@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="midnight">
+<head>
+<meta charset="utf-8">
+<!-- Content Security Policy. GitHub Pages can't set response headers, so this meta
+     tag is the only place to declare one. 'unsafe-inline' is unavoidable: the app
+     is inline script and style by design, with no build step to generate hashes.
+     This app is fully local — no sync, no sign-in — so the only network origin
+     allowed is the GitHub API, used by the "Recent changes" box at the foot of
+     the page. If a feature ever needs a new endpoint it must be added here too
+     (per the family rule: new endpoints go in the CSP in the same commit).
+     form-action is 'self' rather than 'none' because dialogs submit with
+     method="dialog", which some browsers historically checked against it.
+     Note: frame-ancestors is ignored in a meta tag; it needs a real header. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://api.github.com; base-uri 'none'; form-action 'self'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Money Map · Charlie’s Financial Plan</title>
+<meta name="description" content="A personal financial planner: monthly budget with projections, savings goals, retirement, vacations and giving.">
+<link rel="icon" href="favicon.ico">
+<script>
+  /* Apply the saved theme before first paint so there's no light flash. The list
+     is repeated here rather than shared with THEMES below because this has to run
+     before the main script parses; keep the two in step. */
+  try {
+    var t = localStorage.getItem('fin-theme');
+    var ok = ['light','dark','midnight','sepia'];
+    document.documentElement.setAttribute('data-theme',
+      ok.indexOf(t) === -1 ? 'midnight' : t);
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="theme.css">
+<!-- Vendored Chart.js (minified UMD build) — third-party library, do not hand-edit. -->
+<script src="chart.min.js"></script>
+<style>
+/* ── App-specific tokens ──────────────────────────────────────────────────────
+   theme.css is the shared palette, generated in the claude-theme-pack repo (the
+   source of truth for all apps) and deliberately left untouched. Everything
+   below is only what this app adds. No new colours: money in/out, status and
+   the estimate markers all read from the pack's own tokens. */
+:root {
+  color-scheme: light;
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.04);
+  --chrome-h: 30px;    /* small header buttons + pickers */
+  --control-h: 38.5px; /* full-size buttons + toolbar pickers */
+}
+[data-theme="dark"]     { color-scheme: dark;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3); }
+[data-theme="midnight"] { color-scheme: dark;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3); }
+[data-theme="sepia"]    { color-scheme: light;
+  --shadow: 0 1px 2px rgba(90,70,30,.10), 0 4px 12px rgba(90,70,30,.07); }
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text-primary);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+/* 1500px to match the family (Sprint Predictability / Flow Metrics). */
+.wrap { max-width: 1500px; margin: 0 auto; padding: 0 16px 64px; }
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+header {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+  margin-bottom: 20px;
+}
+.headbar { max-width: 1500px; margin: 0 auto; padding: 0 16px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+/* An <h1>, so the page has a top-level heading — hence the margin reset. It
+   carries the auto margin that pushes the control cluster right (this app has
+   no sibling applink to carry it, unlike SV/TD). */
+.brand { font-size: 17px; font-weight: 700; letter-spacing: -.01em;
+  margin: 0 auto 0 0; }
+.brand span { color: var(--text-muted); font-weight: 500; }
+
+button, select, input, textarea { font: inherit; color: inherit; }
+.btn {
+  background: var(--bg-card-alt); color: var(--text-primary);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 7px 12px; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { border-color: var(--text-muted); }
+.btn.primary { background: var(--btn-bg); color: var(--btn-text); border-color: var(--btn-bg); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn:disabled:hover { border-color: var(--border-strong); }
+/* Shared height for the header chrome. A native <select> ignores line-height, so
+   it sizes ~3px shorter than a button with identical padding and font — pinning
+   the height on both is the only way to keep the row even. */
+.btn.small { padding: 4px 9px; font-size: 13px; min-height: var(--chrome-h); }
+select, input[type=text], input[type=number], input[type=date], input[type=month], textarea {
+  background: var(--bg-card); border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm); padding: 7px 9px;
+}
+textarea { width: 100%; resize: vertical; min-height: 64px; }
+:focus-visible { outline: 2px solid var(--focus-border); outline-offset: 2px; }
+
+.btn, select.ctl { min-height: var(--control-h); }
+select.ctl {
+  background: var(--bg-card-alt); color: var(--text-primary);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 7px 9px; cursor: pointer;
+}
+select.ctl:hover { border-color: var(--text-muted); }
+
+#themeSel {
+  background: var(--bg-card-alt); color: var(--text-primary);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 4px 9px; font-size: 13px; font-weight: inherit; cursor: pointer;
+  min-height: var(--chrome-h);
+}
+#themeSel:hover { border-color: var(--text-muted); }
+
+/* ── Tabs ───────────────────────────────────────────────────────────────── */
+.tabs { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+.tabs[hidden] { display: none; }
+.tab {
+  background: var(--bg-card-alt); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px; cursor: pointer; color: var(--text-primary); font-weight: 500;
+}
+.tab:hover { border-color: var(--text-muted); }
+.tab[aria-selected="true"] {
+  background: var(--unit-active-bg); border-color: var(--unit-active-bg);
+  color: var(--unit-active-txt); font-weight: 600;
+}
+.tab[aria-selected="true"]:hover { border-color: var(--unit-active-bg); }
+
+/* ── Cards, tiles ───────────────────────────────────────────────────────── */
+.card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px; margin-bottom: 18px; box-shadow: var(--shadow);
+}
+.card > h2 { margin: 0 0 4px; font-size: 16px; letter-spacing: -.01em; }
+.card > .sub { margin: 0 0 16px; color: var(--text-secondary); font-size: 13px; }
+.sub:empty { display: none; }
+.empty { text-align: center; padding: 40px 20px; color: var(--text-secondary); }
+.empty h2 { color: var(--text-primary); }
+
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.row.spread { justify-content: space-between; }
+label.field { display: block; font-size: 13px; color: var(--text-secondary);
+  font-weight: 600; margin-bottom: 4px; }
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px;
+  font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+th:first-child, td:first-child { text-align: left; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-secondary); font-weight: 600; white-space: nowrap;
+  vertical-align: bottom; border-bottom-color: var(--border-strong); }
+tbody th, tfoot th { font-size: inherit; text-transform: none; letter-spacing: 0;
+  color: var(--text-primary); text-align: left; vertical-align: middle; }
+tbody th { font-weight: 400; white-space: normal; border-bottom-color: var(--border); }
+tbody tr:hover { background: var(--bg-card-alt); }
+tbody tr:last-child td, tbody tr:last-child th { border-bottom: none; }
+tfoot td, tfoot th { font-weight: 700; border-bottom: none;
+  border-top: 2px solid var(--border-strong); }
+
+/* ── Dialogs, toast, footer ─────────────────────────────────────────────── */
+dialog {
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg-card); color: var(--text-primary);
+  padding: 20px; max-width: 640px; width: calc(100% - 32px); box-shadow: var(--shadow);
+  /* vh, not dvh: dvh resolves to 0 in some embedded engines. */
+  max-height: calc(100vh - 32px); overflow: auto;
+}
+dialog::backdrop { background: rgba(0,0,0,.55); }
+dialog h3 { margin: 0 0 12px; font-size: 17px; }
+fieldset, .formpanel { border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px; margin: 14px 0 0; background: var(--bg-card-alt); }
+.formpanel:first-of-type { margin-top: 0; }
+legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-secondary); font-weight: 700; padding: 0 6px; }
+.warn { color: var(--err); font-size: 13px; margin-top: 10px; }
+.warn:empty { display: none; }
+.muted { color: var(--text-secondary); }
+
+#toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: var(--btn-bg); color: var(--btn-text); padding: 10px 18px;
+  border-radius: 999px; font-size: 14px; font-weight: 600; z-index: 100;
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+#toast.show { opacity: 1; }
+
+/* Footer notes line up with the text inside the last card: 18px padding + 1px border. */
+.privacy { font-size: 12px; color: var(--text-muted);
+  margin: 28px 0 0; padding-left: 19px; }
+.privacy-links { margin-top: 6px; }
+.privacy-links a { color: var(--text-muted); }
+.privacy-links a:hover { color: var(--text-secondary); }
+
+.changelog { margin: 14px 0 0; padding-left: 19px;
+  font-size: 12.5px; color: var(--text-muted); }
+.changelog summary { cursor: pointer; user-select: none; padding: 4px 0; }
+.changelog summary:hover { color: var(--text-secondary); }
+.changelog ol { list-style: none; margin: 10px 0 0; padding: 0; }
+.changelog li { display: flex; gap: 10px; padding: 3px 0; align-items: baseline; }
+.cl-date { white-space: nowrap; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.changelog a { color: inherit; text-decoration: none;
+  border-bottom: 1px dotted var(--border-strong); }
+.changelog a:hover { color: var(--text-primary); }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important; scroll-behavior: auto !important;
+  }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="headbar">
+    <!-- Everything in this row is written out at its final size, because the header
+         is painted long before the script at the foot of the page runs. Starting
+         hidden costs nothing; growing does. (Family rule from Sprint Velocity.) -->
+    <h1 class="brand">Money&nbsp;Map <span>· Charlie’s Financial Plan</span></h1>
+    <label class="sr-only" for="themeSel">Theme</label>
+    <!-- The four unified themes, listed alphabetically (matches the other apps).
+         Midnight is pre-selected to match the theme the boot script in <head> has
+         already applied. THEMES is read back off these options. -->
+    <select id="themeSel" title="Change the colour theme">
+      <option value="dark">☾ Dark</option>
+      <option value="light">☀ Light</option>
+      <option value="midnight" selected>✦ Midnight</option>
+      <option value="sepia">📜 Sepia</option>
+    </select>
+    <button class="btn small" id="dataBtn" title="Back up or restore your data">Back up</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" role="tab" id="tab-budget"     aria-controls="views" data-view="budget"     aria-selected="true"  tabindex="0">Budget</button>
+    <button class="tab" role="tab" id="tab-goals"      aria-controls="views" data-view="goals"      aria-selected="false" tabindex="-1">Goals</button>
+    <button class="tab" role="tab" id="tab-retirement" aria-controls="views" data-view="retirement" aria-selected="false" tabindex="-1">Retirement</button>
+    <button class="tab" role="tab" id="tab-vacations"  aria-controls="views" data-view="vacations"  aria-selected="false" tabindex="-1">Vacations</button>
+    <button class="tab" role="tab" id="tab-giving"     aria-controls="views" data-view="giving"     aria-selected="false" tabindex="-1">Giving</button>
+    <button class="tab" role="tab" id="tab-history"    aria-controls="views" data-view="history"    aria-selected="false" tabindex="-1">History</button>
+  </div>
+
+  <!-- The tabpanel role goes on an inner div, not on <main> itself: putting it on
+       the element *is* its role, and it would silently replace the main landmark. -->
+  <main>
+    <div id="views" role="tabpanel" aria-labelledby="tab-budget"></div>
+  </main>
+
+  <p class="privacy" id="privacyNote">🔒 Private — your data is stored in this browser only.
+    Nothing is uploaded anywhere; the repo behind this page holds code, never numbers.</p>
+  <p class="privacy privacy-links"><a href="https://github.com/eagleadams86/financial-plan">Source on GitHub</a></p>
+
+  <details class="changelog" id="cl-box">
+    <summary>Recent changes</summary>
+    <ol id="cl-list"><li>Loading&hellip;</li></ol>
+  </details>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<!-- ── Backup / restore ──────────────────────────────────────────────────── -->
+<dialog id="dataDialog" aria-labelledby="dataDialogTitle">
+  <h3 id="dataDialogTitle">Back up &amp; restore</h3>
+  <p class="sub">Your data lives in this browser. Export a JSON file to keep a backup or
+    move to another browser.</p>
+  <div class="row">
+    <button class="btn" id="exportBtn">⬇ Export JSON</button>
+    <button class="btn" id="importBtn">⬆ Restore JSON…</button>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>
+  </div>
+  <p class="sub muted" style="margin-top:14px">First time here? Run <code>import_xlsx.py</code>
+    (in the repo) against the Numbers export on your Mac, then Restore the file it produces.
+    Restoring replaces everything currently in this browser — you'll be asked to confirm first.</p>
+  <div class="row" style="justify-content:flex-end;margin-top:18px">
+    <button class="btn primary" id="dataCloseBtn">Close</button>
+  </div>
+</dialog>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   Money Map — Charlie's financial plan, ported from the Numbers spreadsheet
+   he kept from 2011 to 2026. Fully local: localStorage is the only store, and
+   the repo behind this page never holds data. The Restore path in the Back up
+   dialog is also the one-time seed: import_xlsx.py converts the spreadsheet
+   into the same JSON shape a backup uses.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const STORAGE_KEY = 'fin-state';
+const UPDATED_KEY = 'fin-updated';   // written by save(); the hook a future sync layer keys off
+const THEME_KEY   = 'fin-theme';
+
+/* ── Date & number helpers ──────────────────────────────────────────────────
+   Months are "YYYY-MM" strings throughout — comparable with <, sortable, and
+   never subject to timezone drift the way Date objects are. */
+
+function monthAdd(m, n) {
+  const y = +m.slice(0, 4), mo = +m.slice(5, 7) - 1 + n;
+  const ny = y + Math.floor(mo / 12), nm = ((mo % 12) + 12) % 12;
+  return `${ny}-${String(nm + 1).padStart(2, '0')}`;
+}
+function monthDiff(a, b) {   // b - a in months
+  return (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7));
+}
+function monthLabel(m) {
+  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${names[+m.slice(5, 7) - 1]} ${m.slice(2, 4)}`;
+}
+function todayISO(d) {
+  const t = d || new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+}
+const thisMonth = () => todayISO().slice(0, 7);
+
+/* Money stays a float in dollars, rounded to cents at every write and every
+   engine step — the spreadsheet itself stores floats, so matching its cached
+   values is an epsilon comparison either way (pinned in tests.html). */
+const round2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
+
+const moneyFmt  = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const moneyFmt0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const fmtMoney  = (v) => moneyFmt.format(v);
+const fmtMoney0 = (v) => moneyFmt0.format(v);
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const F = (id) => document.getElementById(id);
+
+/* ── State ──────────────────────────────────────────────────────────────────
+   State stores INPUTS only — actuals, manual estimates, notes, seeds, side
+   tables. Everything computable (auto-estimates, balances, totals, goals) is
+   derived at render time by the engine and never persisted. */
+
+function blankState() {
+  return {
+    schema: 1,
+    settings: {
+      midTermRateAnnual: 0.03,   // dividend estimate: rate/12 × prior (cash+mid)
+      longTermRateAnnual: 0.07,  // long-term holdings growth
+      ptoAllowance: 32
+    },
+    years: {},        // "YYYY" → grid year or summary year (see import_xlsx.py)
+    goals: [],
+    side: {
+      taxable: [], otherMoney: [], rothContribs: {}, k401: {}, hsa: [],
+      comp: {}, bonuses: {}, retirement: {}, rothLimit: {}, daf: [],
+      donations: {}, venmo: {}, largePurchases: {}
+    },
+    vacations: { trips: [], pto: {} },
+    ui: { activeYear: null, activeTab: 'budget' }
+  };
+}
+
+/* Shapes from outside are not trusted: a hand-edited backup, a truncated file.
+   coerceShape() forces every collection to the right type so a render never
+   throws on a blank page. The importer/restore path shape-checks the RAW parse
+   BEFORE coercing — coercion would turn any JSON into a valid empty state, and
+   the wrong file must be refused, not imported as nothing. */
+function coerceShape(data) {
+  const d = (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
+  const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+  const arr = (v) => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
+  d.schema = typeof d.schema === 'number' ? d.schema : 1;
+  d.settings = obj(d.settings);
+  d.years = obj(d.years);
+  for (const y of Object.keys(d.years)) {
+    const yr = obj(d.years[y]);
+    d.years[y] = yr;
+    if (yr.kind === 'grid') {
+      yr.categories = arr(yr.categories);
+      yr.cells = obj(yr.cells);
+      yr.paychecks = obj(yr.paychecks);
+      yr.seeds = obj(yr.seeds);
+      yr.overrides = obj(yr.overrides);
+      yr.monthCount = Math.max(1, Math.min(36, +yr.monthCount || 12));
+      if (!/^\d{4}-\d{2}$/.test(yr.startMonth || '')) yr.startMonth = `${y}-01`;
+    } else {
+      yr.kind = 'summary';
+      yr.categoryTotals = arr(yr.categoryTotals);
+    }
+  }
+  d.goals = arr(d.goals);
+  d.side = obj(d.side);
+  const s = d.side;
+  for (const k of ['taxable', 'otherMoney', 'hsa', 'daf']) s[k] = arr(s[k]);
+  for (const k of ['rothContribs', 'k401', 'comp', 'bonuses', 'retirement',
+                   'rothLimit', 'donations', 'venmo', 'largePurchases']) s[k] = obj(s[k]);
+  d.vacations = obj(d.vacations);
+  d.vacations.trips = arr(d.vacations.trips);
+  d.vacations.pto = obj(d.vacations.pto);
+  d.ui = obj(d.ui);
+  return d;
+}
+
+/* Migration slot: a switch on parsed.schema. Schema 1 is current, so today it's
+   a passthrough — when the shape changes, bump schema in blankState() and add a
+   case here that upgrades old payloads in place. */
+function migrate(parsed) {
+  switch (parsed.schema) {
+    case 1:
+    default:
+      return parsed;
+  }
+}
+
+let state = load();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return blankState();
+    const parsed = migrate(coerceShape(JSON.parse(raw)));
+    return Object.assign(blankState(), parsed, {
+      settings: Object.assign(blankState().settings, parsed.settings || {}),
+      side: Object.assign(blankState().side, parsed.side || {}),
+      ui: Object.assign(blankState().ui, parsed.ui || {})
+    });
+  } catch (e) {
+    console.warn('Could not read saved data', e);
+    return blankState();
+  }
+}
+
+function save() {
+  /* Guarded: Safari's private mode and a full quota both throw here, and an
+     unguarded throw would kill the click handler mid-save. The in-memory state
+     is still good — warn and carry on. */
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(UPDATED_KEY, String(Date.now()));
+  } catch (e) {
+    console.warn('Could not write saved data', e);
+    toast('⚠️ This browser is blocking storage (full, or private mode?) — changes may be lost when the tab closes');
+  }
+  /* No sync layer yet. When one arrives (SV pattern), it hooks in here. */
+}
+
+/* ── Domain helpers ─────────────────────────────────────────────────────── */
+
+function yearKeys() {
+  return Object.keys(state.years).sort();
+}
+function latestGridYear() {
+  const ks = yearKeys().filter(y => state.years[y].kind === 'grid');
+  return ks.length ? ks[ks.length - 1] : null;
+}
+function activeYearKey() {
+  if (state.ui.activeYear && state.years[state.ui.activeYear]) return state.ui.activeYear;
+  return latestGridYear() || yearKeys()[yearKeys().length - 1] || null;
+}
+function yearMonths(yr) {
+  const out = [];
+  for (let i = 0; i < yr.monthCount; i++) out.push(monthAdd(yr.startMonth, i));
+  return out;
+}
+const hasData = () => yearKeys().length > 0;
+
+/* ── Toast ──────────────────────────────────────────────────────────────── */
+let toastTimer = null;
+function toast(msg) {
+  const el = F('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+/* ── Render skeleton ────────────────────────────────────────────────────── */
+
+const VIEWS = ['budget', 'goals', 'retirement', 'vacations', 'giving', 'history'];
+
+function render() {
+  const view = VIEWS.includes(state.ui.activeTab) ? state.ui.activeTab : 'budget';
+  document.querySelectorAll('.tab').forEach(tab => {
+    const sel = tab.dataset.view === view;
+    tab.setAttribute('aria-selected', sel ? 'true' : 'false');
+    tab.tabIndex = sel ? 0 : -1;
+  });
+  F('views').setAttribute('aria-labelledby', `tab-${view}`);
+  const target = F('views');
+  if (!hasData()) { target.innerHTML = welcomeCard(); return; }
+  const fn = {
+    budget: renderBudget, goals: renderGoals, retirement: renderRetirement,
+    vacations: renderVacations, giving: renderGiving, history: renderHistory
+  }[view];
+  target.innerHTML = fn();
+  wireView(view);
+}
+
+function welcomeCard() {
+  return `<div class="card"><div class="empty">
+    <h2>Welcome to Money Map</h2>
+    <p>Nothing here yet. Restore a backup — or, first time in, run
+      <code>import_xlsx.py</code> against the Numbers export and Restore the JSON it makes.</p>
+    <p style="margin-top:16px"><button class="btn primary" id="welcomeRestoreBtn">Open Back up &amp; restore</button></p>
+  </div></div>`;
+}
+
+/* Per-view renderers are filled in below as the app grows; each returns HTML
+   and wireView() attaches handlers after it lands in the DOM. */
+function renderBudget()     { return `<div class="card"><div class="empty"><h2>Budget</h2><p>Coming together…</p></div></div>`; }
+function renderGoals()      { return `<div class="card"><div class="empty"><h2>Goals</h2><p>Coming together…</p></div></div>`; }
+function renderRetirement() { return `<div class="card"><div class="empty"><h2>Retirement</h2><p>Coming together…</p></div></div>`; }
+function renderVacations()  { return `<div class="card"><div class="empty"><h2>Vacations</h2><p>Coming together…</p></div></div>`; }
+function renderGiving()     { return `<div class="card"><div class="empty"><h2>Giving</h2><p>Coming together…</p></div></div>`; }
+function renderHistory()    { return `<div class="card"><div class="empty"><h2>History</h2><p>Coming together…</p></div></div>`; }
+
+function wireView(view) {
+  const btn = F('welcomeRestoreBtn');
+  if (btn) btn.onclick = () => F('dataDialog').showModal();
+}
+
+/* ═══════════════════════════ Backup & restore ═════════════════════════════ */
+
+const dataDialog = F('dataDialog');
+F('dataBtn').onclick = () => dataDialog.showModal();
+F('dataCloseBtn').onclick = () => dataDialog.close();
+
+F('exportBtn').onclick = () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  /* todayISO(), not toISOString(): a raw UTC slice stamps tomorrow's date on an
+     evening export west of Greenwich, which is exactly when the name misleads. */
+  a.download = `money-map-${todayISO()}.json`;
+  a.click();
+  /* Revoking in the same tick races the download starting; one turn of the
+     event loop settles it. A silent empty backup is the worst outcome here. */
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  toast('Exported');
+};
+
+F('importBtn').onclick = () => F('importFile').click();
+F('importFile').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const rawParsed = JSON.parse(reader.result);
+      /* Shape-check the RAW parse, before coerceShape(): coercion would turn
+         any JSON into a valid empty state, and the wrong file picked out of a
+         Downloads folder must be refused, not imported as nothing. */
+      if (!rawParsed || typeof rawParsed !== 'object'
+          || typeof rawParsed.years !== 'object' || Array.isArray(rawParsed.years))
+        throw new Error('not a Money Map file');
+      const parsed = migrate(coerceShape(rawParsed));
+      const nYears = Object.keys(parsed.years).length;
+      const msg = `Replace everything in this browser with ${nYears} year(s) of data from this file? `
+        + `Your current data will be lost.`;
+      if (!confirm(msg)) return;
+      state = Object.assign(blankState(), parsed, {
+        settings: Object.assign(blankState().settings, parsed.settings || {}),
+        side: Object.assign(blankState().side, parsed.side || {}),
+        ui: Object.assign(blankState().ui, parsed.ui || {})
+      });
+      save();
+      render();
+      toast('Data restored');
+      dataDialog.close();
+    } catch (err) {
+      toast('That file doesn’t look like a Money Map backup');
+      console.warn('restore failed', err);
+    } finally {
+      e.target.value = '';
+    }
+  };
+  reader.readAsText(file);
+};
+
+/* ═════════════════════════════ Theme & chrome ═════════════════════════════ */
+
+/* The picker's options are the single source of the theme list; the palettes
+   live in theme.css. Midnight is the default: anything unrecognised falls back. */
+const THEMES = [...F('themeSel').options].map(o => o.value);
+
+function themeId() {
+  const t = localStorage.getItem(THEME_KEY);
+  return THEMES.includes(t) ? t : 'midnight';
+}
+function applyTheme() {
+  const t = themeId();
+  document.documentElement.setAttribute('data-theme', t);
+  F('themeSel').value = t;
+}
+F('themeSel').onchange = (e) => {
+  localStorage.setItem(THEME_KEY, e.target.value);
+  applyTheme();
+  render();   // charts resolve their colours at construction, so rebuild them
+};
+
+/* Arrow keys move along the tabs and switch view as they go. */
+const visibleTabs = () => [...document.querySelectorAll('.tab')].filter(t => !t.hidden);
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => { state.ui.activeTab = tab.dataset.view; save(); render(); };
+  tab.onkeydown = (e) => {
+    const step = { ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last' }[e.key];
+    if (step === undefined) return;
+    e.preventDefault();
+    const list = visibleTabs();
+    const i = list.indexOf(tab);
+    const next = step === 'first' ? list[0]
+      : step === 'last' ? list[list.length - 1]
+      : list[(i + step + list.length) % list.length];
+    if (next) { next.focus(); next.click(); }
+  };
+});
+
+/* ── Boot ───────────────────────────────────────────────────────────────── */
+applyTheme();
+render();
+
+/* tests.html reaches function declarations directly through the iframe window;
+   consts are invisible on window, so the ones it needs are handed over here. */
+window.__finTestHooks = { round2, fmtMoney, monthAdd, monthDiff, monthLabel,
+  blankState, coerceShape, migrate };
+</script>
+
+<script>
+/* "Recent changes" box — lazily loads this file's last 10 commit subjects from
+   the GitHub API the first time the box is expanded. Commit subjects are
+   user-facing here, so write them for a reader, not for a diff. */
+(function(){
+  var box=document.getElementById('cl-box'),loaded=false;
+  box.addEventListener('toggle',function(){
+    if(!box.open||loaded)return;loaded=true;
+    var list=document.getElementById('cl-list');
+    fetch('https://api.github.com/repos/eagleadams86/financial-plan/commits?path=index.html&per_page=10')
+      .then(function(r){if(!r.ok)throw new Error('http');return r.json();})
+      .then(function(cs){
+        list.innerHTML='';
+        if(!cs.length){list.innerHTML='<li>No changes recorded yet.</li>';return;}
+        cs.forEach(function(c){
+          var li=document.createElement('li');
+          var d=document.createElement('span');d.className='cl-date';
+          d.textContent=new Date(c.commit.author.date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+          // Only accept a real github.com https link — never trust a URL from
+          // the API blindly, or a javascript: href would run on click.
+          var url=String(c.html_url||'');
+          var a=document.createElement(/^https:\/\/github\.com\//.test(url)?'a':'span');
+          if(a.tagName==='A'){a.href=url;a.target='_blank';a.rel='noopener noreferrer';}
+          a.textContent=c.commit.message.split('\n')[0];
+          li.appendChild(d);li.appendChild(a);list.appendChild(li);
+        });
+      })
+      .catch(function(){list.innerHTML='<li>Changelog unavailable right now (offline?).</li>';});
+  });
+})();
+</script>
+</body>
+</html>
