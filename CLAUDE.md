@@ -86,7 +86,13 @@ Firestore rules. `FIREBASE_CONFIG` (public client config, not a secret) and
 Authorized JavaScript origins list `https://eagleadams86.github.io` and
 `http://localhost:8016` — a new local port needs registering there or sign-in
 fails with origin_mismatch. Sign-in is GIS → `signInWithCredential`
-(`initializeAuth`, never `getAuth` — see the comment in the module). Rules the
+(`initializeAuth`, never `getAuth` — see the comment in the module).
+**The cloud doc stores the state as ONE JSON string** (`{ json, updatedAt }`),
+never as Firestore fields: Firestore rejects arrays nested inside arrays
+(invalid-argument), and the free-form tables are exactly that. Charlie's real
+data hit this on the first sign-in — don't "improve" the doc back to
+field-per-field. `remotePayload()` is the single reader (it also accepts the
+old `{ data }` shape). Rules the
 module keeps: localStorage is the source of truth and the cloud only mirrors
 it; the first-sign-in "which copy?" dialog is load-bearing; **an empty copy
 never silently beats one with data**; sync failures surface in the button and

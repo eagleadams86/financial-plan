@@ -2977,6 +2977,25 @@ function chooseSyncSource(local, remote, remoteUpdatedAt) {
    actually wins everywhere. */
 const touchLocal = () => localStorage.setItem('fin-updated', String(Date.now()));
 
+/* ── The cloud doc is { json: "<state as text>", updatedAt } ────────────────
+   The state is stored as ONE JSON string, not as Firestore fields. Charlie's
+   real data proved why: Firestore rejects arrays nested inside arrays
+   (invalid-argument — the free-form tables are lists of lists), and a string
+   is immune to every such type rule, now and for any future state shape.
+   Size is the only remaining limit (~128 KB today vs Firestore's 1 MiB).
+   This helper is the single reader; it also accepts a { data: {...} } doc in
+   case one was ever written by the field-per-field format this replaced. */
+const remotePayload = (r) => {
+  if (!r) return null;
+  if (typeof r.json === 'string') {
+    try { return JSON.parse(r.json); } catch (e) {
+      console.warn('cloud copy unreadable', e);
+      return null;
+    }
+  }
+  return r.data || null;
+};
+
 /* Reconciling the two copies at sign-in. The rule under all four branches:
    AN EMPTY COPY NEVER BEATS A COPY WITH DATA IN IT, whatever the timestamps
    say — a fresh browser's empty push once emptied a device in the sibling
@@ -2985,15 +3004,16 @@ const touchLocal = () => localStorage.setItem('fin-updated', String(Date.now()))
 async function startSync() {
   const snap = await Fs.getDoc(docRef());
   const remote = snap.exists() ? snap.data() : null;
+  const remoteData = remotePayload(remote);
   const local = window.finGet();
-  const remoteHas = !!(remote && window.finHasData(remote.data));
+  const remoteHas = window.finHasData(remoteData);
   const localHas = window.finHasData(local);
   const firstSyncForAccount = localStorage.getItem('fin-sync-uid') !== user.uid;
 
   if (remoteHas && localHas && firstSyncForAccount) {
-    const keepGoogle = await chooseSyncSource(local, remote.data, remote.updatedAt);
+    const keepGoogle = await chooseSyncSource(local, remoteData, remote.updatedAt);
     if (keepGoogle) {
-      window.finAdopt(remote.data, remote.updatedAt);
+      window.finAdopt(remoteData, remote.updatedAt);
       window.toast('Loaded your data from the cloud ☁️');
     } else {
       touchLocal();
@@ -3001,12 +3021,12 @@ async function startSync() {
       window.toast('Kept this device’s data');
     }
   } else if (remoteHas && !localHas) {
-    window.finAdopt(remote.data, remote.updatedAt);
+    window.finAdopt(remoteData, remote.updatedAt);
     window.toast('Loaded your data from the cloud ☁️');
   } else if (localHas && !remoteHas) {
     await pushNow();
   } else if (remoteHas && remote.updatedAt > localTs()) {
-    window.finAdopt(remote.data, remote.updatedAt);
+    window.finAdopt(remoteData, remote.updatedAt);
     window.toast('Loaded your data from the cloud ☁️');
   } else {
     await pushNow();
@@ -3017,9 +3037,10 @@ async function startSync() {
     if (s.metadata.hasPendingWrites || !s.exists()) return;
     const r = s.data();
     if (!(r.updatedAt > localTs())) return;
+    const rData = remotePayload(r);
     /* Same empty-never-wins rule live: clearing everything is a real thing
        people do (the Delete-all button), so this asks rather than refusing. */
-    if (!window.finHasData(r.data) && window.finHasData(window.finGet())) {
+    if (!window.finHasData(rData) && window.finHasData(window.finGet())) {
       const keep = !confirm('Another device has cleared all its Money Map data.\n\n'
         + 'Clear this device too? Cancel keeps what\'s on this device and restores it '
         + 'to your other devices.');
@@ -3030,7 +3051,7 @@ async function startSync() {
         return;
       }
     }
-    window.finAdopt(r.data, r.updatedAt);
+    window.finAdopt(rData, r.updatedAt);
     window.toast('Synced from another device ☁️');
   }, (e) => {
     /* A listener that errors is dropped by Firestore and never fires again —
@@ -3042,7 +3063,8 @@ async function startSync() {
 
 async function pushNow() {
   if (!user) return;
-  await Fs.setDoc(docRef(), { data: window.finGet(), updatedAt: localTs() || Date.now() });
+  await Fs.setDoc(docRef(), { json: JSON.stringify(window.finGet()),
+                              updatedAt: localTs() || Date.now() });
   clearSyncError();
 }
 
