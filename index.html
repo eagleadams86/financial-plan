@@ -499,6 +499,8 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
     <p class="sub muted" id="cellAutoHint" style="margin-top:10px"></p>
     <div class="row spread" style="margin-top:18px">
       <div class="row">
+        <button type="button" class="btn" id="cellRowBtn" hidden
+          title="Rename this row, or change how its future months are estimated">⚙ Row settings</button>
         <button type="button" class="btn" id="cellRevertBtn" hidden>↺ Back to auto estimate</button>
         <button type="button" class="btn" id="cellClearBtn" hidden>Clear this cell</button>
       </div>
@@ -938,30 +940,27 @@ function welcomeCard() {
   </div></div>`;
 }
 
-/* A sensible first budget for someone starting from nothing: the common
-   income and bill rows plus the transfer rows the balance math understands.
-   All renameable, deletable, reorderable — it's a starting vocabulary. */
+/* A basic standard budget for someone starting from nothing — deliberately
+   short and generic (rename, add or delete anything). Every row's rule works
+   with zero setup: type one real month and the later months estimate
+   themselves — "repeats the last month" for income and fixed bills,
+   "average so far" for the spending that varies. The per-check paycheck rule
+   and the transfer/charitable roles from the full model are still available
+   in each row's settings for anyone who wants them. */
 const STARTER_CATEGORIES = [
-  ['Paycheck', 'paycheck', 'normal'],
+  ['Paycheck', 'carry', 'normal'],
   ['Other income', 'none', 'normal'],
-  ['Dividends / Interest', 'dividends', 'normal'],
-  ['Tax Return', 'none', 'normal'],
-  ['Credit Card', 'avg', 'normal'],
-  ['Debit Card / ATM', 'none', 'normal'],
-  ['Checks', 'none', 'normal'],
-  ['Venmo', 'avg', 'normal'],
   ['Rent / Mortgage', 'carry', 'normal'],
-  ['Electric', 'samemonth', 'normal'],
-  ['Gas', 'samemonth', 'normal'],
-  ['Water', 'none', 'normal'],
-  ['Internet', 'carry', 'normal'],
-  ['Phone', 'carry', 'normal'],
-  ['Taxes', 'none', 'normal'],
-  ['Charitable', 'none', 'charitable'],
-  ['Zelle', 'none', 'zelle'],
-  ['Bank transfers', 'none', 'bankTransfer'],
-  ['Mid-term transfers', 'none', 'midTransfer'],
-  ['Long-term transfers', 'none', 'longTransfer'],
+  ['Utilities', 'avg', 'normal'],
+  ['Phone & Internet', 'carry', 'normal'],
+  ['Groceries', 'avg', 'normal'],
+  ['Transportation', 'avg', 'normal'],
+  ['Insurance', 'carry', 'normal'],
+  ['Subscriptions', 'carry', 'normal'],
+  ['Dining out', 'avg', 'normal'],
+  ['Credit Card', 'avg', 'normal'],
+  ['Savings', 'carry', 'normal'],
+  ['Everything else', 'avg', 'normal'],
 ];
 
 function startFresh() {
@@ -1059,7 +1058,8 @@ function gridCard(y, yr) {
 
   const catTh = (cat) => `<th class="lbl" scope="row" data-edit="category"
     data-year="${esc(y)}" data-id="${esc(cat.id)}" style="cursor:pointer"
-    title="${esc(cat.name)}${cat.note ? ' · ' + cat.note : ''} — click to edit this row">${esc(cat.name)}</th>`;
+    title="${esc(cat.name)} — ${esc(RULE_LABEL[cat.rule] || RULE_LABEL.none)}${
+    cat.note ? ' · ' + esc(cat.note) : ''} — click to edit this row">${esc(cat.name)}</th>`;
 
   const catRows = yr.categories.filter(cat => !cat.isBalance).map(cat =>
     `<tr>${catTh(cat)}${months.map(m => cellTd(cat, m)).join('')}</tr>`).join('');
@@ -1069,10 +1069,25 @@ function gridCard(y, yr) {
     `<tr class="balance${i ? ' later' : ''}">${catTh(cat)}${
       months.map(m => cellTd(cat, m)).join('')}</tr>`).join('');
 
-  /* the live year's four accounts + total are computed, not rows */
-  const BAL_NAMES = { cash: 'Cash (SPAXX)', mid: 'Mid-term (FDLXX)',
-                      long: 'Long-term (VOO)', bank: 'Banks / Venmo' };
-  const liveBalRows = !live ? '' : ['cash', 'mid', 'long', 'bank'].map((bid, i) =>
+  /* the live year's four accounts + total are computed, not rows. A basic
+     budget (Start fresh) has no transfer rows, seeds or pins for mid/long/
+     bank, so those accounts sit at $0 forever — hide them rather than show
+     three dead rows. They appear the moment anything feeds them. */
+  const ROLE_TO_BAL = { midTransfer: 'mid', longTransfer: 'long',
+                        bankTransfer: 'bank', zelle: 'bank', charitable: 'long' };
+  const activeBal = (bid) => bid === 'cash'
+    || (yr.seeds[bid] || 0) !== 0
+    || Object.keys(yr.overrides).some(k => k.startsWith(bid + '|'))
+    || yr.categories.some(cat => ROLE_TO_BAL[cat.role] === bid);
+  const activeBals = ['cash', 'mid', 'long', 'bank'].filter(activeBal);
+  /* With just the one account (a Start-fresh budget), the ticker nicknames
+     from the imported spreadsheet would be baffling — plain "Cash" reads
+     right for everyone; the full names return with the full model. */
+  const BAL_NAMES = activeBals.length === 1
+    ? { cash: 'Cash' }
+    : { cash: 'Cash (SPAXX)', mid: 'Mid-term (FDLXX)',
+        long: 'Long-term (VOO)', bank: 'Banks / Venmo' };
+  const liveBalRows = !live ? '' : activeBals.map((bid, i) =>
     `<tr class="balance"><th class="lbl" scope="row">${esc(BAL_NAMES[bid])}</th>${
       months.map(m => {
         const v = c.balances[`${bid}|${m}`];
@@ -1130,6 +1145,18 @@ function gridCard(y, yr) {
 
 const KIND_LABEL = { actual: 'actual', manual: 'your estimate',
   auto: 'auto estimate', missing: 'nothing recorded', pinned: 'stated balance' };
+
+/* Plain-English names for the estimate rules — shown wherever a rule needs
+   identifying (cell editor, row tooltips). Keep in step with the option list
+   in the row editor. */
+const RULE_LABEL = {
+  none: 'no rule — stays blank until you type',
+  carry: 'repeats the last month',
+  avg: 'average of the months so far',
+  samemonth: 'same month last year',
+  dividends: 'interest on cash + mid-term balances',
+  paycheck: 'per-check amount × paychecks',
+};
 
 function venmoSection(y) {
   const items = (state.side.venmo || {})[y] || [];
@@ -2419,8 +2446,15 @@ function openCellEditor(yearKey, type, id, m) {
     const cat = yr.categories.find(c => c.id === id);
     const stored = yr.cells[`${id}|${m}`];
     const resolvedCell = C[yearKey]?.cells[`${id}|${m}`];
+    const rule = cat.rule || 'none';
     F('cellDialogTitle').textContent = `${cat.name} — ${monthLabel(m)}`;
-    F('cellContext').textContent = KIND_LABEL[resolvedCell?.kind || 'missing']
+    /* Name the rule whenever the number came from one, so "auto estimate"
+       is never a mystery — the answer to "where did this come from?" is
+       right in the context line. */
+    const kindText = resolvedCell?.kind === 'auto'
+      ? `auto estimate (${RULE_LABEL[rule]})`
+      : KIND_LABEL[resolvedCell?.kind || 'missing'];
+    F('cellContext').textContent = kindText
       + (resolvedCell ? ` · currently ${fmtMoney(resolvedCell.v)}` : '');
     F('cellValue').value = stored ? stored.v : (resolvedCell?.v || '');
     F('cellNote').value = stored?.note || '';
@@ -2429,12 +2463,22 @@ function openCellEditor(yearKey, type, id, m) {
     const kind = stored?.kind || (future ? 'manual' : 'actual');
     document.querySelectorAll('input[name=cellKind]').forEach(r =>
       r.checked = r.value === kind);
-    const hasRule = (cat.rule || 'none') !== 'none';
+    const hasRule = rule !== 'none';
+    F('cellRowBtn').hidden = false;
     revertBtn.hidden = !(stored && future && hasRule);
     clearBtn.hidden = !stored;
-    if (future && hasRule && !stored)
+    if (future && rule === 'paycheck' && !cat.perCheck)
+      hint.textContent = '⚠ This row multiplies a per-check amount by the month\'s '
+        + 'paychecks, and the per-check amount is $0 — open Row settings to set it '
+        + '(or switch the rule to "repeats the last month").';
+    else if (future && rule === 'none' && !stored)
+      hint.textContent = 'This row has no auto rule, so future months stay blank until '
+        + 'you type them. Row settings can give it one — "repeats the last month" or '
+        + '"average so far" make later months fill in from what you\'ve entered.';
+    else if (future && hasRule && !stored)
       hint.textContent = 'This is an auto estimate — saving a number here takes over from the rule.';
   } else if (type === 'bal') {
+    F('cellRowBtn').hidden = true;
     const ov = yr.overrides[`${id}|${m}`];
     const cur = C[yearKey]?.balances[`${id}|${m}`];
     F('cellDialogTitle').textContent = `Balance — ${monthLabel(m)}`;
@@ -2447,6 +2491,7 @@ function openCellEditor(yearKey, type, id, m) {
     revertBtn.hidden = !ov;
     clearBtn.hidden = true;
   } else {   // paychecks count
+    F('cellRowBtn').hidden = true;
     F('cellDialogTitle').textContent = `Paychecks — ${monthLabel(m)}`;
     F('cellContext').textContent = 'How many paychecks land this month (2 most months, 3 in a three-check month).';
     F('cellValue').value = yr.paychecks[m] ?? '';
@@ -2492,6 +2537,11 @@ F('cellForm').onsubmit = () => {
 };
 
 F('cellCancelBtn').onclick = () => cellDialog.close();
+F('cellRowBtn').onclick = () => {
+  const { yearKey, id } = editing;
+  cellDialog.close();
+  openRowEditor('category', { year: yearKey, id }, false);
+};
 F('cellRevertBtn').onclick = () => {
   const { yearKey, type, id, m } = editing;
   const yr = state.years[yearKey];
