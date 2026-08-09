@@ -270,6 +270,54 @@ details.section { border: 1px solid var(--border); border-radius: var(--radius-s
 details.section > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; }
 
+/* ── Goals ──────────────────────────────────────────────────────────────── */
+.goalgrid { display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.goal { border: 1px solid var(--border); border-left-width: 4px;
+  border-left-color: var(--accent);
+  border-radius: var(--radius-sm); padding: 12px 14px; background: var(--bg-card-alt); }
+.goal .label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase;
+  letter-spacing: .04em; font-weight: 600; }
+.goal .value { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin-top: 2px;
+  font-variant-numeric: tabular-nums; }
+.goal .value .of { font-size: 14px; font-weight: 500; color: var(--text-secondary); }
+.goal .foot { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
+.goal.done { border-left-color: var(--ok); background: var(--ok-bg); }
+.goal.done .value { color: var(--ok); }
+/* A progress bar is a meter, so it carries a real meter role in the markup.
+   Accent, not a status colour — partway to a savings goal isn't "bad". */
+.bar { height: 8px; border-radius: 999px; background: var(--surface);
+  border: 1px solid var(--border); margin-top: 8px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+.goal.done .bar > i { background: var(--ok); }
+
+/* Status pill — tint fill + status edge + glyph, never colour alone. */
+.pill { display: inline-block; padding: 1px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; border: 1px solid;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pill.good { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); }
+.pill.bad  { color: var(--err); background: var(--err-bg); border-color: var(--err); }
+
+/* Two-segment split bar (Traditional vs Roth). The second segment carries a
+   stripe texture so the split never relies on hue alone. */
+.split { display: flex; height: 26px; border-radius: var(--radius-sm);
+  overflow: hidden; border: 1px solid var(--border-strong); margin: 10px 0 4px; }
+.split > i { display: block; height: 100%; background: var(--accent-bg); }
+.split > i.b { background: repeating-linear-gradient(45deg,
+  var(--accent-bg) 0 6px, var(--surface) 6px 12px); }
+.splitlegend { display: flex; gap: 18px; font-size: 12.5px; color: var(--text-secondary); }
+.splitlegend .sw { display: inline-block; width: 12px; height: 12px;
+  border: 1px solid var(--border-strong); border-radius: 3px; margin-right: 5px;
+  vertical-align: -1px; background: var(--accent-bg); }
+.splitlegend .sw.b { background: repeating-linear-gradient(45deg,
+  var(--accent-bg) 0 4px, var(--surface) 4px 8px); }
+
+.chartbox { position: relative; height: 260px; margin-top: 12px; }
+.cards2 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.cards2 > .card { margin-bottom: 0; }
+.cards2 { margin-bottom: 18px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important; animation-iteration-count: 1 !important;
@@ -965,10 +1013,345 @@ function purchasesSection(y) {
     </table></div></details>`;
 }
 
-function renderGoals()      { return `<div class="card"><div class="empty"><h2>Goals</h2><p>Coming together…</p></div></div>`; }
-function renderRetirement() { return `<div class="card"><div class="empty"><h2>Retirement</h2><p>Coming together…</p></div></div>`; }
-function renderVacations()  { return `<div class="card"><div class="empty"><h2>Vacations</h2><p>Coming together…</p></div></div>`; }
-function renderGiving()     { return `<div class="card"><div class="empty"><h2>Giving</h2><p>Coming together…</p></div></div>`; }
+/* ═══════════════════════════ Goals view ═══════════════════════════════════ */
+
+const fmtYrMo = (months) =>
+  `${Math.floor(months / 12)} yr ${months % 12} mo`;
+
+function renderGoals() {
+  const liveKey = latestGridYear();
+  if (!liveKey || !state.goals.length)
+    return `<div class="card"><div class="empty"><h2>No goals yet</h2></div></div>`;
+  const yr = state.years[liveKey];
+  const c = C[liveKey];
+  const goals = computeGoals(state, C, todayISO());
+  const cur = currentMonthOf(yr, todayISO());
+
+  const goalCard = (g) => {
+    const done = g.target && g.saved >= g.target;
+    const pct = Math.min(1, g.progress);
+    return `<div class="goal ${done ? 'done' : ''}">
+      <div class="label">${esc(g.name)}${done ? ' <span aria-hidden="true">✓</span><span class="sr-only"> — reached</span>' : ''}</div>
+      <div class="value">${fmtMoney0(g.saved)} <span class="of">of ${fmtMoney0(g.target)}</span></div>
+      <div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100"
+        aria-valuenow="${Math.round(pct * 100)}" aria-label="${esc(g.name)} progress">
+        <i style="width:${(pct * 100).toFixed(1)}%"></i></div>
+      <div class="foot">${Math.round(g.progress * 100)}%
+        ${g.targetDate ? ` · target ${esc(g.targetDate.slice(0, 7))} (${fmtYrMo(g.monthsLeft)})` : ''}
+        ${!done && g.monthlyReq ? ` · needs ${fmtMoney0(g.monthlyReq)}/mo` : ''}</div>
+    </div>`;
+  };
+
+  /* Total liquidity — the sheet's overall progress bar */
+  const totalNow = c.balances[`total|${cur}`] || 0;
+  const totalTarget = state.goals.reduce((s, g) => s + (g.target || 0), 0);
+  const totalPct = totalTarget ? Math.min(1, totalNow / totalTarget) : 0;
+
+  /* EOY strip + reno pace, ported from the sheet's side table */
+  const decThis = `${liveKey}-12`;
+  const eoyThis = c.balances[`total|${decThis}`];
+  const prevYear = String(+liveKey - 1);
+  const eoyPrev = state.years[prevYear]?.eoyCash;
+  const growth = (eoyThis !== undefined && eoyPrev !== undefined)
+    ? round2(eoyThis - eoyPrev) : null;
+  const reno = computeGoals(state, C, todayISO()).find(g => g.source === 'midCapped');
+  let paceHtml = '';
+  if (growth !== null && reno && reno.monthlyReq > 0) {
+    /* the sheet's pace check: this year's projected growth, spread monthly,
+       against what the renovations goal needs per month */
+    const paceGap = round2(growth / 12 - reno.monthlyReq);
+    const behind = paceGap < 0;
+    const gapMonths = Math.round(Math.abs(paceGap) * reno.monthsLeft / reno.monthlyReq);
+    paceHtml = `<p class="sub" style="margin-top:12px">Renovations pace check: on this year's
+      projected growth you're saving ${fmtMoney0(Math.abs(paceGap))}/mo
+      ${behind ? 'less' : 'more'} than the goal needs —
+      <span class="pill ${behind ? 'warn' : 'good'}">${behind ? '!' : '✓'} ${fmtYrMo(gapMonths)} ${behind ? 'behind' : 'ahead'}</span></p>`;
+  }
+
+  const yearsWithEoy = yearKeys().filter(y => state.years[y].eoyCash !== undefined);
+  const eoyRows = [...yearsWithEoy.slice(-3).map(y => ({ y, v: state.years[y].eoyCash })),
+    ...(eoyThis !== undefined ? [{ y: liveKey, v: eoyThis, est: true }] : []),
+    ...(() => {   // the live grid projects into next year too
+      const months = c.months;
+      const decNext = `${+liveKey + 1}-12`;
+      const v = c.balances[`total|${decNext}`];
+      return v !== undefined ? [{ y: String(+liveKey + 1), v, est: true }] : [];
+    })()];
+  const eoyTable = `<div class="tablewrap"><table>
+    <thead><tr><th style="text-align:left">Year end</th><th>Total</th><th>Growth</th></tr></thead>
+    <tbody>${eoyRows.map((r, i) => {
+      const prev = i ? eoyRows[i - 1].v : null;
+      return `<tr><th scope="row">${esc(r.y)}${r.est ? ' <span class="muted">(projected)</span>' : ''}</th>
+        <td>${fmtMoney0(r.v)}</td>
+        <td>${prev !== null ? fmtMoney0(r.v - prev) : ''}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+
+  return `<div class="card">
+    <h2>Savings goals</h2>
+    <p class="sub">Saved figures read this month's computed balances (${esc(monthLabel(cur))}).</p>
+    <div class="goalgrid">${goals.map(goalCard).join('')}</div>
+    <div style="margin-top:16px">
+      <div class="label" style="font-size:12px;color:var(--text-secondary);font-weight:600;
+        text-transform:uppercase;letter-spacing:.04em">Total liquidity</div>
+      <div class="goal" style="border:none;background:none;padding:0">
+        <div class="value">${fmtMoney0(totalNow)} <span class="of">of ${fmtMoney0(totalTarget)}
+          (${Math.round(totalPct * 100)}%)</span></div>
+        <div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100"
+          aria-valuenow="${Math.round(totalPct * 100)}" aria-label="Total liquidity progress">
+          <i style="width:${(totalPct * 100).toFixed(1)}%"></i></div>
+      </div>
+    </div>
+    ${paceHtml}
+  </div>
+  <div class="cards2">
+    <div class="card">
+      <h2>Where the total is heading</h2>
+      <p class="sub">Computed total liquidity across every month of the ${esc(liveKey)} plan.</p>
+      <div class="chartbox"><canvas id="goalChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>End-of-year liquidity</h2>
+      <p class="sub">Actuals from past years; the plan's projection for this year and next.</p>
+      ${eoyTable}
+    </div>
+  </div>`;
+}
+
+/* ═══════════════════════════ Retirement view ══════════════════════════════ */
+
+const holdingsValue = (rows) =>
+  round2(rows.reduce((s, h) => s + (h.shares || 0) * (h.price || 0), 0));
+
+function holdingsTable(rows) {
+  if (!rows.length) return '<p class="sub">Nothing recorded.</p>';
+  return `<div class="tablewrap"><table>
+    <thead><tr><th style="text-align:left">Ticker</th><th>Shares</th><th>Price</th><th>Value</th></tr></thead>
+    <tbody>${rows.map(h => `<tr><th scope="row">${esc(h.ticker)}</th>
+      <td>${h.shares ?? ''}</td><td>${h.price != null ? fmtMoney(h.price) : ''}</td>
+      <td>${fmtMoney(round2((h.shares || 0) * (h.price || 0)))}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><th>Total</th><td></td><td></td><td>${fmtMoney(holdingsValue(rows))}</td></tr></tfoot>
+  </table></div>`;
+}
+
+/* The imported free-form tables (contribution percentages, MAGI check) come
+   through as raw rows; format each value by what it looks like. */
+function fmtLoose(v) {
+  if (v === null || v === undefined) return '';
+  const n = parseFloat(v);
+  if (Number.isNaN(n)) return esc(String(v));
+  if (Math.abs(n) < 1 && n !== 0) return (n * 100).toFixed(1) + '%';
+  if (Number.isInteger(n) && n > 1900 && n < 2100) return String(n);
+  return fmtMoney(round2(n));
+}
+
+function looseTable(rows) {
+  if (!rows || !rows.length) return '';
+  const ncols = Math.max(...rows.map(r => r.length));
+  return `<div class="tablewrap"><table><tbody>${rows.map(r =>
+    `<tr><th scope="row" style="text-align:left">${esc(String(r[0] ?? ''))}</th>${
+      Array.from({ length: ncols - 1 }, (_, i) =>
+        `<td>${fmtLoose(r[i + 1])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+
+function renderRetirement() {
+  const s = state.side;
+  const year = latestGridYear() || String(new Date().getFullYear());
+
+  /* Traditional vs Roth */
+  const k = s.k401 || {};
+  const trad = round2((k.pretax || 0) + (k.raa || 0) + (k.rollover || 0) + (k.match || 0));
+  const roth = round2((k.roth || 0) + (k.rothIra || 0));
+  const total = round2(trad + roth);
+  const tradPct = total ? trad / total : 0;
+  const splitHtml = !total ? '' : `
+    <div class="split" role="img"
+      aria-label="Traditional ${(tradPct * 100).toFixed(0)} percent, Roth ${((1 - tradPct) * 100).toFixed(0)} percent">
+      <i style="width:${(tradPct * 100).toFixed(1)}%"></i>
+      <i class="b" style="flex:1"></i>
+    </div>
+    <div class="splitlegend">
+      <span><span class="sw"></span>Traditional ${fmtMoney0(trad)} (${(tradPct * 100).toFixed(0)}%)</span>
+      <span><span class="sw b"></span>Roth ${fmtMoney0(roth)} (${((1 - tradPct) * 100).toFixed(0)}%)</span>
+    </div>
+    <div class="tablewrap" style="margin-top:12px"><table>
+      <tbody>
+        <tr><th scope="row">401k pre-tax</th><td>${fmtMoney(k.pretax || 0)}</td></tr>
+        <tr><th scope="row">401k RAA</th><td>${fmtMoney(k.raa || 0)}</td></tr>
+        <tr><th scope="row">401k rollover</th><td>${fmtMoney(k.rollover || 0)}</td></tr>
+        <tr><th scope="row">401k match</th><td>${fmtMoney(k.match || 0)}</td></tr>
+        <tr><th scope="row">401k Roth</th><td>${fmtMoney(k.roth || 0)}</td></tr>
+        <tr><th scope="row">Roth IRA</th><td>${fmtMoney(k.rothIra || 0)}</td></tr>
+      </tbody>
+      <tfoot><tr><th>Total</th><td>${fmtMoney(total)}</td></tr></tfoot>
+    </table></div>`;
+
+  /* Comp */
+  const comp = (s.comp || {})[year];
+  const bonuses = s.bonuses || {};
+  const compHtml = `${comp ? `<div class="tablewrap"><table><tbody>
+      <tr><th scope="row">Salary</th><td>${fmtMoney0(comp.salary || 0)}</td></tr>
+      <tr><th scope="row">Raise</th><td>${((comp.raisePct || 0) * 100).toFixed(1)}%</td></tr>
+      <tr><th scope="row">Bonus</th><td>${fmtMoney0(comp.bonus || 0)}</td></tr>
+      <tr><th scope="row">Total comp</th><td>${fmtMoney0(round2((comp.salary || 0) * (1 + (comp.raisePct || 0)) + (comp.bonus || 0)))}</td></tr>
+    </tbody></table></div>` : ''}
+    ${Object.keys(bonuses).length ? `<h2 style="margin-top:18px">Bonuses by year</h2>
+    <div class="tablewrap"><table><tbody>${Object.keys(bonuses).sort().map(y =>
+      `<tr><th scope="row">${esc(y)}</th><td>${fmtMoney0(bonuses[y])}</td></tr>`).join('')}
+    </tbody></table></div>` : ''}`;
+
+  /* Roth IRA contributions */
+  const contribs = s.rothContribs || {};
+  const cYears = Object.keys(contribs).sort();
+  let cum = 0;
+  const contribRows = cYears.map(y => {
+    cum = round2(cum + contribs[y]);
+    return `<tr><th scope="row">${esc(y)}${+y > new Date().getFullYear() ? ' <span class="muted">(planned)</span>' : ''}</th>
+      <td>${fmtMoney0(contribs[y])}</td><td>${fmtMoney0(cum)}</td></tr>`;
+  }).join('');
+
+  return `<div class="cards2">
+    <div class="card">
+      <h2>Traditional vs Roth</h2>
+      <p class="sub">Across the 401k and the Roth IRA.</p>
+      ${splitHtml || '<p class="sub">Nothing recorded.</p>'}
+    </div>
+    <div class="card">
+      <h2>Roth IRA contributions</h2>
+      <p class="sub">Per year, with the running total.</p>
+      <div class="chartbox" style="height:180px"><canvas id="rothChart"></canvas></div>
+      <div class="tablewrap" style="margin-top:10px"><table>
+        <thead><tr><th style="text-align:left">Year</th><th>Put in</th><th>Running total</th></tr></thead>
+        <tbody>${contribRows}</tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>Comp</h2>
+      <p class="sub">${esc(year)} salary and bonus.</p>
+      ${compHtml || '<p class="sub">Nothing recorded.</p>'}
+    </div>
+    <div class="card">
+      <h2>Contributions &amp; limits</h2>
+      <p class="sub">${esc(year)} retirement contributions, and the Roth income (MAGI) check.</p>
+      ${looseTable((s.retirement || {})[year])}
+      ${looseTable((s.rothLimit || {})[year])}
+    </div>
+    <div class="card">
+      <h2>Taxable investments</h2>
+      ${holdingsTable(s.taxable || [])}
+    </div>
+    <div class="card">
+      <h2>HSA</h2>
+      ${holdingsTable(s.hsa || [])}
+    </div>
+    <div class="card">
+      <h2>Other money</h2>
+      ${(s.otherMoney || []).length ? `<div class="tablewrap"><table><tbody>${
+        s.otherMoney.map(o => `<tr><th scope="row">${esc(o.name)}</th>
+          <td>${fmtMoney(o.balance || 0)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><th>Total</th><td>${fmtMoney(round2(s.otherMoney.reduce((t, o) => t + (o.balance || 0), 0)))}</td></tr></tfoot>
+        </table></div>` : '<p class="sub">Nothing recorded.</p>'}
+    </div>
+  </div>`;
+}
+
+/* ═══════════════════════════ Vacations view ═══════════════════════════════ */
+
+function renderVacations() {
+  const trips = (state.vacations.trips || []).slice()
+    .sort((a, b) => b.year - a.year || a.name.localeCompare(b.name));
+  const ptoYears = Object.keys(state.vacations.pto || {}).sort().reverse();
+
+  const tripCard = (t) => {
+    const hasCredits = t.items.some(i => 'credits' in i);
+    const paid = round2(t.items.reduce((s, i) => s + (i.paid || 0), 0));
+    const credits = round2(t.items.reduce((s, i) => s + (i.credits || 0), 0));
+    const due = round2(t.items.reduce((s, i) => s + (i.due || 0), 0));
+    const total = round2(paid + credits + due);
+    const perNight = t.nights ? round2(total / t.nights) : null;
+    return `<div class="card">
+      <h2>${esc(t.name)}</h2>
+      <p class="sub">${t.nights ? `${t.nights} nights` : ''}${perNight ? ` · ${fmtMoney0(perNight)}/night` : ''}${due ? ` · <strong>${fmtMoney(due)} still due</strong>` : ' · fully paid'}</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th style="text-align:left">Item</th><th>Paid</th>${hasCredits ? '<th>Credits</th>' : ''}<th>Due</th><th>Total</th></tr></thead>
+        <tbody>${t.items.map(i => `<tr>
+          <th scope="row">${esc(i.label)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
+          <td>${i.paid ? fmtMoney(i.paid) : ''}</td>
+          ${hasCredits ? `<td>${i.credits ? fmtMoney(i.credits) : ''}</td>` : ''}
+          <td>${i.due ? fmtMoney(i.due) : ''}</td>
+          <td>${fmtMoney(round2((i.paid || 0) + (i.credits || 0) + (i.due || 0)))}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><th>Total</th><td>${fmtMoney(paid)}</td>${hasCredits ? `<td>${fmtMoney(credits)}</td>` : ''}
+          <td>${fmtMoney(due)}</td><td>${fmtMoney(total)}</td></tr></tfoot>
+      </table></div>
+    </div>`;
+  };
+
+  const ptoCard = (y) => {
+    const p = state.vacations.pto[y];
+    const used = p.entries.reduce((s, e) => s + (e.ptoDays || 0), 0);
+    const remain = (p.allowance || state.settings.ptoAllowance) - used;
+    const pill = remain >= 3 ? 'good' : remain >= 0 ? 'warn' : 'bad';
+    const glyph = remain >= 3 ? '✓' : remain >= 0 ? '!' : '✕';
+    return `<div class="card">
+      <h2>${esc(y)} holidays &amp; PTO</h2>
+      <p class="sub">${used} of ${p.allowance || state.settings.ptoAllowance} PTO days planned ·
+        <span class="pill ${pill}">${glyph} ${remain} left</span>
+        <span class="sr-only">${remain >= 0 ? `${remain} days remaining` : `${-remain} days over`}</span></p>
+      <div class="tablewrap"><table>
+        <thead><tr><th style="text-align:left">Trip / holiday</th><th style="text-align:left">Dates</th><th>Nights</th><th>PTO days</th></tr></thead>
+        <tbody>${p.entries.map(e => `<tr><th scope="row">${esc(e.name)}</th>
+          <td style="text-align:left">${esc(e.dates || '')}</td>
+          <td>${e.nights ?? ''}</td><td>${e.ptoDays || 0}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><th>Used</th><td></td><td></td><td>${used}</td></tr></tfoot>
+      </table></div>
+    </div>`;
+  };
+
+  return ptoYears.map(ptoCard).join('') + `<div class="cards2">${trips.map(tripCard).join('')}</div>`;
+}
+
+/* ═══════════════════════════ Giving view ══════════════════════════════════ */
+
+function renderGiving() {
+  const s = state.side;
+  const years = Object.keys(s.donations || {}).sort().reverse();
+
+  const donTable = (y) => {
+    const items = s.donations[y];
+    const funded = round2(items.reduce((t, i) => t + (i.funding || 0), 0));
+    const granted = round2(items.reduce((t, i) => t + (i.grant || 0), 0));
+    const cash = round2(items.reduce((t, i) => t + (i.cash || 0), 0));
+    const deductible = round2(items.filter(i => i.deductible)
+      .reduce((t, i) => t + (i.funding || 0) + Math.abs(i.grant || 0) + Math.abs(i.cash || 0), 0));
+    return `<div class="card">
+      <h2>${esc(y)} donations</h2>
+      <p class="sub">${fmtMoney(funded)} into the giving fund, ${fmtMoney(Math.abs(granted))} granted out,
+        ${fmtMoney(Math.abs(cash))} given as cash · ${fmtMoney(deductible)} deductible.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th style="text-align:left">Date</th><th style="text-align:left">Foundation</th>
+          <th style="text-align:left">Cause</th><th>Amount</th><th style="text-align:left">How</th>
+          <th style="text-align:left">Deductible</th></tr></thead>
+        <tbody>${items.map(i => {
+          const amount = i.funding || i.grant || i.cash || 0;
+          const how = i.funding ? 'fund deposit' : i.grant ? 'DAF grant' : 'cash';
+          return `<tr><td style="text-align:left">${esc(i.date)}</td>
+            <th scope="row">${esc(i.foundation)}</th>
+            <td style="text-align:left">${esc(i.cause || '')}</td>
+            <td>${fmtMoney(amount)}</td>
+            <td style="text-align:left">${how}</td>
+            <td style="text-align:left">${i.deductible ? 'Yes' : 'No'}</td></tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>`;
+  };
+
+  return `<div class="card">
+    <h2>Fidelity Charitable giving fund</h2>
+    <p class="sub">DAF grants come out of this balance — already donated for tax purposes,
+      waiting to be granted to a cause.</p>
+    ${holdingsTable(s.daf || [])}
+  </div>` + years.map(donTable).join('');
+}
+
+/* ═══════════════════════════ History view (charts land in M7) ═════════════ */
 function renderHistory()    { return `<div class="card"><div class="empty"><h2>History</h2><p>Coming together…</p></div></div>`; }
 
 function wireView(view) {
@@ -980,6 +1363,86 @@ function wireView(view) {
     save(); render();
   };
   if (view === 'budget') wireBudget();
+  if (view === 'goals') buildGoalChart();
+  if (view === 'retirement') buildRothChart();
+}
+
+/* ── Charts ─────────────────────────────────────────────────────────────────
+   Colours resolve from the theme's CSS custom properties at construction, so
+   a theme switch rebuilds them (render() does). Animation off, family rule:
+   bars are a tint fill + full-strength edge, never a slab of colour. */
+const cssVar = (name) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+let charts = [];
+function newChart(id, config) {
+  const el = F(id);
+  if (!el || typeof Chart === 'undefined') return;
+  charts = charts.filter(ch => {
+    if (!document.body.contains(ch.canvas)) { ch.destroy(); return false; }
+    return true;
+  });
+  config.options = Object.assign({ responsive: true, maintainAspectRatio: false,
+    animation: false }, config.options || {});
+  charts.push(new Chart(el.getContext('2d'), config));
+}
+
+function chartAxes() {
+  return {
+    ticks: { color: cssVar('--chart-tick') },
+    grid: { color: cssVar('--chart-grid') },
+  };
+}
+
+function buildGoalChart() {
+  const liveKey = latestGridYear();
+  if (!liveKey) return;
+  const c = C[liveKey];
+  const labels = c.months.map(monthLabel);
+  const data = c.months.map(m => c.balances[`total|${m}`]);
+  newChart('goalChart', {
+    type: 'line',
+    data: { labels, datasets: [{
+      label: 'Total liquidity',
+      data,
+      borderColor: cssVar('--accent'),
+      backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 0, tension: .25,
+    }]},
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        x: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
+          maxRotation: 0, autoSkipPadding: 14 } }),
+        y: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
+          callback: (v) => fmtMoney0(v) } }),
+      },
+    },
+  });
+}
+
+function buildRothChart() {
+  const contribs = state.side.rothContribs || {};
+  const years = Object.keys(contribs).sort().filter(y => +y <= new Date().getFullYear() + 1);
+  if (!years.length) return;
+  const accent = cssVar('--accent');
+  newChart('rothChart', {
+    type: 'bar',
+    data: { labels: years, datasets: [{
+      label: 'Roth IRA contribution',
+      data: years.map(y => contribs[y]),
+      backgroundColor: cssVar('--accent-bg'),
+      borderColor: accent, borderWidth: 2, borderSkipped: false,
+    }]},
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        x: chartAxes(),
+        y: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
+          callback: (v) => fmtMoney0(v) } }),
+      },
+    },
+  });
 }
 
 /* ═══════════════════════════ Cell editing ═════════════════════════════════ */
