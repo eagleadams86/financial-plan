@@ -41,29 +41,57 @@ numbers only. If a change needs a realistic payload, invent one.
   persist a computed value.
 - Cell kinds mirror the spreadsheet's colour Key: `actual` (happened),
   `manual` (Charlie's estimate — beats auto), `auto` (rule-computed),
-  `missing` (blank, counts as 0), `pinned` (balance stated outright).
+  `missing` (blank, counts as 0), `pinned` (balance stated outright), `mixed`
+  (a split month whose parts disagree). Each kind reads as a different LINE
+  STYLE in the grid, never a colour.
 - Estimate rules are table-driven in `RULES`: `carry` (Internet only — the
   sheet types Phone/Parking/Water into each month they apply, so a carry rule
   there would invent charges), `quarterly` (repeat on a cycle, `cat.every`
   months, default 3), `avg` (Credit Card, Venmo — mean of stored months
-  before the estimate), `samemonth` (Electric, ROUND, reaches into the prior
-  year's grid), `dividends` (per-row `cat.rate`, falling back to
+  before the estimate), `avglastyear` (mean of the prior calendar year's
+  STORED months — never autos, so an estimate can't feed itself),
+  `samemonth` (Electric, ROUND, reaches into the prior year's grid),
+  `dividends` (per-row `cat.rate`, falling back to
   `settings.midTermRateAnnual` — rate/12 × prior cash+mid), `paycheck`
-  (perCheck × count, incl. fractional counts), `none`. `ruleDesc()` renders a
-  rule with its row's own numbers — use it, not RULE_LABEL, wherever a rule
-  is named next to a specific row.
-- Balance chain (live year only): cash += all flows except charitable+zelle;
-  mid −= mid transfers; long = (long − transfers) × (1 + 7%/12) + charitable;
-  bank −= bank transfers − (−zelle). Overrides pin a month; later months
-  chain from the pin.
+  (perCheck × count, incl. fractional counts; hidden entirely unless
+  `settings.paycheckRule`), `none`. `ruleDesc()` renders a rule with its
+  row's own numbers — use it, not RULE_LABEL, wherever a rule is named next
+  to a specific row.
+- **Accounts are a list, not four fixed ids.** `settings.accounts` is ordered
+  `{id, name, rate, creditTo, hub?, since?}`. The ids `cash/mid/long/bank`
+  stay reserved (seeds, `overrides`, goal sources and the dividends rule key
+  off them). `hub` is the one account ordinary money flows through — do not
+  generalize that. `creditTo` sends an account's interest somewhere else (a
+  brokerage sweep); `since` starts an account partway through, seeded from
+  `yr.seeds`, blank and out of Total before it.
+- A row's `role` is `normal` / `transfer` (+ `transferTo`) / `passthrough`
+  (+ `transferTo` + `creditTiming`). The old fixed names (midTransfer, zelle,
+  charitable…) still arrive from backups and hand-built fixtures, so every
+  read goes through `normRole()`. **The pass-through timing is load-bearing**:
+  the old `zelle` landed BEFORE its account's growth, `charitable` AFTER it —
+  the real-data cross-check pins that, so never "simplify" it away.
+- Balance chain per month, per account: `base = prior − transfersOut +
+  preCredits`; `interest = base × rate/12` (or `yr.balAdjust[bid|m].interest`)
+  credited to `creditTo`; then `+ postCredits`, `+ all flows` for the hub, and
+  `+ balAdjust.dividend`. At the defaults this reduces exactly to the old
+  four formulas — there's a test that pins it. `overrides` pin a month
+  outright; later months chain from the pin.
+- A cell may carry `parts: [{v, kind, note?}]`. Its `v` stays the sum and its
+  `kind` is derived (all-actual, all-manual, or `mixed`), so the engine,
+  subtotals, rollover and the charts never have to know about parts.
 - "Mark month entered" **materialises** that month's autos into stored
   actuals (the app's overtyping-in-Numbers); re-opening moves the marker back
   and keeps the numbers. Rollover (`rolloverYear`) copies categories+rules,
   keeps overlap manuals, seeds from computed December, and never touches the
   old year.
-- Prior years: `model: 'pinned'` grids (2020–2025, every cell an actual, no
-  balance model) and `kind: 'summary'` years (2011–2019). The live year is
-  always the newest grid.
+- Prior years: `model: 'pinned'` grids (every cell an actual, no balance
+  model) and `kind: 'summary'` years. The live year is always the newest grid.
+  `gridToSummary()` folds a pinned grid into totals — flows sum, balance rows
+  keep DECEMBER (a sum of monthly balances is meaningless). It is permanent,
+  and it refuses quietly to be useful: `rulesNeedingYear()` warns when the
+  next year has `samemonth`/`avglastyear` rows that read the year being
+  converted. `migrate_local_data.py` does the same conversion offline, plus
+  the one-off strip of hand-typed next-year months from the live grid.
 
 ## Editing
 
@@ -85,20 +113,27 @@ inferred once in `coerceShape` for pre-section data, a stored value is never
 re-guessed) and `role` (the balance math). Consistency is enforced ONE way:
 a transfer role forces the Transfers section, but a Transfers-section row may
 keep role `normal` (Roth IRA transfers — the far account isn't tracked, so
-its money is ordinary cash-out). Account display names live in
-`settings.accountNames` and per-account growth in `settings.accountRates`
-(both editable by clicking an account row; the importer writes Charlie's
-ticker names and the 7% Investments rate). The engine applies rate/12 to
-each account monthly — at the defaults this is byte-identical to the
-spreadsheet, and the real-data cross-check pins that. Row reorder moves within a section.
-Retirement accounts are a generic list (`side.retirementAccounts`, each
-Traditional or Roth); the old fixed `k401` fields migrate once in
-`coerceShape` and the source is emptied so deletions can't resurrect them.
-App-wide preferences (currency code — validated against
-`Intl.supportedValuesOf('currency')`, since Intl renders unknown codes
-literally rather than throwing — and the PTO default) live behind the
-header's ⚙ button; `buildMoneyFormats()` rebuilds the formatters on every
-render.
+its money is ordinary cash-out). Row reorder moves within a section, and is
+hidden when `settings.rowSort === 'alpha'` (which sorts at render time and
+never touches the stored order). Accounts edit through the `account` section
+(click an account row); deleting one is refused while a category still moves
+money into it. A field spec may carry `showIf(values)` — `buildFields()`
+re-evaluates on every select change, which is how each rule shows only its
+own setting. Retirement accounts are a generic list
+(`side.retirementAccounts`) with a `type` and their own `contribs` by year;
+the old fixed `k401` fields and the separate `rothContribs` map migrate once
+in `coerceShape` and the sources are emptied so deletions can't resurrect
+them. Nothing about Roth IRAs is special-cased in code.
+`side.limits[year]` holds the inputs to the two calculators (401(k) limit,
+Roth MAGI) and prefills from `side.comp` on first open. App-wide preferences
+(currency code — validated against `Intl.supportedValuesOf('currency')`,
+since Intl renders unknown codes literally rather than throwing — PTO
+default, row sort, the paycheck-rule toggle, the dividend fallback rate, the
+assumed retirement return, and the price-lookup key) live behind the header's
+⚙ button; `buildMoneyFormats()` rebuilds the formatters on every render.
+Info dots (`helpBtn(key, label)` + the `HELP` table + `#helpDialog`) explain
+arithmetic the reader can't see; clicking outside any dialog except the
+sync-choice one closes it without saving.
 
 ## Sync
 
@@ -139,9 +174,13 @@ is what the tests diff the JS engine against.
 `tests.html` (SV harness: hidden iframe onto the real `index.html`,
 `window.__finTestHooks` hands over the consts). Synthetic fixtures only. The
 "Real data (local only)" group fetches the gitignored JSONs and SKIPS on 404
-— green in CI and on the public site by design. When an engine rule changes,
-change the matching test in the same commit, re-run the import, and make the
-local cross-check pass again. CI: `.github/workflows/tests.yml` (Playwright
+— green in CI and on the public site by design. It compares the LIVE YEAR's
+own months only: the grid runs a year past that as a projection now, where the
+sheet had those months typed in, so they are not meant to agree. It also skips
+`total|` once an account with a `since` has joined, because the sheet's SUM
+covers the original four accounts only. When an engine rule changes, change
+the matching test in the same commit, re-run the import, and make the local
+cross-check pass again. CI: `.github/workflows/tests.yml` (Playwright
 Chromium against `python3 -m http.server 8016`).
 
 ## Working rules
@@ -150,8 +189,13 @@ Chromium against `python3 -m http.server 8016`).
   `python3 -m http.server 8016`), then commit, push, verify the Pages deploy.
 - Commit subjects are **user-facing** (the Recent changes box lists them
   verbatim) — plain English for a reader, not a diff.
-- CSP: `connect-src 'self' https://api.github.com` only. A new feature that
-  talks to a new endpoint must add it to the CSP in the same commit.
+- CSP `connect-src`: `'self'`, the Firebase/Google sign-in hosts, the GitHub
+  API (changelog) and `https://www.alphavantage.co` (holding prices — ticker
+  only). A new feature that talks to a new endpoint must add it to the CSP in
+  the same commit, and update `privacy.html` if it changes what leaves the
+  browser. The Alpha Vantage key lives in localStorage `fin-avkey`, NOT in
+  state: state syncs to Firestore and rides along in every backup file, and a
+  credential belongs in neither.
 - Keep README.md current whenever the app meaningfully changes.
 - Help/info icons never sit flush against the word they follow (standing
   preference).

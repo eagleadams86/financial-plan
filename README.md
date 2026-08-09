@@ -21,31 +21,46 @@ must never show them.
 ## What it does
 
 - **Budget** — the monthly grid, 2011–present, grouped into **Income,
-  Expenses, Transfers and Accounts** sections with per-month subtotals. Each
-  row has a type (which section), a projection rule (repeat last month,
-  quarterly, average so far, same month last year, interest, per-check ×
-  paychecks), and a behaviour (ordinary cash, or a transfer with the Savings /
-  Investments / Other-bank accounts — which are renameable and each carry
-  their own configurable interest/growth rate). The current year
-  is live:
-  past months are actuals, future months are estimates that recompute the way
-  the spreadsheet's formulas did (trailing averages, same-month-last-year
-  electric, dividends from balances, paycheck × count, 7%/yr long-term
-  growth). Click any cell to edit; mark a month "entered" to freeze its
-  estimates into numbers, like overtyping formulas in Numbers. The Venmo
-  ledger and large-purchase list sit under the grid.
+  Expenses, Transfers and Accounts** sections, with per-month subtotals (a
+  section holding a single row skips its subtotal) and a year-total column
+  pinned to the right. Each row has a type (which section), a projection rule
+  (repeat last month, cycle, average so far, **average of last year**, same
+  month last year, interest, per-check × paychecks), and a behaviour: ordinary
+  money, a transfer with another account, or a pass-through that never touches
+  the main account. **Accounts are a list you own** — add as many as you like,
+  each with its own name, growth rate, a choice of which account that interest
+  is paid into, and optionally a month it starts being tracked (earlier months
+  stay blank and out of Total). The current year is live: past months are
+  actuals, future months are estimates that recompute the way the spreadsheet's
+  formulas did. Click any cell to edit — or **split a month into several
+  amounts**, each actual or estimated on its own, totalled on save. A month's
+  balance cell shows what the account earned that month and lets you override
+  the interest or add a dividend. Mark a month "entered" to freeze its
+  estimates into numbers, like overtyping formulas in Numbers. A finished year
+  can be **converted to a yearly summary** (permanent — the History charts
+  carry on unchanged), or deleted outright.
 - **Everything is editable, everywhere** — click any row (budget categories,
-  goals, holdings, trips and their line items, PTO entries, donations, the
-  Venmo ledger, the free-form limits tables, the old yearly summaries) to
-  change, annotate, or delete it; every table has a ＋ Add button, budget
-  rows and list rows reorder with ↑↓, and the free-form tables take spacer
-  lines. Row names, trip names and per-year settings are all just fields in
-  the same editor.
+  accounts, goals, holdings, retirement accounts, trips and their line items,
+  PTO entries, donations, the old yearly summaries) to change, annotate, or
+  delete it; every table has a ＋ Add button, rows reorder with ↑↓, and each
+  editor shows only the settings the current choice actually uses. Clicking
+  outside any dialog closes it without saving, and a small ⓘ beside a figure
+  explains the arithmetic behind it.
 - **Goals** — savings goals with progress, target dates, required monthly
-  saving, the renovations pace check, and end-of-year liquidity.
-- **Retirement** — Traditional vs Roth split, Roth IRA contributions,
-  comp & bonuses, contribution limits and the MAGI check, holdings.
-- **Vacations** — per-trip cost tables and the holidays & PTO planner.
+  saving, end-of-year liquidity, and a pace check that follows whichever goal
+  is next: the soonest deadline you haven't met yet.
+- **Retirement** — Traditional vs Roth split; retirement accounts with a type
+  (401(k), Roth IRA, HSA…) and their own contribution history, so nothing
+  about Roth IRAs is special-cased; a **401(k) limit calculator** and a **Roth
+  IRA income (MAGI) calculator** that both recompute as you change the figures;
+  and a projection of where the balances are heading at an assumed return.
+- **Compensation** — where comp stands, raises over time (with the actual
+  year-on-year change alongside the raise you were told), and bonuses by year.
+- **Investments** — taxable holdings and the HSA, with optional **automatic
+  price lookups** (Alpha Vantage; free key kept on the device, cached six
+  hours, and every price still editable by hand).
+- **Vacations** — per-trip cost tables grouped into one row per year, newest
+  first, reorderable within a year, and the holidays & PTO planner.
 - **Giving** — the Fidelity Charitable fund and the donations log.
 - **History** — total liquidity 2011→now and money in vs out per year.
 - **Year rollover** — "Start ⟨next year⟩" duplicates the live grid the way
@@ -69,12 +84,23 @@ Then open the app → **Back up** → **Restore JSON…** → pick
 `financial-plan-data.json`. The same Restore path handles ordinary backups —
 Export writes `money-map-YYYY-MM-DD.json`, Restore reads it back.
 
+`migrate_local_data.py` does the two things the app deliberately won't do to
+your data by itself, because both discard information: it strips the
+hand-typed next-year months out of the live grid (so the rules project them
+instead) and folds finished years into yearly summaries. It writes a new file
+beside the input and never modifies the original.
+
+```bash
+python3 migrate_local_data.py financial-plan-data.json
+```
+
 ## Architecture
 
 One file — `index.html` — no build step, alongside `theme.css` (byte-copy
 from the private claude-theme-pack, the palette source of truth for all apps)
 and a vendored `chart.min.js`. Served by GitHub Pages from `main`. State
-schema is versioned (`schema: 1`) with a migration slot.
+schema is versioned (`schema: 2`); every entry point runs the payload through
+`coerceShape()`, whose upgrades are presence-based and safe to run twice.
 
 `computeAll()` in `index.html` is the only place numbers are calculated —
 every cell, balance, and goal figure derives from stored inputs at render
@@ -86,5 +112,7 @@ Open `tests.html` on a local server (`python3 -m http.server 8016`) — it runs
 the pure functions in the real `index.html` inside a hidden iframe. All
 fixtures are synthetic. On this Mac only, if the import files are present, it
 additionally diffs the JS engine against the spreadsheet's own cached values
-(94 formula cells + 101 balances, at import time they matched exactly). CI
+for the live year's own months. (Months beyond that are now a projection the
+app works out from the rules, where the spreadsheet had them typed in, so the
+two are not meant to agree.) CI
 (`.github/workflows/tests.yml`) runs the same page headless on every push.
