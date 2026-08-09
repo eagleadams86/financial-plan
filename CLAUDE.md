@@ -61,6 +61,21 @@ numbers only. If a change needs a realistic payload, invent one.
   balance model) and `kind: 'summary'` years (2011–2019). The live year is
   always the newest grid.
 
+## Editing
+
+**Every table edits through one dialog** (`#rowDialog`): a section registers
+in the `EDITORS` registry with `fields` (spec-driven form), `get`, `save`,
+and optionally `del`/`move`. Rows carry `data-edit="<section>"` (+ whatever
+keys the section needs — `data-year`, `data-idx`, `data-id`, `data-map`,
+`data-list`); add buttons carry `data-add`. ONE delegated listener on
+`#views` routes both and passes isNew explicitly — don't add per-row
+handlers. New sections: register in EDITORS, stamp the attributes in the
+renderer, done. Budget grid *cells* are the exception — they keep their own
+`#cellDialog` (kind/note/revert semantics the generic editor doesn't have).
+Free-form rows (`side.retirement`/`side.rothLimit`) are loose value arrays;
+an empty array is a spacer line, and `fmtLoose()` guesses display format.
+Deleting a budget category also deletes its orphaned cells — keep that.
+
 ## The import script
 
 `import_xlsx.py` — stdlib only (no openpyxl), reads the Numbers-exported

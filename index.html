@@ -181,6 +181,29 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
 .checkline { display: flex; gap: 8px; align-items: center; font-size: 14px;
   min-height: 24px; }
 .checkline input { flex: none; }
+/* Fields line up on their boxes, not their labels (family rule): each cell is
+   a full-height column with the control pushed to the bottom. */
+.grid-fields { display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.grid-fields > div { display: flex; flex-direction: column; }
+.grid-fields > div > input, .grid-fields > div > select { width: 100%;
+  margin-top: auto; height: 40px; }
+.grid-fields > div.wide { grid-column: 1 / -1; }
+/* An editable row shows a hand, and its row-name cell carries the pencil
+   affordance — hover alone isn't discoverable on touch. */
+tr.editrow { cursor: pointer; }
+tr.editrow > th:first-child::after, tr.editrow > td:first-child::after {
+  content: ' ✎'; opacity: 0; font-size: 11px; color: var(--text-muted); }
+tr.editrow:hover > th:first-child::after,
+tr.editrow:hover > td:first-child::after { opacity: 1; }
+tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
+.addbar { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+/* Small inline edit button beside a card heading (trip name, PTO year…) */
+.h-edit { margin-left: 8px; padding: 1px 8px; font-size: 12px;
+  background: var(--bg-card-alt); color: var(--text-secondary);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  cursor: pointer; vertical-align: 2px; }
+.h-edit:hover { color: var(--text-primary); border-color: var(--text-muted); }
 .warn { color: var(--err); font-size: 13px; margin-top: 10px; }
 .warn:empty { display: none; }
 .muted { color: var(--text-secondary); }
@@ -392,6 +415,29 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
   <div class="row" style="justify-content:flex-end;margin-top:18px">
     <button class="btn primary" id="dataCloseBtn">Close</button>
   </div>
+</dialog>
+
+<!-- ── Generic row editor ─────────────────────────────────────────────────
+     One dialog serves every table in the app: its fields are built from a
+     spec at open time. Save/Delete/Move wiring comes from the EDITORS
+     registry in the script below. -->
+<dialog id="rowDialog" aria-labelledby="rowDialogTitle">
+  <form method="dialog" id="rowForm">
+    <h3 id="rowDialogTitle">Edit</h3>
+    <p class="sub" id="rowDialogSub"></p>
+    <div id="rowFields" class="grid-fields"></div>
+    <div class="row spread" style="margin-top:18px">
+      <div class="row">
+        <button type="button" class="btn" id="rowDeleteBtn" hidden>🗑 Delete</button>
+        <button type="button" class="btn" id="rowUpBtn" hidden title="Move up">↑</button>
+        <button type="button" class="btn" id="rowDownBtn" hidden title="Move down">↓</button>
+      </div>
+      <div class="row">
+        <button type="button" class="btn" id="rowCancelBtn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </div>
+  </form>
 </dialog>
 
 <!-- ── Cell editor ───────────────────────────────────────────────────────── -->
@@ -877,20 +923,31 @@ function renderBudget() {
 }
 
 function summaryCard(y, yr) {
+  const line = (i) => {
+    const idx = yr.categoryTotals.indexOf(i);
+    if (!i.name && !i.total) return `<div class="rowline" data-edit="sumrow"
+      data-year="${esc(y)}" data-idx="${idx}" style="cursor:pointer;height:14px;border-bottom:none"></div>`;
+    return `<div class="rowline" data-edit="sumrow" data-year="${esc(y)}"
+      data-idx="${idx}" style="cursor:pointer" title="Click to edit"><span>${esc(i.name)}${
+      i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''
+    }</span><span>${fmtMoney(i.total)}</span></div>`;
+  };
   const flows = yr.categoryTotals.filter(i => !i.isBalance);
   const bals = yr.categoryTotals.filter(i => i.isBalance);
-  const line = (i) => `<div class="rowline"><span>${esc(i.name)}${
-    i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''
-  }</span><span>${fmtMoney(i.total)}</span></div>`;
   const extras = (yr.extraNotes || []).map(n =>
     `<li><span class="muted">${esc(n.where)}</span> — ${esc(n.note)}</li>`).join('');
   return `<div class="card">
     <h2>${esc(y)} — yearly summary</h2>
     <p class="sub">This year predates the monthly layout, so it's imported as totals only.
-      ${yr.eoyCash !== undefined ? `End of year: <strong>${fmtMoney(yr.eoyCash)}</strong>.` : ''}</p>
+      ${yr.eoyCash !== undefined ? `End of year: <strong>${fmtMoney(yr.eoyCash)}</strong>.` : ''}
+      Click any row to edit it.</p>
     <div class="sumlist">${flows.map(line).join('')}</div>
     ${bals.length ? `<h2 style="margin-top:18px">Balances &amp; derived rows</h2>
       <div class="sumlist">${bals.map(line).join('')}</div>` : ''}
+    <div class="addbar">
+      <button class="btn small" data-add="sumrow" data-year="${esc(y)}">＋ Add row</button>
+      <button class="btn small" data-edit="sumyear" data-year="${esc(y)}">✎ End-of-year figure</button>
+    </div>
     ${extras ? `<details class="section"><summary>Notes from the spreadsheet</summary>
       <ul style="margin:10px 0 0;padding-left:18px;font-size:13px">${extras}</ul></details>` : ''}
   </div>`;
@@ -914,13 +971,16 @@ function gridCard(y, yr) {
       title="${esc(title)}">${fmtCell(r.v)}</td>`;
   };
 
+  const catTh = (cat) => `<th class="lbl" scope="row" data-edit="category"
+    data-year="${esc(y)}" data-id="${esc(cat.id)}" style="cursor:pointer"
+    title="${esc(cat.name)}${cat.note ? ' · ' + cat.note : ''} — click to edit this row">${esc(cat.name)}</th>`;
+
   const catRows = yr.categories.filter(cat => !cat.isBalance).map(cat =>
-    `<tr><th class="lbl" scope="row" title="${esc(cat.name)}">${esc(cat.name)}</th>${
-      months.map(m => cellTd(cat, m)).join('')}</tr>`).join('');
+    `<tr>${catTh(cat)}${months.map(m => cellTd(cat, m)).join('')}</tr>`).join('');
 
   /* pinned history grids keep their balance-ish rows in a block below */
   const pinnedBalRows = yr.categories.filter(cat => cat.isBalance).map((cat, i) =>
-    `<tr class="balance${i ? ' later' : ''}"><th class="lbl" scope="row">${esc(cat.name)}</th>${
+    `<tr class="balance${i ? ' later' : ''}">${catTh(cat)}${
       months.map(m => cellTd(cat, m)).join('')}</tr>`).join('');
 
   /* the live year's four accounts + total are computed, not rows */
@@ -946,14 +1006,17 @@ function gridCard(y, yr) {
   const nextM = live ? monthAdd(yr.enteredThrough, 1) : null;
   const canClose = live && monthDiff(yr.startMonth, nextM) < yr.monthCount;
   const canReopen = live && yr.enteredThrough >= yr.startMonth;
-  const monthControls = !live ? '' : `<div class="row" style="margin:2px 0 12px">
-      ${canClose ? `<button class="btn small" id="closeMonthBtn"
+  const addRowBtn = `<button class="btn small" data-add="category" data-year="${esc(y)}"
+      title="Add a row to this year's grid">＋ Add row</button>`;
+  const monthControls = `<div class="row" style="margin:2px 0 12px">
+      ${addRowBtn}
+      ${live && canClose ? `<button class="btn small" id="closeMonthBtn"
         title="Freeze ${esc(monthLabel(nextM))}'s estimates as entered numbers — like overtyping the formulas in Numbers">
         ✓ Mark ${esc(monthLabel(nextM))} entered</button>` : ''}
-      ${canReopen ? `<button class="btn small" id="reopenMonthBtn"
+      ${live && canReopen ? `<button class="btn small" id="reopenMonthBtn"
         title="Move the entered-through marker back a month (your numbers stay put)">
         ↩ Re-open ${esc(monthLabel(yr.enteredThrough))}</button>` : ''}
-      ${y === latestGridYear() && !state.years[String(+y + 1)]
+      ${live && y === latestGridYear() && !state.years[String(+y + 1)]
         ? `<button class="btn small" id="rolloverBtn"
             title="Create the ${esc(String(+y + 1))} grid — like duplicating the sheet in Numbers">
             ⊕ Start ${esc(String(+y + 1))}</button>` : ''}
@@ -983,12 +1046,12 @@ const KIND_LABEL = { actual: 'actual', manual: 'your estimate',
   auto: 'auto estimate', missing: 'nothing recorded', pinned: 'stated balance' };
 
 function venmoSection(y) {
-  const items = (state.side.venmo || {})[y];
-  if (!items || !items.length) return '';
+  const items = (state.side.venmo || {})[y] || [];
   const total = round2(items.reduce((s, i) => s + i.amount, 0));
-  const rows = items.map(i => `<tr>
+  const rows = items.map((i, idx) => `<tr class="editrow" data-edit="venmo"
+      data-year="${esc(y)}" data-idx="${idx}">
     <td style="text-align:left">${esc(i.date)}</td>
-    <th scope="row">${esc(i.desc)}</th>
+    <th scope="row">${esc(i.desc)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
     <td>${fmtMoney(i.amount)}</td>
     <td style="text-align:left">${i.fromBank ? 'Bank' : ''}</td></tr>`).join('');
   return `<details class="section"><summary>${esc(y)} Venmo ledger — ${items.length} items,
@@ -997,16 +1060,18 @@ function venmoSection(y) {
       <thead><tr><th style="text-align:left">Date</th><th style="text-align:left">Who / what</th>
         <th>Amount</th><th style="text-align:left">Settled</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table></div></details>`;
+    </table></div>
+    <div class="addbar"><button class="btn small" data-add="venmo"
+      data-year="${esc(y)}">＋ Add entry</button></div></details>`;
 }
 
 function purchasesSection(y) {
-  const items = (state.side.largePurchases || {})[y];
-  if (!items || !items.length) return '';
+  const items = (state.side.largePurchases || {})[y] || [];
   const total = round2(items.reduce((s, i) => s + (i.amount || 0), 0));
-  const rows = items.map(i => `<tr>
-    <td style="text-align:left">${esc(i.date)}</td>
-    <th scope="row">${esc(i.desc)}</th>
+  const rows = items.map((i, idx) => `<tr class="editrow" data-edit="purchase"
+      data-year="${esc(y)}" data-idx="${idx}">
+    <td style="text-align:left">${esc((i.date || '').slice(0, 7))}</td>
+    <th scope="row">${esc(i.desc)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
     <td>${i.amount === null || i.amount === undefined ? '' : fmtMoney(i.amount)}</td></tr>`).join('');
   return `<details class="section"><summary>${esc(y)} large credit-card purchases —
       ${fmtMoney(total)} planned</summary>
@@ -1014,7 +1079,9 @@ function purchasesSection(y) {
       <thead><tr><th style="text-align:left">Month</th><th style="text-align:left">What</th>
         <th>Amount</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table></div></details>`;
+    </table></div>
+    <div class="addbar"><button class="btn small" data-add="purchase"
+      data-year="${esc(y)}">＋ Add purchase</button></div></details>`;
 }
 
 /* ═══════════════════════════ Goals view ═══════════════════════════════════ */
@@ -1031,10 +1098,11 @@ function renderGoals() {
   const goals = computeGoals(state, C, todayISO());
   const cur = currentMonthOf(yr, todayISO());
 
-  const goalCard = (g) => {
+  const goalCard = (g, idx) => {
     const done = g.target && g.saved >= g.target;
     const pct = Math.min(1, g.progress);
-    return `<div class="goal ${done ? 'done' : ''}">
+    return `<div class="goal ${done ? 'done' : ''}" data-edit="goal" data-idx="${idx}"
+      style="cursor:pointer" title="Click to edit${g.note ? ' · ' + esc(g.note) : ''}">
       <div class="label">${esc(g.name)}${done ? ' <span aria-hidden="true">✓</span><span class="sr-only"> — reached</span>' : ''}</div>
       <div class="value">${fmtMoney0(g.saved)} <span class="of">of ${fmtMoney0(g.target)}</span></div>
       <div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100"
@@ -1094,6 +1162,7 @@ function renderGoals() {
     <h2>Savings goals</h2>
     <p class="sub">Saved figures read this month's computed balances (${esc(monthLabel(cur))}).</p>
     <div class="goalgrid">${goals.map(goalCard).join('')}</div>
+    <div class="addbar"><button class="btn small" data-add="goal">＋ Add goal</button></div>
     <div style="margin-top:16px">
       <div class="label" style="font-size:12px;color:var(--text-secondary);font-weight:600;
         text-transform:uppercase;letter-spacing:.04em">Total liquidity</div>
@@ -1126,15 +1195,18 @@ function renderGoals() {
 const holdingsValue = (rows) =>
   round2(rows.reduce((s, h) => s + (h.shares || 0) * (h.price || 0), 0));
 
-function holdingsTable(rows) {
-  if (!rows.length) return '<p class="sub">Nothing recorded.</p>';
-  return `<div class="tablewrap"><table>
-    <thead><tr><th style="text-align:left">Ticker</th><th>Shares</th><th>Price</th><th>Value</th></tr></thead>
-    <tbody>${rows.map(h => `<tr><th scope="row">${esc(h.ticker)}</th>
+function holdingsTable(rows, list) {
+  const body = rows.map((h, idx) => `<tr class="editrow" data-edit="holding"
+      data-list="${esc(list)}" data-idx="${idx}"><th scope="row">${esc(h.ticker)}</th>
       <td>${h.shares ?? ''}</td><td>${h.price != null ? fmtMoney(h.price) : ''}</td>
-      <td>${fmtMoney(round2((h.shares || 0) * (h.price || 0)))}</td></tr>`).join('')}</tbody>
+      <td>${fmtMoney(round2((h.shares || 0) * (h.price || 0)))}</td></tr>`).join('');
+  return `${rows.length ? `<div class="tablewrap"><table>
+    <thead><tr><th style="text-align:left">Ticker</th><th>Shares</th><th>Price</th><th>Value</th></tr></thead>
+    <tbody>${body}</tbody>
     <tfoot><tr><th>Total</th><td></td><td></td><td>${fmtMoney(holdingsValue(rows))}</td></tr></tfoot>
-  </table></div>`;
+  </table></div>` : '<p class="sub">Nothing recorded.</p>'}
+  <div class="addbar"><button class="btn small" data-add="holding"
+    data-list="${esc(list)}">＋ Add holding</button></div>`;
 }
 
 /* The imported free-form tables (contribution percentages, MAGI check) come
@@ -1148,13 +1220,22 @@ function fmtLoose(v) {
   return fmtMoney(round2(n));
 }
 
-function looseTable(rows) {
-  if (!rows || !rows.length) return '';
-  const ncols = Math.max(...rows.map(r => r.length));
-  return `<div class="tablewrap"><table><tbody>${rows.map(r =>
-    `<tr><th scope="row" style="text-align:left">${esc(String(r[0] ?? ''))}</th>${
+function looseTable(map, year) {
+  const rows = (state.side[map] || {})[year] || [];
+  const ncols = Math.max(2, ...rows.map(r => r.length));
+  const body = rows.map((r, idx) => {
+    const empty = !r.length || r.every(v => v === null || v === '');
+    if (empty) return `<tr class="spacer editrow" data-edit="loose" data-map="${esc(map)}"
+      data-year="${esc(year)}" data-idx="${idx}"><td colspan="${ncols}"></td></tr>`;
+    return `<tr class="editrow" data-edit="loose" data-map="${esc(map)}"
+      data-year="${esc(year)}" data-idx="${idx}">
+      <th scope="row" style="text-align:left">${esc(String(r[0] ?? ''))}</th>${
       Array.from({ length: ncols - 1 }, (_, i) =>
-        `<td>${fmtLoose(r[i + 1])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+        `<td>${fmtLoose(r[i + 1])}</td>`).join('')}</tr>`;
+  }).join('');
+  return `${rows.length ? `<div class="tablewrap"><table><tbody>${body}</tbody></table></div>` : ''}
+    <div class="addbar"><button class="btn small" data-add="loose"
+      data-map="${esc(map)}" data-year="${esc(year)}">＋ Add line</button></div>`;
 }
 
 function renderRetirement() {
@@ -1187,7 +1268,8 @@ function renderRetirement() {
         <tr><th scope="row">Roth IRA</th><td>${fmtMoney(k.rothIra || 0)}</td></tr>
       </tbody>
       <tfoot><tr><th>Total</th><td>${fmtMoney(total)}</td></tr></tfoot>
-    </table></div>`;
+    </table></div>
+    <div class="addbar"><button class="btn small" data-edit="k401">✎ Edit figures</button></div>`;
 
   /* Comp */
   const comp = (s.comp || {})[year];
@@ -1198,10 +1280,17 @@ function renderRetirement() {
       <tr><th scope="row">Bonus</th><td>${fmtMoney0(comp.bonus || 0)}</td></tr>
       <tr><th scope="row">Total comp</th><td>${fmtMoney0(round2((comp.salary || 0) * (1 + (comp.raisePct || 0)) + (comp.bonus || 0)))}</td></tr>
     </tbody></table></div>` : ''}
+    <div class="addbar">
+      ${comp ? `<button class="btn small" data-edit="comp" data-key="${esc(year)}">✎ Edit ${esc(year)}</button>` : ''}
+      <button class="btn small" data-add="comp">＋ Add a year</button>
+    </div>
     ${Object.keys(bonuses).length ? `<h2 style="margin-top:18px">Bonuses by year</h2>
     <div class="tablewrap"><table><tbody>${Object.keys(bonuses).sort().map(y =>
-      `<tr><th scope="row">${esc(y)}</th><td>${fmtMoney0(bonuses[y])}</td></tr>`).join('')}
-    </tbody></table></div>` : ''}`;
+      `<tr class="editrow" data-edit="yearAmount" data-map="bonuses" data-key="${esc(y)}">
+        <th scope="row">${esc(y)}</th><td>${fmtMoney0(bonuses[y])}</td></tr>`).join('')}
+    </tbody></table></div>` : ''}
+    <div class="addbar"><button class="btn small" data-add="yearAmount"
+      data-map="bonuses">＋ Add a bonus year</button></div>`;
 
   /* Roth IRA contributions */
   const contribs = s.rothContribs || {};
@@ -1209,7 +1298,8 @@ function renderRetirement() {
   let cum = 0;
   const contribRows = cYears.map(y => {
     cum = round2(cum + contribs[y]);
-    return `<tr><th scope="row">${esc(y)}${+y > new Date().getFullYear() ? ' <span class="muted">(planned)</span>' : ''}</th>
+    return `<tr class="editrow" data-edit="yearAmount" data-map="rothContribs" data-key="${esc(y)}">
+      <th scope="row">${esc(y)}${+y > new Date().getFullYear() ? ' <span class="muted">(planned)</span>' : ''}</th>
       <td>${fmtMoney0(contribs[y])}</td><td>${fmtMoney0(cum)}</td></tr>`;
   }).join('');
 
@@ -1226,6 +1316,8 @@ function renderRetirement() {
       <div class="tablewrap" style="margin-top:10px"><table>
         <thead><tr><th style="text-align:left">Year</th><th>Put in</th><th>Running total</th></tr></thead>
         <tbody>${contribRows}</tbody></table></div>
+      <div class="addbar"><button class="btn small" data-add="yearAmount"
+        data-map="rothContribs">＋ Add a year</button></div>
     </div>
     <div class="card">
       <h2>Comp</h2>
@@ -1234,25 +1326,28 @@ function renderRetirement() {
     </div>
     <div class="card">
       <h2>Contributions &amp; limits</h2>
-      <p class="sub">${esc(year)} retirement contributions, and the Roth income (MAGI) check.</p>
-      ${looseTable((s.retirement || {})[year])}
-      ${looseTable((s.rothLimit || {})[year])}
+      <p class="sub">${esc(year)} retirement contributions, and the Roth income (MAGI) check.
+        Free-form lines — click one to edit.</p>
+      ${looseTable('retirement', year)}
+      ${looseTable('rothLimit', year)}
     </div>
     <div class="card">
       <h2>Taxable investments</h2>
-      ${holdingsTable(s.taxable || [])}
+      ${holdingsTable(s.taxable || [], 'taxable')}
     </div>
     <div class="card">
       <h2>HSA</h2>
-      ${holdingsTable(s.hsa || [])}
+      ${holdingsTable(s.hsa || [], 'hsa')}
     </div>
     <div class="card">
       <h2>Other money</h2>
       ${(s.otherMoney || []).length ? `<div class="tablewrap"><table><tbody>${
-        s.otherMoney.map(o => `<tr><th scope="row">${esc(o.name)}</th>
+        s.otherMoney.map((o, idx) => `<tr class="editrow" data-edit="otherMoney" data-idx="${idx}">
+          <th scope="row">${esc(o.name)}</th>
           <td>${fmtMoney(o.balance || 0)}</td></tr>`).join('')}</tbody>
         <tfoot><tr><th>Total</th><td>${fmtMoney(round2(s.otherMoney.reduce((t, o) => t + (o.balance || 0), 0)))}</td></tr></tfoot>
         </table></div>` : '<p class="sub">Nothing recorded.</p>'}
+      <div class="addbar"><button class="btn small" data-add="otherMoney">＋ Add account</button></div>
     </div>
   </div>`;
 }
@@ -1272,11 +1367,13 @@ function renderVacations() {
     const total = round2(paid + credits + due);
     const perNight = t.nights ? round2(total / t.nights) : null;
     return `<div class="card">
-      <h2>${esc(t.name)}</h2>
+      <h2>${esc(t.name)} <button class="h-edit" data-edit="trip" data-id="${esc(t.id)}"
+        title="Rename the trip, change nights, or delete it">✎ Edit</button></h2>
       <p class="sub">${t.nights ? `${t.nights} nights` : ''}${perNight ? ` · ${fmtMoney0(perNight)}/night` : ''}${due ? ` · <strong>${fmtMoney(due)} still due</strong>` : ' · fully paid'}</p>
       <div class="tablewrap"><table>
         <thead><tr><th style="text-align:left">Item</th><th>Paid</th>${hasCredits ? '<th>Credits</th>' : ''}<th>Due</th><th>Total</th></tr></thead>
-        <tbody>${t.items.map(i => `<tr>
+        <tbody>${t.items.map((i, idx) => `<tr class="editrow" data-edit="tripItem"
+          data-id="${esc(t.id)}" data-idx="${idx}">
           <th scope="row">${esc(i.label)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
           <td>${i.paid ? fmtMoney(i.paid) : ''}</td>
           ${hasCredits ? `<td>${i.credits ? fmtMoney(i.credits) : ''}</td>` : ''}
@@ -1285,6 +1382,8 @@ function renderVacations() {
         <tfoot><tr><th>Total</th><td>${fmtMoney(paid)}</td>${hasCredits ? `<td>${fmtMoney(credits)}</td>` : ''}
           <td>${fmtMoney(due)}</td><td>${fmtMoney(total)}</td></tr></tfoot>
       </table></div>
+      <div class="addbar"><button class="btn small" data-add="tripItem"
+        data-id="${esc(t.id)}">＋ Add line</button></div>
     </div>`;
   };
 
@@ -1295,21 +1394,30 @@ function renderVacations() {
     const pill = remain >= 3 ? 'good' : remain >= 0 ? 'warn' : 'bad';
     const glyph = remain >= 3 ? '✓' : remain >= 0 ? '!' : '✕';
     return `<div class="card">
-      <h2>${esc(y)} holidays &amp; PTO</h2>
+      <h2>${esc(y)} holidays &amp; PTO <button class="h-edit" data-edit="ptoYear"
+        data-year="${esc(y)}" title="Change the year's PTO allowance, or delete the year">✎ Edit</button></h2>
       <p class="sub">${used} of ${p.allowance || state.settings.ptoAllowance} PTO days planned ·
         <span class="pill ${pill}">${glyph} ${remain} left</span>
         <span class="sr-only">${remain >= 0 ? `${remain} days remaining` : `${-remain} days over`}</span></p>
       <div class="tablewrap"><table>
         <thead><tr><th style="text-align:left">Trip / holiday</th><th style="text-align:left">Dates</th><th>Nights</th><th>PTO days</th></tr></thead>
-        <tbody>${p.entries.map(e => `<tr><th scope="row">${esc(e.name)}</th>
+        <tbody>${p.entries.map((e, idx) => `<tr class="editrow" data-edit="ptoEntry"
+          data-year="${esc(y)}" data-idx="${idx}"><th scope="row">${esc(e.name)}</th>
           <td style="text-align:left">${esc(e.dates || '')}</td>
           <td>${e.nights ?? ''}</td><td>${e.ptoDays || 0}</td></tr>`).join('')}</tbody>
         <tfoot><tr><th>Used</th><td></td><td></td><td>${used}</td></tr></tfoot>
       </table></div>
+      <div class="addbar"><button class="btn small" data-add="ptoEntry"
+        data-year="${esc(y)}">＋ Add trip / holiday</button></div>
     </div>`;
   };
 
-  return ptoYears.map(ptoCard).join('') + `<div class="cards2">${trips.map(tripCard).join('')}</div>`;
+  return `<div class="addbar" style="margin:0 0 14px">
+      <button class="btn small" data-add="trip">＋ Add trip</button>
+      <button class="btn small" data-add="ptoYear">＋ Add PTO year</button>
+    </div>`
+    + ptoYears.map(ptoCard).join('')
+    + `<div class="cards2">${trips.map(tripCard).join('')}</div>`;
 }
 
 /* ═══════════════════════════ Giving view ══════════════════════════════════ */
@@ -1333,17 +1441,20 @@ function renderGiving() {
         <thead><tr><th style="text-align:left">Date</th><th style="text-align:left">Foundation</th>
           <th style="text-align:left">Cause</th><th>Amount</th><th style="text-align:left">How</th>
           <th style="text-align:left">Deductible</th></tr></thead>
-        <tbody>${items.map(i => {
+        <tbody>${items.map((i, idx) => {
           const amount = i.funding || i.grant || i.cash || 0;
           const how = i.funding ? 'fund deposit' : i.grant ? 'DAF grant' : 'cash';
-          return `<tr><td style="text-align:left">${esc(i.date)}</td>
-            <th scope="row">${esc(i.foundation)}</th>
+          return `<tr class="editrow" data-edit="donation" data-year="${esc(y)}" data-idx="${idx}">
+            <td style="text-align:left">${esc(i.date)}</td>
+            <th scope="row">${esc(i.foundation)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
             <td style="text-align:left">${esc(i.cause || '')}</td>
             <td>${fmtMoney(amount)}</td>
             <td style="text-align:left">${how}</td>
             <td style="text-align:left">${i.deductible ? 'Yes' : 'No'}</td></tr>`;
         }).join('')}</tbody>
       </table></div>
+      <div class="addbar"><button class="btn small" data-add="donation"
+        data-year="${esc(y)}">＋ Add donation</button></div>
     </div>`;
   };
 
@@ -1351,7 +1462,9 @@ function renderGiving() {
     <h2>Fidelity Charitable giving fund</h2>
     <p class="sub">DAF grants come out of this balance — already donated for tax purposes,
       waiting to be granted to a cause.</p>
-    ${holdingsTable(s.daf || [])}
+    ${holdingsTable(s.daf || [], 'daf')}
+    ${years.length ? '' : `<div class="addbar"><button class="btn small" data-add="donation"
+      data-year="${new Date().getFullYear()}">＋ Add the first donation</button></div>`}
   </div>` + years.map(donTable).join('');
 }
 
@@ -1592,6 +1705,569 @@ function buildRothChart() {
     },
   });
 }
+
+/* ═══════════════════════════ Generic row editing ══════════════════════════
+   Every table in the app edits through one dialog. A section registers in
+   EDITORS with: fields (what to show), get (row -> values), save (values ->
+   state), and optionally del / move. Rows carry data-edit="<section>" plus
+   whatever keys the section needs (data-year, data-idx…); add buttons carry
+   data-add="<section>". One delegated listener on #views routes both. */
+
+const rowDialog = F('rowDialog');
+let rowCtx = null;   // { section, ds (the row's dataset), spec }
+
+/* Field types: text · money · number · percent (shown ×100) · date · month ·
+   check · select (options: [[value, label]]) · note (full-width textarea) */
+function buildFields(fields, values) {
+  const wrap = F('rowFields');
+  wrap.innerHTML = '';
+  for (const f of fields) {
+    const cell = document.createElement('div');
+    if (f.type === 'note' || f.wide) cell.className = 'wide';
+    const label = document.createElement('label');
+    label.className = 'field';
+    label.textContent = f.label;
+    label.htmlFor = `rf-${f.key}`;
+    cell.appendChild(label);
+    let input;
+    if (f.type === 'select') {
+      input = document.createElement('select');
+      for (const [v, text] of f.options) {
+        const o = document.createElement('option');
+        o.value = v; o.textContent = text;
+        input.appendChild(o);
+      }
+      input.value = values[f.key] ?? f.options[0][0];
+    } else if (f.type === 'check') {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = !!values[f.key];
+      input.style.cssText = 'width:20px;height:20px;margin-top:auto;align-self:flex-start';
+    } else if (f.type === 'note') {
+      input = document.createElement('textarea');
+      input.rows = 2;
+      input.value = values[f.key] ?? '';
+    } else {
+      input = document.createElement('input');
+      input.type = { money: 'number', number: 'number', percent: 'number',
+                     date: 'date', month: 'month' }[f.type] || 'text';
+      if (f.type === 'money') { input.step = '0.01'; input.inputMode = 'decimal'; }
+      if (f.type === 'percent') { input.step = '0.1'; input.inputMode = 'decimal'; }
+      if (f.type === 'number') { input.step = f.step || 'any'; input.inputMode = 'decimal'; }
+      const v = values[f.key];
+      input.value = v === undefined || v === null ? ''
+        : f.type === 'percent' ? round2(v * 100) : v;
+    }
+    input.id = `rf-${f.key}`;
+    cell.appendChild(input);
+    wrap.appendChild(cell);
+  }
+}
+
+function readFields(fields) {
+  const out = {};
+  for (const f of fields) {
+    const el = F(`rf-${f.key}`);
+    if (f.type === 'check') { out[f.key] = el.checked; continue; }
+    const raw = el.value.trim();
+    if (f.type === 'money' || f.type === 'number' || f.type === 'percent') {
+      const n = raw === '' ? null : parseFloat(raw);
+      out[f.key] = (n === null || Number.isNaN(n)) ? null
+        : f.type === 'percent' ? round2(n) / 100
+        : f.type === 'money' ? round2(n) : n;
+    } else out[f.key] = raw;
+  }
+  return out;
+}
+
+function openRowEditor(section, ds, isNew) {
+  const ed = EDITORS[section];
+  if (!ed) return;
+  const spec = typeof ed.fields === 'function' ? ed.fields(ds) : ed.fields;
+  rowCtx = { section, ds, spec };
+  F('rowDialogTitle').textContent =
+    (typeof ed.title === 'function' ? ed.title(ds, isNew) : ed.title) || 'Edit';
+  F('rowDialogSub').textContent =
+    (typeof ed.sub === 'function' ? ed.sub(ds, isNew) : ed.sub) || '';
+  buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds));
+  F('rowDeleteBtn').hidden = isNew || !ed.del;
+  F('rowUpBtn').hidden = F('rowDownBtn').hidden = isNew || !ed.move;
+  rowDialog.showModal();
+}
+
+F('rowForm').onsubmit = () => {
+  const { section, ds, spec } = rowCtx;
+  EDITORS[section].save(ds, readFields(spec));
+  save(); render();
+};
+F('rowCancelBtn').onclick = () => rowDialog.close();
+F('rowDeleteBtn').onclick = () => {
+  const { section, ds } = rowCtx;
+  EDITORS[section].del(ds);
+  rowDialog.close();
+  save(); render();
+  toast('Deleted');
+};
+F('rowUpBtn').onclick = () => moveRow(-1);
+F('rowDownBtn').onclick = () => moveRow(1);
+function moveRow(dir) {
+  const { section, ds } = rowCtx;
+  if (EDITORS[section].move(ds, dir)) { save(); render(); }
+  rowDialog.close();
+}
+
+/* Shared list helpers — most sections are "array of objects somewhere". */
+const listSwap = (arr, i, dir) => {
+  const j = i + dir;
+  if (j < 0 || j >= arr.length) return false;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+  return true;
+};
+function yearBucket(map, y) {
+  if (!map[y]) map[y] = [];
+  return map[y];
+}
+const noteField = { key: 'note', label: 'Note', type: 'note' };
+
+/* ── The registry ─────────────────────────────────────────────────────────── */
+const EDITORS = {
+
+  /* Budget category rows (the grid's left column) */
+  category: {
+    title: (ds, isNew) => isNew ? 'Add a budget row' : 'Budget row',
+    sub: () => 'The rule fills future months automatically; "counts as" tells the balance math where this row flows.',
+    fields: (ds) => [
+      { key: 'name', label: 'Name', type: 'text' },
+      { key: 'rule', label: 'Future months rule', type: 'select', options: [
+        ['none', 'Blank (type estimates by hand)'],
+        ['avg', 'Average of the months so far'],
+        ['carry', 'Repeat the last value'],
+        ['samemonth', 'Same month last year'],
+        ['dividends', 'Interest on cash + mid-term'],
+        ['paycheck', 'Per-check amount × paychecks'],
+      ]},
+      { key: 'perCheck', label: 'Per-check amount (paycheck rule)', type: 'money' },
+      { key: 'role', label: 'Counts as', type: 'select', options: [
+        ['normal', 'Normal cash flow'],
+        ['bankTransfer', 'Bank transfer (moves to Banks/Venmo)'],
+        ['midTransfer', 'Mid-term transfer'],
+        ['longTransfer', 'Long-term transfer'],
+        ['zelle', 'Zelle (flows to Banks, not Cash)'],
+        ['charitable', 'Charitable (flows from Long-term)'],
+      ]},
+      noteField,
+    ],
+    get(ds) {
+      const yr = state.years[ds.year];
+      return yr.categories.find(c => c.id === ds.id);
+    },
+    blank: () => ({ rule: 'none', role: 'normal' }),
+    save(ds, v) {
+      const yr = state.years[ds.year];
+      if (!v.name) return;
+      if (ds.id) {
+        const cat = yr.categories.find(c => c.id === ds.id);
+        Object.assign(cat, { name: v.name, rule: v.rule, role: v.role });
+        cat.note = v.note || undefined;
+        if (v.rule === 'paycheck') cat.perCheck = v.perCheck || 0;
+      } else {
+        let id = slugJs(v.name), n = 2;
+        while (yr.categories.some(c => c.id === id)) id = `${slugJs(v.name)}-${n++}`;
+        const cat = { id, name: v.name, rule: v.rule, role: v.role };
+        if (v.note) cat.note = v.note;
+        if (v.rule === 'paycheck') cat.perCheck = v.perCheck || 0;
+        yr.categories.push(cat);
+      }
+    },
+    del(ds) {
+      const yr = state.years[ds.year];
+      yr.categories = yr.categories.filter(c => c.id !== ds.id);
+      for (const k of Object.keys(yr.cells))       // orphaned cells go too
+        if (k.startsWith(ds.id + '|')) delete yr.cells[k];
+    },
+    move(ds, dir) {
+      const yr = state.years[ds.year];
+      const i = yr.categories.findIndex(c => c.id === ds.id);
+      return listSwap(yr.categories, i, dir);
+    },
+  },
+
+  /* Summary-year rows (2011–2019) */
+  sumrow: {
+    title: (ds, isNew) => isNew ? 'Add a row' : 'Yearly row',
+    fields: [
+      { key: 'name', label: 'Name', type: 'text' },
+      { key: 'total', label: 'Year total', type: 'money' },
+      { key: 'isBalance', label: 'This is a balance, not a flow', type: 'check' },
+      noteField,
+    ],
+    get: (ds) => state.years[ds.year].categoryTotals[+ds.idx],
+    save(ds, v) {
+      const list = state.years[ds.year].categoryTotals;
+      const row = { name: v.name || '', total: v.total ?? 0 };
+      if (v.isBalance) row.isBalance = true;
+      if (v.note) row.note = v.note;
+      if (ds.idx !== undefined) list[+ds.idx] = row;
+      else list.push(row);
+    },
+    del: (ds) => state.years[ds.year].categoryTotals.splice(+ds.idx, 1),
+    move: (ds, dir) => listSwap(state.years[ds.year].categoryTotals, +ds.idx, dir),
+  },
+
+  /* Summary-year settings (the end-of-year figure) */
+  sumyear: {
+    title: (ds) => `${ds.year} settings`,
+    fields: [{ key: 'eoyCash', label: 'End-of-year total', type: 'money' }],
+    get: (ds) => ({ eoyCash: state.years[ds.year].eoyCash }),
+    save(ds, v) {
+      if (v.eoyCash === null) delete state.years[ds.year].eoyCash;
+      else state.years[ds.year].eoyCash = v.eoyCash;
+    },
+  },
+
+  /* Savings goals */
+  goal: {
+    title: (ds, isNew) => isNew ? 'Add a goal' : 'Savings goal',
+    sub: () => '"Saved" reads the chosen account\'s balance this month.',
+    fields: [
+      { key: 'name', label: 'Name', type: 'text' },
+      { key: 'source', label: 'Saved reads from', type: 'select', options: [
+        ['cashBank', 'Cash + Banks (capped at target)'],
+        ['midCapped', 'Mid-term (capped at target)'],
+        ['midOverflow', 'Mid-term above the capped goal'],
+        ['long', 'Long-term holdings'],
+      ]},
+      { key: 'target', label: 'Target', type: 'money' },
+      { key: 'targetDate', label: 'Target date', type: 'date' },
+      noteField,
+    ],
+    get: (ds) => state.goals[+ds.idx],
+    save(ds, v) {
+      const g = ds.idx !== undefined ? state.goals[+ds.idx]
+        : (state.goals.push({ id: slugJs(v.name || 'goal') }), state.goals[state.goals.length - 1]);
+      Object.assign(g, { name: v.name, source: v.source, target: v.target ?? 0,
+        targetDate: v.targetDate || null });
+      g.note = v.note || undefined;
+    },
+    del: (ds) => state.goals.splice(+ds.idx, 1),
+    move: (ds, dir) => listSwap(state.goals, +ds.idx, dir),
+  },
+
+  /* Holdings tables — taxable, hsa, daf (ds.list picks which) */
+  holding: {
+    title: (ds, isNew) => isNew ? 'Add a holding' : 'Holding',
+    fields: [
+      { key: 'ticker', label: 'Ticker', type: 'text' },
+      { key: 'shares', label: 'Shares', type: 'number' },
+      { key: 'price', label: 'Price', type: 'money' },
+    ],
+    get: (ds) => state.side[ds.list][+ds.idx],
+    save(ds, v) {
+      const list = state.side[ds.list];
+      const row = { ticker: v.ticker || '?', shares: v.shares ?? 0, price: v.price ?? 0 };
+      if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
+    },
+    del: (ds) => state.side[ds.list].splice(+ds.idx, 1),
+  },
+
+  otherMoney: {
+    title: (ds, isNew) => isNew ? 'Add an account' : 'Other money',
+    fields: [
+      { key: 'name', label: 'Account', type: 'text' },
+      { key: 'balance', label: 'Balance', type: 'money' },
+    ],
+    get: (ds) => state.side.otherMoney[+ds.idx],
+    save(ds, v) {
+      const row = { name: v.name || '?', balance: v.balance ?? 0 };
+      if (ds.idx !== undefined) state.side.otherMoney[+ds.idx] = row;
+      else state.side.otherMoney.push(row);
+    },
+    del: (ds) => state.side.otherMoney.splice(+ds.idx, 1),
+    move: (ds, dir) => listSwap(state.side.otherMoney, +ds.idx, dir),
+  },
+
+  /* The six 401k / Roth IRA figures in one form */
+  k401: {
+    title: 'Traditional vs Roth figures',
+    fields: [
+      { key: 'pretax', label: '401k pre-tax', type: 'money' },
+      { key: 'raa', label: '401k RAA', type: 'money' },
+      { key: 'rollover', label: '401k rollover', type: 'money' },
+      { key: 'match', label: '401k match', type: 'money' },
+      { key: 'roth', label: '401k Roth', type: 'money' },
+      { key: 'rothIra', label: 'Roth IRA', type: 'money' },
+    ],
+    get: () => state.side.k401 || {},
+    save(ds, v) {
+      state.side.k401 = Object.fromEntries(
+        Object.entries(v).map(([k, n]) => [k, n ?? 0]));
+    },
+  },
+
+  /* Year → amount maps: Roth contributions, bonuses (ds.map picks which) */
+  yearAmount: {
+    title: (ds, isNew) => isNew ? 'Add a year' : `${ds.key}`,
+    fields: [
+      { key: 'year', label: 'Year', type: 'number', step: 1 },
+      { key: 'amount', label: 'Amount', type: 'money' },
+    ],
+    get: (ds) => ({ year: +ds.key, amount: state.side[ds.map][ds.key] }),
+    save(ds, v) {
+      if (!v.year) return;
+      if (ds.key !== undefined && String(v.year) !== ds.key)
+        delete state.side[ds.map][ds.key];
+      state.side[ds.map][String(v.year)] = v.amount ?? 0;
+    },
+    del: (ds) => { delete state.side[ds.map][ds.key]; },
+  },
+
+  comp: {
+    title: (ds, isNew) => isNew ? 'Add a comp year' : `${ds.key} comp`,
+    fields: [
+      { key: 'year', label: 'Year', type: 'number', step: 1 },
+      { key: 'salary', label: 'Salary', type: 'money' },
+      { key: 'raisePct', label: 'Raise %', type: 'percent' },
+      { key: 'bonus', label: 'Bonus', type: 'money' },
+    ],
+    get: (ds) => Object.assign({ year: +ds.key }, state.side.comp[ds.key]),
+    save(ds, v) {
+      if (!v.year) return;
+      if (ds.key !== undefined && String(v.year) !== ds.key)
+        delete state.side.comp[ds.key];
+      state.side.comp[String(v.year)] = { salary: v.salary ?? 0,
+        raisePct: v.raisePct ?? 0, bonus: v.bonus ?? 0 };
+    },
+    del: (ds) => { delete state.side.comp[ds.key]; },
+  },
+
+  /* Free-form tables (contributions & limits, MAGI check): rows are loose
+     value lists — label + up to four figures. A row with nothing in it is a
+     spacer line. */
+  loose: {
+    title: (ds, isNew) => isNew ? 'Add a line' : 'Table line',
+    sub: () => 'Free-form: a label plus up to four values (money, %, plain text — anything). Leave everything empty for a spacer line.',
+    fields: [
+      { key: 'c0', label: 'Label', type: 'text' },
+      { key: 'c1', label: 'Value 1', type: 'text' },
+      { key: 'c2', label: 'Value 2', type: 'text' },
+      { key: 'c3', label: 'Value 3', type: 'text' },
+      { key: 'c4', label: 'Value 4', type: 'text' },
+    ],
+    get(ds) {
+      const row = state.side[ds.map][ds.year][+ds.idx] || [];
+      return { c0: row[0] ?? '', c1: row[1] ?? '', c2: row[2] ?? '',
+               c3: row[3] ?? '', c4: row[4] ?? '' };
+    },
+    save(ds, v) {
+      const rows = yearBucket(state.side[ds.map], ds.year);
+      const vals = [v.c0, v.c1, v.c2, v.c3, v.c4].map(x => x === '' ? null : x);
+      while (vals.length && vals[vals.length - 1] === null) vals.pop();
+      if (ds.idx !== undefined) rows[+ds.idx] = vals; else rows.push(vals);
+    },
+    del: (ds) => state.side[ds.map][ds.year].splice(+ds.idx, 1),
+    move: (ds, dir) => listSwap(state.side[ds.map][ds.year], +ds.idx, dir),
+  },
+
+  /* Venmo ledger */
+  venmo: {
+    title: (ds, isNew) => isNew ? 'Add a Venmo entry' : 'Venmo entry',
+    fields: [
+      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'desc', label: 'Who / what', type: 'text', wide: true },
+      { key: 'amount', label: 'Amount (− = you paid)', type: 'money' },
+      { key: 'fromBank', label: 'Settled via bank', type: 'check' },
+      noteField,
+    ],
+    get: (ds) => state.side.venmo[ds.year][+ds.idx],
+    blank: (ds) => ({ date: todayISO() }),
+    save(ds, v) {
+      const row = { date: v.date || '', desc: v.desc || '', amount: v.amount ?? 0,
+        fromBank: !!v.fromBank };
+      if (v.note) row.note = v.note;
+      const y = v.date ? v.date.slice(0, 4) : ds.year;
+      if (ds.idx !== undefined && y === ds.year)
+        state.side.venmo[ds.year][+ds.idx] = row;
+      else {
+        if (ds.idx !== undefined) state.side.venmo[ds.year].splice(+ds.idx, 1);
+        yearBucket(state.side.venmo, y).push(row);
+      }
+    },
+    del: (ds) => state.side.venmo[ds.year].splice(+ds.idx, 1),
+  },
+
+  /* Large CC purchases */
+  purchase: {
+    title: (ds, isNew) => isNew ? 'Add a planned purchase' : 'Planned purchase',
+    fields: [
+      { key: 'date', label: 'Month', type: 'month' },
+      { key: 'desc', label: 'What', type: 'text', wide: true },
+      { key: 'amount', label: 'Amount', type: 'money' },
+      noteField,
+    ],
+    get(ds) {
+      const r = state.side.largePurchases[ds.year][+ds.idx];
+      return { ...r, date: (r.date || '').slice(0, 7) };
+    },
+    blank: () => ({ date: thisMonth() }),
+    save(ds, v) {
+      const row = { date: v.date ? v.date + '-01' : '', desc: v.desc || '',
+        amount: v.amount };
+      if (v.note) row.note = v.note;
+      const y = v.date ? v.date.slice(0, 4) : ds.year;
+      if (ds.idx !== undefined && y === ds.year)
+        state.side.largePurchases[ds.year][+ds.idx] = row;
+      else {
+        if (ds.idx !== undefined) state.side.largePurchases[ds.year].splice(+ds.idx, 1);
+        yearBucket(state.side.largePurchases, y).push(row);
+      }
+    },
+    del: (ds) => state.side.largePurchases[ds.year].splice(+ds.idx, 1),
+  },
+
+  /* Donations */
+  donation: {
+    title: (ds, isNew) => isNew ? 'Add a donation' : 'Donation',
+    sub: () => 'Fill exactly one of the three amounts: fund deposit (+), DAF grant (−), or cash (−).',
+    fields: [
+      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'foundation', label: 'Foundation', type: 'text', wide: true },
+      { key: 'cause', label: 'Cause', type: 'text' },
+      { key: 'funding', label: 'Fund deposit', type: 'money' },
+      { key: 'grant', label: 'DAF grant', type: 'money' },
+      { key: 'cash', label: 'Cash gift', type: 'money' },
+      { key: 'deductible', label: 'Tax deductible', type: 'check' },
+      noteField,
+    ],
+    get: (ds) => state.side.donations[ds.year][+ds.idx],
+    blank: () => ({ date: todayISO() }),
+    save(ds, v) {
+      const row = { date: v.date || '', foundation: v.foundation || '?',
+        cause: v.cause || '', funding: v.funding ?? 0, grant: v.grant ?? 0,
+        cash: v.cash ?? 0, deductible: !!v.deductible };
+      if (v.note) row.note = v.note;
+      const y = v.date ? v.date.slice(0, 4) : ds.year;
+      if (ds.idx !== undefined && y === ds.year)
+        state.side.donations[ds.year][+ds.idx] = row;
+      else {
+        if (ds.idx !== undefined) state.side.donations[ds.year].splice(+ds.idx, 1);
+        yearBucket(state.side.donations, y).push(row);
+      }
+    },
+    del: (ds) => state.side.donations[ds.year].splice(+ds.idx, 1),
+  },
+
+  /* Vacations: the trip itself, and its line items */
+  trip: {
+    title: (ds, isNew) => isNew ? 'Add a trip' : 'Trip',
+    fields: [
+      { key: 'name', label: 'Trip name (e.g. "2027 Lisbon")', type: 'text', wide: true },
+      { key: 'year', label: 'Year', type: 'number', step: 1 },
+      { key: 'nights', label: 'Nights', type: 'number' },
+    ],
+    get(ds) {
+      const t = state.vacations.trips.find(t => t.id === ds.id);
+      return { name: t.name, year: t.year, nights: t.nights };
+    },
+    blank: () => ({ year: new Date().getFullYear() }),
+    save(ds, v) {
+      if (ds.id) {
+        const t = state.vacations.trips.find(t => t.id === ds.id);
+        Object.assign(t, { name: v.name || t.name, year: v.year || t.year,
+          nights: v.nights });
+      } else {
+        let id = slugJs(v.name || 'trip'), n = 2;
+        while (state.vacations.trips.some(t => t.id === id))
+          id = `${slugJs(v.name || 'trip')}-${n++}`;
+        state.vacations.trips.push({ id, name: v.name || 'New trip',
+          year: v.year || new Date().getFullYear(), nights: v.nights, items: [] });
+      }
+    },
+    del(ds) {
+      state.vacations.trips = state.vacations.trips.filter(t => t.id !== ds.id);
+    },
+  },
+
+  tripItem: {
+    title: (ds, isNew) => isNew ? 'Add a line' : 'Trip line',
+    sub: () => 'Leave the label blank for a continuation line, or everything blank for a spacer.',
+    fields: [
+      { key: 'label', label: 'Item', type: 'text' },
+      { key: 'paid', label: 'Paid', type: 'money' },
+      { key: 'credits', label: 'Credits', type: 'money' },
+      { key: 'due', label: 'Still due', type: 'money' },
+      noteField,
+    ],
+    get: (ds) => state.vacations.trips.find(t => t.id === ds.id).items[+ds.idx],
+    save(ds, v) {
+      const t = state.vacations.trips.find(t => t.id === ds.id);
+      const row = { label: v.label || '', paid: v.paid ?? 0, due: v.due ?? 0 };
+      if (v.credits !== null && v.credits !== undefined && v.credits !== 0)
+        row.credits = v.credits;
+      if (v.note) row.note = v.note;
+      if (ds.idx !== undefined) t.items[+ds.idx] = row; else t.items.push(row);
+    },
+    del: (ds) => state.vacations.trips.find(t => t.id === ds.id).items.splice(+ds.idx, 1),
+    move: (ds, dir) =>
+      listSwap(state.vacations.trips.find(t => t.id === ds.id).items, +ds.idx, dir),
+  },
+
+  /* PTO: the year's allowance, and its entries */
+  ptoYear: {
+    title: (ds, isNew) => isNew ? 'Add a PTO year' : `${ds.year} PTO settings`,
+    fields: [
+      { key: 'year', label: 'Year', type: 'number', step: 1 },
+      { key: 'allowance', label: 'PTO days for the year', type: 'number' },
+    ],
+    get: (ds) => ({ year: +ds.year,
+      allowance: state.vacations.pto[ds.year].allowance }),
+    blank: () => ({ year: new Date().getFullYear(),
+      allowance: state.settings.ptoAllowance }),
+    save(ds, v) {
+      if (!v.year) return;
+      const y = String(v.year);
+      const old = ds.year && state.vacations.pto[ds.year];
+      if (old && y !== ds.year) delete state.vacations.pto[ds.year];
+      state.vacations.pto[y] = { allowance: v.allowance ?? state.settings.ptoAllowance,
+        entries: old ? old.entries : [] };
+    },
+    del: (ds) => { delete state.vacations.pto[ds.year]; },
+  },
+
+  ptoEntry: {
+    title: (ds, isNew) => isNew ? 'Add a trip / holiday' : 'PTO entry',
+    fields: [
+      { key: 'name', label: 'Trip / holiday', type: 'text', wide: true },
+      { key: 'dates', label: 'Dates (free text)', type: 'text' },
+      { key: 'nights', label: 'Nights', type: 'number' },
+      { key: 'ptoDays', label: 'PTO days', type: 'number' },
+    ],
+    get: (ds) => state.vacations.pto[ds.year].entries[+ds.idx],
+    save(ds, v) {
+      const list = state.vacations.pto[ds.year].entries;
+      const row = { name: v.name || '?', dates: v.dates || '',
+        nights: v.nights, ptoDays: v.ptoDays ?? 0 };
+      if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
+    },
+    del: (ds) => state.vacations.pto[ds.year].entries.splice(+ds.idx, 1),
+    move: (ds, dir) => listSwap(state.vacations.pto[ds.year].entries, +ds.idx, dir),
+  },
+};
+
+/* id helper for user-created rows (mirrors the importer's slug()) */
+function slugJs(name) {
+  const s = String(name).replace(/\(.*?\)/g, '').trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return s || 'row';
+}
+
+/* One delegated listener routes every row click and add button. Attached
+   once — it survives every re-render of #views. */
+F('views').addEventListener('click', (e) => {
+  const add = e.target.closest('[data-add]');
+  if (add) { openRowEditor(add.dataset.add, add.dataset, true); return; }
+  const row = e.target.closest('[data-edit]');
+  if (row) openRowEditor(row.dataset.edit, row.dataset, false);
+});
 
 /* ═══════════════════════════ Cell editing ═════════════════════════════════ */
 

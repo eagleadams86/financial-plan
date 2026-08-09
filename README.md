@@ -22,6 +22,13 @@ must never show them.
   growth). Click any cell to edit; mark a month "entered" to freeze its
   estimates into numbers, like overtyping formulas in Numbers. The Venmo
   ledger and large-purchase list sit under the grid.
+- **Everything is editable, everywhere** — click any row (budget categories,
+  goals, holdings, trips and their line items, PTO entries, donations, the
+  Venmo ledger, the free-form limits tables, the old yearly summaries) to
+  change, annotate, or delete it; every table has a ＋ Add button, budget
+  rows and list rows reorder with ↑↓, and the free-form tables take spacer
+  lines. Row names, trip names and per-year settings are all just fields in
+  the same editor.
 - **Goals** — savings goals with progress, target dates, required monthly
   saving, the renovations pace check, and end-of-year liquidity.
 - **Retirement** — Traditional vs Roth split, Roth IRA contributions,
