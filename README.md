@@ -25,7 +25,8 @@ must never show them.
   row has a type (which section), a projection rule (repeat last month,
   quarterly, average so far, same month last year, interest, per-check ×
   paychecks), and a behaviour (ordinary cash, or a transfer with the Savings /
-  Investments / Other-bank accounts — which are renameable). The current year
+  Investments / Other-bank accounts — which are renameable and each carry
+  their own configurable interest/growth rate). The current year
   is live:
   past months are actuals, future months are estimates that recompute the way
   the spreadsheet's formulas did (trailing averages, same-month-last-year

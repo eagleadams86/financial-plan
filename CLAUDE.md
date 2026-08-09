@@ -82,8 +82,11 @@ re-guessed) and `role` (the balance math). Consistency is enforced ONE way:
 a transfer role forces the Transfers section, but a Transfers-section row may
 keep role `normal` (Roth IRA transfers — the far account isn't tracked, so
 its money is ordinary cash-out). Account display names live in
-`settings.accountNames` (renameable in the grid; the importer writes
-Charlie's ticker names). Row reorder moves within a section.
+`settings.accountNames` and per-account growth in `settings.accountRates`
+(both editable by clicking an account row; the importer writes Charlie's
+ticker names and the 7% Investments rate). The engine applies rate/12 to
+each account monthly — at the defaults this is byte-identical to the
+spreadsheet, and the real-data cross-check pins that. Row reorder moves within a section.
 
 ## Sync
 

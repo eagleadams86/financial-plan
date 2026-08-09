@@ -587,7 +587,11 @@ function blankState() {
          renameable by clicking an account row (Charlie's import writes his
          own: Cash (SPAXX), Mid-term (FDLXX), …). */
       accountNames: { cash: 'Cash', mid: 'Savings', long: 'Investments',
-                      bank: 'Other bank' }
+                      bank: 'Other bank' },
+      /* Annual growth applied to each account's balance, rate/12 per month.
+         Investments defaults to the spreadsheet's 7%/yr; everything else
+         starts flat. Set per account by clicking its row in the grid. */
+      accountRates: { cash: 0, mid: 0, long: 0.07, bank: 0 }
     },
     years: {},        // "YYYY" → grid year or summary year (see import_xlsx.py)
     goals: [],
@@ -615,6 +619,14 @@ function coerceShape(data) {
   d.settings.accountNames = Object.assign(
     { cash: 'Cash', mid: 'Savings', long: 'Investments', bank: 'Other bank' },
     obj(d.settings.accountNames));
+  /* Data from before per-account rates: Investments inherits the old global
+     long-term rate (the only account that ever grew), everything else 0. */
+  d.settings.accountRates = Object.assign(
+    { cash: 0, mid: 0,
+      long: typeof d.settings.longTermRateAnnual === 'number'
+        ? d.settings.longTermRateAnnual : 0.07,
+      bank: 0 },
+    obj(d.settings.accountRates));
   d.years = obj(d.years);
   for (const y of Object.keys(d.years)) {
     const yr = obj(d.years[y]);
@@ -853,12 +865,17 @@ function computeYear(st, yearKey, prior, today) {
       const priorOf = (bid) =>
         balances[`${bid}|${prevM}`] !== undefined ? balances[`${bid}|${prevM}`]
                                                   : (yr.seeds[bid] || 0);
+      /* Each account grows by its own annual rate, applied monthly. At the
+         defaults (only Investments at 7%) this is byte-for-byte the
+         spreadsheet's math: growth multiplies the prior balance net of the
+         month's transfers, and the charitable adjustment lands after. */
+      const rates = st.settings.accountRates || {};
+      const grow = (bid) => 1 + (rates[bid] || 0) / 12;
       const computed = {
-        cash: priorOf('cash') + flows.all,
-        mid:  priorOf('mid') - flows.mid,
-        long: (priorOf('long') - flows.long)
-              * (1 + st.settings.longTermRateAnnual / 12) + flows.charitable,
-        bank: priorOf('bank') - flows.bank + flows.zelle,
+        cash: priorOf('cash') * grow('cash') + flows.all,
+        mid:  (priorOf('mid') - flows.mid) * grow('mid'),
+        long: (priorOf('long') - flows.long) * grow('long') + flows.charitable,
+        bank: (priorOf('bank') - flows.bank + flows.zelle) * grow('bank'),
       };
       let total = 0;
       for (const bid of ['cash', 'mid', 'long', 'bank']) {
@@ -1153,7 +1170,9 @@ function gridCard(y, yr) {
     + activeBals.map((bid, i) =>
     `<tr class="balance"><th class="lbl" scope="row" data-edit="accountName"
       data-bal="${bid}" style="cursor:pointer"
-      title="${esc(balName(bid))} — click to rename this account">${esc(balName(bid))}</th>${
+      title="${esc(balName(bid))}${(state.settings.accountRates[bid] || 0)
+        ? ` — grows ${round2((state.settings.accountRates[bid]) * 100)}%/yr`
+        : ''} — click for name & interest rate">${esc(balName(bid))}</th>${
       months.map(m => {
         const v = c.balances[`${bid}|${m}`];
         const kind = c.balanceKinds[`${bid}|${m}`];
@@ -2048,7 +2067,7 @@ const EDITORS = {
         ['normal', 'Ordinary Cash money — the usual'],
         ['bankTransfer', 'Transfer with the Other-bank account'],
         ['midTransfer', 'Transfer with the Savings account'],
-        ['longTransfer', 'Transfer with Investments (grows 7%/yr)'],
+        ['longTransfer', 'Transfer with the Investments account'],
         ['zelle', 'Pass-through on Other bank (skips Cash)'],
         ['charitable', 'Paid from Investments, not Cash (giving fund)'],
       ]},
@@ -2107,14 +2126,20 @@ const EDITORS = {
     },
   },
 
-  /* The display name of a balance account (click the account row's label) */
+  /* An account's display name and interest rate (click the row's label) */
   accountName: {
-    title: 'Rename this account',
-    sub: () => 'Display name only — the balance math is unchanged.',
-    fields: [{ key: 'name', label: 'Account name', type: 'text' }],
-    get: (ds) => ({ name: state.settings.accountNames[ds.bal] || ds.bal }),
+    title: 'Account settings',
+    sub: () => 'The rate compounds monthly on the account\'s balance in future months — '
+      + 'set 0 for a plain account. Past months and pinned balances are untouched.',
+    fields: [
+      { key: 'name', label: 'Account name', type: 'text' },
+      { key: 'rate', label: 'Interest / growth %/yr', type: 'percent' },
+    ],
+    get: (ds) => ({ name: state.settings.accountNames[ds.bal] || ds.bal,
+                    rate: state.settings.accountRates[ds.bal] || 0 }),
     save(ds, v) {
       if (v.name) state.settings.accountNames[ds.bal] = v.name;
+      state.settings.accountRates[ds.bal] = v.rate ?? 0;
     },
   },
 

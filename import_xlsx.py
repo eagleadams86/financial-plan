@@ -1082,7 +1082,9 @@ def main():
     state = {
         'schema': 1,
         'settings': {'midTermRateAnnual': 0.03, 'longTermRateAnnual': 0.07,
-                     'ptoAllowance': 32, 'accountNames': account_names},
+                     'ptoAllowance': 32, 'accountNames': account_names,
+                     'accountRates': {'cash': 0, 'mid': 0, 'long': 0.07,
+                                      'bank': 0}},
         'years': years,
         'goals': goals,
         'side': side,
