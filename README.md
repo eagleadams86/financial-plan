@@ -20,7 +20,13 @@ must never show them.
 
 ## What it does
 
-- **Budget** — the monthly grid, 2011–present. The current year is live:
+- **Budget** — the monthly grid, 2011–present, grouped into **Income,
+  Expenses, Transfers and Accounts** sections with per-month subtotals. Each
+  row has a type (which section), a projection rule (repeat last month,
+  quarterly, average so far, same month last year, interest, per-check ×
+  paychecks), and a behaviour (ordinary cash, or a transfer with the Savings /
+  Investments / Other-bank accounts — which are renameable). The current year
+  is live:
   past months are actuals, future months are estimates that recompute the way
   the spreadsheet's formulas did (trailing averages, same-month-last-year
   electric, dividends from balances, paycheck × count, 7%/yr long-term

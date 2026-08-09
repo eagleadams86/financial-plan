@@ -282,6 +282,42 @@ t('monthly requirement divides the gap by the months left', () => {
   approx(goals[0].monthlyReq, 0, 'already at target');
 });
 
+group('Sections & quarterly rule');
+t('coerceShape infers sections: roles → transfer, sign → income/expense', () => {
+  const d = H.coerceShape({ years: { '2030': { kind: 'grid', startMonth: '2030-01',
+    monthCount: 6,
+    categories: [
+      { id: 'pay', name: 'Pay', role: 'normal', rule: 'none' },
+      { id: 'rent', name: 'Rent', role: 'normal', rule: 'none' },
+      { id: 'move', name: 'Move', role: 'midTransfer', rule: 'none' },
+      { id: 'picked', name: 'Picked', role: 'normal', rule: 'none', section: 'income' },
+    ],
+    cells: { 'pay|2030-01': { v: 500, kind: 'actual' },
+             'rent|2030-01': { v: -900, kind: 'actual' },
+             'picked|2030-01': { v: -5, kind: 'actual' } } } } });
+  const cats = d.years['2030'].categories;
+  eq(cats[0].section, 'income', 'positive sum');
+  eq(cats[1].section, 'expense', 'negative sum');
+  eq(cats[2].section, 'transfer', 'transfer role wins');
+  eq(cats[3].section, 'income', 'a hand-picked section is never re-guessed');
+});
+t('account names default and survive a partial payload', () => {
+  const d = H.coerceShape({ settings: { accountNames: { mid: 'House fund' } } });
+  eq(d.settings.accountNames.mid, 'House fund');
+  eq(d.settings.accountNames.cash, 'Cash', 'missing keys fall back');
+});
+t('quarterly rule repeats on the 3-month beat and stays blank between', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].categories.push({ id: 'water', name: 'Water', role: 'normal',
+    rule: 'quarterly', section: 'expense' });
+  s.years['2030'].cells['water|2030-03'] = { v: -56, kind: 'actual' };
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(c.cells['water|2030-04'].kind, 'missing', 'one month after: blank');
+  eq(c.cells['water|2030-05'].kind, 'missing', 'two months after: blank');
+  approx(c.cells['water|2030-06'].v, -56, 'three months after: repeats');
+  eq(c.cells['water|2030-06'].kind, 'auto');
+});
+
 group('Year rollover');
 t('rollover copies rules, keeps overlap manuals, seeds December balances', () => {
   const s = H.coerceShape(fixtureState());

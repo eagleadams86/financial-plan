@@ -514,6 +514,11 @@ def import_live_year(sheet, year, header_row, months, label_col, today, expected
         else:
             extra.append({'where': f'{sheet.name}!r{r}c{c}', 'note': txt})
 
+    # the sheet's own account labels (e.g. "Cash (SPAXX)") become the app's
+    # display names; whitespace runs collapse
+    account_names = {b['id']: re.sub(r'\s+', ' ', b['name']).strip()
+                     for b in balance_rows}
+
     return {
         'kind': 'grid', 'model': 'live',
         'startMonth': first_month, 'monthCount': len(months),
@@ -521,6 +526,7 @@ def import_live_year(sheet, year, header_row, months, label_col, today, expected
         'categories': out_cats, 'cells': cells, 'paychecks': paychecks,
         'seeds': seeds, 'overrides': overrides,
         'extraNotes': extra,
+        'accountNames': account_names,
     }
 
 
@@ -1069,10 +1075,14 @@ def main():
     if 'Vacations' in sheets:
         vacations = extract_vacations(sheets['Vacations'], 32)
 
+    account_names = {}
+    if live_year and years.get(live_year):
+        account_names = years[live_year].pop('accountNames', {})
+
     state = {
         'schema': 1,
         'settings': {'midTermRateAnnual': 0.03, 'longTermRateAnnual': 0.07,
-                     'ptoAllowance': 32},
+                     'ptoAllowance': 32, 'accountNames': account_names},
         'years': years,
         'goals': goals,
         'side': side,

@@ -76,6 +76,15 @@ Free-form rows (`side.retirement`/`side.rothLimit`) are loose value arrays;
 an empty array is a spacer line, and `fmtLoose()` guesses display format.
 Deleting a budget category also deletes its orphaned cells — keep that.
 
+Budget rows carry `section` (income/expense/transfer — display grouping,
+inferred once in `coerceShape` for pre-section data, a stored value is never
+re-guessed) and `role` (the balance math). Consistency is enforced ONE way:
+a transfer role forces the Transfers section, but a Transfers-section row may
+keep role `normal` (Roth IRA transfers — the far account isn't tracked, so
+its money is ordinary cash-out). Account display names live in
+`settings.accountNames` (renameable in the grid; the importer writes
+Charlie's ticker names). Row reorder moves within a section.
+
 ## Sync
 
 Optional Google sign-in + Firestore, the family pattern (ported from Sprint
