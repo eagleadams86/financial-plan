@@ -412,6 +412,12 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
   <p class="sub muted" style="margin-top:14px">First time here? Run <code>import_xlsx.py</code>
     (in the repo) against the Numbers export on your Mac, then Restore the file it produces.
     Restoring replaces everything currently in this browser — you'll be asked to confirm first.</p>
+  <fieldset class="formpanel">
+    <legend>Start over</legend>
+    <p class="sub" style="margin:0 0 10px" id="wipeNote">Wipes every year, goal, trip and
+      table from this browser. There is no undo beyond a backup file you exported earlier.</p>
+    <button class="btn" id="wipeBtn">🗑 Delete all data</button>
+  </fieldset>
   <div class="row" style="justify-content:flex-end;margin-top:18px">
     <button class="btn primary" id="dataCloseBtn">Close</button>
   </div>
@@ -2511,6 +2517,32 @@ function reopenMonth() {
 const dataDialog = F('dataDialog');
 F('dataBtn').onclick = () => dataDialog.showModal();
 F('dataCloseBtn').onclick = () => dataDialog.close();
+
+/* Delete everything. Two deliberate confirms — this is the one action in the
+   app with no way back (short of a backup file), so it must never ride on a
+   single misclick. When the sync module is signed in it registers
+   window.cloudWipe, and the wipe removes the cloud copy too — otherwise the
+   next sign-in would just pour the old data straight back. */
+F('wipeBtn').onclick = async () => {
+  const nYears = yearKeys().length;
+  if (!confirm(`Delete ALL data from this browser${window.cloudWipe ? ' AND the synced copy' : ''}?`
+    + (nYears ? ` That's ${nYears} year(s) of budgets, plus goals, trips and tables.` : '')
+    + ' There is no undo.')) return;
+  if (!confirm('Last check — really delete everything? An exported backup file is the only way back.')) return;
+  try {
+    if (window.cloudWipe) await window.cloudWipe();
+  } catch (e) {
+    console.warn('cloud wipe failed', e);
+    toast('⚠️ Could not remove the synced copy — local data was kept. Try again.');
+    return;
+  }
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(UPDATED_KEY);
+  state = blankState();
+  dataDialog.close();
+  render();
+  toast('Everything deleted — a fresh start');
+};
 
 F('exportBtn').onclick = () => {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
