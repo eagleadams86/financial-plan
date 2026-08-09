@@ -4,12 +4,17 @@ Charlie's personal financial planner — the web-app successor to a Numbers
 spreadsheet kept since 2011. Live at
 **https://eagleadams86.github.io/financial-plan/**
 
-## Your numbers never leave your browser
+## Your numbers never leave your browser (unless you sign in)
 
 **This repo is public and holds code only — never data.** Everything you see
-in the app lives in your browser's localStorage. There is no account, no sync,
-and the only network call the page makes is to the GitHub API for the "Recent
-changes" box. The import files (`financial-plan-data.json`,
+in the app lives in your browser's localStorage. No account is needed; without
+signing in, the only network call the page makes is to the GitHub API for the
+"Recent changes" box. **Optional sync**: "Sign in to sync" (Google) mirrors
+your data to a private Firestore document in the `financialplan-60c6e`
+Firebase project — security rules confine every account to its own document,
+sign-in uses Google Identity Services (works on corporate networks that block
+firebaseapp.com), and "Delete all data" removes the synced copy too. See
+[privacy.html](privacy.html). The import files (`financial-plan-data.json`,
 `expected-2026.json`) are gitignored from the very first commit; `git status`
 must never show them.
 

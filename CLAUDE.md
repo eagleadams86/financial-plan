@@ -76,6 +76,25 @@ Free-form rows (`side.retirement`/`side.rothLimit`) are loose value arrays;
 an empty array is a spacer line, and `fmtLoose()` guesses display format.
 Deleting a budget category also deletes its orphaned cells — keep that.
 
+## Sync
+
+Optional Google sign-in + Firestore, the family pattern (ported from Sprint
+Velocity). Project **financialplan-60c6e**; one doc per user at
+`financialplan/{uid}` — the collection name must always match the published
+Firestore rules. `FIREBASE_CONFIG` (public client config, not a secret) and
+`GOOGLE_CLIENT_ID` sit at the top of the sync module; the OAuth client's
+Authorized JavaScript origins list `https://eagleadams86.github.io` and
+`http://localhost:8016` — a new local port needs registering there or sign-in
+fails with origin_mismatch. Sign-in is GIS → `signInWithCredential`
+(`initializeAuth`, never `getAuth` — see the comment in the module). Rules the
+module keeps: localStorage is the source of truth and the cloud only mirrors
+it; the first-sign-in "which copy?" dialog is load-bearing; **an empty copy
+never silently beats one with data**; sync failures surface in the button and
+privacy note, with no retry button by design; `save()` is the one chokepoint
+that calls `cloudPush()`; Delete-all calls `window.cloudWipe` (registered only
+while signed in) so a wipe removes the cloud copy too. `privacy.html` must be
+updated in the same commit as any change to what sync stores.
+
 ## The import script
 
 `import_xlsx.py` — stdlib only (no openpyxl), reads the Numbers-exported

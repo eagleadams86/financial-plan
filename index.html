@@ -5,14 +5,18 @@
 <!-- Content Security Policy. GitHub Pages can't set response headers, so this meta
      tag is the only place to declare one. 'unsafe-inline' is unavoidable: the app
      is inline script and style by design, with no build step to generate hashes.
-     This app is fully local — no sync, no sign-in — so the only network origin
-     allowed is the GitHub API, used by the "Recent changes" box at the foot of
-     the page. If a feature ever needs a new endpoint it must be added here too
-     (per the family rule: new endpoints go in the CSP in the same commit).
-     form-action is 'self' rather than 'none' because dialogs submit with
-     method="dialog", which some browsers historically checked against it.
-     Note: frame-ancestors is ignored in a meta tag; it needs a real header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'self'">
+     The host allowlists are the real value: scripts from this origin, Firebase's
+     CDN and Google sign-in only; network calls to the Firestore/auth endpoints
+     the optional sync uses, the GitHub API (changelog box), and 'self' (the
+     local-only test fixtures). accounts.google.com appears in script-src,
+     connect-src AND frame-src because sign-in goes through Google Identity
+     Services rather than Firebase's hosted handler (corporate filters block
+     firebaseapp.com hostnames unpredictably) — same flow as the sibling apps.
+     If a feature ever needs a new endpoint it must be added here in the same
+     commit (family rule). form-action is 'self' rather than 'none' because
+     dialogs submit with method="dialog", which some browsers historically
+     checked against it. frame-ancestors is ignored in a meta tag. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://api.github.com; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Money Map · Charlie’s Financial Plan</title>
 <meta name="description" content="A personal financial planner: monthly budget with projections, savings goals, retirement, vacations and giving.">
@@ -114,6 +118,11 @@ select.ctl:hover { border-color: var(--text-muted); }
   min-height: var(--chrome-h);
 }
 #themeSel:hover { border-color: var(--text-muted); }
+
+/* Holds the signed-out label's width: signing in swaps "Sign in to sync" for a
+   first name, which is shorter — without this the whole header slides the
+   moment Firebase reports who you are. */
+#syncBtn { min-width: 125px; }
 
 /* ── Tabs ───────────────────────────────────────────────────────────────── */
 .tabs { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -368,6 +377,11 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
       <option value="sepia">📜 Sepia</option>
     </select>
     <button class="btn small" id="dataBtn" title="Back up or restore your data">Back up</button>
+    <!-- Ships visible and signed-out at its final width (min-width in CSS), so
+         the header doesn't reflow when the Firebase SDK arrives; the module
+         hides it only when sync genuinely can't run. -->
+    <button class="btn small" id="syncBtn"
+      title="Sign in with Google to see the same data on all your devices">☁️ Sign in to sync</button>
   </div>
 </header>
 
@@ -388,8 +402,11 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
   </main>
 
   <p class="privacy" id="privacyNote">🔒 Private — your data is stored in this browser only.
-    Nothing is uploaded anywhere; the repo behind this page holds code, never numbers.</p>
-  <p class="privacy privacy-links"><a href="https://github.com/eagleadams86/financial-plan">Source on GitHub</a></p>
+    No account needed. Sign in with Google if you want the same data on your other devices.</p>
+  <!-- Its own element, not part of #privacyNote: the sync module rewrites that
+       note's textContent, which would silently delete a link nested inside it. -->
+  <p class="privacy privacy-links"><a href="privacy.html">Privacy policy</a> &middot;
+    <a href="https://github.com/eagleadams86/financial-plan">Source on GitHub</a></p>
 
   <details class="changelog" id="cl-box">
     <summary>Recent changes</summary>
@@ -420,6 +437,16 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
   </fieldset>
   <div class="row" style="justify-content:flex-end;margin-top:18px">
     <button class="btn primary" id="dataCloseBtn">Close</button>
+  </div>
+</dialog>
+
+<!-- ── First-sync reconciliation ─────────────────────────────────────────── -->
+<dialog id="syncChoiceDialog" aria-labelledby="syncChoiceTitle">
+  <h3 id="syncChoiceTitle">Two copies of your data</h3>
+  <p id="syncChoiceBody"></p>
+  <div class="row" style="justify-content:flex-end;margin-top:18px">
+    <button class="btn" id="syncKeepDeviceBtn">Keep this device's data</button>
+    <button class="btn primary" id="syncKeepGoogleBtn">Keep Google's data</button>
   </div>
 </dialog>
 
@@ -639,7 +666,8 @@ function save() {
     console.warn('Could not write saved data', e);
     toast('⚠️ This browser is blocking storage (full, or private mode?) — changes may be lost when the tab closes');
   }
-  /* No sync layer yet. When one arrives (SV pattern), it hooks in here. */
+  /* The sync module (foot of the file) registers this when signed in. */
+  if (window.cloudPush) window.cloudPush();
 }
 
 /* ── Domain helpers ─────────────────────────────────────────────────────── */
@@ -2644,6 +2672,350 @@ render();
 window.__finTestHooks = { round2, fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths };
+
+/* ── Hooks the sync module calls ──────────────────────────────────────────
+   The module is a separate <script type="module"> and can't see this scope. */
+window.finGet = () => state;
+window.finAdopt = (incoming, ts) => {
+  incoming = migrate(coerceShape(incoming || {}));
+  state = Object.assign(blankState(), incoming, {
+    settings: Object.assign(blankState().settings, incoming.settings || {}),
+    side: Object.assign(blankState().side, incoming.side || {}),
+    ui: Object.assign(blankState().ui, incoming.ui || {})
+  });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(UPDATED_KEY, String(ts || Date.now()));
+  render();
+};
+window.finCounts = (d) => ({
+  years: d && d.years ? Object.keys(d.years).length : 0,
+  goals: d && d.goals ? d.goals.length : 0,
+  trips: d && d.vacations && d.vacations.trips ? d.vacations.trips.length : 0
+});
+window.finHasData = (d) => !!(d && ((d.years && Object.keys(d.years).length)
+  || (d.goals && d.goals.length)
+  || (d.vacations && d.vacations.trips && d.vacations.trips.length)));
+</script>
+
+<script type="module">
+/* ───────────────────────── Optional cross-device sync ─────────────────────────
+   Google sign-in + one Firestore doc per user, the pattern proven in Sprint
+   Velocity / Flow Metrics / Golf Handicap / PAPTrack. The config below is
+   Firebase's public client config, not a secret — access is enforced by the
+   Firestore security rules (each account can read and write only its own
+   financialplan/{uid} document). While FIREBASE_CONFIG is null the sync button
+   stays hidden and the app is 100% local. localStorage remains the source of
+   truth either way; the cloud only mirrors it.
+
+   Sign-in goes through Google Identity Services, not Firebase's hosted popup:
+   corporate filters block individual firebaseapp.com hostnames unpredictably,
+   and a popup straight to accounts.google.com survives them. The token comes
+   back and signInWithCredential exchanges it for the Firebase session.
+   GOOGLE_CLIENT_ID is NOT part of FIREBASE_CONFIG — it's the OAuth web client
+   from Google Cloud Console → Credentials, and that client's "Authorized
+   JavaScript origins" must list every serving origin (port included) or
+   Google refuses with origin_mismatch. */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAb_DiT0bkcoWkTT8FUcwujtht4uYmAATE",
+  authDomain: "financialplan-60c6e.firebaseapp.com",
+  projectId: "financialplan-60c6e",
+  storageBucket: "financialplan-60c6e.firebasestorage.app",
+  messagingSenderId: "929356552024",
+  appId: "1:929356552024:web:75a9acb8c94b9e2e9ab72d"
+};
+const GOOGLE_CLIENT_ID = '929356552024-qtv6nm1tucqb8e9j4mbheve9vq9vq3ds.apps.googleusercontent.com';
+
+const SDK = 'https://www.gstatic.com/firebasejs/12.16.0/';
+const GIS = 'https://accounts.google.com/gsi/client';
+const btn = document.getElementById('syncBtn');
+const privacyNote = document.getElementById('privacyNote');
+const localTs = () => Number(localStorage.getItem('fin-updated') || 0);
+
+/* Visible and signed-out in the markup so the header is its final width at
+   first paint; taken away only when sync genuinely can't run. */
+if (FIREBASE_CONFIG) {
+  init().catch((e) => { console.warn('Sync unavailable:', e); btn.hidden = true; });
+} else {
+  btn.hidden = true;
+}
+
+let A, Fs, auth, db, user = null, unsub = null, pushTimer = null, tokenClient = null;
+
+/* Google's sign-in client is a classic script, not a module. */
+function loadGis() {
+  return new Promise((resolve, reject) => {
+    if (window.google?.accounts?.oauth2) return resolve();
+    const s = document.createElement('script');
+    s.src = GIS; s.async = true; s.defer = true;
+    s.onload = () => window.google?.accounts?.oauth2
+      ? resolve()
+      : reject(new Error('Google sign-in client loaded but exposed no oauth2 API'));
+    s.onerror = () => reject(new Error('Could not load Google sign-in client'));
+    document.head.appendChild(s);
+  });
+}
+
+async function init() {
+  const [{ initializeApp }, authMod, fsMod] = await Promise.all([
+    import(SDK + 'firebase-app.js'),
+    import(SDK + 'firebase-auth.js'),
+    import(SDK + 'firebase-firestore.js'),
+    loadGis(),
+  ]);
+  A = authMod; Fs = fsMod;
+  const app = initializeApp(FIREBASE_CONFIG);
+  /* initializeAuth, NOT getAuth: getAuth wires in browserPopupRedirectResolver,
+     which Safari/iOS initialise eagerly and which fetches apis.google.com for a
+     gapi iframe nothing here reads (sign-in is signInWithCredential). The three
+     persistences are the ones getAuth would have set, in its order. If a popup/
+     redirect call is ever wanted, pass the resolver to THAT call. (Family rule,
+     same in Sprint Velocity and Flow Metrics.) */
+  auth = A.initializeAuth(app, {
+    persistence: [A.indexedDBLocalPersistence, A.browserLocalPersistence, A.browserSessionPersistence],
+  });
+  db = Fs.getFirestore(app);
+  A.onAuthStateChanged(auth, (u) => {
+    user = u;
+    syncError = null;
+    /* The wipe hook only exists while signed in — Delete-all reads its
+       presence to know whether a cloud copy needs removing too. */
+    if (u) {
+      window.cloudWipe = async () => {
+        await Fs.deleteDoc(docRef());
+        localStorage.removeItem('fin-sync-uid');
+        await A.signOut(auth);
+      };
+    } else {
+      delete window.cloudWipe;
+    }
+    updateUI();
+    if (unsub) { unsub(); unsub = null; }
+    if (u) startSync().catch((e) => setSyncError(e));
+  });
+  /* Built once, reused for every sign-in. requestAccessToken() must be called
+     from inside the click handler or the browser blocks the popup. */
+  tokenClient = window.google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: 'openid email profile',
+    callback: (resp) => {
+      if (!resp || !resp.access_token) { onSignInFailed(resp); return; }
+      const cred = A.GoogleAuthProvider.credential(null, resp.access_token);
+      A.signInWithCredential(auth, cred).catch(onSignInFailed);
+    },
+    error_callback: (err) => {
+      if (err && /popup_closed|user_cancel/.test(String(err.type))) return;
+      onSignInFailed(err);
+    },
+  });
+  btn.addEventListener('click', onClick);
+}
+
+function onSignInFailed(e) {
+  console.warn('sign-in error', e);
+  const s = String((e && (e.type || e.code || e.message)) || e || '');
+  if (s.includes('origin_mismatch') || s.includes('idpiframe') || s.includes('invalid_client')) {
+    window.toast('Sign-in rejected — this site isn’t an authorised origin for the Google client');
+  } else if (s.includes('popup_failed_to_open')) {
+    window.toast('Sign-in popup was blocked — allow popups for this site and try again');
+  } else {
+    window.toast('Sign-in failed — check the Firebase setup');
+  }
+}
+
+/* ── Saying so when sync stops working ──────────────────────────────────────
+   Failures surface in the button and the privacy note, never just the console
+   (family rule). No retry button: Firestore retries the transient causes, the
+   permanent ones aren't fixed by pressing anything, and every save() attempts
+   another push — recovery is automatic the moment sync works again. */
+let syncError = null;
+
+function describeSyncError(e) {
+  const code = String((e && e.code) || e || '');
+  if (code.includes('invalid-argument')) return {
+    reason: 'There’s more history here than can be synced in one go.',
+    fix: 'Export a backup, then delete a year you no longer need — sync picks up again on the next change.' };
+  if (code.includes('permission-denied') || code.includes('unauthenticated')) return {
+    reason: 'Google refused the sign-in for this data.',
+    fix: 'Signing out and back in usually clears it.' };
+  if (code.includes('resource-exhausted')) return {
+    reason: 'This project has hit its daily sync limit.',
+    fix: 'It resets tomorrow; nothing is lost in the meantime.' };
+  if (code.includes('unavailable') || code.includes('deadline-exceeded')) return {
+    reason: 'Couldn’t reach Google just now.',
+    fix: 'It should sort itself out — the next change will try again.' };
+  return { reason: 'Sync has stopped working.',
+    fix: 'The next change will try again. If it keeps up, sign out and back in.' };
+}
+
+function setSyncError(e) {
+  console.warn('sync problem', e);
+  const first = !syncError;
+  syncError = describeSyncError(e);
+  updateUI();
+  if (first) window.toast('⚠️ Not syncing — see the note at the foot of the page');
+}
+
+function clearSyncError() {
+  if (!syncError) return;
+  syncError = null;
+  updateUI();
+  window.toast('Syncing again ☁️');
+}
+
+function updateUI() {
+  if (user && syncError) {
+    btn.textContent = '⚠️ Not syncing';
+    btn.title = syncError.reason + ' ' + syncError.fix;
+    privacyNote.textContent = `⚠️ Not syncing — ${syncError.reason} Everything is still saved in `
+      + `this browser, but your other devices aren’t getting it. ${syncError.fix}`;
+  } else if (user) {
+    btn.textContent = `☁️ ${user.displayName ? user.displayName.split(' ')[0] : user.email}`;
+    btn.title = 'Syncing across your devices — click to sign out';
+    privacyNote.textContent = `☁️ Signed in as ${user.email} — your figures sync privately to your own account and still work offline.`;
+  } else {
+    btn.textContent = '☁️ Sign in to sync';
+    btn.title = 'Sign in with Google to see the same data on all your devices';
+    privacyNote.textContent = '🔒 Private — your data is stored in this browser only. No account needed. Sign in with Google if you want the same data on your other devices.';
+  }
+}
+
+async function onClick() {
+  if (user) {
+    if (confirm('Sign out? The app keeps working with the local copy on this device.')) A.signOut(auth);
+    return;
+  }
+  tokenClient.requestAccessToken();
+}
+
+/* 'financialplan', matching the collection the published Firestore rules
+   protect — the rules and this path must always agree. */
+const docRef = () => Fs.doc(db, 'financialplan', user.uid);
+
+/* Resolves true to keep Google's copy, false to keep this device's. Escape or
+   a backdrop dismiss resolves false — the non-destructive choice. */
+function chooseSyncSource(local, remote, remoteUpdatedAt) {
+  return new Promise((resolve) => {
+    const dlg = document.getElementById('syncChoiceDialog');
+    const body = document.getElementById('syncChoiceBody');
+    const when = remoteUpdatedAt ? new Date(remoteUpdatedAt).toLocaleString() : 'an earlier sign-in';
+    const l = window.finCounts(local), r = window.finCounts(remote);
+    const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    body.textContent =
+      `This device has ${plural(l.years, 'year')} of budgets and ${plural(l.goals, 'goal')} saved. `
+      + `Your Google account already has ${plural(r.years, 'year')} and ${plural(r.goals, 'goal')} `
+      + `(last updated ${when}). Pick which to keep — the other copy will be replaced.`;
+    const deviceBtn = document.getElementById('syncKeepDeviceBtn');
+    const googleBtn = document.getElementById('syncKeepGoogleBtn');
+    const preventCancel = (e) => e.preventDefault();
+    function finish(keepGoogle) {
+      deviceBtn.removeEventListener('click', onDevice);
+      googleBtn.removeEventListener('click', onGoogle);
+      dlg.removeEventListener('cancel', preventCancel);
+      dlg.close();
+      resolve(keepGoogle);
+    }
+    const onDevice = () => finish(false);
+    const onGoogle = () => finish(true);
+    deviceBtn.addEventListener('click', onDevice);
+    googleBtn.addEventListener('click', onGoogle);
+    dlg.addEventListener('cancel', preventCancel);
+    dlg.showModal();
+  });
+}
+
+/* Stamps this device's copy as the newest, so "keep this device's data"
+   actually wins everywhere. */
+const touchLocal = () => localStorage.setItem('fin-updated', String(Date.now()));
+
+/* Reconciling the two copies at sign-in. The rule under all four branches:
+   AN EMPTY COPY NEVER BEATS A COPY WITH DATA IN IT, whatever the timestamps
+   say — a fresh browser's empty push once emptied a device in the sibling
+   app. The dialog handles the genuine conflict (both sides hold data), once
+   per account per browser. */
+async function startSync() {
+  const snap = await Fs.getDoc(docRef());
+  const remote = snap.exists() ? snap.data() : null;
+  const local = window.finGet();
+  const remoteHas = !!(remote && window.finHasData(remote.data));
+  const localHas = window.finHasData(local);
+  const firstSyncForAccount = localStorage.getItem('fin-sync-uid') !== user.uid;
+
+  if (remoteHas && localHas && firstSyncForAccount) {
+    const keepGoogle = await chooseSyncSource(local, remote.data, remote.updatedAt);
+    if (keepGoogle) {
+      window.finAdopt(remote.data, remote.updatedAt);
+      window.toast('Loaded your data from the cloud ☁️');
+    } else {
+      touchLocal();
+      await pushNow();
+      window.toast('Kept this device’s data');
+    }
+  } else if (remoteHas && !localHas) {
+    window.finAdopt(remote.data, remote.updatedAt);
+    window.toast('Loaded your data from the cloud ☁️');
+  } else if (localHas && !remoteHas) {
+    await pushNow();
+  } else if (remoteHas && remote.updatedAt > localTs()) {
+    window.finAdopt(remote.data, remote.updatedAt);
+    window.toast('Loaded your data from the cloud ☁️');
+  } else {
+    await pushNow();
+  }
+  localStorage.setItem('fin-sync-uid', user.uid);
+
+  unsub = Fs.onSnapshot(docRef(), (s) => {
+    if (s.metadata.hasPendingWrites || !s.exists()) return;
+    const r = s.data();
+    if (!(r.updatedAt > localTs())) return;
+    /* Same empty-never-wins rule live: clearing everything is a real thing
+       people do (the Delete-all button), so this asks rather than refusing. */
+    if (!window.finHasData(r.data) && window.finHasData(window.finGet())) {
+      const keep = !confirm('Another device has cleared all its Money Map data.\n\n'
+        + 'Clear this device too? Cancel keeps what\'s on this device and restores it '
+        + 'to your other devices.');
+      if (keep) {
+        touchLocal();
+        pushNow().catch(setSyncError);
+        window.toast('Kept this device’s data');
+        return;
+      }
+    }
+    window.finAdopt(r.data, r.updatedAt);
+    window.toast('Synced from another device ☁️');
+  }, (e) => {
+    /* A listener that errors is dropped by Firestore and never fires again —
+       without this callback, another device's updates would just stop. */
+    setSyncError(e);
+    unsub = null;
+  });
+}
+
+async function pushNow() {
+  if (!user) return;
+  await Fs.setDoc(docRef(), { data: window.finGet(), updatedAt: localTs() || Date.now() });
+  clearSyncError();
+}
+
+/* Called by save() on every local change; debounced so rapid edits batch up. */
+window.cloudPush = () => {
+  if (!user) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => { pushTimer = null; pushNow().catch(setSyncError); }, 1200);
+};
+
+/* Flush a pending push the moment the page hides, so "edit then close the
+   tab" can't leave the cloud a step behind. Best-effort; the next edit or
+   sign-in re-sends regardless. */
+const flushPush = () => {
+  if (!user || !pushTimer) return;
+  clearTimeout(pushTimer);
+  pushTimer = null;
+  pushNow().catch(() => { /* page is going away — nowhere left to report */ });
+};
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushPush();
+});
+addEventListener('pagehide', flushPush);
 </script>
 
 <script>
