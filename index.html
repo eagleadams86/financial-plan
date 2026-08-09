@@ -892,10 +892,62 @@ function render() {
 function welcomeCard() {
   return `<div class="card"><div class="empty">
     <h2>Welcome to Money Map</h2>
-    <p>Nothing here yet. Restore a backup — or, first time in, run
-      <code>import_xlsx.py</code> against the Numbers export and Restore the JSON it makes.</p>
-    <p style="margin-top:16px"><button class="btn primary" id="welcomeRestoreBtn">Open Back up &amp; restore</button></p>
+    <p>A private financial planner: a monthly budget that projects itself forward,
+      savings goals, retirement, vacations and giving. Everything you enter stays
+      in this browser — nothing is uploaded anywhere.</p>
+    <p style="margin-top:16px">
+      <button class="btn primary" id="startFreshBtn">Start fresh</button>
+      <button class="btn" id="welcomeRestoreBtn">Restore a backup</button></p>
+    <p class="sub" style="margin-top:14px">Start fresh sets up this year's budget with a
+      starter set of rows — rename, add or delete any of them. Restore reads a Money Map
+      export (or the JSON that <code>import_xlsx.py</code> makes from a spreadsheet).</p>
   </div></div>`;
+}
+
+/* A sensible first budget for someone starting from nothing: the common
+   income and bill rows plus the transfer rows the balance math understands.
+   All renameable, deletable, reorderable — it's a starting vocabulary. */
+const STARTER_CATEGORIES = [
+  ['Paycheck', 'paycheck', 'normal'],
+  ['Other income', 'none', 'normal'],
+  ['Dividends / Interest', 'dividends', 'normal'],
+  ['Tax Return', 'none', 'normal'],
+  ['Credit Card', 'avg', 'normal'],
+  ['Debit Card / ATM', 'none', 'normal'],
+  ['Checks', 'none', 'normal'],
+  ['Venmo', 'avg', 'normal'],
+  ['Rent / Mortgage', 'carry', 'normal'],
+  ['Electric', 'samemonth', 'normal'],
+  ['Gas', 'samemonth', 'normal'],
+  ['Water', 'none', 'normal'],
+  ['Internet', 'carry', 'normal'],
+  ['Phone', 'carry', 'normal'],
+  ['Taxes', 'none', 'normal'],
+  ['Charitable', 'none', 'charitable'],
+  ['Zelle', 'none', 'zelle'],
+  ['Bank transfers', 'none', 'bankTransfer'],
+  ['Mid-term transfers', 'none', 'midTransfer'],
+  ['Long-term transfers', 'none', 'longTransfer'],
+];
+
+function startFresh() {
+  const y = String(new Date().getFullYear());
+  state = blankState();
+  state.years[y] = {
+    kind: 'grid', model: 'live',
+    startMonth: `${y}-01`, monthCount: 12,
+    enteredThrough: monthAdd(thisMonth(), -1),
+    categories: STARTER_CATEGORIES.map(([name, rule, role]) => {
+      const cat = { id: slugJs(name), name, rule, role };
+      if (rule === 'paycheck') cat.perCheck = 0;
+      return cat;
+    }),
+    cells: {}, paychecks: {}, seeds: { cash: 0, mid: 0, long: 0, bank: 0 },
+    overrides: {}, extraNotes: [],
+  };
+  state.ui.activeYear = y;
+  save(); render();
+  toast(`${y} is ready — click any cell or row name to make it yours`);
 }
 
 /* ═══════════════════════════ Budget view ══════════════════════════════════ */
@@ -1091,8 +1143,15 @@ const fmtYrMo = (months) =>
 
 function renderGoals() {
   const liveKey = latestGridYear();
-  if (!liveKey || !state.goals.length)
-    return `<div class="card"><div class="empty"><h2>No goals yet</h2></div></div>`;
+  if (!liveKey)
+    return `<div class="card"><div class="empty"><h2>Goals need a budget year first</h2>
+      <p>Head to the Budget tab and start one — goals read their "saved so far"
+        from its computed balances.</p></div></div>`;
+  if (!state.goals.length)
+    return `<div class="card"><div class="empty"><h2>No goals yet</h2>
+      <p>A goal watches one of your account balances against a target and a date.</p>
+      <p style="margin-top:14px"><button class="btn primary" data-add="goal">＋ Add your first goal</button></p>
+    </div></div>`;
   const yr = state.years[liveKey];
   const c = C[liveKey];
   const goals = computeGoals(state, C, todayISO());
@@ -1307,7 +1366,8 @@ function renderRetirement() {
     <div class="card">
       <h2>Traditional vs Roth</h2>
       <p class="sub">Across the 401k and the Roth IRA.</p>
-      ${splitHtml || '<p class="sub">Nothing recorded.</p>'}
+      ${splitHtml || `<p class="sub">Nothing recorded.</p>
+        <div class="addbar"><button class="btn small" data-edit="k401">✎ Enter the figures</button></div>`}
     </div>
     <div class="card">
       <h2>Roth IRA contributions</h2>
@@ -2263,6 +2323,11 @@ function slugJs(name) {
 /* One delegated listener routes every row click and add button. Attached
    once — it survives every re-render of #views. */
 F('views').addEventListener('click', (e) => {
+  /* The welcome card renders before wireView() runs (render() returns early
+     when there's no data), so its buttons must be handled here, in the one
+     listener that survives every re-render. */
+  if (e.target.closest('#startFreshBtn')) { startFresh(); return; }
+  if (e.target.closest('#welcomeRestoreBtn')) { F('dataDialog').showModal(); return; }
   const add = e.target.closest('[data-add]');
   if (add) { openRowEditor(add.dataset.add, add.dataset, true); return; }
   const row = e.target.closest('[data-edit]');

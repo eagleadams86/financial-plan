@@ -39,7 +39,15 @@ must never show them.
 - **Year rollover** — "Start ⟨next year⟩" duplicates the live grid the way
   Charlie used to duplicate the sheet.
 
-## First-time setup (one Mac, once)
+## Getting started
+
+**Anyone can just use it** — open the page and press **Start fresh**: it sets
+up the current year's budget with a starter set of rows (all renameable,
+deletable, reorderable) and every tab's ＋ Add buttons do the rest. No import
+needed, no account, and each person's data stays in their own browser — so
+sharing the URL shares the app, never the numbers.
+
+Charlie's own one-time migration from the Numbers spreadsheet:
 
 ```bash
 python3 import_xlsx.py "~/Downloads/Financial Plan.xlsx"
