@@ -12,7 +12,7 @@
      form-action is 'self' rather than 'none' because dialogs submit with
      method="dialog", which some browsers historically checked against it.
      Note: frame-ancestors is ignored in a meta tag; it needs a real header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://api.github.com; base-uri 'none'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Money Map · Charlie’s Financial Plan</title>
 <meta name="description" content="A personal financial planner: monthly budget with projections, savings goals, retirement, vacations and giving.">
@@ -210,6 +210,62 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
 
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+/* ── The budget grid ────────────────────────────────────────────────────────
+   A wide months × categories table in its own horizontal scroller, with the
+   category names held in a sticky first column. Estimate kind is typography,
+   never colour alone (Charlie is red-green colourblind): actuals plain,
+   manual estimates get a solid underline, auto estimates italics + a dotted
+   underline — the legend under the grid spells all three out. */
+.gridwrap { overflow-x: auto; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); }
+.grid { border-collapse: separate; border-spacing: 0; width: max-content;
+  min-width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+.grid th, .grid td { padding: 6px 10px; border-bottom: 1px solid var(--border);
+  text-align: right; white-space: nowrap; }
+.grid thead th { position: sticky; top: 0; z-index: 3; background: var(--bg-card);
+  font-size: 11px; border-bottom: 1px solid var(--border-strong); }
+.grid th.lbl, .grid td.lbl { position: sticky; left: 0; z-index: 2;
+  background: var(--bg-card); text-align: left; font-weight: 500;
+  border-right: 1px solid var(--border-strong); max-width: 180px;
+  overflow: hidden; text-overflow: ellipsis; }
+.grid thead th.lbl { z-index: 4; }
+.grid thead th.now, .grid td.now { background: var(--accent-bg); }
+.grid tr.balance td, .grid tr.balance th { border-top: 1px solid var(--border-strong); }
+.grid tr.total td, .grid tr.total th { font-weight: 700; }
+.grid tr.paych td, .grid tr.paych th { color: var(--text-secondary); font-size: 12px; }
+.grid td.c-manual { text-decoration: underline; text-underline-offset: 3px; }
+.grid td.c-auto { font-style: italic; color: var(--text-secondary);
+  text-decoration: underline dotted; text-underline-offset: 3px; }
+.grid td.c-missing { color: var(--text-hint); }
+.grid td.c-pinned { font-weight: 600; }
+/* A note rides in the cell's corner as a dot; the text is in the title
+   attribute (hover) and in the edit popover (tap). */
+.grid td.noted { position: relative; }
+.grid td.noted::after { content: ''; position: absolute; top: 3px; right: 3px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.grid td.cell { cursor: pointer; }
+.grid td.cell:hover { outline: 1px solid var(--focus-border); outline-offset: -1px; }
+.gridlegend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px;
+  color: var(--text-secondary); margin-top: 10px; padding-left: 2px; }
+.gridlegend .k-manual { text-decoration: underline; text-underline-offset: 3px; }
+.gridlegend .k-auto { font-style: italic; text-decoration: underline dotted;
+  text-underline-offset: 3px; }
+.gridlegend .k-dot { position: relative; padding-right: 10px; }
+.gridlegend .k-dot::after { content: ''; position: absolute; top: 1px; right: 0;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+
+/* Summary-year card list */
+.sumlist { columns: 2 260px; column-gap: 32px; }
+.sumlist .rowline { display: flex; justify-content: space-between; gap: 12px;
+  padding: 4px 2px; break-inside: avoid; font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--border); font-size: 14px; }
+.sumlist .rowline:last-child { border-bottom: none; }
+
+details.section { border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; background: var(--bg-card-alt); margin-top: 14px; }
+details.section > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -466,6 +522,204 @@ function yearMonths(yr) {
 }
 const hasData = () => yearKeys().length > 0;
 
+/* ═══════════════════════════ Formula engine ═══════════════════════════════
+   computeAll() is the one place the numbers are calculated — every grid cell,
+   balance, and goal figure reads from it. It is a pure function of (state,
+   today), so tests can pin it, and it recomputes from scratch on every render
+   (the whole workbook is ~2k cells; there is nothing worth caching).
+
+   Years compute in chronological order so a rule can read the PRIOR year's
+   resolved cells (the spreadsheet's ='2025'!J15 cross-references).
+
+   Cell kinds, mirroring the spreadsheet's colour Key:
+     actual   — a number that happened (typed into a closed month)
+     manual   — Charlie's own future estimate (the sheet's blue cells)
+     auto     — a rule-computed estimate (the sheet's yellow cells)
+     missing  — a blank inside an entered month; counts as 0, flagged
+     pinned   — a balance the sheet stated outright rather than derived */
+
+/* One estimate rule per category, table-driven. Each is a small pure function
+   (cat, month, ctx) -> dollars; ctx carries everything a rule may read. */
+const RULES = {
+  none: () => null,
+
+  /* Internet & friends: repeat the nearest earlier stored value. */
+  carry(cat, m, ctx) {
+    for (let i = monthDiff(ctx.yr.startMonth, m) - 1; i >= 0; i--) {
+      const cell = ctx.yr.cells[`${cat.id}|${ctx.months[i]}`];
+      if (cell) return cell.v;
+    }
+    return null;
+  },
+
+  /* Credit Card, Venmo: mean of every stored month so far. Matches the
+     sheet's AVERAGE chains exactly — an average that includes an earlier
+     average of the same run doesn't move, so only stored cells count. */
+  avg(cat, m, ctx) {
+    let sum = 0, n = 0;
+    for (const mm of ctx.months) {
+      if (mm >= m) break;
+      const cell = ctx.yr.cells[`${cat.id}|${mm}`];
+      if (cell) { sum += cell.v; n++; }
+    }
+    return n ? sum / n : null;
+  },
+
+  /* Electric: same month a year earlier, rounded to whole dollars — from
+     this grid when it reaches back 12 months, else from the prior year. */
+  samemonth(cat, m, ctx) {
+    const prev = monthAdd(m, -12);
+    const idx = monthDiff(ctx.yr.startMonth, prev);
+    const cell = idx >= 0 ? ctx.resolved[`${cat.id}|${prev}`]
+                          : ctx.prior?.cells[`${cat.id}|${prev}`];
+    /* an estimate may chain off an earlier estimate (the sheet does), but a
+       month with nothing recorded must stay blank, not become a $0 estimate */
+    if (!cell || cell.kind === 'missing') return null;
+    return Math.round(cell.v);
+  },
+
+  /* Dividends: monthly interest on last month's cash + mid-term balances. */
+  dividends(cat, m, ctx) {
+    const prev = monthAdd(m, -1);
+    const cash = ctx.balances[`cash|${prev}`], mid = ctx.balances[`mid|${prev}`];
+    if (cash === undefined) return null;
+    return ctx.st.settings.midTermRateAnnual / 12 * ((cash || 0) + (mid || 0));
+  },
+
+  /* Paycheck: per-check amount × that month's paycheck count. */
+  paycheck(cat, m, ctx) {
+    const n = ctx.yr.paychecks[m];
+    return (cat.perCheck || 0) * (n === undefined ? 2 : n);
+  },
+};
+
+function computeYear(st, yearKey, prior, today) {
+  const yr = st.years[yearKey];
+  const months = yearMonths(yr);
+  const resolved = {};   // 'catId|m' -> {v, kind, note?}
+  const balances = {};   // 'bid|m'   -> dollars
+  const balanceKinds = {};
+  const thisM = today.slice(0, 7);
+
+  if (yr.kind !== 'grid') return { months: [], cells: {}, balances: {}, balanceKinds: {} };
+
+  const ctx = { st, yr, months, resolved, balances, prior };
+  const live = yr.model === 'live';
+
+  for (const m of months) {
+    /* 1 · categories */
+    for (const cat of yr.categories) {
+      const key = `${cat.id}|${m}`;
+      const stored = yr.cells[key];
+      if (stored) {
+        resolved[key] = { v: stored.v, kind: stored.kind, note: stored.note };
+        continue;
+      }
+      if (!live || m <= (yr.enteredThrough || '')) {
+        resolved[key] = { v: 0, kind: 'missing' };
+        continue;
+      }
+      const v = RULES[cat.rule || 'none'](cat, m, ctx);
+      resolved[key] = v === null ? { v: 0, kind: 'missing' }
+                                 : { v: round2(v), kind: 'auto' };
+    }
+
+    /* 2 · balances (live model only — the four-account chain from the sheet) */
+    if (live) {
+      const flows = { all: 0, mid: 0, long: 0, bank: 0, zelle: 0, charitable: 0 };
+      for (const cat of yr.categories) {
+        const v = resolved[`${cat.id}|${m}`].v;
+        if (cat.role === 'charitable') { flows.charitable += v; continue; }
+        if (cat.role === 'zelle') { flows.zelle += v; continue; }
+        flows.all += v;
+        if (cat.role === 'midTransfer') flows.mid += v;
+        if (cat.role === 'longTransfer') flows.long += v;
+        if (cat.role === 'bankTransfer') flows.bank += v;
+      }
+      const prevM = monthAdd(m, -1);
+      const priorOf = (bid) =>
+        balances[`${bid}|${prevM}`] !== undefined ? balances[`${bid}|${prevM}`]
+                                                  : (yr.seeds[bid] || 0);
+      const computed = {
+        cash: priorOf('cash') + flows.all,
+        mid:  priorOf('mid') - flows.mid,
+        long: (priorOf('long') - flows.long)
+              * (1 + st.settings.longTermRateAnnual / 12) + flows.charitable,
+        bank: priorOf('bank') - flows.bank + flows.zelle,
+      };
+      let total = 0;
+      for (const bid of ['cash', 'mid', 'long', 'bank']) {
+        const ov = yr.overrides[`${bid}|${m}`];
+        const v = round2(ov ? ov.v : computed[bid]);
+        balances[`${bid}|${m}`] = v;
+        balanceKinds[`${bid}|${m}`] = ov ? 'pinned'
+          : (m <= thisM ? 'actual' : 'auto');
+        total += v;
+      }
+      balances[`total|${m}`] = round2(total);
+      balanceKinds[`total|${m}`] = m <= thisM ? 'actual' : 'auto';
+    }
+  }
+
+  return { months, cells: resolved, balances, balanceKinds };
+}
+
+/* Every grid year, oldest first, each handed the previous one for the
+   look-a-year-back rules. */
+function computeAll(st, todayIso) {
+  const out = {};
+  let prior = null;
+  for (const y of Object.keys(st.years).sort()) {
+    if (st.years[y].kind !== 'grid') continue;
+    out[y] = computeYear(st, y, prior, todayIso);
+    prior = out[y];
+  }
+  return out;
+}
+
+/* The engine's replacement for the sheet's TODAY(): the month the goal
+   figures read balances at, clamped into the live year's range. */
+function currentMonthOf(yr, todayIso) {
+  const months = yearMonths(yr);
+  const t = todayIso.slice(0, 7);
+  if (t < months[0]) return months[0];
+  if (t > months[months.length - 1]) return months[months.length - 1];
+  return t;
+}
+
+/* Savings-goal figures, ported row for row from the sheet's Savings Goals
+   table. Sources: cashBank = cash + banks (capped at target), midCapped =
+   mid-term (capped), midOverflow = mid-term above the capped goal's target,
+   long = long-term holdings uncapped. */
+function computeGoals(st, computed, todayIso) {
+  const gridKeys = Object.keys(st.years).sort()
+    .filter(y => st.years[y].kind === 'grid');
+  const liveKey = gridKeys[gridKeys.length - 1];
+  if (!liveKey) return [];
+  const yr = st.years[liveKey];
+  const c = computed[liveKey];
+  const cur = currentMonthOf(yr, todayIso);
+  const bal = (bid) => c.balances[`${bid}|${cur}`] || 0;
+  const capTarget = st.goals.find(g => g.source === 'midCapped')?.target || 0;
+
+  return st.goals.map(g => {
+    let saved = 0;
+    if (g.source === 'cashBank') saved = Math.min(bal('cash') + bal('bank'), g.target);
+    else if (g.source === 'midCapped') saved = Math.min(bal('mid'), g.target);
+    else if (g.source === 'midOverflow') saved = Math.max(0, bal('mid') - capTarget);
+    else saved = bal('long');
+    saved = round2(saved);
+    const monthsLeft = g.targetDate
+      ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
+    return {
+      ...g, saved,
+      progress: g.target ? saved / g.target : 0,
+      monthsLeft,
+      monthlyReq: monthsLeft > 0 ? round2((g.target - saved) / monthsLeft) : 0,
+    };
+  });
+}
+
 /* ── Toast ──────────────────────────────────────────────────────────────── */
 let toastTimer = null;
 function toast(msg) {
@@ -480,6 +734,8 @@ function toast(msg) {
 
 const VIEWS = ['budget', 'goals', 'retirement', 'vacations', 'giving', 'history'];
 
+let C = {};   // computeAll() output, rebuilt on every render
+
 function render() {
   const view = VIEWS.includes(state.ui.activeTab) ? state.ui.activeTab : 'budget';
   document.querySelectorAll('.tab').forEach(tab => {
@@ -490,6 +746,7 @@ function render() {
   F('views').setAttribute('aria-labelledby', `tab-${view}`);
   const target = F('views');
   if (!hasData()) { target.innerHTML = welcomeCard(); return; }
+  C = computeAll(state, todayISO());
   const fn = {
     budget: renderBudget, goals: renderGoals, retirement: renderRetirement,
     vacations: renderVacations, giving: renderGiving, history: renderHistory
@@ -507,9 +764,154 @@ function welcomeCard() {
   </div></div>`;
 }
 
-/* Per-view renderers are filled in below as the app grows; each returns HTML
-   and wireView() attaches handlers after it lands in the DOM. */
-function renderBudget()     { return `<div class="card"><div class="empty"><h2>Budget</h2><p>Coming together…</p></div></div>`; }
+/* ═══════════════════════════ Budget view ══════════════════════════════════ */
+
+/* Money in the grid: whole dollars keep 24 columns readable; the exact cents
+   live in the title tooltip and the editor. */
+const fmtCell = (v) => (v === 0 ? '·' : fmtMoney0(v));
+
+function yearPickerHtml(active) {
+  const opts = yearKeys().slice().reverse().map(y => {
+    const yr = state.years[y];
+    const tag = yr.kind === 'summary' ? ' (summary)' : '';
+    return `<option value="${esc(y)}" ${y === active ? 'selected' : ''}>${esc(y)}${tag}</option>`;
+  }).join('');
+  return `<label class="sr-only" for="yearSel">Year</label>
+    <select id="yearSel" class="ctl" title="Which year you're looking at">${opts}</select>`;
+}
+
+function renderBudget() {
+  const y = activeYearKey();
+  const yr = state.years[y];
+  const picker = `<div class="row" style="margin-bottom:14px">${yearPickerHtml(y)}</div>`;
+  if (yr.kind === 'summary') return picker + summaryCard(y, yr);
+  return picker + gridCard(y, yr) + venmoSection(y) + purchasesSection(y);
+}
+
+function summaryCard(y, yr) {
+  const flows = yr.categoryTotals.filter(i => !i.isBalance);
+  const bals = yr.categoryTotals.filter(i => i.isBalance);
+  const line = (i) => `<div class="rowline"><span>${esc(i.name)}${
+    i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''
+  }</span><span>${fmtMoney(i.total)}</span></div>`;
+  const extras = (yr.extraNotes || []).map(n =>
+    `<li><span class="muted">${esc(n.where)}</span> — ${esc(n.note)}</li>`).join('');
+  return `<div class="card">
+    <h2>${esc(y)} — yearly summary</h2>
+    <p class="sub">This year predates the monthly layout, so it's imported as totals only.
+      ${yr.eoyCash !== undefined ? `End of year: <strong>${fmtMoney(yr.eoyCash)}</strong>.` : ''}</p>
+    <div class="sumlist">${flows.map(line).join('')}</div>
+    ${bals.length ? `<h2 style="margin-top:18px">Balances &amp; derived rows</h2>
+      <div class="sumlist">${bals.map(line).join('')}</div>` : ''}
+    ${extras ? `<details class="section"><summary>Notes from the spreadsheet</summary>
+      <ul style="margin:10px 0 0;padding-left:18px;font-size:13px">${extras}</ul></details>` : ''}
+  </div>`;
+}
+
+function gridCard(y, yr) {
+  const c = C[y];
+  const months = c.months;
+  const thisM = thisMonth();
+  const live = yr.model === 'live';
+
+  const head = `<tr><th class="lbl">Category</th>${months.map(m =>
+    `<th ${m === thisM ? 'class="now"' : ''}>${esc(monthLabel(m))}</th>`).join('')}</tr>`;
+
+  const cellTd = (cat, m) => {
+    const r = c.cells[`${cat.id}|${m}`] || { v: 0, kind: 'missing' };
+    const cls = ['cell', `c-${r.kind}`, r.note ? 'noted' : '', m === thisM ? 'now' : '']
+      .filter(Boolean).join(' ');
+    const title = [fmtMoney(r.v), KIND_LABEL[r.kind], r.note].filter(Boolean).join(' · ');
+    return `<td class="${cls}" data-cat="${esc(cat.id)}" data-m="${m}"
+      title="${esc(title)}">${fmtCell(r.v)}</td>`;
+  };
+
+  const catRows = yr.categories.filter(cat => !cat.isBalance).map(cat =>
+    `<tr><th class="lbl" scope="row" title="${esc(cat.name)}">${esc(cat.name)}</th>${
+      months.map(m => cellTd(cat, m)).join('')}</tr>`).join('');
+
+  /* pinned history grids keep their balance-ish rows in a block below */
+  const pinnedBalRows = yr.categories.filter(cat => cat.isBalance).map((cat, i) =>
+    `<tr class="balance${i ? ' later' : ''}"><th class="lbl" scope="row">${esc(cat.name)}</th>${
+      months.map(m => cellTd(cat, m)).join('')}</tr>`).join('');
+
+  /* the live year's four accounts + total are computed, not rows */
+  const BAL_NAMES = { cash: 'Cash (SPAXX)', mid: 'Mid-term (FDLXX)',
+                      long: 'Long-term (VOO)', bank: 'Banks / Venmo' };
+  const liveBalRows = !live ? '' : ['cash', 'mid', 'long', 'bank'].map((bid, i) =>
+    `<tr class="balance"><th class="lbl" scope="row">${esc(BAL_NAMES[bid])}</th>${
+      months.map(m => {
+        const v = c.balances[`${bid}|${m}`];
+        const kind = c.balanceKinds[`${bid}|${m}`];
+        const ov = yr.overrides[`${bid}|${m}`];
+        return `<td class="cell c-${kind} ${m === thisM ? 'now' : ''}"
+          data-bal="${bid}" data-m="${m}"
+          title="${esc(fmtMoney(v || 0))}${ov ? ' · stated in the sheet' : ''}">${fmtCell(v || 0)}</td>`;
+      }).join('')}</tr>`).join('')
+    + `<tr class="total"><th class="lbl" scope="row">Total</th>${
+        months.map(m => `<td class="${m === thisM ? 'now' : ''}">${
+          fmtCell(c.balances[`total|${m}`] || 0)}</td>`).join('')}</tr>`
+    + `<tr class="paych"><th class="lbl" scope="row">Paychecks</th>${
+        months.map(m => `<td class="cell ${m === thisM ? 'now' : ''}" data-pay="${m}">${
+          yr.paychecks[m] ?? '·'}</td>`).join('')}</tr>`;
+
+  return `<div class="card">
+    <h2>${esc(y)} budget</h2>
+    <p class="sub">${live
+      ? `Entered through <strong>${esc(monthLabel(yr.enteredThrough))}</strong>; later months are estimates that update as real numbers land.`
+      : 'A finished year — every figure is history.'}</p>
+    <div class="gridwrap"><table class="grid">
+      <thead>${head}</thead>
+      <tbody>${catRows}${liveBalRows}${pinnedBalRows}</tbody>
+    </table></div>
+    <div class="gridlegend">
+      <span>Plain — actual</span>
+      <span class="k-manual">Underlined — your estimate</span>
+      <span class="k-auto">Italic dotted — auto estimate</span>
+      <span class="k-dot">Dot — has a note</span>
+      <span>· — nothing recorded</span>
+    </div>
+  </div>`;
+}
+
+const KIND_LABEL = { actual: 'actual', manual: 'your estimate',
+  auto: 'auto estimate', missing: 'nothing recorded', pinned: 'stated balance' };
+
+function venmoSection(y) {
+  const items = (state.side.venmo || {})[y];
+  if (!items || !items.length) return '';
+  const total = round2(items.reduce((s, i) => s + i.amount, 0));
+  const rows = items.map(i => `<tr>
+    <td style="text-align:left">${esc(i.date)}</td>
+    <th scope="row">${esc(i.desc)}</th>
+    <td>${fmtMoney(i.amount)}</td>
+    <td style="text-align:left">${i.fromBank ? 'Bank' : ''}</td></tr>`).join('');
+  return `<details class="section"><summary>${esc(y)} Venmo ledger — ${items.length} items,
+      ${fmtMoney(total)} (${fmtMoney(round2(total / 12))}/mo)</summary>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Date</th><th style="text-align:left">Who / what</th>
+        <th>Amount</th><th style="text-align:left">Settled</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div></details>`;
+}
+
+function purchasesSection(y) {
+  const items = (state.side.largePurchases || {})[y];
+  if (!items || !items.length) return '';
+  const total = round2(items.reduce((s, i) => s + (i.amount || 0), 0));
+  const rows = items.map(i => `<tr>
+    <td style="text-align:left">${esc(i.date)}</td>
+    <th scope="row">${esc(i.desc)}</th>
+    <td>${i.amount === null || i.amount === undefined ? '' : fmtMoney(i.amount)}</td></tr>`).join('');
+  return `<details class="section"><summary>${esc(y)} large credit-card purchases —
+      ${fmtMoney(total)} planned</summary>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Month</th><th style="text-align:left">What</th>
+        <th>Amount</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div></details>`;
+}
+
 function renderGoals()      { return `<div class="card"><div class="empty"><h2>Goals</h2><p>Coming together…</p></div></div>`; }
 function renderRetirement() { return `<div class="card"><div class="empty"><h2>Retirement</h2><p>Coming together…</p></div></div>`; }
 function renderVacations()  { return `<div class="card"><div class="empty"><h2>Vacations</h2><p>Coming together…</p></div></div>`; }
@@ -519,6 +921,11 @@ function renderHistory()    { return `<div class="card"><div class="empty"><h2>H
 function wireView(view) {
   const btn = F('welcomeRestoreBtn');
   if (btn) btn.onclick = () => F('dataDialog').showModal();
+  const yearSel = F('yearSel');
+  if (yearSel) yearSel.onchange = (e) => {
+    state.ui.activeYear = e.target.value;
+    save(); render();
+  };
 }
 
 /* ═══════════════════════════ Backup & restore ═════════════════════════════ */
@@ -625,7 +1032,8 @@ render();
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { round2, fmtMoney, monthAdd, monthDiff, monthLabel,
-  blankState, coerceShape, migrate };
+  blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
+  currentMonthOf, yearMonthsOf: yearMonths };
 </script>
 
 <script>

@@ -301,10 +301,10 @@ RULE_BY_NAME = [
     (re.compile(r'^credit card$', re.I), 'avg'),
     (re.compile(r'^venmo$', re.I), 'avg'),
     (re.compile(r'^electric$', re.I), 'samemonth'),
+    # Internet is the only bill the sheet carries forward by formula chain;
+    # Phone, Parking and Water are typed into every month they apply to —
+    # a carry rule would invent charges in the months the sheet leaves blank.
     (re.compile(r'^internet$', re.I), 'carry'),
-    (re.compile(r'^phone$', re.I), 'carry'),
-    (re.compile(r'^parking$', re.I), 'carry'),
-    (re.compile(r'^water$', re.I), 'carry'),
 ]
 
 BALANCE_ID_BY_NAME = [

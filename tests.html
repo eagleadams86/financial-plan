@@ -128,8 +128,199 @@ t('blankState carries the spreadsheet constants', () => {
   eq(s.settings.ptoAllowance, 32);
 });
 
+/* ── Formula engine (synthetic fixture) ───────────────────────────────────────
+   A hand-computed 6-month live year. Invented round numbers only. */
+function fixtureState() {
+  const s = {
+    schema: 1,
+    settings: { midTermRateAnnual: 0.03, longTermRateAnnual: 0.07, ptoAllowance: 32 },
+    years: {
+      '2029': {          // prior year, pinned — feeds the same-month rule
+        kind: 'grid', model: 'pinned', startMonth: '2029-01', monthCount: 12,
+        categories: [{ id: 'electric', name: 'Electric', role: 'normal', rule: 'none' }],
+        cells: { 'electric|2029-10': { v: -80.4, kind: 'actual' } },
+        paychecks: {}, seeds: {}, overrides: {}
+      },
+      '2030': {
+        kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 6,
+        enteredThrough: '2030-03',
+        categories: [
+          { id: 'paycheck', name: 'Paycheck', role: 'normal', rule: 'paycheck', perCheck: 1000 },
+          { id: 'dividends', name: 'Dividends', role: 'normal', rule: 'dividends' },
+          { id: 'cc', name: 'Credit Card', role: 'normal', rule: 'avg' },
+          { id: 'internet', name: 'Internet', role: 'normal', rule: 'carry' },
+          { id: 'electric', name: 'Electric', role: 'normal', rule: 'samemonth' },
+          { id: 'midt', name: 'Mid-term transfers', role: 'midTransfer', rule: 'none' },
+          { id: 'longt', name: 'Long-term transfers', role: 'longTransfer', rule: 'none' },
+          { id: 'bankt', name: 'Bank transfers', role: 'bankTransfer', rule: 'none' },
+          { id: 'zelle', name: 'Zelle', role: 'zelle', rule: 'none' },
+          { id: 'char', name: 'Charitable', role: 'charitable', rule: 'none' },
+        ],
+        cells: {
+          'paycheck|2030-01': { v: 2000, kind: 'actual' },
+          'paycheck|2030-02': { v: 2000, kind: 'actual' },
+          'paycheck|2030-03': { v: 3000, kind: 'actual' },
+          'cc|2030-01': { v: -900, kind: 'actual' },
+          'cc|2030-02': { v: -1100, kind: 'actual' },
+          'cc|2030-03': { v: -1000, kind: 'actual' },
+          'internet|2030-01': { v: -50, kind: 'actual' },
+          'midt|2030-02': { v: -500, kind: 'actual' },   // 500 INTO mid-term
+          'zelle|2030-04': { v: 25, kind: 'manual' },
+          'char|2030-04': { v: -60, kind: 'manual' },
+          'cc|2030-05': { v: -1234, kind: 'manual' },    // manual beats auto
+        },
+        paychecks: { '2030-01': 2, '2030-02': 2, '2030-03': 3, '2030-04': 2,
+                     '2030-05': 3.5, '2030-06': 2 },
+        seeds: { cash: 10000, mid: 1000, long: 1200, bank: 300 },
+        overrides: { 'long|2030-01': { v: 1200 }, 'cash|2030-04': { v: 12345 } }
+      }
+    },
+    goals: [
+      { id: 'g1', name: 'Emergencies', source: 'cashBank', target: 5000, targetDate: '2030-12-01' },
+      { id: 'g2', name: 'Renovations', source: 'midCapped', target: 1200, targetDate: '2031-06-01' },
+      { id: 'g3', name: 'New Car', source: 'midOverflow', target: 9000, targetDate: '2033-06-01' },
+      { id: 'g4', name: 'Retire', source: 'long', target: 90000, targetDate: '2040-01-01' },
+    ],
+    side: {}, vacations: { trips: [], pto: {} }, ui: {}
+  };
+  return s;
+}
+const TODAY_FIX = '2030-04-15';   // engine time is injected, so tests are stable
+
+function computeFixture() {
+  return H.computeAll(H.coerceShape(fixtureState()), TODAY_FIX);
+}
+
+group('Formula engine — rules');
+t('paycheck rule multiplies per-check by that month count (incl. the 3.5 case)', () => {
+  const c = computeFixture()['2030'];
+  approx(c.cells['paycheck|2030-04'].v, 2000, 'April: 1000 × 2');
+  approx(c.cells['paycheck|2030-05'].v, 3500, 'May: 1000 × 3.5');
+  eq(c.cells['paycheck|2030-04'].kind, 'auto');
+});
+t('trailing average uses stored months before the estimate, so it does not drift', () => {
+  const c = computeFixture()['2030'];
+  approx(c.cells['cc|2030-04'].v, -1000, 'April: mean of the Jan..Mar actuals');
+  approx(c.cells['cc|2030-06'].v, -1058.5,
+    'June adds the May manual but ignores the auto April');
+});
+t('a manual estimate beats the auto rule', () => {
+  const c = computeFixture()['2030'];
+  eq(c.cells['cc|2030-05'].kind, 'manual');
+  approx(c.cells['cc|2030-05'].v, -1234);
+});
+t('carry repeats the nearest earlier stored value', () => {
+  const c = computeFixture()['2030'];
+  approx(c.cells['internet|2030-04'].v, -50);
+  approx(c.cells['internet|2030-06'].v, -50);
+});
+t('same-month-last-year reaches into the prior year and rounds', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].monthCount = 12;   // reach October, 12 months after 2029-10
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(c.cells['electric|2030-10'].kind, 'auto');
+  approx(c.cells['electric|2030-10'].v, -80, 'ROUND(-80.4, 0)');
+  eq(c.cells['electric|2030-05'].kind, 'missing', 'no May 2029 to copy — stays blank');
+});
+t('a blank month inside the entered range counts as zero and is flagged', () => {
+  const c = computeFixture()['2030'];
+  eq(c.cells['dividends|2030-02'].kind, 'missing');
+  approx(c.cells['dividends|2030-02'].v, 0);
+});
+t('dividends read last month’s cash + mid balances at rate/12', () => {
+  const c = computeFixture()['2030'];
+  // March balances: cash = 10000+2000+2000-900-1100-50-500 (midt) +3000-1000 = 13450
+  //                 mid  = 1000 + 500 = 1500
+  approx(c.balances['cash|2030-03'], 13450);
+  approx(c.balances['mid|2030-03'], 1500);
+  approx(c.cells['dividends|2030-04'].v, H.round2(0.03 / 12 * (12345 + 1500)) ,
+    'April divs read the PINNED April cash? No — March', 100);
+  approx(c.cells['dividends|2030-04'].v, H.round2(0.03 / 12 * (13450 + 1500)));
+});
+
+group('Formula engine — balances');
+t('the four-account chain matches the spreadsheet formulas', () => {
+  const c = computeFixture()['2030'];
+  approx(c.balances['bank|2030-04'], 325, 'bank + zelle');
+  approx(c.balances['mid|2030-02'], 1500, 'mid grows by the negative transfer');
+  // long April: (long Mar − 0) × (1 + .07/12) + charitable(-60)
+  const longMar = c.balances['long|2030-03'];
+  approx(c.balances['long|2030-04'], H.round2(longMar * (1 + 0.07 / 12) - 60), '', 0.02);
+});
+t('a balance override pins that month and later months chain from it', () => {
+  const c = computeFixture()['2030'];
+  approx(c.balances['cash|2030-04'], 12345, 'pinned');
+  eq(c.balanceKinds['cash|2030-04'], 'pinned');
+  const aprFlows = c.cells['paycheck|2030-05'].v + c.cells['dividends|2030-05'].v
+    + c.cells['cc|2030-05'].v + c.cells['internet|2030-05'].v;
+  approx(c.balances['cash|2030-05'], H.round2(12345 + aprFlows), 'May chains from the pin', 0.02);
+});
+t('total is the sum of the four accounts', () => {
+  const c = computeFixture()['2030'];
+  const m = '2030-03';
+  approx(c.balances[`total|${m}`],
+    H.round2(c.balances[`cash|${m}`] + c.balances[`mid|${m}`]
+      + c.balances[`long|${m}`] + c.balances[`bank|${m}`]));
+});
+
+group('Goals');
+t('each source maps to its balance, with caps and overflow', () => {
+  const s = H.coerceShape(fixtureState());
+  const computed = H.computeAll(s, TODAY_FIX);
+  const goals = H.computeGoals(s, computed, TODAY_FIX);
+  const c = computed['2030'];
+  const cur = '2030-04';
+  eq(goals[0].saved, 5000, 'cashBank capped at target');
+  eq(goals[1].saved, 1200, 'mid capped at its target');
+  approx(goals[2].saved, c.balances[`mid|${cur}`] - 1200, 'overflow above the cap');
+  approx(goals[3].saved, c.balances[`long|${cur}`], 'long uncapped');
+});
+t('monthly requirement divides the gap by the months left', () => {
+  const s = H.coerceShape(fixtureState());
+  const goals = H.computeGoals(s, H.computeAll(s, TODAY_FIX), TODAY_FIX);
+  eq(goals[0].monthsLeft, 8, 'Apr 2030 → Dec 2030');
+  approx(goals[0].monthlyReq, 0, 'already at target');
+});
+
+/* ── Local-only real-data cross-check ─────────────────────────────────────────
+   Fetches the two gitignored import files. On this Mac, with a fresh import
+   run, it diffs the JS engine against the spreadsheet's own cached values.
+   Anywhere else (CI, the public site) the fetch 404s and the group SKIPS —
+   green, because absence is the expected state there. */
+group('Real data (local only)');
+t('engine matches the spreadsheet where the import files exist', () => {
+  if (!window.__realData) { return; }   // resolved before run() below
+  const { data, expected } = window.__realData;
+  const st = H.coerceShape(data);
+  const computed = H.computeAll(st, new Date().toISOString().slice(0, 10));
+  const liveKey = Object.keys(computed).sort().pop();
+  const c = computed[liveKey];
+  const bad = [];
+  for (const [key, exp] of Object.entries(expected.cells)) {
+    const got = c.cells[key];
+    if (!got || Math.abs(got.v - exp.v) > 0.01)
+      bad.push(`${key}: engine ${got ? got.v : 'missing'} vs sheet ${exp.v} (=${exp.f})`);
+  }
+  for (const [key, exp] of Object.entries(expected.balances)) {
+    const got = c.balances[key];
+    if (got === undefined || Math.abs(got - exp.v) > 1)
+      bad.push(`${key}: engine ${got} vs sheet ${exp.v} (=${exp.f})`);
+  }
+  if (bad.length) throw new Error(bad.slice(0, 8).join('\n') +
+    (bad.length > 8 ? `\n…and ${bad.length - 8} more` : ''));
+});
+
 /* ── Runner ───────────────────────────────────────────────────────────────── */
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  /* The real-data files are gitignored; a 404 here is the normal state in CI
+     and on the public site, and the cross-check test skips itself. */
+  try {
+    const [d, e] = await Promise.all([
+      fetch('financial-plan-data.json'), fetch('expected-2026.json')]);
+    if (d.ok && e.ok)
+      window.__realData = { data: await d.json(), expected: await e.json() };
+  } catch (_) { /* no local files — skip */ }
+
   const frame = document.getElementById('app');
   const start = () => setTimeout(run, 150); // let the app's boot script finish
   if (frame.contentDocument && frame.contentDocument.readyState === 'complete'
