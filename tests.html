@@ -282,6 +282,32 @@ t('monthly requirement divides the gap by the months left', () => {
   approx(goals[0].monthlyReq, 0, 'already at target');
 });
 
+group('Year rollover');
+t('rollover copies rules, keeps overlap manuals, seeds December balances', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].monthCount = 18;   // grid reaches into 2031 like the real sheet
+  s.years['2030'].cells['cc|2031-02'] = { v: -777, kind: 'manual' };
+  s.years['2030'].paychecks['2031-03'] = 3;
+  const computed = H.computeAll(s, TODAY_FIX);
+  const created = H.rolloverYear(s, computed, '2030');
+  eq(created, '2031');
+  const ny = s.years['2031'];
+  eq(ny.model, 'live');
+  eq(ny.monthCount, 12);
+  eq(ny.enteredThrough, '2030-12', 'nothing entered yet');
+  eq(ny.categories.length, s.years['2030'].categories.length);
+  eq(ny.cells['cc|2031-02'].v, -777, 'overlap manual came along');
+  eq(ny.paychecks['2031-03'], 3);
+  approx(ny.seeds.cash, computed['2030'].balances['cash|2030-12'], 'seeded from Dec');
+  eq(H.rolloverYear(s, computed, '2030'), null, 'no double rollover');
+});
+t('the old year is untouched by a rollover', () => {
+  const s = H.coerceShape(fixtureState());
+  const before = JSON.stringify(s.years['2030']);
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  eq(JSON.stringify(s.years['2030']), before);
+});
+
 /* ── Local-only real-data cross-check ─────────────────────────────────────────
    Fetches the two gitignored import files. On this Mac, with a fresh import
    run, it diffs the JS engine against the spreadsheet's own cached values.

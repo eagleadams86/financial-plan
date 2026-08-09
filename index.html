@@ -953,6 +953,10 @@ function gridCard(y, yr) {
       ${canReopen ? `<button class="btn small" id="reopenMonthBtn"
         title="Move the entered-through marker back a month (your numbers stay put)">
         ↩ Re-open ${esc(monthLabel(yr.enteredThrough))}</button>` : ''}
+      ${y === latestGridYear() && !state.years[String(+y + 1)]
+        ? `<button class="btn small" id="rolloverBtn"
+            title="Create the ${esc(String(+y + 1))} grid — like duplicating the sheet in Numbers">
+            ⊕ Start ${esc(String(+y + 1))}</button>` : ''}
     </div>`;
 
   return `<div class="card">
@@ -1351,8 +1355,151 @@ function renderGiving() {
   </div>` + years.map(donTable).join('');
 }
 
-/* ═══════════════════════════ History view (charts land in M7) ═════════════ */
-function renderHistory()    { return `<div class="card"><div class="empty"><h2>History</h2><p>Coming together…</p></div></div>`; }
+/* ═══════════════════════════ History view ═════════════════════════════════ */
+
+/* Money in vs money out per year. Flows only — rows the import flagged as
+   balances stay out. Transfers between accounts are still flows here, so
+   this reads as "cash through the checking account", not pure income/spend. */
+function yearFlows(y) {
+  const yr = state.years[y];
+  let inn = 0, out = 0;
+  if (yr.kind === 'summary') {
+    for (const item of yr.categoryTotals) {
+      if (item.isBalance) continue;
+      if (item.total > 0) inn += item.total; else out += item.total;
+    }
+  } else {
+    const balIds = new Set(yr.categories.filter(c => c.isBalance).map(c => c.id));
+    for (const [key, cell] of Object.entries(yr.cells)) {
+      const [cid, m] = key.split('|');
+      if (balIds.has(cid) || !m.startsWith(y)) continue;
+      if (cell.v > 0) inn += cell.v; else out += cell.v;
+    }
+  }
+  return { in: round2(inn), out: round2(Math.abs(out)) };
+}
+
+function renderHistory() {
+  const eoyYears = yearKeys().filter(y => state.years[y].eoyCash !== undefined);
+  const liveKey = latestGridYear();
+  return `<div class="card">
+    <h2>Total liquidity, year by year</h2>
+    <p class="sub">End-of-year totals since 2011 — the long walk from ${
+      eoyYears.length ? fmtMoney0(state.years[eoyYears[0]].eoyCash) : ''} to today,
+      with the plan's projection dashed at the end.</p>
+    <div class="chartbox" style="height:300px"><canvas id="eoyChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Money in vs money out</h2>
+    <p class="sub">All account flows per year, transfers included — striped bars are money out.
+      Early years are best-effort reads of the old bi-weekly sheets.</p>
+    <div class="chartbox" style="height:300px"><canvas id="flowChart"></canvas></div>
+  </div>`;
+}
+
+function buildHistoryCharts() {
+  const liveKey = latestGridYear();
+  const pts = [];
+  for (const y of yearKeys()) {
+    if (state.years[y].eoyCash !== undefined)
+      pts.push({ y, v: state.years[y].eoyCash, est: false });
+  }
+  if (liveKey && C[liveKey]) {
+    const c = C[liveKey];
+    for (const yy of [liveKey, String(+liveKey + 1)]) {
+      const v = c.balances[`total|${yy}-12`];
+      if (v !== undefined) pts.push({ y: yy, v, est: true });
+    }
+  }
+  const accent = cssVar('--accent');
+  newChart('eoyChart', {
+    type: 'line',
+    data: { labels: pts.map(p => p.y), datasets: [{
+      label: 'End-of-year total',
+      data: pts.map(p => p.v),
+      borderColor: accent, backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 3, pointBackgroundColor: accent, tension: .2,
+      /* the projected tail is dashed so an estimate never reads as history */
+      segment: { borderDash: (ctx) => pts[ctx.p1DataIndex]?.est ? [6, 4] : undefined },
+      pointStyle: pts.map(p => p.est ? 'rectRot' : 'circle'),
+    }]},
+    options: {
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (t) =>
+          fmtMoney0(t.parsed.y) + (pts[t.dataIndex].est ? ' (projected)' : '') } } },
+      scales: { x: chartAxes(), y: Object.assign(chartAxes(),
+        { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
+    },
+  });
+
+  const flowYears = yearKeys();
+  const flows = flowYears.map(yearFlows);
+  /* stripes carry the in/out distinction alongside the colour (the family
+     rule: never hue alone) — full-strength colour over the tint */
+  const stripes = (color, tint) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 8;
+    const g = c.getContext('2d');
+    g.fillStyle = tint; g.fillRect(0, 0, 8, 8);
+    g.strokeStyle = color; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(-2, 6); g.lineTo(6, -2);
+    g.moveTo(2, 10); g.lineTo(10, 2); g.stroke();
+    return (typeof Chart !== 'undefined') ? g.createPattern(c, 'repeat') : tint;
+  };
+  newChart('flowChart', {
+    type: 'bar',
+    data: { labels: flowYears, datasets: [
+      { label: 'Money in', data: flows.map(f => f.in),
+        backgroundColor: cssVar('--ok-bg'), borderColor: cssVar('--ok'),
+        borderWidth: 2, borderSkipped: false },
+      { label: 'Money out', data: flows.map(f => f.out),
+        backgroundColor: stripes(cssVar('--err'), cssVar('--err-bg')),
+        borderColor: cssVar('--err'), borderWidth: 2, borderSkipped: false },
+    ]},
+    options: {
+      plugins: { legend: { labels: { color: cssVar('--chart-tick') } },
+        tooltip: { callbacks: { label: (t) => `${t.dataset.label}: ${fmtMoney0(t.parsed.y)}` } } },
+      scales: { x: chartAxes(), y: Object.assign(chartAxes(),
+        { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
+    },
+  });
+}
+
+/* ═══════════════════════════ Year rollover ════════════════════════════════ */
+
+/* "Start <next year>" — the app's version of duplicating the sheet in
+   Numbers. The old year keeps its grid untouched; the new one carries the
+   categories and rules forward, keeps any hand-typed estimates from the
+   overlap months, and seeds its balances from the old year's computed
+   December. Pure state-in, state-out so tests can pin it. */
+function rolloverYear(st, computed, fromKey) {
+  const src = st.years[fromKey];
+  const newKey = String(+fromKey + 1);
+  if (st.years[newKey]) return null;
+  const start = `${newKey}-01`;
+  const months12 = Array.from({ length: 12 }, (_, i) => monthAdd(start, i));
+  const cells = {}, paychecks = {};
+  for (const m of months12) {
+    for (const cat of src.categories) {
+      const old = src.cells[`${cat.id}|${m}`];
+      if (old && old.kind === 'manual') cells[`${cat.id}|${m}`] = { ...old };
+    }
+    if (src.paychecks[m] !== undefined) paychecks[m] = src.paychecks[m];
+  }
+  const dec = `${fromKey}-12`;
+  const c = computed[fromKey];
+  const seeds = {};
+  for (const bid of ['cash', 'mid', 'long', 'bank'])
+    seeds[bid] = round2(c?.balances[`${bid}|${dec}`] || 0);
+  st.years[newKey] = {
+    kind: 'grid', model: 'live',
+    startMonth: start, monthCount: 12,
+    enteredThrough: monthAdd(start, -1),
+    categories: src.categories.map(cat => ({ ...cat })),
+    cells, paychecks, seeds, overrides: {}, extraNotes: [],
+  };
+  return newKey;
+}
 
 function wireView(view) {
   const btn = F('welcomeRestoreBtn');
@@ -1365,6 +1512,7 @@ function wireView(view) {
   if (view === 'budget') wireBudget();
   if (view === 'goals') buildGoalChart();
   if (view === 'retirement') buildRothChart();
+  if (view === 'history') buildHistoryCharts();
 }
 
 /* ── Charts ─────────────────────────────────────────────────────────────────
@@ -1464,6 +1612,21 @@ function wireBudget() {
   if (closeBtn) closeBtn.onclick = markMonthEntered;
   const reopenBtn = F('reopenMonthBtn');
   if (reopenBtn) reopenBtn.onclick = reopenMonth;
+  const rollBtn = F('rolloverBtn');
+  if (rollBtn) rollBtn.onclick = () => {
+    const from = latestGridYear();
+    const next = String(+from + 1);
+    if (!confirm(`Start the ${next} budget? It copies the ${from} categories and rules, `
+      + `keeps your hand-typed ${next} estimates from the ${from} grid, and opens with `
+      + `balances seeded from ${from}'s projected December. ${from} stays exactly as it is.`))
+      return;
+    const created = rolloverYear(state, C, from);
+    if (created) {
+      state.ui.activeYear = created;
+      save(); render();
+      toast(`${created} is ready — check the seeded balances`);
+    }
+  };
 }
 
 function openCellEditor(yearKey, type, id, m) {
@@ -1707,7 +1870,7 @@ render();
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { round2, fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  currentMonthOf, yearMonthsOf: yearMonths };
+  currentMonthOf, rolloverYear, yearMonthsOf: yearMonths };
 </script>
 
 <script>
