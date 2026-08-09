@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="midnight">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Money Map — tests</title>
+<link rel="stylesheet" href="theme.css">
+<style>
+  /* Dev-only page: pins the pure functions in index.html. It loads the real app
+     in a hidden same-origin iframe and calls its functions directly, so what's
+     tested is exactly what ships — no copies, no build step. Serve over
+     http://localhost (python3 -m http.server 8016); file:// iframes are blocked
+     in some browsers. Nothing here writes localStorage or calls save().
+     Every fixture is SYNTHETIC — invented round numbers, never real data. The
+     one exception is the local-only block at the end, which fetches the
+     gitignored import JSONs when they exist on this machine and silently
+     skips when they don't (which is always, in CI and on the public site). */
+  body { background: var(--bg); color: var(--text-primary); margin: 0;
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 60px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--text-muted); font-size: 12.5px; margin: 0 0 18px; }
+  #summary { font-weight: 600; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px;
+             border: 1px solid var(--border); background: var(--surface); }
+  #summary.ok  { color: var(--ok);  border-color: var(--ok); }
+  #summary.bad { color: var(--err); border-color: var(--err); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  td.st { width: 28px; font-weight: 700; }
+  tr.pass td.st { color: var(--ok); }
+  tr.fail td.st { color: var(--err); }
+  tr.fail td.msg { color: var(--err); }
+  .msg { color: var(--text-muted); font-size: 12px; white-space: pre-wrap; }
+  .group td { padding-top: 16px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+              text-transform: uppercase; color: var(--text-muted); border-bottom-color: var(--border-strong); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Money Map — pure-function tests</h1>
+  <p class="sub">Runs against the real <code>index.html</code> in a hidden iframe. Read-only: nothing is saved.</p>
+  <div id="summary">Loading app…</div>
+  <table><tbody id="out"></tbody></table>
+</div>
+<iframe id="app" src="index.html" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" title="app under test"></iframe>
+
+<script>
+'use strict';
+const TESTS = [];
+function group(name) { TESTS.push({ group: name }); }
+function t(name, fn) { TESTS.push({ name, fn }); }
+
+function fmt(v) { return JSON.stringify(v); }
+function eq(actual, expected, note) {
+  const a = JSON.stringify(actual), e = JSON.stringify(expected);
+  if (a !== e) throw new Error((note ? note + ': ' : '') + 'expected ' + e + ', got ' + a);
+}
+function approx(actual, expected, note, eps) {
+  if (typeof actual !== 'number' || Math.abs(actual - expected) > (eps ?? 0.005))
+    throw new Error((note ? note + ': ' : '') + 'expected ≈' + expected + ', got ' + fmt(actual));
+}
+function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy'); }
+
+let w, H;   // app window + its __finTestHooks
+
+/* ── Date helpers ─────────────────────────────────────────────────────────── */
+group('Date helpers');
+t('monthAdd walks forward across a year end', () => {
+  eq(H.monthAdd('2026-11', 1), '2026-12');
+  eq(H.monthAdd('2026-12', 1), '2027-01');
+  eq(H.monthAdd('2026-01', 23), '2027-12');
+});
+t('monthAdd walks backward across a year start', () => {
+  eq(H.monthAdd('2026-01', -1), '2025-12');
+  eq(H.monthAdd('2026-03', -12), '2025-03');
+});
+t('monthDiff is the signed distance in months', () => {
+  eq(H.monthDiff('2026-01', '2026-07'), 6);
+  eq(H.monthDiff('2026-07', '2026-01'), -6);
+  eq(H.monthDiff('2025-11', '2026-02'), 3);
+});
+t('monthLabel renders a short month + 2-digit year', () => {
+  eq(H.monthLabel('2026-01'), 'Jan 26');
+  eq(H.monthLabel('2027-12'), 'Dec 27');
+});
+
+/* ── Money ────────────────────────────────────────────────────────────────── */
+group('Money');
+t('round2 rounds to cents and survives float dust', () => {
+  eq(H.round2(1.005), 1.01);
+  eq(H.round2(-79.98999999999999), -79.99);
+  eq(H.round2(0.1 + 0.2), 0.3);
+});
+t('fmtMoney renders US dollars', () => {
+  eq(H.fmtMoney(1234.5), '$1,234.50');
+  eq(H.fmtMoney(-42), '-$42.00');
+});
+
+/* ── State boundary ───────────────────────────────────────────────────────── */
+group('State boundary');
+t('coerceShape forces every collection to the right type', () => {
+  const d = H.coerceShape({ years: 'junk', goals: 'nope', side: 7, vacations: null });
+  eq(typeof d.years, 'object');
+  eq(Array.isArray(d.goals), true);
+  eq(Array.isArray(d.side.taxable), true);
+  eq(Array.isArray(d.vacations.trips), true);
+});
+t('coerceShape repairs a damaged grid year without dropping it', () => {
+  const d = H.coerceShape({ years: { '2026': { kind: 'grid', cells: 'junk', monthCount: 999 } } });
+  const y = d.years['2026'];
+  eq(typeof y.cells, 'object');
+  eq(y.monthCount, 36, 'month count clamps');
+  eq(y.startMonth, '2026-01', 'missing start month defaults to January');
+});
+t('an unknown year kind falls back to summary', () => {
+  const d = H.coerceShape({ years: { '2014': { kind: 'wat' } } });
+  eq(d.years['2014'].kind, 'summary');
+  eq(Array.isArray(d.years['2014'].categoryTotals), true);
+});
+t('migrate passes schema 1 through untouched', () => {
+  const s = H.blankState();
+  eq(H.migrate(s), s);
+});
+t('blankState carries the spreadsheet constants', () => {
+  const s = H.blankState();
+  approx(s.settings.midTermRateAnnual, 0.03);
+  approx(s.settings.longTermRateAnnual, 0.07);
+  eq(s.settings.ptoAllowance, 32);
+});
+
+/* ── Runner ───────────────────────────────────────────────────────────────── */
+window.addEventListener('load', () => {
+  const frame = document.getElementById('app');
+  const start = () => setTimeout(run, 150); // let the app's boot script finish
+  if (frame.contentDocument && frame.contentDocument.readyState === 'complete'
+      && frame.contentWindow.__finTestHooks) start();
+  else frame.addEventListener('load', start, { once: true });
+});
+
+function run() {
+  w = document.getElementById('app').contentWindow;
+  H = w.__finTestHooks;
+  const out = document.getElementById('out');
+  let pass = 0, fail = 0;
+  for (const item of TESTS) {
+    if (item.group) {
+      const tr = document.createElement('tr');
+      tr.className = 'group';
+      tr.innerHTML = '<td colspan="3"></td>';
+      tr.firstChild.textContent = item.group;
+      out.appendChild(tr);
+      continue;
+    }
+    const tr = document.createElement('tr');
+    const st = document.createElement('td'); st.className = 'st';
+    const name = document.createElement('td'); name.textContent = item.name;
+    const msg = document.createElement('td'); msg.className = 'msg';
+    try {
+      item.fn();
+      tr.className = 'pass'; st.textContent = '✓'; pass++;
+    } catch (e) {
+      tr.className = 'fail'; st.textContent = '✕'; msg.textContent = e.message; fail++;
+    }
+    tr.appendChild(st); tr.appendChild(name); tr.appendChild(msg);
+    out.appendChild(tr);
+  }
+  const s = document.getElementById('summary');
+  s.textContent = fail === 0 ? `All ${pass} tests pass` : `${fail} of ${pass + fail} tests FAILED`;
+  s.className = fail === 0 ? 'ok' : 'bad';
+  document.title = (fail === 0 ? '✓ ' : '✕ ') + document.title;
+}
+</script>
+</body>
+</html>

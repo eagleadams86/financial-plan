@@ -1,0 +1,48 @@
+# Runs tests.html on every push — the suite that pins the pure functions in
+# index.html. There is no build step, so CI is exactly what a person does:
+# serve the folder, open the page in a real browser, read the summary line.
+# The job fails if the summary goes red or the page throws.
+# Ported from Flow Metrics (team-dashboard).
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright
+          npx playwright install --with-deps chromium
+
+      - name: Run tests.html headless
+        run: |
+          python3 -m http.server 8016 &
+          # Written next to node_modules so `import 'playwright'` resolves.
+          cat > ci-run-tests.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch();
+          const page = await browser.newPage();
+          const errors = [];
+          page.on('pageerror', (e) => errors.push(String(e)));
+          await page.goto('http://localhost:8016/tests.html');
+          await page.waitForFunction(
+            () => !/^Loading/.test(document.getElementById('summary').textContent),
+            null, { timeout: 60000 });
+          const summary = await page.evaluate(() => document.getElementById('summary').textContent);
+          const failedNames = await page.evaluate(() =>
+            [...document.querySelectorAll('tr.fail, li.bad')].map((el) => el.textContent.trim()));
+          console.log(summary);
+          for (const f of failedNames) console.log('FAIL:', f);
+          for (const e of errors) console.log('PAGE ERROR:', e);
+          await browser.close();
+          if (failedNames.length || errors.length || !/^All \d+ tests pass/.test(summary)) process.exit(1);
+          EOF
+          node ci-run-tests.mjs
