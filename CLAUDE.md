@@ -44,10 +44,14 @@ numbers only. If a change needs a realistic payload, invent one.
   `missing` (blank, counts as 0), `pinned` (balance stated outright).
 - Estimate rules are table-driven in `RULES`: `carry` (Internet only — the
   sheet types Phone/Parking/Water into each month they apply, so a carry rule
-  there would invent charges), `avg` (Credit Card, Venmo — mean of stored
-  months before the estimate), `samemonth` (Electric, ROUND, reaches into the
-  prior year's grid), `dividends` (rate/12 × prior cash+mid), `paycheck`
-  (perCheck × count, incl. fractional counts), `none`.
+  there would invent charges), `quarterly` (repeat on a cycle, `cat.every`
+  months, default 3), `avg` (Credit Card, Venmo — mean of stored months
+  before the estimate), `samemonth` (Electric, ROUND, reaches into the prior
+  year's grid), `dividends` (per-row `cat.rate`, falling back to
+  `settings.midTermRateAnnual` — rate/12 × prior cash+mid), `paycheck`
+  (perCheck × count, incl. fractional counts), `none`. `ruleDesc()` renders a
+  rule with its row's own numbers — use it, not RULE_LABEL, wherever a rule
+  is named next to a specific row.
 - Balance chain (live year only): cash += all flows except charitable+zelle;
   mid −= mid transfers; long = (long − transfers) × (1 + 7%/12) + charitable;
   bank −= bank transfers − (−zelle). Overrides pin a month; later months
@@ -87,6 +91,14 @@ its money is ordinary cash-out). Account display names live in
 ticker names and the 7% Investments rate). The engine applies rate/12 to
 each account monthly — at the defaults this is byte-identical to the
 spreadsheet, and the real-data cross-check pins that. Row reorder moves within a section.
+Retirement accounts are a generic list (`side.retirementAccounts`, each
+Traditional or Roth); the old fixed `k401` fields migrate once in
+`coerceShape` and the source is emptied so deletions can't resurrect them.
+App-wide preferences (currency code — validated against
+`Intl.supportedValuesOf('currency')`, since Intl renders unknown codes
+literally rather than throwing — and the PTO default) live behind the
+header's ⚙ button; `buildMoneyFormats()` rebuilds the formatters on every
+render.
 
 ## Sync
 

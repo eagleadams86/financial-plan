@@ -327,6 +327,40 @@ t('quarterly rule repeats on the 3-month beat and stays blank between', () => {
   approx(c.cells['water|2030-06'].v, -56, 'three months after: repeats');
   eq(c.cells['water|2030-06'].kind, 'auto');
 });
+t('the cycle length is configurable per row', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].categories.push({ id: 'ins', name: 'Insurance', role: 'normal',
+    rule: 'quarterly', every: 2, section: 'expense' });
+  s.years['2030'].cells['ins|2030-02'] = { v: -90, kind: 'actual' };
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(c.cells['ins|2030-05'].kind, 'missing', 'odd month: blank');
+  approx(c.cells['ins|2030-04'].v, -90, 'two months after: repeats');
+  approx(c.cells['ins|2030-06'].v, -90, 'four months after: repeats');
+});
+t('the interest rule takes a per-row rate, falling back to the old setting', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].categories.push({ id: 'divs2', name: 'HYSA interest',
+    role: 'normal', rule: 'dividends', rate: 0.12, section: 'income' });
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const base = c.balances['cash|2030-03'] + c.balances['mid|2030-03'];
+  approx(c.cells['divs2|2030-04'].v, H.round2(0.12 / 12 * base), 'row rate wins', 0.02);
+  approx(c.cells['dividends|2030-04'].v, H.round2(0.03 / 12 * base),
+    'a row without its own rate keeps the old 3%', 0.02);
+});
+t('the six old 401k fields migrate into the generic account list once', () => {
+  const d = H.coerceShape({ side: { k401: { pretax: 100, raa: 50, rollover: 200,
+    match: 25, roth: 80, rothIra: 40 } } });
+  const a = d.side.retirementAccounts;
+  eq(a.length, 6);
+  eq(a[0].name, '401k pre-tax');
+  eq(a[0].kind, 'traditional');
+  eq(a[4].kind, 'roth');
+  eq(Object.keys(d.side.k401).length, 0, 'source emptied so it cannot re-migrate');
+  // deleting everything must not resurrect the old figures
+  const again = H.coerceShape(JSON.parse(JSON.stringify(
+    Object.assign(d, { side: Object.assign(d.side, { retirementAccounts: [] }) }))));
+  eq(again.side.retirementAccounts.length, 0);
+});
 
 group('Year rollover');
 t('rollover copies rules, keeps overlap manuals, seeds December balances', () => {

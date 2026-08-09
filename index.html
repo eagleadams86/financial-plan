@@ -385,6 +385,7 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
       <option value="midnight" selected>✦ Midnight</option>
       <option value="sepia">📜 Sepia</option>
     </select>
+    <button class="btn small" id="prefsBtn" title="Preferences — currency and defaults">⚙</button>
     <button class="btn small" id="dataBtn" title="Back up or restore your data">Back up</button>
     <!-- Ships visible and signed-out at its final width (min-width in CSS), so
          the header doesn't reflow when the Firebase SDK arrives; the module
@@ -561,8 +562,23 @@ const thisMonth = () => todayISO().slice(0, 7);
    values is an epsilon comparison either way (pinned in tests.html). */
 const round2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
 
-const moneyFmt  = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-const moneyFmt0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+/* Currency comes from settings (Preferences dialog) and defaults to USD; the
+   formatters rebuild whenever it changes. An unknown code falls back rather
+   than leaving every number unrenderable. */
+let moneyFmt, moneyFmt0;
+function buildMoneyFormats(code) {
+  const cur = code || 'USD';
+  try {
+    moneyFmt  = new Intl.NumberFormat('en-US', { style: 'currency', currency: cur });
+    moneyFmt0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: cur,
+      maximumFractionDigits: 0 });
+  } catch (e) {
+    moneyFmt  = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+    moneyFmt0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD',
+      maximumFractionDigits: 0 });
+  }
+}
+buildMoneyFormats('USD');
 const fmtMoney  = (v) => moneyFmt.format(v);
 const fmtMoney0 = (v) => moneyFmt0.format(v);
 
@@ -591,7 +607,8 @@ function blankState() {
       /* Annual growth applied to each account's balance, rate/12 per month.
          Investments defaults to the spreadsheet's 7%/yr; everything else
          starts flat. Set per account by clicking its row in the grid. */
-      accountRates: { cash: 0, mid: 0, long: 0.07, bank: 0 }
+      accountRates: { cash: 0, mid: 0, long: 0.07, bank: 0 },
+      currency: 'USD'   // ISO code; the ⚙ Preferences dialog edits it
     },
     years: {},        // "YYYY" → grid year or summary year (see import_xlsx.py)
     goals: [],
@@ -660,7 +677,24 @@ function coerceShape(data) {
   d.goals = arr(d.goals);
   d.side = obj(d.side);
   const s = d.side;
-  for (const k of ['taxable', 'otherMoney', 'hsa', 'daf']) s[k] = arr(s[k]);
+  for (const k of ['taxable', 'otherMoney', 'hsa', 'daf',
+                   'retirementAccounts']) s[k] = arr(s[k]);
+  /* Retirement accounts used to be six fixed fields (k401) with labels from
+     Charlie's employer. They're a generic list now — any number of accounts,
+     each Traditional or Roth. One-time migration; k401 is emptied so deleting
+     every row later can't resurrect it. */
+  if (!s.retirementAccounts.length && s.k401
+      && Object.values(obj(s.k401)).some(v => v)) {
+    const map = [['pretax', '401k pre-tax', 'traditional'],
+                 ['raa', '401k RAA', 'traditional'],
+                 ['rollover', '401k rollover', 'traditional'],
+                 ['match', '401k match', 'traditional'],
+                 ['roth', '401k Roth', 'roth'],
+                 ['rothIra', 'Roth IRA', 'roth']];
+    for (const [k, name, kind] of map)
+      if (s.k401[k]) s.retirementAccounts.push({ name, kind, amount: s.k401[k] });
+    s.k401 = {};
+  }
   for (const k of ['rothContribs', 'k401', 'comp', 'bonuses', 'retirement',
                    'rothLimit', 'donations', 'venmo', 'largePurchases']) s[k] = obj(s[k]);
   d.vacations = obj(d.vacations);
@@ -764,9 +798,12 @@ const RULES = {
     return null;
   },
 
-  /* Quarterly bills (water is the classic): repeat the last stored value in
-     the months that land on its 3-month beat, and stay blank in between. */
+  /* Cycle bills (a quarterly water bill, semi-annual insurance, an annual
+     subscription): repeat the last stored value in the months that land on
+     the row's beat — every 3 months unless the row says otherwise — and
+     stay blank in between. */
   quarterly(cat, m, ctx) {
+    const interval = Math.max(1, Math.round(cat.every || 3));
     let lastV = null, lastM = null;
     for (const mm of ctx.months) {
       if (mm >= m) break;
@@ -774,7 +811,7 @@ const RULES = {
       if (cell) { lastV = cell.v; lastM = mm; }
     }
     if (lastM === null) return null;
-    return monthDiff(lastM, m) % 3 === 0 ? lastV : null;
+    return monthDiff(lastM, m) % interval === 0 ? lastV : null;
   },
 
   /* Credit Card, Venmo: mean of every stored month so far. Matches the
@@ -803,12 +840,14 @@ const RULES = {
     return Math.round(cell.v);
   },
 
-  /* Dividends: monthly interest on last month's cash + mid-term balances. */
+  /* Dividends: monthly interest on last month's cash + savings balances,
+     at the row's own rate (falling back to the old global setting). */
   dividends(cat, m, ctx) {
     const prev = monthAdd(m, -1);
     const cash = ctx.balances[`cash|${prev}`], mid = ctx.balances[`mid|${prev}`];
     if (cash === undefined) return null;
-    return ctx.st.settings.midTermRateAnnual / 12 * ((cash || 0) + (mid || 0));
+    const rate = cat.rate ?? ctx.st.settings.midTermRateAnnual ?? 0;
+    return rate / 12 * ((cash || 0) + (mid || 0));
   },
 
   /* Paycheck: per-check amount × that month's paycheck count. */
@@ -974,6 +1013,7 @@ function render() {
     tab.tabIndex = sel ? 0 : -1;
   });
   F('views').setAttribute('aria-labelledby', `tab-${view}`);
+  buildMoneyFormats(state.settings.currency);
   const target = F('views');
   if (!hasData()) { target.innerHTML = welcomeCard(); return; }
   C = computeAll(state, todayISO());
@@ -1120,7 +1160,7 @@ function gridCard(y, yr) {
 
   const catTh = (cat) => `<th class="lbl" scope="row" data-edit="category"
     data-year="${esc(y)}" data-id="${esc(cat.id)}" style="cursor:pointer"
-    title="${esc(cat.name)} — ${esc(RULE_LABEL[cat.rule] || RULE_LABEL.none)}${
+    title="${esc(cat.name)} — ${esc(ruleDesc(cat))}${
     cat.note ? ' · ' + esc(cat.note) : ''} — click to edit this row">${esc(cat.name)}</th>`;
 
   /* ── The grid is grouped: Income / Expenses / Transfers, each with a header
@@ -1237,12 +1277,25 @@ const KIND_LABEL = { actual: 'actual', manual: 'your estimate',
 const RULE_LABEL = {
   none: 'no rule — stays blank until you type',
   carry: 'repeats the last month',
-  quarterly: 'repeats every 3 months (quarterly bills)',
+  quarterly: 'repeats on a cycle (every few months)',
   avg: 'average of the months so far',
   samemonth: 'same month last year',
-  dividends: 'interest on cash + savings balances',
+  dividends: 'interest on Cash + Savings balances',
   paycheck: 'per-check amount × paychecks',
 };
+
+/* The label with the row's own numbers filled in — what the cell editor and
+   row tooltips show, so a rule is never a mystery. */
+function ruleDesc(cat) {
+  const r = cat.rule || 'none';
+  if (r === 'paycheck')
+    return `${fmtMoney(cat.perCheck || 0)} per check × that month's paychecks`;
+  if (r === 'quarterly')
+    return `repeats every ${Math.max(1, Math.round(cat.every || 3))} months`;
+  if (r === 'dividends')
+    return `${round2(((cat.rate ?? state.settings.midTermRateAnnual) || 0) * 100)}%/yr interest on Cash + Savings`;
+  return RULE_LABEL[r] || RULE_LABEL.none;
+}
 
 const SECTION_LABEL = { income: 'Income', expense: 'Expenses', transfer: 'Transfers' };
 
@@ -1342,7 +1395,7 @@ function renderGoals() {
     const paceGap = round2(growth / 12 - reno.monthlyReq);
     const behind = paceGap < 0;
     const gapMonths = Math.round(Math.abs(paceGap) * reno.monthsLeft / reno.monthlyReq);
-    paceHtml = `<p class="sub" style="margin-top:12px">Renovations pace check: on this year's
+    paceHtml = `<p class="sub" style="margin-top:12px">${esc(reno.name)} pace check: on this year's
       projected growth you're saving ${fmtMoney0(Math.abs(paceGap))}/mo
       ${behind ? 'less' : 'more'} than the goal needs —
       <span class="pill ${behind ? 'warn' : 'good'}">${behind ? '!' : '✓'} ${fmtYrMo(gapMonths)} ${behind ? 'behind' : 'ahead'}</span></p>`;
@@ -1450,13 +1503,15 @@ function renderRetirement() {
   const s = state.side;
   const year = latestGridYear() || String(new Date().getFullYear());
 
-  /* Traditional vs Roth */
-  const k = s.k401 || {};
-  const trad = round2((k.pretax || 0) + (k.raa || 0) + (k.rollover || 0) + (k.match || 0));
-  const roth = round2((k.roth || 0) + (k.rothIra || 0));
+  /* Traditional vs Roth, from the generic account list */
+  const accts = s.retirementAccounts || [];
+  const trad = round2(accts.filter(a => a.kind !== 'roth')
+    .reduce((t, a) => t + (a.amount || 0), 0));
+  const roth = round2(accts.filter(a => a.kind === 'roth')
+    .reduce((t, a) => t + (a.amount || 0), 0));
   const total = round2(trad + roth);
   const tradPct = total ? trad / total : 0;
-  const splitHtml = !total ? '' : `
+  const splitHtml = `${!total ? '' : `
     <div class="split" role="img"
       aria-label="Traditional ${(tradPct * 100).toFixed(0)} percent, Roth ${((1 - tradPct) * 100).toFixed(0)} percent">
       <i style="width:${(tradPct * 100).toFixed(1)}%"></i>
@@ -1465,19 +1520,16 @@ function renderRetirement() {
     <div class="splitlegend">
       <span><span class="sw"></span>Traditional ${fmtMoney0(trad)} (${(tradPct * 100).toFixed(0)}%)</span>
       <span><span class="sw b"></span>Roth ${fmtMoney0(roth)} (${((1 - tradPct) * 100).toFixed(0)}%)</span>
-    </div>
-    <div class="tablewrap" style="margin-top:12px"><table>
-      <tbody>
-        <tr><th scope="row">401k pre-tax</th><td>${fmtMoney(k.pretax || 0)}</td></tr>
-        <tr><th scope="row">401k RAA</th><td>${fmtMoney(k.raa || 0)}</td></tr>
-        <tr><th scope="row">401k rollover</th><td>${fmtMoney(k.rollover || 0)}</td></tr>
-        <tr><th scope="row">401k match</th><td>${fmtMoney(k.match || 0)}</td></tr>
-        <tr><th scope="row">401k Roth</th><td>${fmtMoney(k.roth || 0)}</td></tr>
-        <tr><th scope="row">Roth IRA</th><td>${fmtMoney(k.rothIra || 0)}</td></tr>
-      </tbody>
-      <tfoot><tr><th>Total</th><td>${fmtMoney(total)}</td></tr></tfoot>
-    </table></div>
-    <div class="addbar"><button class="btn small" data-edit="k401">✎ Edit figures</button></div>`;
+    </div>`}
+    ${accts.length ? `<div class="tablewrap" style="margin-top:12px"><table>
+      <thead><tr><th style="text-align:left">Account</th><th style="text-align:left">Tax treatment</th><th>Balance</th></tr></thead>
+      <tbody>${accts.map((a, idx) => `<tr class="editrow" data-edit="retAcct" data-idx="${idx}">
+        <th scope="row">${esc(a.name)}</th>
+        <td style="text-align:left">${a.kind === 'roth' ? 'Roth' : 'Traditional'}</td>
+        <td>${fmtMoney(a.amount || 0)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th>Total</th><td></td><td>${fmtMoney(total)}</td></tr></tfoot>
+    </table></div>` : '<p class="sub">Nothing recorded.</p>'}
+    <div class="addbar"><button class="btn small" data-add="retAcct">＋ Add account</button></div>`;
 
   /* Comp */
   const comp = (s.comp || {})[year];
@@ -1514,9 +1566,8 @@ function renderRetirement() {
   return `<div class="cards2">
     <div class="card">
       <h2>Traditional vs Roth</h2>
-      <p class="sub">Across the 401k and the Roth IRA.</p>
-      ${splitHtml || `<p class="sub">Nothing recorded.</p>
-        <div class="addbar"><button class="btn small" data-edit="k401">✎ Enter the figures</button></div>`}
+      <p class="sub">Your retirement accounts, split by tax treatment. Click a row to edit.</p>
+      ${splitHtml}
     </div>
     <div class="card">
       <h2>Roth IRA contributions</h2>
@@ -1668,9 +1719,9 @@ function renderGiving() {
   };
 
   return `<div class="card">
-    <h2>Fidelity Charitable giving fund</h2>
-    <p class="sub">DAF grants come out of this balance — already donated for tax purposes,
-      waiting to be granted to a cause.</p>
+    <h2>Giving fund</h2>
+    <p class="sub">A donor-advised fund's holdings. Grants come out of this balance —
+      already donated for tax purposes, waiting to be granted to a cause.</p>
     ${holdingsTable(s.daf || [], 'daf')}
     ${years.length ? '' : `<div class="addbar"><button class="btn small" data-add="donation"
       data-year="${new Date().getFullYear()}">＋ Add the first donation</button></div>`}
@@ -2056,13 +2107,15 @@ const EDITORS = {
       { key: 'rule', label: 'Future months rule', type: 'select', options: [
         ['none', 'Blank (type estimates by hand)'],
         ['carry', 'Repeat the last month'],
-        ['quarterly', 'Repeat every 3 months (quarterly bills)'],
+        ['quarterly', 'Repeat on a cycle (every N months)'],
         ['avg', 'Average of the months so far'],
         ['samemonth', 'Same month last year'],
         ['dividends', 'Interest on Cash + Savings balances'],
         ['paycheck', 'Per-check amount × paychecks'],
       ]},
       { key: 'perCheck', label: 'Per-check amount (paycheck rule)', type: 'money' },
+      { key: 'every', label: 'Months between payments (cycle rule)', type: 'number', step: 1 },
+      { key: 'rate', label: 'Interest %/yr (interest rule)', type: 'percent' },
       { key: 'role', label: 'Behaves as', type: 'select', options: [
         ['normal', 'Ordinary Cash money — the usual'],
         ['bankTransfer', 'Transfer with the Other-bank account'],
@@ -2094,6 +2147,11 @@ const EDITORS = {
         cat.note = v.note || undefined;
         if (v.rule === 'paycheck') cat.perCheck = v.perCheck || 0;
         else delete cat.perCheck;
+        if (v.rule === 'quarterly' && v.every) cat.every = Math.max(1, Math.round(v.every));
+        else delete cat.every;
+        if (v.rule === 'dividends' && v.rate !== null && v.rate !== undefined)
+          cat.rate = v.rate;
+        else delete cat.rate;
       };
       if (ds.id) {
         apply(yr.categories.find(c => c.id === ds.id));
@@ -2123,6 +2181,37 @@ const EDITORS = {
       if (j < 0 || j >= yr.categories.length) return false;
       [yr.categories[i], yr.categories[j]] = [yr.categories[j], yr.categories[i]];
       return true;
+    },
+  },
+
+  /* App-wide preferences (the header's ⚙ button) */
+  prefs: {
+    title: 'Preferences',
+    sub: () => 'Currency is the 3-letter code (USD, EUR, GBP, CAD…) — it changes how '
+      + 'numbers display, not their values. PTO days seed new holiday-planner years.',
+    fields: [
+      { key: 'currency', label: 'Currency code', type: 'text' },
+      { key: 'ptoAllowance', label: 'PTO days per year', type: 'number', step: 1 },
+    ],
+    get: () => ({ currency: state.settings.currency || 'USD',
+                  ptoAllowance: state.settings.ptoAllowance }),
+    save(ds, v) {
+      const code = (v.currency || 'USD').trim().toUpperCase();
+      /* Intl accepts any well-formed 3-letter code and renders unknown ones
+         literally ("ZZZ 12,345"), so a syntax check isn't enough — ask the
+         browser for its real currency list where it can be asked. */
+      let known = true;
+      try {
+        if (typeof Intl.supportedValuesOf === 'function')
+          known = Intl.supportedValuesOf('currency').includes(code);
+        else new Intl.NumberFormat('en-US', { style: 'currency', currency: code });
+      } catch (e) { known = false; }
+      if (!known) {
+        toast(`"${code}" isn't a currency code I know — kept the old one`);
+        return;
+      }
+      state.settings.currency = code;
+      if (v.ptoAllowance) state.settings.ptoAllowance = v.ptoAllowance;
     },
   },
 
@@ -2237,22 +2326,25 @@ const EDITORS = {
     move: (ds, dir) => listSwap(state.side.otherMoney, +ds.idx, dir),
   },
 
-  /* The six 401k / Roth IRA figures in one form */
-  k401: {
-    title: 'Traditional vs Roth figures',
+  /* Retirement accounts — any number, each Traditional or Roth */
+  retAcct: {
+    title: (ds, isNew) => isNew ? 'Add a retirement account' : 'Retirement account',
     fields: [
-      { key: 'pretax', label: '401k pre-tax', type: 'money' },
-      { key: 'raa', label: '401k RAA', type: 'money' },
-      { key: 'rollover', label: '401k rollover', type: 'money' },
-      { key: 'match', label: '401k match', type: 'money' },
-      { key: 'roth', label: '401k Roth', type: 'money' },
-      { key: 'rothIra', label: 'Roth IRA', type: 'money' },
+      { key: 'name', label: 'Account', type: 'text' },
+      { key: 'kind', label: 'Tax treatment', type: 'select', options: [
+        ['traditional', 'Traditional (pre-tax)'],
+        ['roth', 'Roth (after-tax)'],
+      ]},
+      { key: 'amount', label: 'Balance', type: 'money' },
     ],
-    get: () => state.side.k401 || {},
+    get: (ds) => state.side.retirementAccounts[+ds.idx],
     save(ds, v) {
-      state.side.k401 = Object.fromEntries(
-        Object.entries(v).map(([k, n]) => [k, n ?? 0]));
+      const row = { name: v.name || '?', kind: v.kind, amount: v.amount ?? 0 };
+      if (ds.idx !== undefined) state.side.retirementAccounts[+ds.idx] = row;
+      else state.side.retirementAccounts.push(row);
     },
+    del: (ds) => state.side.retirementAccounts.splice(+ds.idx, 1),
+    move: (ds, dir) => listSwap(state.side.retirementAccounts, +ds.idx, dir),
   },
 
   /* Year → amount maps: Roth contributions, bonuses (ds.map picks which) */
@@ -2582,7 +2674,7 @@ function openCellEditor(yearKey, type, id, m) {
        is never a mystery — the answer to "where did this come from?" is
        right in the context line. */
     const kindText = resolvedCell?.kind === 'auto'
-      ? `auto estimate (${RULE_LABEL[rule]})`
+      ? `auto estimate (${ruleDesc(cat)})`
       : KIND_LABEL[resolvedCell?.kind || 'missing'];
     F('cellContext').textContent = kindText
       + (resolvedCell ? ` · currently ${fmtMoney(resolvedCell.v)}` : '');
@@ -2825,6 +2917,8 @@ F('themeSel').onchange = (e) => {
   applyTheme();
   render();   // charts resolve their colours at construction, so rebuild them
 };
+
+F('prefsBtn').onclick = () => openRowEditor('prefs', {}, false);
 
 /* Arrow keys move along the tabs and switch view as they go. */
 const visibleTabs = () => [...document.querySelectorAll('.tab')].filter(t => !t.hidden);
