@@ -25,7 +25,7 @@
      midnight tile with the plan's line climbing across it and a map marker at
      the end. img-src allows data: URIs, so no extra request. favicon.ico stays
      as the fallback for anything that can't read an SVG icon. -->
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'> <defs> <linearGradient id='g' x1='10' y1='52' x2='54' y2='12' gradientUnits='userSpaceOnUse'> <stop offset='0' stop-color='#818cf8'/><stop offset='1' stop-color='#a5b4fc'/> </linearGradient> </defs> <rect width='64' height='64' rx='14' fill='#0a0e1a'/> <circle cx='14' cy='52' r='20' fill='#141c33'/> <path d='M11 47 L24 34 L34 41 L53 17' fill='none' stroke='url(#g)' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/> <circle cx='53' cy='17' r='6.5' fill='#a5b4fc'/> <circle cx='53' cy='17' r='2.4' fill='#0a0e1a'/> </svg>">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'> <defs><linearGradient id='g' x1='10' y1='52' x2='54' y2='12' gradientUnits='userSpaceOnUse'> <stop offset='0' stop-color='%23818cf8'/><stop offset='1' stop-color='%23a5b4fc'/></linearGradient></defs> <rect width='64' height='64' rx='14' fill='%230a0e1a'/> <circle cx='14' cy='52' r='20' fill='%23141c33'/> <path d='M11 47 L24 34 L34 41 L53 17' fill='none' stroke='url(%23g)' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/> <circle cx='53' cy='17' r='6.5' fill='%23a5b4fc'/> <circle cx='53' cy='17' r='2.4' fill='%230a0e1a'/> </svg>">
 <link rel="alternate icon" href="favicon.ico">
 <script>
   /* Apply the saved theme before first paint so there's no light flash. The list
@@ -258,12 +258,14 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
    never colour alone (Charlie is red-green colourblind): actuals plain,
    manual estimates get a solid underline, auto estimates italics + a dotted
    underline — the legend under the grid spells all three out. */
-/* The grid scrolls in both directions inside its own box. That box needs a
-   height limit or `position: sticky` on the header row has nothing to stick
-   inside — the months would scroll away with the page. The cap leaves room
-   for the app header, the tabs and the card's own chrome. */
-.gridwrap { overflow: auto; max-height: calc(100vh - 260px); min-height: 320px;
-  border: 1px solid var(--border); border-radius: var(--radius-sm); }
+/* The grid scrolls sideways in its own box; DOWN is the page's job, so there
+   is only ever one vertical scrollbar on screen. That means the month header
+   can't use `position: sticky` for the vertical axis — this box is the sticky
+   scroll container and it never scrolls vertically — so pinGridHeader() below
+   nudges the header cells down by hand instead. The sideways pinning of the
+   label and total columns is ordinary sticky, and still works. */
+.gridwrap { overflow-x: auto; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); }
 .grid { border-collapse: separate; border-spacing: 0; width: max-content;
   min-width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
 .grid th, .grid td { padding: 6px 10px; border-bottom: 1px solid var(--border);
@@ -447,7 +449,7 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
       <option value="midnight" selected>✦ Midnight</option>
       <option value="sepia">📜 Sepia</option>
     </select>
-    <button class="btn small" id="prefsBtn" title="Preferences — currency and defaults">⚙</button>
+    <button class="btn small" id="prefsBtn" title="Currency, row order, rates and other app-wide settings">⚙ Preferences</button>
     <button class="btn small" id="dataBtn" title="Back up or restore your data">Back up</button>
     <!-- Ships visible and signed-out at its final width (min-width in CSS), so
          the header doesn't reflow when the Firebase SDK arrives; the module
@@ -764,7 +766,7 @@ function blankState() {
     years: {},        // "YYYY" → grid year or summary year (see import_xlsx.py)
     goals: [],
     side: {
-      taxable: [], rothContribs: {}, k401: {}, hsa: [],
+      portfolios: [], taxable: [], rothContribs: {}, k401: {}, hsa: [],
       comp: {}, bonuses: {}, retirement: {}, rothLimit: {}, daf: [],
       donations: {}, limits: {}, retirementAccounts: []
     },
@@ -859,8 +861,22 @@ function coerceShape(data) {
   d.goals = arr(d.goals);
   d.side = obj(d.side);
   const s = d.side;
-  for (const k of ['taxable', 'otherMoney', 'hsa', 'daf',
+  for (const k of ['taxable', 'otherMoney', 'hsa', 'daf', 'portfolios',
                    'retirementAccounts']) s[k] = arr(s[k]);
+  /* Investments used to be two fixed panes, "Taxable investments" and "HSA",
+     because those were the two Charlie had. They're a named list now — add as
+     many as you keep, rename any of them. One-time migration; the old keys are
+     emptied so deleting a pane can't resurrect it. */
+  if (!s.portfolios.length) {
+    for (const [k, name] of [['taxable', 'Taxable investments'], ['hsa', 'HSA']])
+      s.portfolios.push({ id: k, name, rows: arr(s[k]) });
+    s.taxable = []; s.hsa = [];
+  }
+  for (const pf of s.portfolios) {
+    pf.id = String(pf.id || slugJs(pf.name || 'account'));
+    pf.name = String(pf.name || pf.id);
+    pf.rows = arr(pf.rows);
+  }
   /* Retirement accounts used to be six fixed fields (k401) with labels from
      Charlie's employer. They're a generic list now — any number of accounts,
      each Traditional or Roth. One-time migration; k401 is emptied so deleting
@@ -1354,6 +1370,13 @@ const HELP = {
       + 'counting only months with a number actually recorded. It is the steadier cousin of '
       + '"same month last year": good for spending that wanders month to month but holds its '
       + 'level over a year.' },
+  raiseVsMoved: { title: 'Raise $ vs Since last year',
+    body: 'Raise $ is this year\'s raise percentage applied to this year\'s salary — the '
+      + 'money the raise itself is worth. "Since last year" compares this year\'s starting '
+      + 'salary with what last year\'s salary came to after ITS raise. If the two match, the '
+      + 'only thing that moved your pay was the annual raise; if they differ, something else '
+      + 'landed in between — a promotion, an adjustment, or a raise that took effect partway '
+      + 'through the year.' },
   priceLookup: { title: 'Looking up prices',
     body: 'Prices come from Alpha Vantage, which needs a free API key (Preferences). Only '
       + 'the ticker is sent. A fetched price is cached for six hours, so opening this tab '
@@ -1863,6 +1886,17 @@ function renderGoals() {
 const holdingsValue = (rows) =>
   round2(rows.reduce((s, h) => s + (h.shares || 0) * (h.price || 0), 0));
 
+/* A holdings table is either one of the named investment panes ("pf:<id>") or
+   the giving fund, which lives on its own tab. One resolver so the renderer,
+   the editor and the price lookup all read the same array. */
+function holdingList(key) {
+  if (key && key.startsWith('pf:')) {
+    const pf = (state.side.portfolios || []).find(p => p.id === key.slice(3));
+    return pf ? pf.rows : [];
+  }
+  return state.side[key] || [];
+}
+
 function holdingsTable(rows, list) {
   const body = rows.map((h, idx) => `<tr class="editrow" data-edit="holding"
       data-list="${esc(list)}" data-idx="${idx}"><th scope="row">${esc(h.ticker)}</th>
@@ -2163,27 +2197,40 @@ function renderComp() {
     </div>
   </div>`;
 
+  /* Two different "changes" live in this table and they are easy to confuse:
+     the raise itself in dollars (this year's percentage applied to this year's
+     salary), and how the salary figure actually moved since last year. They
+     disagree whenever a mid-year change lands, which is the interesting case. */
   const raiseRows = years.map((y, i) => {
+    const c = comp[y];
+    const raiseAmt = round2((c.salary || 0) * (c.raisePct || 0));
     const prev = i ? comp[years[i - 1]] : null;
-    const growth = prev && prev.salary
-      ? (comp[y].salary - prev.salary) / prev.salary : null;
+    const prevAfter = prev ? round2((prev.salary || 0) * (1 + (prev.raisePct || 0))) : null;
+    const moved = prevAfter !== null ? round2((c.salary || 0) - prevAfter) : null;
+    const movedPct = prevAfter ? moved / prevAfter : null;
     return `<tr class="editrow" data-edit="comp" data-key="${esc(y)}">
       <th scope="row">${esc(y)}</th>
-      <td>${fmtMoney0(comp[y].salary || 0)}</td>
-      <td>${((comp[y].raisePct || 0) * 100).toFixed(1)}%</td>
-      <td>${growth === null ? '' : (growth * 100).toFixed(1) + '%'}</td>
-      <td>${fmtMoney0(totalComp(comp[y]))}</td></tr>`;
+      <td>${fmtMoney0(c.salary || 0)}</td>
+      <td>${((c.raisePct || 0) * 100).toFixed(1)}%</td>
+      <td>${raiseAmt ? '+' + fmtMoney(raiseAmt) : '—'}</td>
+      <td>${moved === null ? '<span class="muted">first year</span>'
+        : `${moved >= 0 ? '+' : '−'}${fmtMoney(Math.abs(moved))}
+           <span class="muted">(${(movedPct * 100).toFixed(1)}%)</span>`}</td>
+      <td>${fmtMoney0(round2((c.salary || 0) * (1 + (c.raisePct || 0))))}</td></tr>`;
   }).join('');
 
   const historyCard = `<div class="card">
     <h2>Raises over time</h2>
-    <p class="sub">"Raise" is the percentage you were told; "actual change" is what the salary
-      figures themselves moved year to year — they differ whenever a mid-year change lands.</p>
+    <p class="sub">Raise $ is this year's percentage applied to this year's salary. Since last
+      year compares this salary with what last year's ended at${
+      helpBtn('raiseVsMoved', 'the two change columns')} — the two disagree whenever
+      something landed mid-year.</p>
     <div class="chartbox" style="height:220px"><canvas id="compChart"></canvas></div>
     ${years.length ? `<div class="tablewrap" style="margin-top:12px"><table>
       <thead><tr><th style="text-align:left">Year</th><th>Salary</th><th>Raise</th>
-        <th>Actual change</th><th>Total comp</th></tr></thead>
-      <tbody>${raiseRows}</tbody></table></div>` : '<p class="sub">Add a couple of years to see the trend.</p>'}
+        <th>Raise $</th><th>Since last year</th>
+        <th>Salary after the raise</th></tr></thead>
+      <tbody>${raiseRows}</tbody></table></div>` : '<p class="sub">Add a year to get started.</p>'}
     <div class="addbar"><button class="btn small" data-add="comp">＋ Add a year</button></div>
   </div>`;
 
@@ -2242,18 +2289,18 @@ function renderInvestments() {
       : priceKey() ? 'No prices fetched yet' : 'Add an Alpha Vantage key in ⚙ Preferences to fetch prices'}
       ${helpBtn('priceLookup', 'the price lookup')}</span>
   </div>`;
-  return priceBar + `<div class="cards2">
-    <div class="card">
-      <h2>Taxable investments</h2>
+  const panes = (s.portfolios || []).map(pf => `<div class="card">
+      <h2>${esc(pf.name)} <button class="h-edit" data-edit="portfolio"
+        data-id="${esc(pf.id)}" title="Rename this account, reorder it, or delete it">✎ Edit</button></h2>
       <p class="sub">Value is shares × price. Type a price over a fetched one any time.</p>
-      ${holdingsTable(s.taxable || [], 'taxable')}
-    </div>
-    <div class="card">
-      <h2>HSA</h2>
-      <p class="sub">Held as investments rather than cash.</p>
-      ${holdingsTable(s.hsa || [], 'hsa')}
-    </div>
-  </div>`;
+      ${holdingsTable(pf.rows, 'pf:' + pf.id)}
+    </div>`).join('');
+  return priceBar
+    + (panes ? `<div class="cards2">${panes}</div>`
+             : `<div class="card"><div class="empty"><h2>No investment accounts yet</h2>
+                <p>Add one for each place you hold investments — a brokerage, an HSA, a
+                  pension pot. Each gets its own pane of holdings.</p></div></div>`)
+    + `<div class="addbar"><button class="btn small" data-add="portfolio">＋ Add an investment account</button></div>`;
 }
 
 function wireInvestments() {
@@ -2739,10 +2786,14 @@ const quoteFresh = (q) => q && typeof q.price === 'number'
   && (Date.now() - (q.ts || 0)) < QUOTE_TTL_MS;
 
 /* Every ticker across the three holdings tables, deduplicated. */
+const priceLists = () => [
+  ...(state.side.portfolios || []).map(pf => pf.rows),
+  state.side.daf || [],
+];
 function allTickers() {
   const out = new Set();
-  for (const list of ['taxable', 'hsa', 'daf'])
-    for (const h of (state.side[list] || []))
+  for (const rows of priceLists())
+    for (const h of rows)
       if (h.ticker && h.ticker !== '?') out.add(h.ticker.trim().toUpperCase());
   return [...out];
 }
@@ -2788,8 +2839,8 @@ async function refreshPrices(quiet) {
   refreshingPrices = false;
   writeQuoteCache(cache);
   if (got) {
-    for (const list of ['taxable', 'hsa', 'daf'])
-      for (const h of (state.side[list] || [])) {
+    for (const rows of priceLists())
+      for (const h of rows) {
         const q = cache[(h.ticker || '').trim().toUpperCase()];
         if (quoteFresh(q)) h.price = q.price;
       }
@@ -3267,13 +3318,40 @@ const EDITORS = {
       { key: 'shares', label: 'Shares', type: 'number' },
       { key: 'price', label: 'Price', type: 'money' },
     ],
-    get: (ds) => state.side[ds.list][+ds.idx],
+    get: (ds) => holdingList(ds.list)[+ds.idx],
     save(ds, v) {
-      const list = state.side[ds.list];
+      const list = holdingList(ds.list);
       const row = { ticker: v.ticker || '?', shares: v.shares ?? 0, price: v.price ?? 0 };
       if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
     },
-    del: (ds) => state.side[ds.list].splice(+ds.idx, 1),
+    del: (ds) => holdingList(ds.list).splice(+ds.idx, 1),
+    move: (ds, dir) => listSwap(holdingList(ds.list), +ds.idx, dir),
+  },
+
+  /* An investment pane: a named group of holdings on the Investments tab */
+  portfolio: {
+    title: (ds, isNew) => isNew ? 'Add an investment account' : 'Investment account',
+    sub: (ds, isNew) => isNew
+      ? 'A separate pane on the Investments tab — a brokerage, an HSA, a pension pot.'
+      : 'Renaming changes only the heading. Deleting takes its holdings with it.',
+    fields: [{ key: 'name', label: 'Name', type: 'text', wide: true }],
+    get: (ds) => ({ name: (state.side.portfolios.find(p => p.id === ds.id) || {}).name }),
+    save(ds, v) {
+      if (!v.name) return;
+      if (ds.id) {
+        const pf = state.side.portfolios.find(p => p.id === ds.id);
+        if (pf) pf.name = v.name;
+        return;
+      }
+      let id = slugJs(v.name), n = 2;
+      while (state.side.portfolios.some(p => p.id === id)) id = `${slugJs(v.name)}-${n++}`;
+      state.side.portfolios.push({ id, name: v.name, rows: [] });
+    },
+    del(ds) {
+      state.side.portfolios = state.side.portfolios.filter(p => p.id !== ds.id);
+    },
+    move: (ds, dir) => listSwap(state.side.portfolios,
+      state.side.portfolios.findIndex(p => p.id === ds.id), dir),
   },
 
   /* Retirement accounts — any number, each with a type and a contribution
@@ -3595,6 +3673,8 @@ const cellDialog = F('cellDialog');
 let editing = null;   // { yearKey, type: 'cat'|'bal'|'pay', id, m }
 
 function wireBudget() {
+  pinnedShift = -1;  // fresh cells, so force a write
+  pinGridHeader();   // a render starts with the header wherever the page is
   const grid = document.querySelector('.grid');
   if (grid) grid.addEventListener('click', (e) => {
     const td = e.target.closest('td.cell');
@@ -3700,6 +3780,44 @@ function partsKind(parts) {
   const kinds = new Set(parts.map(p => p.kind === 'manual' ? 'manual' : 'actual'));
   return kinds.size > 1 ? 'mixed' : [...kinds][0] || 'actual';
 }
+
+/* ── Pinning the month header ────────────────────────────────────────────────
+   The header row should stop under the app header and stay there while the
+   rest of the grid scrolls past. `position: sticky` can't do it: the grid
+   scrolls sideways, which makes .gridwrap the sticky scroll container, and
+   that container has no vertical scroll of its own to stick inside. Giving it
+   one would put a second scrollbar on screen.
+
+   So the header cells are moved by hand instead. Each `th` is shifted down by
+   however far the table's top has passed under the app header, clamped so the
+   header never leaves its own table. The transform goes on the cells rather
+   than on <thead>, because a transformed ANCESTOR would become the containing
+   block for the sticky label column inside it and break its sideways pinning;
+   transforming a sticky element itself just moves it, which is what we want. */
+let pinnedShift = -1;   // reset by wireBudget: a new grid starts unpinned
+function pinGridHeader() {
+  const wrap = document.querySelector('.gridwrap');
+  const table = wrap && wrap.querySelector('table.grid');
+  const cells = table && table.querySelectorAll('thead th');
+  if (!cells || !cells.length) return;
+  /* bottom, not height: it's where the app header actually ends on screen,
+     so the two edges meet with no seam for a row to peek through. */
+  const stop = document.querySelector('header').getBoundingClientRect().bottom;
+  const box = table.getBoundingClientRect();
+  const headH = cells[0].getBoundingClientRect().height;
+  const shift = Math.round(
+    Math.max(0, Math.min(stop - box.top, box.height - headH)));
+  /* Runs straight off the scroll event rather than through rAF — the writes
+     only happen when the number actually changes, and rAF is starved to a
+     standstill in a background tab, which is exactly when a queued update
+     would be left stranded. */
+  if (shift === pinnedShift) return;
+  pinnedShift = shift;
+  const value = shift ? `translateY(${shift}px)` : '';
+  for (const th of cells) th.style.transform = value;
+}
+addEventListener('scroll', pinGridHeader, { passive: true });
+addEventListener('resize', pinGridHeader);
 
 function openCellEditor(yearKey, type, id, m) {
   const yr = state.years[yearKey];

@@ -54,11 +54,13 @@ must never show them.
   about Roth IRAs is special-cased; a **401(k) limit calculator** and a **Roth
   IRA income (MAGI) calculator** that both recompute as you change the figures;
   and a projection of where the balances are heading at an assumed return.
-- **Compensation** — where comp stands, raises over time (with the actual
-  year-on-year change alongside the raise you were told), and bonuses by year.
-- **Investments** — taxable holdings and the HSA, with optional **automatic
-  price lookups** (Alpha Vantage; free key kept on the device, cached six
-  hours, and every price still editable by hand).
+- **Compensation** — where comp stands, raises over time (the raise in dollars
+  and how the salary actually moved since last year, which differ whenever
+  something lands mid-year), and bonuses by year.
+- **Investments** — one pane per place you hold investments (add, rename and
+  reorder them), with optional **automatic price lookups** (Alpha Vantage; free
+  key kept on the device, cached six hours, and every price still editable by
+  hand).
 - **Vacations** — per-trip cost tables grouped into one row per year, newest
   first, reorderable within a year, and the holidays & PTO planner.
 - **Giving** — the Fidelity Charitable fund and the donations log.
@@ -84,11 +86,12 @@ Then open the app → **Back up** → **Restore JSON…** → pick
 `financial-plan-data.json`. The same Restore path handles ordinary backups —
 Export writes `money-map-YYYY-MM-DD.json`, Restore reads it back.
 
-`migrate_local_data.py` does the two things the app deliberately won't do to
-your data by itself, because both discard information: it strips the
-hand-typed next-year months out of the live grid (so the rules project them
-instead) and folds finished years into yearly summaries. It writes a new file
-beside the input and never modifies the original.
+`migrate_local_data.py` does the one thing the app deliberately won't do to
+your data by itself: it strips the hand-typed next-year months out of the live
+grid, so the rules project them instead of repeating what the spreadsheet
+happened to contain. It writes a new file beside the input and never modifies
+the original. (Folding a year into a summary is a per-year decision with a
+button on the year itself — the script never does it for you.)
 
 ```bash
 python3 migrate_local_data.py financial-plan-data.json

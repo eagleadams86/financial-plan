@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""One-off migration for a Money Map backup file — stdlib only, no data inside.
+"""One-off edit for a Money Map backup file — stdlib only, no data inside.
 
-Two things the app deliberately will NOT do to your data on its own, because
-both throw information away:
+Does exactly one thing, because it is the one thing the app will not do on
+its own: strip the hand-typed next-year months out of the live grid, so the
+app projects them from each row's rule instead of repeating what the
+spreadsheet happened to contain. Paycheck counts are KEPT — they're a real
+schedule (three-check months and all), not an estimate.
 
-  1. Strip the hand-typed next-year months out of the live grid, so the app
-     projects them from each row's rule instead of repeating what the
-     spreadsheet happened to contain. Paycheck counts are KEPT: they're a real
-     schedule (three-check months and all), not an estimate.
-
-  2. Fold finished years into yearly summaries. A summary keeps one total per
-     row — which is all the History charts read — and drops the months.
+It does NOT convert any year to a summary. That is a per-year decision, it is
+permanent, and the app has a button for it on the year you actually want it.
 
 Reads a backup JSON and writes a new one beside it; the input is never
 modified. Restore the output through the app's Back up dialog.
@@ -23,11 +21,6 @@ Both files are gitignored: real financial data never belongs in this repo.
 import json
 import sys
 from pathlib import Path
-
-# Rules that read a year back. Converting the year they read would blank their
-# estimates, so a year with a dependant is left as a grid.
-LOOKBACK_RULES = {"samemonth", "avglastyear"}
-
 
 def live_year_key(state):
     """The newest grid year still being filled in."""
@@ -55,50 +48,6 @@ def strip_future_months(state):
     return key, len(doomed)
 
 
-def grid_to_summary(yr, year):
-    """Mirror of gridToSummary() in index.html — keep the two in step.
-
-    Flow rows sum across the year. Balance rows keep December's figure: adding
-    up twelve monthly balances would be meaningless.
-    """
-    months = [f"{year}-{m:02d}" for m in range(1, 13)]
-    last = months[-1]
-    totals = []
-    for cat in yr["categories"]:
-        row = {"name": cat["name"]}
-        if cat.get("isBalance"):
-            cell = yr["cells"].get(f"{cat['id']}|{last}")
-            row["total"] = round(cell["v"], 2) if cell else 0
-            row["isBalance"] = True
-        else:
-            row["total"] = round(sum(
-                yr["cells"].get(f"{cat['id']}|{m}", {}).get("v", 0)
-                for m in months), 2)
-        if cat.get("note"):
-            row["note"] = cat["note"]
-        totals.append(row)
-    out = {"kind": "summary", "convertedFrom": "grid", "categoryTotals": totals,
-           "extraNotes": list(yr.get("extraNotes") or [])}
-    if "eoyCash" in yr:
-        out["eoyCash"] = yr["eoyCash"]
-    return out
-
-
-def convertible_years(state):
-    """Finished grid years that nothing later still reads a year back into."""
-    out = []
-    for year, yr in sorted(state["years"].items()):
-        if yr.get("kind") != "grid" or yr.get("model") != "pinned":
-            continue
-        nxt = state["years"].get(str(int(year) + 1))
-        if nxt and nxt.get("kind") == "grid" and any(
-                cat.get("rule") in LOOKBACK_RULES for cat in nxt["categories"]):
-            out.append((year, False))   # a later year still needs its months
-        else:
-            out.append((year, True))
-    return out
-
-
 def main(argv):
     src = Path(argv[1] if len(argv) > 1 else "financial-plan-data.json")
     if not src.exists():
@@ -123,13 +72,6 @@ def main(argv):
                   '"average of last year" suits spending that wanders:')
             for name in ruleless:
                 print(f"    · {name}")
-
-    for year, can in convertible_years(state):
-        if can:
-            state["years"][year] = grid_to_summary(state["years"][year], year)
-            print(f"{year}: converted to a yearly summary")
-        else:
-            print(f"{year}: left as a grid — the next year has rows that read it")
 
     dst = src.with_name(src.stem + "-migrated" + src.suffix)
     dst.write_text(json.dumps(state, indent=2))

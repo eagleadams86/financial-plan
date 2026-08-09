@@ -70,6 +70,12 @@ numbers only. If a change needs a realistic payload, invent one.
   read goes through `normRole()`. **The pass-through timing is load-bearing**:
   the old `zelle` landed BEFORE its account's growth, `charitable` AFTER it —
   the real-data cross-check pins that, so never "simplify" it away.
+- The month header is pinned by `pinGridHeader()`, not by CSS: `.gridwrap`
+  scrolls sideways, which makes it the sticky scroll container, and giving it a
+  vertical scroll of its own would put a second scrollbar on screen. The header
+  cells (not `<thead>` — a transformed ancestor would break the sticky label
+  column inside it) are translated down as the PAGE scrolls, straight off the
+  scroll event, because rAF is starved in a background tab.
 - Balance chain per month, per account: `base = prior − transfersOut +
   preCredits`; `interest = base × rate/12` (or `yr.balAdjust[bid|m].interest`)
   credited to `creditTo`; then `+ postCredits`, `+ all flows` for the hub, and
@@ -90,8 +96,9 @@ numbers only. If a change needs a realistic payload, invent one.
   keep DECEMBER (a sum of monthly balances is meaningless). It is permanent,
   and it refuses quietly to be useful: `rulesNeedingYear()` warns when the
   next year has `samemonth`/`avglastyear` rows that read the year being
-  converted. `migrate_local_data.py` does the same conversion offline, plus
-  the one-off strip of hand-typed next-year months from the live grid.
+  converted. `migrate_local_data.py` only ever does the one-off strip of
+  hand-typed next-year months from the live grid — converting a year is a
+  deliberate, per-year click, never something a script does behind your back.
 
 ## Editing
 
@@ -131,6 +138,10 @@ since Intl renders unknown codes literally rather than throwing — PTO
 default, row sort, the paycheck-rule toggle, the dividend fallback rate, the
 assumed retirement return, and the price-lookup key) live behind the header's
 ⚙ button; `buildMoneyFormats()` rebuilds the formatters on every render.
+Investment panes are `side.portfolios` — `{id, name, rows}` each, add/rename/
+reorder through the `portfolio` section; the old fixed `taxable`/`hsa` lists
+migrate once and are emptied. A holdings table reads through `holdingList()`,
+whose key is either `pf:<id>` or a plain side key (`daf`, on the Giving tab).
 Info dots (`helpBtn(key, label)` + the `HELP` table + `#helpDialog`) explain
 arithmetic the reader can't see; clicking outside any dialog except the
 sync-choice one closes it without saving.
