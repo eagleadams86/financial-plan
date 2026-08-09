@@ -178,6 +178,9 @@ fieldset, .formpanel { border: 1px solid var(--border); border-radius: var(--rad
 .formpanel:first-of-type { margin-top: 0; }
 legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
   color: var(--text-secondary); font-weight: 700; padding: 0 6px; }
+.checkline { display: flex; gap: 8px; align-items: center; font-size: 14px;
+  min-height: 24px; }
+.checkline input { flex: none; }
 .warn { color: var(--err); font-size: 13px; margin-top: 10px; }
 .warn:empty { display: none; }
 .muted { color: var(--text-secondary); }
@@ -341,6 +344,43 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
   <div class="row" style="justify-content:flex-end;margin-top:18px">
     <button class="btn primary" id="dataCloseBtn">Close</button>
   </div>
+</dialog>
+
+<!-- ── Cell editor ───────────────────────────────────────────────────────── -->
+<dialog id="cellDialog" aria-labelledby="cellDialogTitle">
+  <form method="dialog" id="cellForm">
+    <h3 id="cellDialogTitle">Edit</h3>
+    <p class="sub" id="cellContext"></p>
+    <div class="row">
+      <div>
+        <label class="field" for="cellValue">Amount</label>
+        <input type="number" id="cellValue" step="0.01" inputmode="decimal"
+          style="width:160px">
+      </div>
+      <div id="cellKindWrap">
+        <span class="field">This number is…</span>
+        <div class="row" role="radiogroup" aria-label="Cell kind" style="gap:14px">
+          <label class="checkline"><input type="radio" name="cellKind" value="actual"> actual — it happened</label>
+          <label class="checkline"><input type="radio" name="cellKind" value="manual"> my estimate</label>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <label class="field" for="cellNote">Note</label>
+      <textarea id="cellNote" rows="2" placeholder="Why this number? (shows as a dot on the cell)"></textarea>
+    </div>
+    <p class="sub muted" id="cellAutoHint" style="margin-top:10px"></p>
+    <div class="row spread" style="margin-top:18px">
+      <div class="row">
+        <button type="button" class="btn" id="cellRevertBtn" hidden>↺ Back to auto estimate</button>
+        <button type="button" class="btn" id="cellClearBtn" hidden>Clear this cell</button>
+      </div>
+      <div class="row">
+        <button type="button" class="btn" id="cellCancelBtn">Cancel</button>
+        <button type="submit" class="btn primary" id="cellSaveBtn">Save</button>
+      </div>
+    </div>
+  </form>
 </dialog>
 
 <script>
@@ -855,11 +895,24 @@ function gridCard(y, yr) {
         months.map(m => `<td class="cell ${m === thisM ? 'now' : ''}" data-pay="${m}">${
           yr.paychecks[m] ?? '·'}</td>`).join('')}</tr>`;
 
+  const nextM = live ? monthAdd(yr.enteredThrough, 1) : null;
+  const canClose = live && monthDiff(yr.startMonth, nextM) < yr.monthCount;
+  const canReopen = live && yr.enteredThrough >= yr.startMonth;
+  const monthControls = !live ? '' : `<div class="row" style="margin:2px 0 12px">
+      ${canClose ? `<button class="btn small" id="closeMonthBtn"
+        title="Freeze ${esc(monthLabel(nextM))}'s estimates as entered numbers — like overtyping the formulas in Numbers">
+        ✓ Mark ${esc(monthLabel(nextM))} entered</button>` : ''}
+      ${canReopen ? `<button class="btn small" id="reopenMonthBtn"
+        title="Move the entered-through marker back a month (your numbers stay put)">
+        ↩ Re-open ${esc(monthLabel(yr.enteredThrough))}</button>` : ''}
+    </div>`;
+
   return `<div class="card">
     <h2>${esc(y)} budget</h2>
     <p class="sub">${live
-      ? `Entered through <strong>${esc(monthLabel(yr.enteredThrough))}</strong>; later months are estimates that update as real numbers land.`
-      : 'A finished year — every figure is history.'}</p>
+      ? `Entered through <strong>${esc(monthLabel(yr.enteredThrough))}</strong>; later months are estimates that update as real numbers land. Click any cell to edit it.`
+      : 'A finished year — every figure is history. Click a cell to correct it.'}</p>
+    ${monthControls}
     <div class="gridwrap"><table class="grid">
       <thead>${head}</thead>
       <tbody>${catRows}${liveBalRows}${pinnedBalRows}</tbody>
@@ -926,6 +979,164 @@ function wireView(view) {
     state.ui.activeYear = e.target.value;
     save(); render();
   };
+  if (view === 'budget') wireBudget();
+}
+
+/* ═══════════════════════════ Cell editing ═════════════════════════════════ */
+
+const cellDialog = F('cellDialog');
+let editing = null;   // { yearKey, type: 'cat'|'bal'|'pay', id, m }
+
+function wireBudget() {
+  const grid = document.querySelector('.grid');
+  if (grid) grid.addEventListener('click', (e) => {
+    const td = e.target.closest('td.cell');
+    if (!td) return;
+    const y = activeYearKey();
+    if (td.dataset.cat) openCellEditor(y, 'cat', td.dataset.cat, td.dataset.m);
+    else if (td.dataset.bal) openCellEditor(y, 'bal', td.dataset.bal, td.dataset.m);
+    else if (td.dataset.pay) openCellEditor(y, 'pay', 'paychecks', td.dataset.pay);
+  });
+  const closeBtn = F('closeMonthBtn');
+  if (closeBtn) closeBtn.onclick = markMonthEntered;
+  const reopenBtn = F('reopenMonthBtn');
+  if (reopenBtn) reopenBtn.onclick = reopenMonth;
+}
+
+function openCellEditor(yearKey, type, id, m) {
+  const yr = state.years[yearKey];
+  const live = yr.model === 'live';
+  editing = { yearKey, type, id, m };
+  const kindWrap = F('cellKindWrap');
+  const revertBtn = F('cellRevertBtn');
+  const clearBtn = F('cellClearBtn');
+  const hint = F('cellAutoHint');
+  F('cellNote').value = '';
+  hint.textContent = '';
+
+  if (type === 'cat') {
+    const cat = yr.categories.find(c => c.id === id);
+    const stored = yr.cells[`${id}|${m}`];
+    const resolvedCell = C[yearKey]?.cells[`${id}|${m}`];
+    F('cellDialogTitle').textContent = `${cat.name} — ${monthLabel(m)}`;
+    F('cellContext').textContent = KIND_LABEL[resolvedCell?.kind || 'missing']
+      + (resolvedCell ? ` · currently ${fmtMoney(resolvedCell.v)}` : '');
+    F('cellValue').value = stored ? stored.v : (resolvedCell?.v || '');
+    F('cellNote').value = stored?.note || '';
+    const future = live && m > yr.enteredThrough;
+    kindWrap.hidden = !future;
+    const kind = stored?.kind || (future ? 'manual' : 'actual');
+    document.querySelectorAll('input[name=cellKind]').forEach(r =>
+      r.checked = r.value === kind);
+    const hasRule = (cat.rule || 'none') !== 'none';
+    revertBtn.hidden = !(stored && future && hasRule);
+    clearBtn.hidden = !stored;
+    if (future && hasRule && !stored)
+      hint.textContent = 'This is an auto estimate — saving a number here takes over from the rule.';
+  } else if (type === 'bal') {
+    const ov = yr.overrides[`${id}|${m}`];
+    const cur = C[yearKey]?.balances[`${id}|${m}`];
+    F('cellDialogTitle').textContent = `Balance — ${monthLabel(m)}`;
+    F('cellContext').textContent = ov
+      ? 'This balance is stated (pinned), not computed.'
+      : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held.`;
+    F('cellValue').value = ov ? ov.v : (cur ?? '');
+    F('cellNote').value = ov?.note || '';
+    kindWrap.hidden = true;
+    revertBtn.hidden = !ov;
+    clearBtn.hidden = true;
+  } else {   // paychecks count
+    F('cellDialogTitle').textContent = `Paychecks — ${monthLabel(m)}`;
+    F('cellContext').textContent = 'How many paychecks land this month (2 most months, 3 in a three-check month).';
+    F('cellValue').value = yr.paychecks[m] ?? '';
+    kindWrap.hidden = true;
+    revertBtn.hidden = true;
+    clearBtn.hidden = yr.paychecks[m] === undefined;
+  }
+  cellDialog.showModal();
+}
+
+F('cellForm').onsubmit = () => {
+  const { yearKey, type, id, m } = editing;
+  const yr = state.years[yearKey];
+  const raw = F('cellValue').value.trim();
+  const v = raw === '' ? null : round2(parseFloat(raw));
+  if (type === 'cat') {
+    const key = `${id}|${m}`;
+    if (v === null || Number.isNaN(v)) { delete yr.cells[key]; }
+    else {
+      const live = yr.model === 'live';
+      const future = live && m > yr.enteredThrough;
+      const kind = !future ? 'actual'
+        : (document.querySelector('input[name=cellKind]:checked')?.value || 'manual');
+      const cell = { v, kind };
+      const note = F('cellNote').value.trim();
+      if (note) cell.note = note;
+      yr.cells[key] = cell;
+    }
+  } else if (type === 'bal') {
+    const key = `${id}|${m}`;
+    if (v === null || Number.isNaN(v)) delete yr.overrides[key];
+    else {
+      const ov = { v };
+      const note = F('cellNote').value.trim();
+      if (note) ov.note = note;
+      yr.overrides[key] = ov;
+    }
+  } else {
+    if (v === null || Number.isNaN(v)) delete yr.paychecks[m];
+    else yr.paychecks[m] = v;
+  }
+  save(); render();
+};
+
+F('cellCancelBtn').onclick = () => cellDialog.close();
+F('cellRevertBtn').onclick = () => {
+  const { yearKey, type, id, m } = editing;
+  const yr = state.years[yearKey];
+  if (type === 'cat') delete yr.cells[`${id}|${m}`];
+  else if (type === 'bal') delete yr.overrides[`${id}|${m}`];
+  cellDialog.close();
+  save(); render();
+  toast('Back to the computed number');
+};
+F('cellClearBtn').onclick = () => {
+  const { yearKey, type, id, m } = editing;
+  const yr = state.years[yearKey];
+  if (type === 'cat') delete yr.cells[`${id}|${m}`];
+  else if (type === 'pay') delete yr.paychecks[m];
+  cellDialog.close();
+  save(); render();
+  toast('Cleared');
+};
+
+/* Marking a month entered materialises its auto estimates into stored actuals
+   — the app's version of overtyping the formulas in Numbers — so trailing
+   averages and balances then rest on numbers you can edit. Re-opening only
+   moves the marker back; stored numbers stay put and stay editable. */
+function markMonthEntered() {
+  const y = activeYearKey();
+  const yr = state.years[y];
+  const target = monthAdd(yr.enteredThrough, 1);
+  const c = C[y];
+  for (const cat of yr.categories) {
+    const key = `${cat.id}|${target}`;
+    if (yr.cells[key]) continue;
+    const r = c.cells[key];
+    if (r && r.kind === 'auto') yr.cells[key] = { v: r.v, kind: 'actual' };
+  }
+  yr.enteredThrough = target;
+  save(); render();
+  toast(`${monthLabel(target)} marked as entered`);
+}
+
+function reopenMonth() {
+  const y = activeYearKey();
+  const yr = state.years[y];
+  const target = yr.enteredThrough;
+  yr.enteredThrough = monthAdd(target, -1);
+  save(); render();
+  toast(`${monthLabel(target)} re-opened — its numbers are still there`);
 }
 
 /* ═══════════════════════════ Backup & restore ═════════════════════════════ */
