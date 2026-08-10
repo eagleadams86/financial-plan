@@ -757,6 +757,31 @@ const roundTo = (v, dp) => {
    that same cent, that shorter one is what was meant. Only a pay rise that
    genuinely isn't a round percentage (a flat "you're on $103,333 now") falls
    through to the long form, and then the decimals are the honest answer. */
+/* Whether a year's salary picked up where the year before it left off.
+
+   It is NOT a year-on-year comparison of what you earn — that is the raise
+   itself, one row up in the table. This checks the join between two years, so
+   the ordinary answer is "nothing to report", and printing "+$0.00 (0.00%)"
+   for that made a column of perfectly normal years look like a column of
+   failed sums. `planned` is that ordinary case; a figure appears only when
+   something other than the annual raise moved the salary — a promotion, an
+   adjustment, a raise that landed partway through the year.
+
+   `against` names the year actually compared, but only when it isn't the one
+   before: with 2020 missing from the table, 2021 sits under 2019, and calling
+   that "since last year" without saying so is a lie. */
+function sinceLastYear(y, prevY, salary, prevAfter) {
+  if (prevAfter === null || prevAfter === undefined) return { state: 'first' };
+  const moved = round2(salary - prevAfter);
+  return {
+    state: moved === 0 ? 'planned' : moved > 0 ? 'above' : 'below',
+    moved,
+    /* a percentage against a starting point of nothing means nothing */
+    pct: prevAfter ? moved / prevAfter : null,
+    against: prevY !== null && +prevY !== +y - 1 ? prevY : null,
+  };
+}
+
 function raiseFor(salary, after) {
   const exact = (after / salary - 1) * 100;
   for (const dp of [1, 2, 3, 4]) {
@@ -1761,10 +1786,13 @@ const HELP = {
   raiseVsMoved: { title: 'Raise $ vs Since last year',
     body: 'Raise $ is this year\'s raise percentage applied to this year\'s salary — the '
       + 'money the raise itself is worth. "Since last year" compares this year\'s starting '
-      + 'salary with what last year\'s salary came to after ITS raise. If the two match, the '
-      + 'only thing that moved your pay was the annual raise; if they differ, something else '
-      + 'landed in between — a promotion, an adjustment, or a raise that took effect partway '
-      + 'through the year.' },
+      + 'salary with what last year\'s salary came to after ITS raise. Matching is the '
+      + 'ordinary case and reads "as planned" — the annual raise was the only thing that '
+      + 'moved your pay. A figure there instead means something else landed in between: a '
+      + 'promotion, an adjustment, or a raise that took effect partway through the year. It '
+      + 'is not a year-on-year comparison of what you earn — that is the raise itself, one '
+      + 'row up. Where a year is missing from the table the column says which year it did '
+      + 'read, since the one before is not always last year.' },
   priceLookup: { title: 'Looking up prices',
     body: 'Prices come from Alpha Vantage, which needs a free API key (Preferences). Only '
       + 'the ticker is sent. A fetched price is cached for six hours, so opening this tab '
@@ -2659,30 +2687,41 @@ function renderComp() {
      the raise itself in dollars (this year's percentage applied to this year's
      salary), and how the salary figure actually moved since last year. They
      disagree whenever a mid-year change lands, which is the interesting case. */
-  const raiseRows = years.map((y, i) => {
+  const raiseRows = years.map((y, i) => {   // see sinceLastYear() for the last column
     const c = comp[y];
     const raiseAmt = round2((c.salary || 0) * (c.raisePct || 0));
-    const prev = i ? comp[years[i - 1]] : null;
+    const prevY = i ? years[i - 1] : null;
+    const prev = prevY ? comp[prevY] : null;
     const prevAfter = prev ? round2((prev.salary || 0) * (1 + (prev.raisePct || 0))) : null;
-    const moved = prevAfter !== null ? round2((c.salary || 0) - prevAfter) : null;
-    const movedPct = prevAfter ? moved / prevAfter : null;
+    const s = sinceLastYear(y, prevY, c.salary || 0, prevAfter);
+    const vs = s.against === null ? '' : ` vs ${s.against}`;
+    const since = s.state === 'first' ? '<span class="muted">first year</span>'
+      : s.state === 'planned' ? `<span class="muted">as planned${esc(vs)}</span>`
+      : `${s.moved > 0 ? '+' : '−'}${fmtMoney(Math.abs(s.moved))}
+         <span class="muted">${s.state} plan${
+           /* no percentage to quote against a starting point of nothing */
+           s.pct === null ? '' : ` (${Math.abs(s.pct * 100).toFixed(2)}%)`
+         }${esc(vs)}</span>`;
+    /* Escaped once, at the sink below — the year keys come out of a restored
+       file, so they are data here and must not be escaped twice. */
+    const sinceTitle = s.state === 'first' ? 'Nothing recorded before this year'
+      : `${y} started on ${fmtMoney(c.salary || 0)}; ${prevY} ended on ${
+          fmtMoney(prevAfter)}`;
     return `<tr class="editrow" data-edit="comp" data-key="${esc(y)}">
       <th scope="row">${esc(y)}</th>
       <td>${fmtMoney(c.salary || 0)}</td>
       <td>${((c.raisePct || 0) * 100).toFixed(2)}%</td>
       <td>${raiseAmt ? '+' + fmtMoney(raiseAmt) : '—'}</td>
-      <td>${moved === null ? '<span class="muted">first year</span>'
-        : `${moved >= 0 ? '+' : '−'}${fmtMoney(Math.abs(moved))}
-           <span class="muted">(${(movedPct * 100).toFixed(2)}%)</span>`}</td>
+      <td title="${esc(sinceTitle)}">${since}</td>
       <td>${fmtMoney(round2((c.salary || 0) * (1 + (c.raisePct || 0))))}</td></tr>`;
   }).join('');
 
   const historyCard = `<div class="card">
     <h2>Raises over time</h2>
     <p class="sub">Raise $ is this year's percentage applied to this year's salary. Since last
-      year compares this salary with what last year's ended at${
-      helpBtn('raiseVsMoved', 'the two change columns')} — the two disagree whenever
-      something landed mid-year.</p>
+      year checks this salary against what last year's ended at${
+      helpBtn('raiseVsMoved', 'the two change columns')} — "as planned" means the raise was
+      the only thing that moved your pay, and a figure there means something else landed.</p>
     ${years.length > 1
       ? '<div class="chartbox" style="height:220px"><canvas id="compChart"></canvas></div>'
       : '<p class="sub">A second year is what turns this into a trend — add one below.</p>'}
@@ -5247,7 +5286,8 @@ render();
 
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
-window.__finTestHooks = { round2, roundTo, raiseFor, fmtMoney, monthAdd, monthDiff, monthLabel,
+window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
+  fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
   normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,

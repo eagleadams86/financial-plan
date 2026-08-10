@@ -268,6 +268,16 @@ projected-year "dashed edge" on the flow bars is drawn by the `dashedBarEdge`
 plugin, and those bars' solid border is turned off (a dash over a same-colour
 solid reads as solid). The signal must never be colour alone — Charlie is
 red-green colourblind.
+**"Since last year" on the Comp tab is not a year-on-year comparison** — that
+is the raise itself, one row up. `sinceLastYear()` checks the JOIN between two
+years: did this salary pick up where the year before ended? The ordinary answer
+is yes, so it reads **"as planned"**; a figure appears only when something other
+than the annual raise moved the pay. It used to print `+$0.00 (0.00%)` for the
+ordinary case, which made a column of perfectly normal years look like failed
+sums — that was reported as a bug, and it was a presentation one, not an
+arithmetic one. `against` names the year compared whenever a year is missing
+from the table (2021 sitting under 2019), because calling that "last year"
+without saying so is a lie.
 **Figures show cents — `fmtMoney`, everywhere a number is a value.** The
 whole-dollar `fmtMoney0` survives for exactly one job: CHART AXIS TICKS, where
 `$137,000.00` on every gridline is clutter on a scale rather than precision. If
