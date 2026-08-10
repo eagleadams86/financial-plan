@@ -272,15 +272,23 @@ red-green colourblind.
   it was written out in seven, and Total comp, the "since last year" join and
   the bonus percentage are all built on it, so a second copy that drifted would
   be its own quiet bug.
-- **Bonus % is derived, never stored** — `bonusShare(bonus, afterRaise(c))`,
-  measured against the after-raise figure because that is the same base Total
-  comp uses. It appears as a column in Bonuses by year and as a linked box in
+- **Bonus % is derived, never stored** — `bonusShare(bonus, bonusBase(c))`,
+  measured against the salary the year OPENED on, not what it closed on. A
+  bonus arrives with February's merit raise but is earned against the pay you
+  were on through the year before it, which is the opening figure — and that
+  makes it agree to the basis point with the payroll system, which files the
+  same payment under the plan year it was FOR and divides by that year's
+  closing salary. Same number: every year opens where the last one closed.
+  (Total comp still uses `afterRaise` — that is a total for the year, a
+  different question.) It appears as a column in Bonuses by year and as a
+  linked box in
   BOTH dialogs (the comp year's `bonus`, a bonus row's `amount`) via the shared
   `linkBonusPct(which, base, moneyKey)`. Ordering rule: type the percentage and
-  the dollars follow; type the dollars, or move the salary underneath, and the
-  dollars stand while the percentage re-derives — a bonus is what was actually
-  paid. A year with no comp record has no base, so the box disables itself and
-  says why rather than showing a stale figure, and the grid shows an em dash.
+  the dollars follow; type the dollars, or move the SALARY box, and the dollars
+  stand while the percentage re-derives — a bonus is what was actually paid.
+  Changing the raise leaves it alone: the raise is not part of its base. A year
+  with no comp record has no base, so the box disables itself and says why
+  rather than showing a stale figure, and the grid shows an em dash.
 - **One bonus, one place: `side.bonuses[year]`.** It used to be stored twice —
   there and again as `comp[year].bonus` — and nobody keeps two copies of a
   number in step by hand, so "Where comp stands" reported a $0 bonus and a

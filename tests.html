@@ -1078,17 +1078,35 @@ t('the after-raise figure is one calculation, not seven', () => {
   eq(H.afterRaise(undefined), 0, 'a year with no comp record has no salary');
   eq(H.afterRaise({}), 0);
 });
-t('a bonus is a share of the salary it was earned against', () => {
-  eq(H.round2(H.bonusShare(15000, 136346.67) * 100), 11);
-  eq(H.round2(H.bonusShare(11000, 128179.17) * 100), 8.58);
+t('a bonus is measured against the salary the year opened on', () => {
+  /* Not what the year ended on. A bonus lands with February's merit raise but
+     is earned against the pay you were on before it — which is the opening
+     figure, since every year opens where the last one closed. */
+  eq(H.bonusBase({ salary: 133021.14, raisePct: 0.025 }), 133021.14);
+  eq(H.bonusBase(undefined), 0, 'a year with no comp record has no salary');
+  eq(H.bonusBase({}), 0);
+  eq(H.round2(H.bonusShare(15000, H.bonusBase({ salary: 133021.14, raisePct: 0.025 })) * 100),
+    11.28, 'and not the 11.00% the after-raise figure would give');
   eq(H.bonusShare(0, 89000), 0, 'a recorded nil bonus is 0%, not blank');
+});
+t('the percentages agree with the payroll system, to the basis point', () => {
+  /* Charlie's own three, cross-checked against Workday's own Percent column.
+     Each bonus is filed under the year it was PAID; Workday files it under the
+     plan year it was FOR and divides by that year's ENDING salary — the same
+     number, because a year opens where the last one closed. */
+  const check = (openingSalary, bonus, workdayPct) =>
+    eq(+(H.bonusShare(bonus, H.bonusBase({ salary: openingSalary })) * 100).toFixed(2),
+      workdayPct);
+  check(125358.60, 11000, 8.77);    // paid Feb 2024, for the 2023 plan year
+  check(128179.17, 15000, 11.70);   // paid Feb 2025, for the 2024 plan year
+  check(133021.14, 15000, 11.28);   // paid Feb 2026, for the 2025 plan year
 });
 t('a bonus with no salary behind it has no percentage', () => {
   /* Bonuses by year runs to years with no comp record — 2020 in the real
      history — and a percentage of an unknown salary is not a figure. */
   eq(H.bonusShare(1000, 0), null);
-  eq(H.bonusShare(1000, H.afterRaise(undefined)), null);
-  eq(H.bonusShare(undefined, 136346.67), null, 'and no bonus means nothing to show');
+  eq(H.bonusShare(1000, H.bonusBase(undefined)), null);
+  eq(H.bonusShare(undefined, 133021.14), null, 'and no bonus means nothing to show');
 });
 t('a year that picked up where the last one ended reports nothing', () => {
   /* The ordinary case, and the whole column used to read "+$0.00 (0.00%)" for

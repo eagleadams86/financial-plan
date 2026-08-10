@@ -763,9 +763,17 @@ const roundTo = (v, dp) => {
    own small bug if they ever disagreed about it. */
 const afterRaise = (c) => round2(((c && c.salary) || 0) * (1 + ((c && c.raisePct) || 0)));
 
-/* A bonus as a share of the salary it was earned against. Null when there is
-   nothing to measure it against: Bonuses by year runs to years that have no
-   comp record, and a percentage of an unknown salary is not a figure. */
+/* The salary a bonus is measured against: what the year STARTED on, not what
+   it ended on. A bonus arrives alongside February's merit raise but is earned
+   against the pay you were on through the year before it — which is exactly
+   the year's opening figure, since every year opens where the last one closed.
+   That makes it the same base the payslip system quotes, to the basis point,
+   for a bonus filed under the year it was PAID. */
+const bonusBase = (c) => round2((c && c.salary) || 0);
+
+/* A bonus as a share of that salary. Null when there is nothing to measure it
+   against: Bonuses by year runs to years that have no comp record, and a
+   percentage of an unknown salary is not a figure. */
 const bonusShare = (bonus, base) =>
   (!base || bonus === null || bonus === undefined) ? null : bonus / base;
 
@@ -2769,11 +2777,11 @@ function renderComp() {
     <p class="sub">What actually landed, whatever the comp plan said.</p>
     ${bonusYears.length ? `<div class="tablewrap"><table>
       <thead><tr><th style="text-align:left">Year</th><th>Bonus</th>
-        <th title="The bonus as a share of what that year's salary came to after its raise — the same figure Total comp is built from">% of salary</th></tr></thead>
+        <th title="The bonus as a share of the salary the year opened on — the pay it was earned against, and the base a payslip system quotes">% of salary</th></tr></thead>
       <tbody>${bonusYears.map(y => {
         /* A year with no comp record has a bonus but no salary to measure it
            against, and inventing one would be worse than the dash. */
-        const share = bonusShare(bonuses[y], afterRaise(comp[y]));
+        const share = bonusShare(bonuses[y], bonusBase(comp[y]));
         return `<tr class="editrow" data-edit="yearAmount" data-map="bonuses" data-key="${esc(y)}">
           <th scope="row">${esc(y)}</th><td>${fmtMoney(bonuses[y])}</td>
           <td${share === null ? ' class="muted" title="No salary recorded for this year"' : ''}>${
@@ -4367,16 +4375,16 @@ const EDITORS = {
          serves have nothing to measure against. */
       ...(ds.map === 'bonuses' ? [{ key: 'bonusPct', label: 'Bonus %',
         type: 'percent', dp: 4,
-        hint: "A share of that year's salary after its raise — type either box." }] : []),
+        hint: "A share of the salary that year started on — type either box." }] : []),
     ],
     get: (ds) => ({ year: +ds.key, amount: state.side[ds.map][ds.key],
       bonusPct: ds.map !== 'bonuses' ? undefined
-        : bonusShare(state.side[ds.map][ds.key], afterRaise(state.side.comp[ds.key])) }),
+        : bonusShare(state.side[ds.map][ds.key], bonusBase(state.side.comp[ds.key])) }),
     /* Changing the YEAR here changes which salary the percentage is measured
        against, so the base is read from the box rather than from ds.key. */
     link(changed, ds) {
       if (ds.map !== 'bonuses') return;
-      const base = afterRaise((state.side.comp || {})[F('rf-year').value.trim()]);
+      const base = bonusBase((state.side.comp || {})[F('rf-year').value.trim()]);
       linkBonusPct(changed === 'bonusPct' ? 'pct' : changed === 'amount' ? 'money' : 'base',
         base, 'amount');
     },
@@ -4410,7 +4418,7 @@ const EDITORS = {
         hint: 'Fill in whichever the letter gave you — the other one follows.' },
       { key: 'bonus', label: 'Bonus', type: 'money' },
       { key: 'bonusPct', label: 'Bonus %', type: 'percent', dp: 4,
-        hint: 'A share of the salary after the raise — type either box.' },
+        hint: 'A share of the salary the year starts on — type either box.' },
     ],
     /* The two raise boxes are one fact written two ways, so typing in either
        fills the other. Whichever box you are in is the one that's right.
@@ -4419,9 +4427,10 @@ const EDITORS = {
        unless there is no raise yet, in which case the salary and the figure you
        were quoted are what give it.
 
-       The bonus pair works the same way against the after-raise figure, with
-       one ordering rule: when the BASE moves, the dollar bonus is what was
-       actually paid, so it stays put and the percentage re-derives. */
+       The bonus pair works the same way against the SALARY box — the pay the
+       bonus was earned against, not what the year ended on — with one ordering
+       rule: when that base moves, the dollar bonus is what was actually paid,
+       so it stays put and the percentage re-derives. */
     link(changed) {
       const box = (k) => F(`rf-${k}`);
       const salary = parseMoney(box('salary').value);
@@ -4442,13 +4451,13 @@ const EDITORS = {
         else if (after !== null && salary) setPct(raiseFor(salary, after));
       }
       linkBonusPct(changed === 'bonusPct' ? 'pct' : changed === 'bonus' ? 'money' : 'base',
-        parseMoney(box('after').value));
+        parseMoney(box('salary').value));
     },
     get(ds) {
       const c = state.side.comp[ds.key] || {};
       return { year: +ds.key, ...c,
         bonus: state.side.bonuses[ds.key],   // the one the table shows
-        bonusPct: bonusShare(state.side.bonuses[ds.key], afterRaise(c)),
+        bonusPct: bonusShare(state.side.bonuses[ds.key], bonusBase(c)),
         after: afterRaise(c) };
     },
     /* Carry the previous year forward: next year, opening on the salary that
@@ -5396,7 +5405,7 @@ render();
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
-  afterRaise, bonusShare,
+  afterRaise, bonusBase, bonusShare,
   fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
