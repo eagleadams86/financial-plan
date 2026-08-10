@@ -2102,7 +2102,8 @@ function holdingList(key) {
 
 function holdingsTable(rows, list) {
   const body = rows.map((h, idx) => `<tr class="editrow" data-edit="holding"
-      data-list="${esc(list)}" data-idx="${idx}"><th scope="row">${esc(h.ticker)}</th>
+      data-list="${esc(list)}" data-idx="${idx}"><th scope="row">${esc(h.ticker)}${
+        h.lookup === false ? ' <span class="muted" title="Priced by hand — not looked up">✎</span>' : ''}</th>
       <td>${h.shares ?? ''}</td><td>${h.price != null ? fmtMoney(h.price) : ''}</td>
       <td>${fmtMoney(round2((h.shares || 0) * (h.price || 0)))}</td></tr>`).join('');
   return `${rows.length ? `<div class="tablewrap"><table>
@@ -2503,13 +2504,22 @@ function renderInvestments() {
   const s = state.side;
   const asOf = pricesAsOf();
   const stale = stalePrices().length;
+  const run = lastPriceRun();
   const priceBar = `<div class="row" style="margin:0 0 14px;align-items:center">
     <button class="btn small" id="refreshPricesBtn">↻ Refresh prices</button>
     <span class="sub muted">${asOf
       ? `Prices as of ${new Date(asOf).toLocaleString()}${stale ? ` · ${stale} out of date` : ''}`
       : priceKey() ? 'No prices fetched yet' : 'Add an Alpha Vantage key in ⚙ Preferences to fetch prices'}
       ${helpBtn('priceLookup', 'the price lookup')}</span>
-  </div>`;
+  </div>
+  ${run && run.missing && run.missing.length ? `<p class="sub" style="margin:-6px 0 14px">
+    <strong>No quote came back for ${esc(run.missing.join(', '))}.</strong>
+    Alpha Vantage's free tier quotes shares and ETFs but not mutual funds, so those
+    stay as you typed them. If a row isn't a security at all — a cash balance, say —
+    open it and turn its price lookup off so it stops being asked for.</p>` : ''}
+  ${run && run.limited ? `<p class="sub" style="margin:-6px 0 14px"><strong>Alpha Vantage
+    stopped answering.</strong> The free tier allows 25 lookups a day; the prices already
+    fetched are kept.</p>` : ''}`;
   const panes = (s.portfolios || []).map(pf => `<div class="card">
       <h2>${esc(pf.name)} <button class="h-edit" data-edit="portfolio"
         data-id="${esc(pf.id)}" title="Rename this account, reorder it, or delete it">✎ Edit</button></h2>
@@ -3047,6 +3057,7 @@ function buildRothChart() {
 
 const PRICE_KEY = 'fin-avkey';
 const QUOTE_CACHE = 'fin-quotes';
+const PRICE_RUN = 'fin-quote-run';   // what the last refresh managed, per ticker
 const QUOTE_TTL_MS = 6 * 60 * 60 * 1000;
 
 const priceKey = () => { try { return localStorage.getItem(PRICE_KEY) || ''; }
@@ -3077,9 +3088,14 @@ function allTickers() {
   const out = new Set();
   for (const rows of priceLists())
     for (const h of rows)
-      if (h.ticker && h.ticker !== '?') out.add(h.ticker.trim().toUpperCase());
+      if (h.ticker && h.ticker !== '?' && h.lookup !== false)
+        out.add(h.ticker.trim().toUpperCase());
   return [...out];
 }
+const lastPriceRun = () => {
+  try { return safeParse(localStorage.getItem(PRICE_RUN) || 'null'); }
+  catch (e) { return null; }
+};
 const stalePrices = () => {
   const cache = quoteCache();
   return allTickers().filter(t => !quoteFresh(cache[t]));
@@ -3100,42 +3116,56 @@ async function refreshPrices(quiet) {
   if (!want.length) { if (!quiet) toast('Every price is already less than six hours old'); return; }
   refreshingPrices = true;
   const cache = quoteCache();
-  let got = 0, limited = false;
+  /* Kept per ticker, not as a count: "updated 1 price" out of four leaves you
+     guessing which three didn't, and the reasons differ — Alpha Vantage's free
+     tier quotes shares and ETFs but not mutual funds, so a fund comes back
+     empty rather than as an error. The result is stored, so the Investments
+     tab can still show it after the toast has gone. */
+  const run = { at: Date.now(), updated: [], missing: [], limited: false, failed: false };
   try {
     for (const ticker of want) {
       const url = 'https://www.alphavantage.co/query?function=GLOBAL_QUOTE'
         + `&symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(key)}`;
       const res = await fetch(url);
-      if (!res.ok) break;
+      if (!res.ok) { run.failed = true; break; }
       const data = await res.json();
       /* Alpha Vantage answers 200 with a prose message rather than an error
          status when the daily allowance is gone, or the key is wrong. */
-      if (data.Note || data.Information) { limited = true; break; }
+      if (data.Note || data.Information) { run.limited = true; break; }
       const price = parseFloat(data['Global Quote']?.['05. price']);
-      if (!Number.isFinite(price)) continue;   // a fund it doesn't cover
+      if (!Number.isFinite(price)) { run.missing.push(ticker); continue; }
       cache[ticker] = { price: round2(price), ts: Date.now() };
-      got++;
+      run.updated.push({ ticker, price: round2(price) });
     }
   } catch (e) {
     console.warn('price lookup failed', e);
+    run.failed = true;
   }
   refreshingPrices = false;
   writeQuoteCache(cache);
-  if (got) {
+  try { localStorage.setItem(PRICE_RUN, JSON.stringify(run)); } catch (e) {}
+  if (run.updated.length) {
     for (const rows of priceLists())
       for (const h of rows) {
+        if (h.lookup === false) continue;
         const q = cache[(h.ticker || '').trim().toUpperCase()];
         if (quoteFresh(q)) h.price = q.price;
       }
     save();
   }
   render();
-  if (limited) toast(got
-    ? `Updated ${got} price(s), then Alpha Vantage cut us off for today`
+  const named = run.updated.map(u => `${u.ticker} ${fmtMoney(u.price)}`).join(', ');
+  if (run.limited) toast(named
+    ? `Updated ${named}, then Alpha Vantage stopped answering for today`
     : 'Alpha Vantage says no more lookups today (or the key is wrong)');
-  else if (got) toast(`Updated ${got} price${got === 1 ? '' : 's'}`);
-  else if (!quiet) toast('No prices came back — check the tickers, or try later');
+  else if (run.updated.length && run.missing.length)
+    toast(`Updated ${named}. No quote for ${run.missing.join(', ')} — see the note above the tables.`);
+  else if (run.updated.length) toast(`Updated ${named}`);
+  else if (run.missing.length)
+    toast(`No quote for ${run.missing.join(', ')} — see the note above the tables.`);
+  else if (!quiet) toast('Nothing came back — check the tickers, or try again later');
 }
+
 
 /* ═══════════════════════════ Generic row editing ══════════════════════════
    Every table in the app edits through one dialog. A section registers in
@@ -3651,15 +3681,24 @@ const EDITORS = {
   /* Holdings tables — taxable, hsa, daf (ds.list picks which) */
   holding: {
     title: (ds, isNew) => isNew ? 'Add a holding' : 'Holding',
+    sub: () => 'Value is shares × price. A row that is not a security — a cash balance '
+      + 'sitting in the account — should have its price lookup off, or it will be quoted '
+      + 'as whatever company happens to share its name.',
     fields: [
       { key: 'ticker', label: 'Ticker', type: 'text' },
       { key: 'shares', label: 'Shares', type: 'number' },
       { key: 'price', label: 'Price', type: 'money' },
+      { key: 'lookup', label: 'Look its price up automatically', type: 'check' },
     ],
-    get: (ds) => holdingList(ds.list)[+ds.idx],
+    get: (ds) => {
+      const h = holdingList(ds.list)[+ds.idx];
+      return { ...h, lookup: h.lookup !== false };
+    },
+    blank: () => ({ lookup: true }),
     save(ds, v) {
       const list = holdingList(ds.list);
       const row = { ticker: v.ticker || '?', shares: v.shares ?? 0, price: v.price ?? 0 };
+      if (!v.lookup) row.lookup = false;   // absent means yes, so only "no" is stored
       if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
     },
     del: (ds) => holdingList(ds.list).splice(+ds.idx, 1),

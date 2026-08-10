@@ -150,6 +150,12 @@ hole. That includes values you might not think of as user input: year keys and
 account ids come out of a restored file. JSON that didn't come from this code
 (`safeParse`, and the same reviver in the sync module) drops `__proto__`,
 because `Object.assign` copies it with [[Set]] and would reassign a prototype.
+The price lookup records its result per ticker (`fin-quote-run`) and the
+Investments tab reports it: a count alone can't say WHICH ticker failed, and
+the reasons differ — Alpha Vantage's free tier quotes shares and ETFs but not
+mutual funds. A holding carries `lookup: false` when it shouldn't be quoted at
+all; a row called "Cash" otherwise fetches the real listed company CASH and
+overwrites the balance with its share price.
 Charts get a `summary` argument: a `<canvas>` announces nothing to a screen
 reader, and a chart that can't be drawn shouldn't render an empty one.
 Money fields are TEXT inputs, not number ones: a number input can render
