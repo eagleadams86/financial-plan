@@ -337,6 +337,8 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
 th .tile-help, td .tile-help { vertical-align: 1px; }
 td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 #helpDialog { max-width: 46ch; }
+.field-hint { margin: 4px 0 0; font-size: 12px; line-height: 1.45;
+  color: var(--text-muted); }
 
 /* Summary-year card list */
 .sumlist { columns: 2 260px; column-gap: 32px; }
@@ -3096,6 +3098,17 @@ function buildFields(fields, values) {
     if (input.tagName === 'SELECT')
       input.addEventListener('change', () => applyFieldVisibility(fields));
     cell.appendChild(input);
+    /* A line under the input, for a field whose label can't carry the whole
+       story — easier to read than one paragraph at the top explaining five
+       fields at once. */
+    if (f.hint) {
+      const hint = document.createElement('p');
+      hint.className = 'field-hint';
+      hint.textContent = f.hint;
+      hint.id = `rf-${f.key}-hint`;
+      input.setAttribute('aria-describedby', hint.id);
+      cell.appendChild(hint);
+    }
     wrap.appendChild(cell);
   }
   applyFieldVisibility(fields);
@@ -3376,40 +3389,45 @@ const EDITORS = {
      (optionally) the month it starts being tracked. Click an account row. */
   account: {
     title: (ds, isNew) => isNew ? 'Add an account' : 'Account settings',
-    sub: () => 'The rate compounds monthly on the account\'s balance in future months — '
-      + 'set 0 for a plain account. Interest can be paid into a different account, the way '
-      + 'a brokerage sweeps dividends into cash. A start month leaves earlier months blank '
-      + 'and out of Total, seeded from the balance you give it.',
+    sub: (ds, isNew) => isNew
+      ? 'A new account is tracked from this month on. Earlier months stay blank and out of '
+        + 'Total rather than inventing a history it never had.'
+      : 'How this account behaves in the budget grid.',
     fields: (ds) => [
       { key: 'name', label: 'Account name', type: 'text' },
-      { key: 'rate', label: 'Interest / growth %/yr', type: 'percent' },
+      { key: 'rate', label: 'Interest / growth %/yr', type: 'percent',
+        hint: 'Compounds monthly on the balance, in future months only. 0 for an account '
+          + 'that just holds money.' },
       { key: 'creditTo', label: 'Interest is paid into', type: 'select',
-        options: accountsOf(state).map(a => [a.id, a.name]) },
-      { key: 'since', label: 'Tracked from (optional)', type: 'month' },
-      ...(ds.bal ? [] : [{ key: 'seed', label: 'Balance at that month', type: 'money' }]),
+        options: accountsOf(state).map(a => [a.id, a.name]),
+        hint: 'Usually itself. Point it at another account if the interest is swept out, '
+          + 'the way a brokerage pays dividends into cash.' },
+      ...(ds.bal ? [] : [{ key: 'seed', label: 'Balance right now', type: 'money',
+        hint: 'What the account holds today — the figure every later month builds on.' }]),
     ],
     get: (ds) => {
       const a = accountById(state, ds.bal) || {};
-      return { name: a.name, rate: a.rate || 0, creditTo: a.creditTo || a.id,
-               since: a.since || '' };
+      return { name: a.name, rate: a.rate || 0, creditTo: a.creditTo || a.id };
     },
-    blank: () => ({ rate: 0, creditTo: hubAccount(state)?.id, since: thisMonth() }),
+    blank: () => ({ rate: 0, creditTo: hubAccount(state)?.id }),
     save(ds, v) {
       if (!v.name) return;
-      const since = /^\d{4}-\d{2}$/.test(v.since || '') ? v.since : undefined;
       if (ds.bal) {
         const a = accountById(state, ds.bal);
         if (!a) return;
+        /* `since` is deliberately not edited here: when an account started
+           being tracked is a fact about the data, not a setting, and changing
+           it would either blank months that have figures or invent months
+           that never did. */
         Object.assign(a, { name: v.name, rate: v.rate ?? 0,
           creditTo: accountById(state, v.creditTo) ? v.creditTo : a.id });
-        if (since) a.since = since; else delete a.since;
         return;
       }
       let id = slugJs(v.name), n = 2;
       while (accountById(state, id)) id = `${slugJs(v.name)}-${n++}`;
       state.settings.accounts.push({ id, name: v.name, rate: v.rate ?? 0,
         creditTo: accountById(state, v.creditTo) ? v.creditTo : id,
-        ...(since ? { since } : {}) });
+        since: thisMonth() });
       const live = latestGridYear();
       if (live && v.seed) state.years[live].seeds[id] = v.seed;
     },

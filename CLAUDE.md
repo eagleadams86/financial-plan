@@ -63,7 +63,10 @@ numbers only. If a change needs a realistic payload, invent one.
   off them). `hub` is the one account ordinary money flows through — do not
   generalize that. `creditTo` sends an account's interest somewhere else (a
   brokerage sweep); `since` starts an account partway through, seeded from
-  `yr.seeds`, blank and out of Total before it.
+  `yr.seeds`, blank and out of Total before it. It is set once — at migration,
+  or to the current month when an account is added — and deliberately has NO
+  editor field: when tracking began is a fact about the data, and editing it
+  would either blank months that hold figures or invent months that never did.
 - A row's `role` is `normal` / `transfer` (+ `transferTo`) / `passthrough`
   (+ `transferTo` + `creditTiming`). The old fixed names (midTransfer, zelle,
   charitable…) still arrive from backups and hand-built fixtures, so every
@@ -138,7 +141,8 @@ never touches the stored order). Accounts edit through the `account` section
 (click an account row); deleting one is refused while a category still moves
 money into it. A field spec may carry `showIf(values)` — `buildFields()`
 re-evaluates on every select change, which is how each rule shows only its
-own setting. Retirement accounts are a generic list
+own setting — and `hint`, a line under the input for a field whose label can't
+carry the whole story. Retirement accounts are a generic list
 (`side.retirementAccounts`) with a `type` and their own `contribs` by year;
 the old fixed `k401` fields and the separate `rothContribs` map migrate once
 in `coerceShape` and the sources are emptied so deletions can't resurrect
