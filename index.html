@@ -1024,6 +1024,7 @@ function blankState() {
       currency: 'USD',   // ISO code; the ⚙ Preferences dialog edits it
       retirementReturnAnnual: 0.07,  // the retirement projection's assumed return
       paycheckRule: false,  // show the per-check machinery (Preferences)
+      givingFund: false,    // show the donor-advised fund section (Preferences)
       rowSort: 'manual'     // 'manual' (drag with ↑/↓) or 'alpha' within a section
     },
     years: {},        // "YYYY" → grid year or summary year (see import_xlsx.py)
@@ -1281,6 +1282,15 @@ function coerceShape(data) {
       yr.extraNotes = yr.extraNotes.filter(n => !FOLDED.test(String((n && n.where) || '')));
   for (const k of ['rothContribs', 'k401', 'comp', 'bonuses',
                    'donations', 'limits']) s[k] = obj(s[k]);
+  /* A year with nothing in it is not a year: it draws a whole card with a $0
+     summary and an empty table, which is what an emptied bucket leaves behind
+     when its last donation moves to the year its date actually falls in. The
+     buckets are forced to arrays on the way past, so a hand-edited backup
+     can't make the renderer throw. */
+  for (const y of Object.keys(s.donations)) {
+    s.donations[y] = arr(s.donations[y]);
+    if (!s.donations[y].length) delete s.donations[y];
+  }
   /* `retirement` and `rothLimit` held the spreadsheet's original free-form
      lines — a label and up to four values, shown in an "Imported spreadsheet
      rows" panel that nothing computed from. The panel is gone, so the rows go
@@ -1359,6 +1369,14 @@ function coerceShape(data) {
   if (typeof d.settings.paycheckRule !== 'boolean')
     d.settings.paycheckRule = Object.values(d.years).some(yr =>
       (yr.categories || []).some(cat => cat.rule === 'paycheck'));
+  /* Same bargain for the donor-advised fund: off unless the data already shows
+     one — a holding in it, or a donation that went through it. Deciding once
+     from the data means nobody who has a fund has to go and find the switch,
+     and nobody who hasn't is shown a section about one. */
+  if (typeof d.settings.givingFund !== 'boolean')
+    d.settings.givingFund = !!(s.daf || []).length
+      || Object.values(s.donations).some(rows =>
+        (rows || []).some(r => r && (r.funding || r.grant)));
   if (d.settings.rowSort !== 'alpha') d.settings.rowSort = 'manual';
   d.vacations = obj(d.vacations);
   d.vacations.trips = arr(d.vacations.trips);
@@ -3238,7 +3256,11 @@ function renderVacations() {
 
 function renderGiving() {
   const s = state.side;
-  const years = Object.keys(s.donations || {}).sort().reverse();
+  /* Only years that hold something. coerceShape prunes an emptied bucket on
+     load, but deleting the last donation of a year empties one mid-session —
+     the card has to go there and then, not on the next reload. */
+  const years = Object.keys(s.donations || {})
+    .filter(y => (s.donations[y] || []).length).sort().reverse();
 
   const donTable = (y) => {
     const items = s.donations[y];
@@ -3272,11 +3294,22 @@ function renderGiving() {
     </div>`;
   };
 
-  return `<div class="card">
+  /* Not everyone has a donor-advised fund, and a section explaining one you
+     haven't got is just a section to scroll past — so it's a Preferences
+     switch. The donations themselves are nothing to do with it and are always
+     here, which is why the paragraph about how they file lives outside it. */
+  const fund = !state.settings.givingFund ? '' : `<div class="card">
     <h2>Giving fund</h2>
     <p class="sub">A donor-advised fund's holdings. Grants come out of this balance —
       already donated for tax purposes, waiting to be granted to a cause.</p>
     ${holdingsTable(s.daf || [], 'daf')}
+  </div>`;
+  return fund + `<div class="card">
+    <h2>Donations</h2>
+    <p class="sub">Each one files itself under the year of its date, newest year first.
+      Give one a date in <strong>any</strong> year — last year's, next year's — and that
+      year gets its own table below, appearing the moment it has something in it and
+      going again when it doesn't.</p>
     ${years.length ? '' : `<div class="addbar"><button class="btn small" data-add="donation"
       data-year="${new Date().getFullYear()}">＋ Add the first donation</button></div>`}
   </div>` + years.map(donTable).join('');
@@ -4079,6 +4112,16 @@ function yearBucket(map, y) {
   if (!map[y]) map[y] = [];
   return map[y];
 }
+
+/* Take a donation out, and the year with it if that was the last one. The tab
+   stops drawing an empty year either way, but leaving the bucket behind would
+   put it in a backup taken before the next reload — and bring the empty card
+   back on restore. */
+function dropDonation(year, idx) {
+  const rows = state.side.donations[year] || [];
+  rows.splice(+idx, 1);
+  if (!rows.length) delete state.side.donations[year];
+}
 const noteField = { key: 'note', label: 'Note', type: 'note' };
 
 /* The lines nearly every trip turns out to need. A new trip starts from these
@@ -4294,8 +4337,9 @@ const EDITORS = {
       + 'GBP, CAD…) — it changes how numbers display, not their values. PTO days seed new '
       + 'holiday-planner years. Turn the paycheck setting on if some months bring three '
       + 'paychecks instead of two: rows can then be set as an amount per check, and the '
-      + 'budget grows a row for the count. The price-lookup key stays on this device and is '
-      + 'never synced or backed up.',
+      + 'budget grows a row for the count. The donor-advised fund section is off for anyone '
+      + 'who has no such fund — donations are tracked either way. The price-lookup key stays '
+      + 'on this device and is never synced or backed up.',
     fields: [
       { key: 'currency', label: 'Currency code', type: 'text' },
       { key: 'ptoAllowance', label: 'PTO days per year', type: 'number', step: 1 },
@@ -4305,6 +4349,8 @@ const EDITORS = {
       ]},
       { key: 'paycheckRule',
         label: "I don't get the same number of paychecks every month", type: 'check' },
+      { key: 'givingFund', label: 'I have a donor-advised fund', type: 'check',
+        hint: 'Adds its holdings to the Giving tab. Donations are tracked either way.' },
       { key: 'midTermRateAnnual', label: 'Default interest %/yr for dividend rows',
         type: 'percent' },
       { key: 'retirementReturnAnnual', label: 'Assumed retirement return %/yr',
@@ -4315,6 +4361,7 @@ const EDITORS = {
                   ptoAllowance: state.settings.ptoAllowance,
                   rowSort: state.settings.rowSort || 'manual',
                   paycheckRule: !!state.settings.paycheckRule,
+                  givingFund: !!state.settings.givingFund,
                   midTermRateAnnual: state.settings.midTermRateAnnual ?? 0.03,
                   retirementReturnAnnual: state.settings.retirementReturnAnnual ?? 0.07,
                   avKey: priceKey() }),
@@ -4337,6 +4384,7 @@ const EDITORS = {
       if (v.ptoAllowance) state.settings.ptoAllowance = v.ptoAllowance;
       state.settings.rowSort = v.rowSort === 'alpha' ? 'alpha' : 'manual';
       state.settings.paycheckRule = !!v.paycheckRule;
+      state.settings.givingFund = !!v.givingFund;
       if (v.midTermRateAnnual !== null) state.settings.midTermRateAnnual = v.midTermRateAnnual;
       if (v.retirementReturnAnnual !== null)
         state.settings.retirementReturnAnnual = v.retirementReturnAnnual;
@@ -4818,9 +4866,12 @@ const EDITORS = {
   /* Donations */
   donation: {
     title: (ds, isNew) => isNew ? 'Add a donation' : 'Donation',
-    sub: () => 'Fill exactly one of the three amounts: fund deposit (+), DAF grant (−), or cash (−).',
+    sub: (ds, isNew) => 'Fill exactly one of the three amounts: fund deposit (+), DAF grant (−), '
+      + `or cash (−). The date decides which year this ${isNew ? 'lands in' : 'is filed under'} — `
+      + `date it in another year and it ${isNew ? 'starts' : 'moves to'} that year's table.`,
     fields: [
-      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'date', label: 'Date', type: 'date',
+        hint: 'Any year. One without a table yet gets one.' },
       { key: 'foundation', label: 'Foundation', type: 'text', wide: true },
       { key: 'cause', label: 'Cause', type: 'text' },
       { key: 'funding', label: 'Fund deposit', type: 'money' },
@@ -4842,7 +4893,7 @@ const EDITORS = {
       if (ds.idx !== undefined && y === ds.year)
         state.side.donations[ds.year][+ds.idx] = row;
       else {
-        if (ds.idx !== undefined) state.side.donations[ds.year].splice(+ds.idx, 1);
+        if (ds.idx !== undefined) dropDonation(ds.year, ds.idx);
         yearBucket(state.side.donations, y).push(row);
         /* SAY SO. The row leaves the table you were looking at for one further
            down the page, and a row vanishing from under the cursor reads as
@@ -4854,7 +4905,7 @@ const EDITORS = {
             fullDayLabel(row.date)}`;
       }
     },
-    del: (ds) => state.side.donations[ds.year].splice(+ds.idx, 1),
+    del: (ds) => dropDonation(ds.year, ds.idx),
   },
 
   /* Vacations: the trip itself, and its line items */

@@ -99,7 +99,11 @@ must never show them.
   your choice. Each line tracks what's paid, what's credited and what's still
   due, with a **✓ Paid** button that settles the rest in one click. Plus the
   holidays & PTO planner, with from/to dates.
-- **Giving** — the Fidelity Charitable fund and the donations log.
+- **Giving** — the donations log, each one filed under the year of its date:
+  date one in any year, past or future, and that year gets its own table, which
+  appears when it has something in it and goes when it doesn't. Plus a
+  donor-advised fund's holdings, for those who have one — a Preferences switch,
+  since plenty of people don't, and donations are tracked either way.
 - **History** — total liquidity 2011→now, and money in vs out for every one of
   those years, with the interest your accounts earned counted as money in so the
   two charts tell the same story. The oldest years come from bi-weekly sheets

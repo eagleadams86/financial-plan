@@ -413,6 +413,17 @@ text is read once in `coerceShape` using the year it's filed under, and text
 that doesn't parse is kept and still displayed. Dates are formatted by slicing
 the ISO string, never by building a Date — a bare ISO day parses as UTC
 midnight, which renders as the day before west of Greenwich.
+**A year with no donations in it is not drawn** — `renderGiving` filters empty
+buckets (needed at render time: deleting the last row of a year empties one
+mid-session) and `coerceShape` + `dropDonation()` delete the bucket outright, so
+an emptied year can't sit in a backup and come back on restore.
+**`settings.givingFund` shows or hides the donor-advised fund section** — not
+everyone has one, and the donations themselves have nothing to do with it, which
+is why they are always drawn and the paragraph explaining how they file lives
+outside that card. Defaulted once from the data like `paycheckRule`: on if there
+is a holding in the fund or any donation with a `funding`/`grant`, off for
+cash-only giving, and never overruling a choice already made. Turning it off
+HIDES, never deletes — the holdings come back intact.
 **A donation is filed under the year its DATE falls in**, so editing one whose
 date sits outside the table it was in moves it to another table further down
 the page — which reads as the row vanishing, especially when you only came to
