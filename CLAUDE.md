@@ -119,6 +119,12 @@ numbers only. If a change needs a realistic payload, invent one.
   `+ balAdjust.dividend`. At the defaults this reduces exactly to the old
   four formulas — there's a test that pins it. `overrides` pin a month
   outright; later months chain from the pin.
+- **The note dot is `hasNote(cell)`** — the cell's own note OR a note on any of
+  its split amounts. Asking only about `cell.note` meant a month annotated
+  solely on one of its amounts drew no dot and said nothing on hover, leaving
+  the note reachable only by opening that cell. The tooltip breaks the amounts
+  out whenever there is more than one OR a single one carries a note. A stated
+  balance's note earns the dot the same way.
 - A cell may carry `parts: [{v, kind, note?}]`. Its `v` stays the sum and its
   `kind` is derived (all-actual, all-manual, or `mixed`), so the engine,
   subtotals, rollover and the charts never have to know about parts.
