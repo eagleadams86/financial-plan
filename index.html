@@ -910,6 +910,16 @@ function coerceShape(data) {
   const d = (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
   const arr = (v) => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
+  /* Force a field that must be a number BUT reaches the page unescaped (shares,
+     nights, PTO days…) to an actual number. A hand-edited or corrupted backup
+     could carry a string there, and the renderers interpolate several of these
+     raw — a string of markup would then execute. Absent stays absent (the
+     renderers show those as blank); anything present becomes a finite number or
+     0. This is the class fix; individual sinks needn't each remember to esc(). */
+  const num = (v) => (v === null || v === undefined || v === '') ? v
+    : (typeof v === 'number' && Number.isFinite(v)) ? v
+    : (Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0);
+  const numHolding = (h) => { h.shares = num(h.shares); h.price = num(h.price); };
   d.schema = typeof d.schema === 'number' ? d.schema : 1;
   d.settings = obj(d.settings);
   /* Accounts used to be four fixed ids with their names and rates in two
@@ -1025,7 +1035,9 @@ function coerceShape(data) {
     pf.id = String(pf.id || slugJs(pf.name || 'account'));
     pf.name = String(pf.name || pf.id);
     pf.rows = arr(pf.rows);
+    pf.rows.forEach(numHolding);
   }
+  s.daf.forEach(numHolding);
   /* Retirement accounts used to be six fixed fields (k401) with labels from
      Charlie's employer. They're a generic list now — any number of accounts,
      each Traditional or Roth. One-time migration; k401 is emptied so deleting
@@ -1137,6 +1149,16 @@ function coerceShape(data) {
   if (d.settings.rowSort !== 'alpha') d.settings.rowSort = 'manual';
   d.vacations = obj(d.vacations);
   d.vacations.trips = arr(d.vacations.trips);
+  /* Trip nights and each line's figures reach the page unescaped, so coerce
+     them the same way as holdings. */
+  for (const t of d.vacations.trips) {
+    t.nights = num(t.nights);
+    t.year = num(t.year);
+    t.items = arr(t.items);
+    for (const it of t.items) {
+      it.paid = num(it.paid); it.credits = num(it.credits); it.due = num(it.due);
+    }
+  }
   d.vacations.pto = obj(d.vacations.pto);
   /* PTO dates were one free-text box ("Jan 30 - Feb 1", or a bare ISO day).
      They're a from/to pair on real date pickers now. Read the old text once,
@@ -1145,8 +1167,12 @@ function coerceShape(data) {
   for (const [y, p] of Object.entries(d.vacations.pto)) {
     const bucket = obj(p);
     d.vacations.pto[y] = bucket;
+    bucket.allowance = num(bucket.allowance);
     bucket.entries = arr(bucket.entries);
     for (const e of bucket.entries) {
+      /* nights and PTO days render unescaped and feed the "used" running total */
+      e.nights = num(e.nights);
+      e.ptoDays = num(e.ptoDays);
       if (e.from || !e.dates) continue;
       /* split only on a spaced dash, so the hyphens inside an ISO date survive */
       const parts = String(e.dates).split(/\s+[–—-]\s+/);
@@ -1162,12 +1188,15 @@ function coerceShape(data) {
   return d;
 }
 
-/* Migration slot: a switch on parsed.schema. Schema 1 is current, so today it's
-   a passthrough — when the shape changes, bump schema in blankState() and add a
-   case here that upgrades old payloads in place. */
+/* Migration slot: a switch on parsed.schema. Schema 2 is current (schema 1, and
+   backups from before the field existed, default to 1 in coerceShape). Every
+   shape change so far is presence-based and handled inside coerceShape, so both
+   schemas flow straight through here — when a change ever needs a real rewrite,
+   bump schema in blankState() and add a case that upgrades older payloads. */
 function migrate(parsed) {
   switch (parsed.schema) {
     case 1:
+    case 2:
     default:
       return parsed;
   }

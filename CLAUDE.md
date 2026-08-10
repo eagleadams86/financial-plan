@@ -161,14 +161,29 @@ hole. That includes values you might not think of as user input: year keys and
 account ids come out of a restored file. JSON that didn't come from this code
 (`safeParse`, and the same reviver in the sync module) drops `__proto__`,
 because `Object.assign` copies it with [[Set]] and would reassign a prototype.
+Numeric fields that reach the page WITHOUT `esc()` (holding shares, trip/PTO
+nights, PTO days, allowances) are forced to numbers in `coerceShape` (`num()`) —
+several renderers interpolate them raw, so a string of markup in a hand-edited
+or corrupted backup would otherwise execute. Coerce the field, don't just esc
+the one sink: it closes the whole class.
 The price lookup records its result per ticker (`fin-quote-run`) and the
 Investments tab reports it: a count alone can't say WHICH ticker failed, and
 the reasons differ — Alpha Vantage's free tier quotes shares and ETFs but not
 mutual funds. A holding carries `lookup: false` when it shouldn't be quoted at
 all; a row called "Cash" otherwise fetches the real listed company CASH and
-overwrites the balance with its share price.
+overwrites the balance with its share price. The Investments tab tops up stale
+prices when it opens, but a ticker that can never be quoted (a fund, a wrong
+key, the daily limit, being offline) stays stale — and `refreshPrices()` ends in
+`render()`, which re-opens the tab. `priceAutoTried` remembers what the quiet
+auto-refresh has attempted this page load so it can't re-fire in a tight loop;
+the manual Refresh button ignores the set and always retries.
 Charts get a `summary` argument: a `<canvas>` announces nothing to a screen
-reader, and a chart that can't be drawn shouldn't render an empty one.
+reader, and a chart that can't be drawn shouldn't render an empty one. Chart.js
+4's BAR element ignores `borderDash` (only lines and arcs honour it), so the
+projected-year "dashed edge" on the flow bars is drawn by the `dashedBarEdge`
+plugin, and those bars' solid border is turned off (a dash over a same-colour
+solid reads as solid). The signal must never be colour alone — Charlie is
+red-green colourblind.
 Money fields are TEXT inputs, not number ones: a number input can render
 neither `$` nor a thousands separator. `asMoneyInput()` formats on blur and
 `parseMoney()` reads leniently — symbol, commas and spaces all fall away, and

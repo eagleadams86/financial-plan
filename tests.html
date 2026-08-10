@@ -614,6 +614,34 @@ t('a __proto__ key in a restored file never becomes a prototype', () => {
   eq(Object.getPrototypeOf(target) === Object.prototype, true, 'Object.assign left it alone');
   eq(({}).pwned, undefined, 'and nothing global was touched');
 });
+t('numeric fields that render unescaped are coerced to numbers', () => {
+  /* shares, trip/PTO nights and PTO days reach the page WITHOUT esc(); a string
+     of markup in a hand-edited or corrupted backup would otherwise execute.
+     coerceShape forces them to numbers, closing the whole class of sink. */
+  const evil = '<img src=x onerror=alert(1)>';
+  const d = H.coerceShape({
+    side: { portfolios: [{ id: 'p', name: 'P',
+              rows: [{ ticker: 'X', shares: evil, price: evil }] }],
+            daf: [{ ticker: 'Y', shares: evil, price: 5 }] },
+    vacations: { trips: [{ id: 't', name: 'T', year: '2027', nights: evil,
+                  items: [{ label: 'Air', paid: evil, credits: '1.5', due: 3 }] }],
+      pto: { '2027': { allowance: evil, entries: [
+              { name: 'H', nights: evil, ptoDays: evil }] } } }
+  });
+  const row = d.side.portfolios[0].rows[0];
+  eq(typeof row.shares, 'number'); eq(row.shares, 0, 'markup shares → 0');
+  eq(typeof row.price, 'number');
+  eq(typeof d.side.daf[0].shares, 'number', 'the giving fund is coerced too');
+  const trip = d.vacations.trips[0];
+  eq(trip.nights, 0, 'markup trip nights → 0');
+  eq(trip.year, 2027, 'a numeric string parses');
+  eq(trip.items[0].paid, 0);
+  eq(trip.items[0].credits, 1.5, 'a real figure survives as a number');
+  const bucket = d.vacations.pto['2027'];
+  eq(bucket.allowance, 0);
+  eq(bucket.entries[0].nights, 0);
+  eq(bucket.entries[0].ptoDays, 0);
+});
 t('markup in a year key survives coerceShape as data, not as markup', () => {
   const evil = '<img src=x onerror=alert(1)>';
   const d = H.coerceShape({ years: { [evil]: { kind: 'summary', categoryTotals: [] } } });
