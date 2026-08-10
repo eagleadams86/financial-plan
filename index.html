@@ -2827,6 +2827,34 @@ function renderHistory() {
   </div>`;
 }
 
+/* Chart.js 4's bar element ignores borderDash — only lines and arcs honour it —
+   so the dashed "this year is projected" edge never actually drew on the flow
+   bars, and a projection read as solid history. The signal must not lean on
+   colour (Charlie is red-green colourblind), so this plugin strokes the dashed
+   outline by hand over each bar flagged projected, in the bar's true colour. */
+const dashedBarEdge = {
+  id: 'dashedBarEdge',
+  afterDatasetsDraw(chart, args, opts) {
+    const projected = (opts && opts.projected) || [];
+    const { ctx } = chart;
+    chart.data.datasets.forEach((ds, di) => {
+      const meta = chart.getDatasetMeta(di);
+      if (meta.hidden) return;
+      meta.data.forEach((bar, i) => {
+        if (!projected[i]) return;
+        const { x, y, base, width } = bar.getProps(['x', 'y', 'base', 'width'], true);
+        const half = width / 2;
+        ctx.save();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = ds._trueBorder || ds.borderColor;
+        ctx.setLineDash([5, 3]);
+        ctx.strokeRect(x - half, Math.min(y, base), width, Math.abs(base - y));
+        ctx.restore();
+      });
+    });
+  }
+};
+
 function buildHistoryCharts() {
   const liveKey = latestGridYear();
   const pts = [];
@@ -2878,25 +2906,32 @@ function buildHistoryCharts() {
   /* a projected year's bars are outlined with a dashed edge — the same signal
      the two line charts use for a figure the plan worked out */
   const projected = flowYears.map(yearIsProjected);
-  const dashed = (ctx) => projected[ctx.dataIndex] ? [5, 3] : undefined;
+  const okColor = cssVar('--ok'), errColor = cssVar('--err');
+  /* Solid edge on real years, none on projected ones — dashedBarEdge draws the
+     dashed edge for those instead. (A dash painted over a solid border of the
+     same colour would just read as solid.) The guard keeps the legend swatch,
+     which resolves borderColor with no bar context, showing the solid colour. */
+  const edge = (color) => (ctx) => (ctx && projected[ctx.dataIndex]) ? 'transparent' : color;
   newChart('flowChart', {
     type: 'bar',
     data: { labels: flowYears, datasets: [
       { label: 'Money in', data: flows.map(f => f.in),
-        backgroundColor: cssVar('--ok-bg'), borderColor: cssVar('--ok'),
-        borderWidth: 2, borderSkipped: false, borderDash: dashed },
+        backgroundColor: cssVar('--ok-bg'), borderColor: edge(okColor),
+        _trueBorder: okColor, borderWidth: 2, borderSkipped: false },
       { label: 'Money out', data: flows.map(f => f.out),
-        backgroundColor: stripes(cssVar('--err'), cssVar('--err-bg')),
-        borderColor: cssVar('--err'), borderWidth: 2, borderSkipped: false,
-        borderDash: dashed },
+        backgroundColor: stripes(errColor, cssVar('--err-bg')),
+        borderColor: edge(errColor), _trueBorder: errColor,
+        borderWidth: 2, borderSkipped: false },
     ]},
     options: {
       plugins: { legend: { labels: { color: cssVar('--chart-tick') } },
+        dashedBarEdge: { projected },
         tooltip: { callbacks: { label: (t) => `${t.dataset.label}: ${fmtMoney0(t.parsed.y)}`
           + (projected[t.dataIndex] ? ' (projected)' : '') } } },
       scales: { x: chartAxes(), y: Object.assign(chartAxes(),
         { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
     },
+    plugins: [dashedBarEdge],
   }, `Money in and money out per year: ${flowYears.map((y, i) =>
     `${y}, in ${fmtMoney0(flows[i].in)}, out ${fmtMoney0(flows[i].out)}${
       projected[i] ? ', projected' : ''}`).join('; ')}.`);
