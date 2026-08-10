@@ -195,14 +195,17 @@ function computeFixture() {
    no cells of its own, entered through the December before it. Every
    backward-looking rule has to keep working across that boundary or the whole
    year reads as blank. */
-function projectNextYear(s, categories, cells) {
+function projectNextYear(s, categories, cells, paychecks) {
   s.years['2031'] = {
     kind: 'grid', model: 'live', startMonth: '2031-01', monthCount: 12,
     enteredThrough: '2030-12',
-    categories, cells: cells || {}, paychecks: {}, seeds: {}, overrides: {}
+    categories, cells: cells || {}, paychecks: paychecks || {},
+    seeds: {}, overrides: {}
   };
   return H.computeAll(H.coerceShape(s), TODAY_FIX);
 }
+const PAYROW = () => [{ id: 'paycheck', name: 'Paycheck', role: 'normal',
+  rule: 'paycheck', perCheck: 1000 }];
 
 group('Formula engine — rules');
 t('paycheck rule multiplies per-check by that month count (incl. the 3.5 case)', () => {
@@ -284,6 +287,42 @@ t('an annual bill lands in the same month a year later, not in January', () => {
   eq(c.cells['domain|2031-01'].kind, 'missing');
   approx(c.cells['domain|2031-02'].v, -18, 'February again — the anchor is a month');
   eq(c.cells['domain|2031-03'].kind, 'missing');
+});
+t('a projected year inherits last year’s paycheck pattern, not a flat two', () => {
+  /* 2030 is paid 2, 2, 3, 2, 3.5, 2. Assuming two every month would quietly
+     drop a fortnight's pay out of every year built ahead. */
+  const all = projectNextYear(fixtureState(), PAYROW());
+  eq(all['2031'].paychecks['2031-03'], 3, 'March had three last year, so it does again');
+  eq(all['2031'].paychecks['2031-05'], 3.5);
+  eq(all['2031'].paychecks['2031-09'], 2, 'a month last year never reached: two');
+  approx(all['2031'].cells['paycheck|2031-05'].v, 3500);
+  approx(all['2031'].cells['paycheck|2031-09'].v, 2000);
+});
+t('a paycheck count typed into the projected year wins', () => {
+  const all = projectNextYear(fixtureState(), PAYROW(), null, { '2031-05': 2 });
+  eq(all['2031'].paychecks['2031-05'], 2, 'the three-check month moved, and you said so');
+  approx(all['2031'].cells['paycheck|2031-05'].v, 2000);
+});
+t('a first year with nothing behind it assumes two a month', () => {
+  /* The fresh-start case: no history to read, so the old default stands. */
+  const s = fixtureState();
+  delete s.years['2029'];
+  s.years['2030'].paychecks = {};
+  const c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2030'];
+  eq(c.paychecks['2030-04'], 2);
+  approx(c.cells['paycheck|2030-04'].v, 2000);
+});
+t('a second year ahead keeps the pattern rather than resetting to two', () => {
+  const s = fixtureState();
+  projectNextYear(s, PAYROW());
+  s.years['2032'] = {
+    kind: 'grid', model: 'live', startMonth: '2032-01', monthCount: 12,
+    enteredThrough: '2031-12',
+    categories: PAYROW(), cells: {}, paychecks: {}, seeds: {}, overrides: {}
+  };
+  const c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2032'];
+  eq(c.paychecks['2032-05'], 3.5, 'read through 2031, which read it from 2030');
+  approx(c.cells['paycheck|2032-05'].v, 3500);
 });
 t('a second year built ahead fills in off the projection behind it', () => {
   /* 2032's only history is 2031, which is nothing but estimates. Reading them

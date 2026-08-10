@@ -1431,10 +1431,30 @@ const RULES = {
 
   /* Paycheck: per-check amount × that month's paycheck count. */
   paycheck(cat, m, ctx) {
-    const n = ctx.yr.paychecks[m];
-    return (cat.perCheck || 0) * (n === undefined ? 2 : n);
+    return (cat.perCheck || 0) * ctx.paychecks[m];
   },
 };
+
+/* How many paydays land in each month of a year: its own figure where it has
+   one, else the same month of the year before, else two.
+
+   The middle step is what a year built ahead runs on — it has no counts of
+   its own — and it matters more than it looks. Assuming two every month is
+   24 a year, and anyone paid fortnightly gets 26, so the projection would
+   quietly drop a fortnight's pay from every year built ahead. Repeating last
+   year's pattern gets the ANNUAL total right, which is what a projection is
+   for; the odd three-check month may sit a month out, and any month can be
+   typed over. The prior year's own RESOLVED counts are read, so a second year
+   built ahead keeps the pattern instead of falling back to two. */
+function resolvePaychecks(yr, months, prior) {
+  const out = {};
+  for (const m of months) {
+    const own = yr.paychecks[m];
+    const last = prior?.paychecks?.[monthAdd(m, -12)];
+    out[m] = own !== undefined ? own : last !== undefined ? last : 2;
+  }
+  return out;
+}
 
 function computeYear(st, yearKey, prior, today) {
   const yr = st.years[yearKey];
@@ -1448,9 +1468,10 @@ function computeYear(st, yearKey, prior, today) {
 
   if (yr.kind !== 'grid')
     return { months: [], cells: {}, balances: {}, balanceKinds: {},
-             interest: {}, dividend: {} };
+             interest: {}, dividend: {}, paychecks: {} };
 
-  const ctx = { st, yr, months, resolved, balances, prior };
+  const paychecks = resolvePaychecks(yr, months, prior);
+  const ctx = { st, yr, months, resolved, balances, prior, paychecks };
   const live = yr.model === 'live';
   const running = {};   // account id -> tracking has begun
 
@@ -1571,7 +1592,8 @@ function computeYear(st, yearKey, prior, today) {
     }
   }
 
-  return { months, cells: resolved, balances, balanceKinds, interest, dividend };
+  return { months, cells: resolved, balances, balanceKinds, interest, dividend,
+           paychecks };
 }
 
 /* Every grid year, oldest first, each handed the previous one for the
@@ -2013,11 +2035,18 @@ function gridCard(y, yr) {
         months.map(m => `<td class="${m === thisM ? 'now' : ''}">${
           fmtCell(c.balances[`total|${m}`] || 0)}</td>`).join('')}${rowTotalTd()}</tr>`
     + (!usesPaychecks ? '' :
+      /* The count the income row is actually multiplying by, not just the ones
+         typed in: a year built ahead inherits last year's, and a row reading
+         "·" beside three checks' worth of pay would be a puzzle. An inherited
+         count reads as an estimate, in the same italic every other estimate
+         uses — never a colour. */
       `<tr class="paych"><th class="lbl" scope="row">Paychecks</th>${
-        months.map(m => `<td class="cell ${m === thisM ? 'now' : ''}" data-pay="${m}">${
-          yr.paychecks[m] ?? '·'}</td>`).join('')}${rowTotalTd(
+        months.map(m => `<td class="cell ${yr.paychecks[m] === undefined ? 'c-auto' : ''} ${
+          m === thisM ? 'now' : ''}" data-pay="${m}" title="${
+          yr.paychecks[m] === undefined ? 'Estimated from the same month last year'
+            : 'Entered'}">${c.paychecks[m]}</td>`).join('')}${rowTotalTd(
             round2(months.filter(m => m.startsWith(y))
-              .reduce((s, m) => s + (yr.paychecks[m] || 0), 0)), true)}</tr>`);
+              .reduce((s, m) => s + (c.paychecks[m] || 0), 0)), true)}</tr>`);
 
   const nextM = live ? monthAdd(yr.enteredThrough, 1) : null;
   /* A year that hasn't begun has nothing to enter and nothing to roll over
@@ -4738,12 +4767,19 @@ function openCellEditor(yearKey, type, id, m) {
     F('cellSplitBtn').hidden = true;
     setParts(null, false);
     F('cellDialogTitle').textContent = `Paychecks — ${monthLabel(m)}`;
-    F('cellContext').textContent = 'How many paychecks land this month (2 most months, 3 in a three-check month).';
+    const stored = yr.paychecks[m];
+    F('cellContext').textContent = stored !== undefined
+      ? 'How many paychecks land this month (2 most months, 3 in a three-check month).'
+      : `Estimated from ${monthLabel(monthAdd(m, -12))} — type the real number if `
+        + 'the three-check month has moved.';
     F('cellValue').dataset.money = 'off';
-    F('cellValue').value = yr.paychecks[m] ?? '';
+    /* A placeholder, never a value: filling the box in would make simply
+       opening the dialog freeze the estimate into a figure of its own. */
+    F('cellValue').value = stored ?? '';
+    F('cellValue').placeholder = String(C[yearKey]?.paychecks[m] ?? 2);
     kindWrap.hidden = true;
     revertBtn.hidden = true;
-    clearBtn.hidden = yr.paychecks[m] === undefined;
+    clearBtn.hidden = stored === undefined;
   }
   cellDialog.showModal();
 }

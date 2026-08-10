@@ -55,6 +55,20 @@ numbers only. If a change needs a realistic payload, invent one.
   `settings.midTermRateAnnual` — rate/12 × prior cash+mid), `paycheck`
   (perCheck × count, incl. fractional counts; hidden entirely unless
   `settings.paycheckRule`), `none`.
+- **Paycheck counts resolve, they aren't just read.** `resolvePaychecks()` gives
+  every month of a year a count — its own if stored, else the SAME MONTH of the
+  year before (the prior year's resolved counts, so a second year ahead keeps
+  the pattern), else 2 — and `computeYear` returns the map as `paychecks`. A
+  year built ahead has none of its own, and assuming two a month is 24 against
+  a fortnightly 26, so the old default quietly dropped a fortnight's pay from
+  every projected year. Repeating last year's pattern gets the ANNUAL total
+  right, which is the point of a projection; a three-check month that has moved
+  is typed over. The Paychecks row renders the RESOLVED count (italic `c-auto`
+  when inherited, never a colour) — showing `·` beside three checks' worth of
+  pay was the real bug — and the cell editor offers it as a placeholder, never
+  a value, same rule as the balance branch. Charlie's own import happens to
+  carry 2027 counts inside the 2026 grid, which `rolloverYear` copies, so this
+  path was invisible in his data and only bit a fresh customer.
 - **The backward-looking rules reach over the year boundary**, through the one
   shared helper `priorYearRun()` (the prior year's recorded months for a row,
   oldest first). A year built ahead has no cells of its own, so without it

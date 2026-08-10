@@ -81,8 +81,11 @@ must never show them.
   where the plan is heading: a year that hasn't arrived shows nothing but
   projections, and they start from the year before rather than a blank page —
   "repeat last month" rows open at December, "average so far" rows at last
-  year's average, and a cycle bill keeps its beat, so an annual renewal still
-  lands in its own month. Each hands over as soon as you type a real month in.
+  year's average, a cycle bill keeps its beat so an annual renewal still lands
+  in its own month, and the paycheck counts repeat last year's pattern — which
+  keeps the year's total right if you're paid fortnightly, where assuming two a
+  month would lose you a fortnight's pay. Each hands over as soon as you type a
+  real month in.
   It keeps tracking the current year as that changes — **rows included**: add a
   row to this year, retire one, rename it, change its rule or move it, and next
   year is changed to match, so a year you built in advance never quietly
