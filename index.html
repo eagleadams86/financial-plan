@@ -605,7 +605,7 @@ details.section table th, details.section table td { padding: 4px 6px; }
     <div class="row">
       <div>
         <label class="field" for="cellValue">Amount</label>
-        <input type="number" id="cellValue" step="0.01" inputmode="decimal"
+        <input type="text" id="cellValue" inputmode="decimal" autocomplete="off"
           style="width:160px">
       </div>
       <div id="cellKindWrap">
@@ -633,12 +633,12 @@ details.section table th, details.section table td { padding: 4px 6px; }
       <div class="row">
         <div>
           <label class="field" for="cellInterest">Interest this month</label>
-          <input type="number" id="cellInterest" step="0.01" inputmode="decimal"
+          <input type="text" id="cellInterest" inputmode="decimal" autocomplete="off"
             style="width:160px">
         </div>
         <div>
           <label class="field" for="cellDividend">Dividend paid in</label>
-          <input type="number" id="cellDividend" step="0.01" inputmode="decimal"
+          <input type="text" id="cellDividend" inputmode="decimal" autocomplete="off"
             style="width:160px">
         </div>
       </div>
@@ -751,6 +751,30 @@ function buildMoneyFormats(code) {
 buildMoneyFormats('USD');
 const fmtMoney  = (v) => moneyFmt.format(v);
 const fmtMoney0 = (v) => moneyFmt0.format(v);
+
+/* Money is typed and read the way it looks on a statement — $1,234.50. A
+   number input can render neither the symbol nor the separator, so money
+   fields are text inputs that format themselves when you leave them and parse
+   leniently on the way back in: $, commas, spaces and stray characters all
+   fall away, and an empty box means "no figure" rather than zero. */
+function parseMoney(raw) {
+  const t = String(raw ?? '').replace(/[^0-9.\-]/g, '');
+  if (t === '' || t === '-' || t === '.') return null;
+  const n = parseFloat(t);
+  return Number.isNaN(n) ? null : round2(n);
+}
+function asMoneyInput(input) {
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.autocomplete = 'off';
+  input.addEventListener('blur', () => {
+    if (input.dataset.money === 'off') return;   // the paycheck count isn't money
+    const n = parseMoney(input.value);
+    input.value = n === null ? '' : fmtMoney(n);
+  });
+  return input;
+}
+const showMoney = (v) => (v === null || v === undefined || v === '') ? '' : fmtMoney(v);
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -880,6 +904,7 @@ function coerceShape(data) {
        drop its interest — fall back to itself. */
     if (!a.creditTo) a.creditTo = a.id;
     a.divRate = typeof a.divRate === 'number' ? a.divRate : 0;
+    a.divEvery = [1, 3, 6, 12].includes(+a.divEvery) ? +a.divEvery : 3;
     if (!a.divTo) a.divTo = a.id;
     if (!/^\d{4}-\d{2}$/.test(a.since || '')) delete a.since;
     acctIds.add(a.id);
@@ -1337,8 +1362,15 @@ function computeYear(st, yearKey, prior, today) {
            Either can be overridden for one month with what really arrived. */
         earnedInt[a.id] = typeof adj.interest === 'number'
           ? adj.interest : base[a.id] * (a.rate || 0) / 12;
-        earnedDiv[a.id] = typeof adj.dividend === 'number'
-          ? adj.dividend : base[a.id] * (a.divRate || 0) / 12;
+        /* Dividends land on a calendar beat rather than every month —
+           quarterly means March, June, September, December — and each payment
+           carries the whole period's worth. A month that isn't on the beat
+           pays nothing, which is what makes a quarterly rate add up to the
+           same year as a monthly one. */
+        const every = [1, 3, 6, 12].includes(+a.divEvery) ? +a.divEvery : 3;
+        const paysThisMonth = (+m.slice(5, 7)) % every === 0;
+        earnedDiv[a.id] = typeof adj.dividend === 'number' ? adj.dividend
+          : paysThisMonth ? base[a.id] * (a.divRate || 0) / 12 * every : 0;
         interest[`${a.id}|${m}`] = round2(earnedInt[a.id]);
         dividend[`${a.id}|${m}`] = round2(earnedDiv[a.id]);
       }
@@ -3108,14 +3140,15 @@ function buildFields(fields, values) {
       input.value = values[f.key] ?? '';
     } else {
       input = document.createElement('input');
-      input.type = { money: 'number', number: 'number', percent: 'number',
+      input.type = { number: 'number', percent: 'number',
                      date: 'date', month: 'month' }[f.type] || 'text';
-      if (f.type === 'money') { input.step = '0.01'; input.inputMode = 'decimal'; }
+      if (f.type === 'money') asMoneyInput(input);
       if (f.type === 'percent') { input.step = '0.1'; input.inputMode = 'decimal'; }
       if (f.type === 'number') { input.step = f.step || 'any'; input.inputMode = 'decimal'; }
       const v = values[f.key];
       input.value = v === undefined || v === null ? ''
-        : f.type === 'percent' ? round2(v * 100) : v;
+        : f.type === 'percent' ? round2(v * 100)
+        : f.type === 'money' ? fmtMoney(v) : v;
     }
     input.id = `rf-${f.key}`;
     /* A field that only matters for one choice re-evaluates whenever any
@@ -3162,11 +3195,11 @@ function readFields(fields) {
     const el = F(`rf-${f.key}`);
     if (f.type === 'check') { out[f.key] = el.checked; continue; }
     const raw = el.value.trim();
-    if (f.type === 'money' || f.type === 'number' || f.type === 'percent') {
+    if (f.type === 'money') { out[f.key] = parseMoney(raw); continue; }
+    if (f.type === 'number' || f.type === 'percent') {
       const n = raw === '' ? null : parseFloat(raw);
       out[f.key] = (n === null || Number.isNaN(n)) ? null
-        : f.type === 'percent' ? round2(n) / 100
-        : f.type === 'money' ? round2(n) : n;
+        : f.type === 'percent' ? round2(n) / 100 : n;
     } else out[f.key] = raw;
   }
   return out;
@@ -3436,15 +3469,23 @@ const EDITORS = {
         options: accountsOf(state).map(a => [a.id, a.name]),
         hint: 'Often somewhere spendable: a brokerage usually sweeps its dividends into '
           + 'cash rather than reinvesting them here.' },
+      { key: 'divEvery', label: 'Paid how often', type: 'select', options: [
+        ['3', 'Quarterly — Mar, Jun, Sep, Dec'],
+        ['1', 'Every month'],
+        ['6', 'Twice a year — Jun and Dec'],
+        ['12', 'Once a year — December'],
+      ], hint: 'The rate above is a yearly one either way; this only decides which months '
+          + 'it arrives in.' },
       ...(ds.bal ? [] : [{ key: 'seed', label: 'Balance right now', type: 'money',
         hint: 'What the account holds today — the figure every later month builds on.' }]),
     ],
     get: (ds) => {
       const a = accountById(state, ds.bal) || {};
       return { name: a.name, rate: a.rate || 0, creditTo: a.creditTo || a.id,
-               divRate: a.divRate || 0, divTo: a.divTo || a.id };
+               divRate: a.divRate || 0, divTo: a.divTo || a.id,
+               divEvery: String(a.divEvery || 3) };
     },
-    blank: () => ({ rate: 0, divRate: 0,
+    blank: () => ({ rate: 0, divRate: 0, divEvery: '3',
                     creditTo: hubAccount(state)?.id, divTo: hubAccount(state)?.id }),
     save(ds, v) {
       if (!v.name) return;
@@ -3456,6 +3497,7 @@ const EDITORS = {
            it would either blank months that have figures or invent months
            that never did. */
         Object.assign(a, { name: v.name, rate: v.rate ?? 0, divRate: v.divRate ?? 0,
+          divEvery: +v.divEvery || 3,
           creditTo: accountById(state, v.creditTo) ? v.creditTo : a.id,
           divTo: accountById(state, v.divTo) ? v.divTo : a.id });
         return;
@@ -3463,7 +3505,7 @@ const EDITORS = {
       let id = slugJs(v.name), n = 2;
       while (accountById(state, id)) id = `${slugJs(v.name)}-${n++}`;
       state.settings.accounts.push({ id, name: v.name, rate: v.rate ?? 0,
-        divRate: v.divRate ?? 0,
+        divRate: v.divRate ?? 0, divEvery: +v.divEvery || 3,
         creditTo: accountById(state, v.creditTo) ? v.creditTo : id,
         divTo: accountById(state, v.divTo) ? v.divTo : id,
         since: thisMonth() });
@@ -3975,6 +4017,7 @@ F('helpCloseBtn').onclick = () => helpDialog.close();
 
 const cellDialog = F('cellDialog');
 let editing = null;   // { yearKey, type: 'cat'|'bal'|'pay', id, m }
+['cellValue', 'cellInterest', 'cellDividend'].forEach(id => asMoneyInput(F(id)));
 
 function wireBudget() {
   pinnedShift = -1;  // fresh cells, so force a write
@@ -4033,15 +4076,12 @@ function setParts(parts, canEstimate) {
     const row = document.createElement('div');
     row.className = 'row';
     row.style.cssText = 'margin-top:6px;align-items:center';
-    const amount = document.createElement('input');
-    amount.type = 'number'; amount.step = '0.01'; amount.inputMode = 'decimal';
-    amount.style.width = '130px';
-    amount.value = p.v ?? '';
+    const amount = asMoneyInput(document.createElement('input'));
+    amount.style.width = '150px';
+    amount.value = showMoney(p.v ?? '');
     amount.setAttribute('aria-label', `Amount ${i + 1}`);
-    amount.oninput = () => {
-      cellParts[i].v = amount.value === '' ? 0 : round2(parseFloat(amount.value) || 0);
-      partsTotal();
-    };
+    /* parsed as you type so the running total keeps up; reformatted on blur */
+    amount.oninput = () => { cellParts[i].v = parseMoney(amount.value) || 0; partsTotal(); };
     row.appendChild(amount);
     if (canEstimate) {
       const kindSel = document.createElement('select');
@@ -4153,7 +4193,8 @@ function openCellEditor(yearKey, type, id, m) {
       : KIND_LABEL[resolvedCell?.kind || 'missing'];
     F('cellContext').textContent = kindText
       + (resolvedCell ? ` · currently ${fmtMoney(resolvedCell.v)}` : '');
-    F('cellValue').value = stored ? stored.v : (resolvedCell?.v || '');
+    F('cellValue').dataset.money = 'on';
+    F('cellValue').value = showMoney(stored ? stored.v : (resolvedCell?.v ?? ''));
     F('cellNote').value = stored?.note || '';
     const future = live && m > yr.enteredThrough;
     kindWrap.hidden = !future;
@@ -4192,24 +4233,26 @@ function openCellEditor(yearKey, type, id, m) {
     const rateLine = [
       (acct.rate || 0) ? `Grows ${round2(acct.rate * 100)}%/yr — ${fmtMoney(earned || 0)} this month${
         acct.creditTo !== acct.id ? `, into ${accountName(state, acct.creditTo)}` : ''}.` : '',
-      (acct.divRate || 0) ? `Pays ${round2(acct.divRate * 100)}%/yr in dividends — ${
-        fmtMoney(paidOut || 0)} this month${
+      (acct.divRate || 0) ? `Pays ${round2(acct.divRate * 100)}%/yr in dividends, ${
+        { 1: 'every month', 3: 'quarterly', 6: 'twice a year', 12: 'once a year' }[
+          acct.divEvery || 3]} — ${paidOut ? fmtMoney(paidOut) : 'nothing'} this month${
         (acct.divTo || acct.id) !== acct.id ? `, into ${accountName(state, acct.divTo)}` : ''}.` : '',
     ].filter(Boolean).join(' ') || 'No growth or dividend rate set on this account.';
     F('cellContext').textContent = (ov
       ? 'This balance is stated (pinned), not computed. '
       : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held. `)
       + rateLine;
-    F('cellValue').value = ov ? ov.v : (cur ?? '');
+    F('cellValue').dataset.money = 'on';
+    F('cellValue').value = showMoney(ov ? ov.v : (cur ?? ''));
     F('cellNote').value = ov?.note || '';
     /* The computed figures show as placeholders rather than values: typing one
        in is what makes it an override, so simply opening the dialog and saving
        can't freeze this month's interest by accident. */
     F('cellBalWrap').hidden = false;
-    F('cellInterest').value = typeof adj.interest === 'number' ? adj.interest : '';
-    F('cellInterest').placeholder = round2(earned || 0);
-    F('cellDividend').value = typeof adj.dividend === 'number' ? adj.dividend : '';
-    F('cellDividend').placeholder = round2(paidOut || 0);
+    F('cellInterest').value = showMoney(typeof adj.interest === 'number' ? adj.interest : '');
+    F('cellInterest').placeholder = fmtMoney(round2(earned || 0));
+    F('cellDividend').value = showMoney(typeof adj.dividend === 'number' ? adj.dividend : '');
+    F('cellDividend').placeholder = fmtMoney(round2(paidOut || 0));
     kindWrap.hidden = true;
     revertBtn.hidden = !(ov || adj.interest !== undefined || adj.dividend !== undefined);
     clearBtn.hidden = true;
@@ -4219,6 +4262,7 @@ function openCellEditor(yearKey, type, id, m) {
     setParts(null, false);
     F('cellDialogTitle').textContent = `Paychecks — ${monthLabel(m)}`;
     F('cellContext').textContent = 'How many paychecks land this month (2 most months, 3 in a three-check month).';
+    F('cellValue').dataset.money = 'off';
     F('cellValue').value = yr.paychecks[m] ?? '';
     kindWrap.hidden = true;
     revertBtn.hidden = true;
@@ -4231,7 +4275,9 @@ F('cellForm').onsubmit = () => {
   const { yearKey, type, id, m } = editing;
   const yr = state.years[yearKey];
   const raw = F('cellValue').value.trim();
-  const v = raw === '' ? null : round2(parseFloat(raw));
+  const v = type === 'pay'
+    ? (raw === '' ? null : parseFloat(raw))
+    : parseMoney(raw);
   if (type === 'cat') {
     const key = `${id}|${m}`;
     if (cellParts) {
@@ -4277,10 +4323,8 @@ F('cellForm').onsubmit = () => {
     yr.balAdjust = yr.balAdjust || {};
     const adj = {};
     const num = (elId) => {
-      const raw = F(elId).value.trim();
-      if (raw === '') return undefined;
-      const n = round2(parseFloat(raw));
-      return Number.isNaN(n) ? undefined : n;
+      const n = parseMoney(F(elId).value);
+      return n === null ? undefined : n;
     };
     const int = num('cellInterest'), div = num('cellDividend');
     if (int !== undefined) adj.interest = int;

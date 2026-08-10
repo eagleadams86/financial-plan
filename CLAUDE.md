@@ -63,7 +63,9 @@ numbers only. If a change needs a realistic payload, invent one.
   off them). `hub` is the one account ordinary money flows through — do not
   generalize that. An account earns twice over: `rate` compounds into
   `creditTo` (usually itself), and `divRate` is earned the same way but paid
-  into `divTo` — the brokerage sweep. Both are earnings, so both raise Total
+  into `divTo` on a calendar beat (`divEvery`: 1/3/6/12 months, quarterly by
+  default) — the brokerage sweep. A payment carries the whole period, so the
+  yearly rate means the same whichever frequency it's on. Both are earnings, so both raise Total
   wherever they land; a per-month `balAdjust.interest`/`.dividend` replaces
   either with what really arrived. `since` starts an account partway through, seeded from
   `yr.seeds`, blank and out of Total before it. It is set once — at migration,
@@ -142,7 +144,12 @@ its money is ordinary cash-out). Row reorder moves within a section, and is
 hidden when `settings.rowSort === 'alpha'` (which sorts at render time and
 never touches the stored order). Accounts edit through the `account` section
 (click an account row); deleting one is refused while a category still moves
-money into it. A field spec may carry `showIf(values)` — `buildFields()`
+money into it. Money fields are TEXT inputs, not number ones: a number input can render
+neither `$` nor a thousands separator. `asMoneyInput()` formats on blur and
+`parseMoney()` reads leniently — symbol, commas and spaces all fall away, and
+an empty box is null rather than zero. Anything counted rather than paid (the
+paycheck count) opts out with `data-money="off"`.
+A field spec may carry `showIf(values)` — `buildFields()`
 re-evaluates on every select change, which is how each rule shows only its
 own setting — and `hint`, a line under the input for a field whose label can't
 carry the whole story. Retirement accounts are a generic list
