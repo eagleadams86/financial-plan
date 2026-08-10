@@ -425,7 +425,13 @@ twelve-by-forty grid. The collector is pure over state so it can be tested;
 `yearNotes(y)` renders it, and returns '' when there are none so the section
 isn't drawn at all rather than sitting empty. Each line carries the cell it
 came from and opens it on click — wired in `wireBudget`, because the list sits
-outside `.grid` and the grid's own listener can't reach it.
+outside `.grid` and the grid's own listener can't reach it. The list is ONE
+per line, never columns, and the note text is `white-space: pre-wrap` — a note
+is typed into a textarea over several lines and has to read back the way it was
+written, which collapsing it to a paragraph destroyed. A multi-line note puts
+its label on a line of its own (`li.multiline`); a one-liner keeps the label
+inline after an em dash, because giving every short note two lines doubles the
+list for nothing.
 **A collapsible panel stays as you left it**: tag it `data-keep="<name>"` and
 `restoreOpenSections()` (called from `wireView`, so it re-applies after every
 render) does the rest. The set of open names lives in `fin-open`, its own
