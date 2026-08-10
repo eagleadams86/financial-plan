@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """One-off edit for a Money Map backup file — stdlib only, no data inside.
 
-Does exactly one thing, because it is the one thing the app will not do on
-its own: strip the hand-typed next-year months out of the live grid, so the
-app projects them from each row's rule instead of repeating what the
-spreadsheet happened to contain. Paycheck counts are KEPT — they're a real
-schedule (three-check months and all), not an estimate.
+Does one thing, because it is the one thing the app will not do on its own:
+take the next year back out of the live grid. The spreadsheet ran 24 months so
+it could see a year ahead; the app ends the year at December and starts the
+next one with "Start <year>" instead. So the hand-typed next-year months go,
+and the grid comes back to twelve.
+
+Paycheck counts for that next year are KEPT even though nothing reads them
+yet: they're a real schedule (three-check months and all), and the rollover
+carries them into the new year the day you start it.
 
 It does NOT convert any year to a summary. That is a per-year decision, it is
 permanent, and the app has a button for it on the year you actually want it.
@@ -30,22 +34,22 @@ def live_year_key(state):
 
 
 def strip_future_months(state):
-    """Delete cells belonging to years after the live year's own.
+    """Cut the live grid back to its own twelve months.
 
-    The live grid runs long on purpose (Charlie's spans 24 months) so the plan
-    can see into next year. Those months were transcribed from the spreadsheet;
-    removing them lets the rules do the projecting, which is the whole point of
-    the grid. Returns (year key, number of cells removed).
+    Every stored cell belonging to a later year goes, and monthCount comes down
+    to 12, so the grid ends at December. Returns (year key, cells removed,
+    previous month count).
     """
     key = live_year_key(state)
     if not key:
-        return None, 0
+        return None, 0, 0
     yr = state["years"][key]
-    doomed = [k for k, cell in yr["cells"].items()
-              if k.split("|")[1][:4] > key and cell.get("kind") == "manual"]
+    doomed = [k for k in yr["cells"] if k.split("|")[1][:4] > key]
     for k in doomed:
         del yr["cells"][k]
-    return key, len(doomed)
+    was = yr.get("monthCount", 12)
+    yr["monthCount"] = 12
+    return key, len(doomed), was
 
 
 def main(argv):
@@ -56,20 +60,24 @@ def main(argv):
     if not isinstance(state.get("years"), dict):
         sys.exit(f"{src} doesn't look like a Money Map backup (no years object)")
 
-    key, removed = strip_future_months(state)
+    key, removed, was = strip_future_months(state)
     if key:
         kept = sum(1 for m in state["years"][key].get("paychecks", {})
                    if m[:4] > key)
-        print(f"{key}: removed {removed} hand-typed month(s) beyond {key}; "
-              f"kept {kept} paycheck count(s) — the rules project those months now")
+        print(f"{key}: removed {removed} cell(s) beyond {key} and shortened the grid "
+              f"from {was} months to 12")
+        print(f"  Kept {kept} paycheck count(s) for next year — the rollover picks "
+              f"them up when you press \u2295 Start {int(key) + 1}.")
         # A row with no rule now has nothing to say about next year. Name those
         # rows rather than leaving them to be noticed as gaps in the grid.
         ruleless = [cat["name"] for cat in state["years"][key]["categories"]
                     if cat.get("rule", "none") == "none" and not cat.get("isBalance")]
         if ruleless:
-            print("\n  These rows have no rule, so next year stays blank for them.")
+            print("\n  These rows have no projection rule, so any month you haven't "
+                  "typed stays\n  blank for them — including every month of next year "
+                  "once you start it.")
             print("  Give each one a rule in the app (row settings) — "
-                  '"average of last year" suits spending that wanders:')
+                  '"average of last year"\n  suits spending that wanders:')
             for name in ruleless:
                 print(f"    · {name}")
 

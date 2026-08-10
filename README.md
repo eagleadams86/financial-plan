@@ -87,11 +87,14 @@ Then open the app → **Back up** → **Restore JSON…** → pick
 Export writes `money-map-YYYY-MM-DD.json`, Restore reads it back.
 
 `migrate_local_data.py` does the one thing the app deliberately won't do to
-your data by itself: it strips the hand-typed next-year months out of the live
-grid, so the rules project them instead of repeating what the spreadsheet
-happened to contain. It writes a new file beside the input and never modifies
-the original. (Folding a year into a summary is a per-year decision with a
-button on the year itself — the script never does it for you.)
+your data by itself: it takes the next year back out of the live grid. The
+spreadsheet ran 24 months so it could see a year ahead; the app ends a year at
+December and starts the next with "Start ⟨year⟩". So the hand-typed next-year
+months go and the grid comes back to twelve — while next year's paycheck
+counts are kept, because the rollover carries them into the new year. It
+writes a new file beside the input and never modifies the original. (Folding a
+year into a summary is a per-year decision with a button on the year itself —
+the script never does it for you.)
 
 ```bash
 python3 migrate_local_data.py financial-plan-data.json
