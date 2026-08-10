@@ -117,7 +117,7 @@ t('an unknown year kind falls back to summary', () => {
   eq(d.years['2014'].kind, 'summary');
   eq(Array.isArray(d.years['2014'].categoryTotals), true);
 });
-t('migrate passes schema 1 through untouched', () => {
+t('migrate passes a current-schema state through untouched', () => {
   const s = H.blankState();
   eq(H.migrate(s), s);
 });
@@ -301,16 +301,23 @@ t('coerceShape infers sections: roles → transfer, sign → income/expense', ()
   eq(cats[2].section, 'transfer', 'transfer role wins');
   eq(cats[3].section, 'income', 'a hand-picked section is never re-guessed');
 });
-t('account names default and survive a partial payload', () => {
-  const d = H.coerceShape({ settings: { accountNames: { mid: 'House fund' } } });
-  eq(d.settings.accountNames.mid, 'House fund');
-  eq(d.settings.accountNames.cash, 'Cash', 'missing keys fall back');
+t('the old name/rate maps become an account list, once', () => {
+  const d = H.coerceShape({ settings: { accountNames: { mid: 'House fund' },
+    accountRates: { mid: 0.05 } } });
+  const mid = d.settings.accounts.find(a => a.id === 'mid');
+  eq(mid.name, 'House fund');
+  approx(mid.rate, 0.05);
+  eq(d.settings.accounts.find(a => a.id === 'cash').name, 'Cash', 'missing keys fall back');
+  eq(d.settings.accounts.find(a => a.id === 'cash').hub, true, 'cash is the hub');
+  eq(d.settings.accountNames, undefined, 'the old maps are gone, so a rename sticks');
+  eq(d.settings.accountRates, undefined);
 });
 t('a per-account interest rate compounds that account monthly', () => {
   const raw = fixtureState();
   raw.settings.accountRates = { mid: 0.12 };   // 1%/month, coerce fills the rest
   const s = H.coerceShape(raw);
-  approx(s.settings.accountRates.long, 0.07, 'legacy long rate carried over');
+  approx(s.settings.accounts.find(a => a.id === 'long').rate, 0.07,
+    'legacy long rate carried over');
   const c = H.computeAll(s, TODAY_FIX)['2030'];
   approx(c.balances['mid|2030-01'], 1010, 'seed 1000 × 1.01');
   approx(c.balances['mid|2030-02'], 1525.1, '(1010 + the 500 moved in) × 1.01');
@@ -388,6 +395,322 @@ t('the old year is untouched by a rollover', () => {
   eq(JSON.stringify(s.years['2030']), before);
 });
 
+group('Accounts');
+t('the legacy roles compute identically to the fixed four-account chain', () => {
+  /* The engine used to hard-code cash/mid/long/bank and five role names. It
+     iterates a list now — this pins that the defaults still produce exactly
+     the old numbers, including the one asymmetry that matters: a bank
+     pass-through lands BEFORE that account's growth, a charitable payment
+     AFTER it. */
+  const s = H.coerceShape(fixtureState());
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const yr = s.years['2030'];
+  const rate = (id) => s.settings.accounts.find(a => a.id === id).rate;
+  const priorOf = (id, m) => c.balances[`${id}|${H.monthAdd(m, -1)}`] ?? (yr.seeds[id] || 0);
+  const flowsAt = (m) => {
+    const f = { all: 0, mid: 0, long: 0, bank: 0, zelle: 0, char: 0 };
+    for (const cat of yr.categories) {
+      const v = c.cells[`${cat.id}|${m}`].v;
+      if (cat.id === 'char') { f.char += v; continue; }
+      if (cat.id === 'zelle') { f.zelle += v; continue; }
+      f.all += v;
+      if (cat.id === 'midt') f.mid += v;
+      if (cat.id === 'longt') f.long += v;
+      if (cat.id === 'bankt') f.bank += v;
+    }
+    return f;
+  };
+  for (const m of ['2030-02', '2030-03', '2030-05', '2030-06']) {
+    const f = flowsAt(m);
+    const g = (id) => 1 + rate(id) / 12;
+    approx(c.balances[`cash|${m}`], H.round2(priorOf('cash', m) * g('cash') + f.all),
+      `cash ${m}`, 0.02);
+    approx(c.balances[`mid|${m}`], H.round2((priorOf('mid', m) - f.mid) * g('mid')),
+      `mid ${m}`, 0.02);
+    approx(c.balances[`long|${m}`],
+      H.round2((priorOf('long', m) - f.long) * g('long') + f.char), `long ${m}`, 0.02);
+    approx(c.balances[`bank|${m}`],
+      H.round2((priorOf('bank', m) - f.bank + f.zelle) * g('bank')), `bank ${m}`, 0.02);
+  }
+});
+t('legacy role names become role + target, and migrating twice changes nothing', () => {
+  const once = H.coerceShape(fixtureState());
+  const cats = once.years['2030'].categories;
+  const by = (id) => cats.find(c => c.id === id);
+  eq(by('midt').role, 'transfer'); eq(by('midt').transferTo, 'mid');
+  eq(by('zelle').role, 'passthrough'); eq(by('zelle').creditTiming, 'pre');
+  eq(by('char').role, 'passthrough'); eq(by('char').creditTiming, 'post');
+  const twice = H.coerceShape(JSON.parse(JSON.stringify(once)));
+  eq(JSON.stringify(H.computeAll(twice, TODAY_FIX)),
+     JSON.stringify(H.computeAll(once, TODAY_FIX)), 'idempotent');
+});
+t('interest can be paid into a different account', () => {
+  const withRate = () => {
+    const raw = fixtureState();
+    raw.settings.accountRates = { long: 0.12 };   // 1%/month
+    return H.coerceShape(raw);
+  };
+  const noSweep = H.computeAll(withRate(), TODAY_FIX)['2030'];
+  const s = withRate();
+  s.settings.accounts.find(a => a.id === 'long').creditTo = 'cash';
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  /* long stops growing; the same money shows up in cash instead */
+  approx(c.balances['long|2030-02'], c.balances['long|2030-01'], 'long stays flat', 0.02);
+  const swept = c.interest['long|2030-01'] + c.interest['long|2030-02'];
+  approx(c.balances['cash|2030-02'] - noSweep.balances['cash|2030-02'], swept,
+    'cash gained exactly the interest long would have kept', 0.05);
+});
+t('a dividend rate earns like interest but lands where it is sent', () => {
+  const s = H.coerceShape(fixtureState());
+  const long = s.settings.accounts.find(a => a.id === 'long');
+  long.divRate = 0.12;          // 1%/month
+  long.divTo = 'cash';
+  long.divEvery = 1;            // every month, so each one is comparable
+  const bare = H.computeAll(H.coerceShape(fixtureState()), TODAY_FIX)['2030'];
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  approx(c.dividend['long|2030-02'],
+    H.round2(bare.balances['long|2030-01'] * 0.12 / 12), 'earned on last month', 0.05);
+  approx(c.balances['long|2030-02'], bare.balances['long|2030-02'],
+    'the paying account is untouched — it earned it, it just did not keep it', 0.02);
+  approx(c.balances['cash|2030-02'] - bare.balances['cash|2030-02'],
+    c.dividend['long|2030-01'] + c.dividend['long|2030-02'],
+    'cash gained exactly the dividends', 0.05);
+});
+t('a quarterly dividend pays on the beat and carries the quarter', () => {
+  const s = H.coerceShape(fixtureState());
+  const long = s.settings.accounts.find(a => a.id === 'long');
+  long.divRate = 0.12; long.divTo = 'cash'; long.divEvery = 3;
+  s.years['2030'].monthCount = 12;
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  approx(c.dividend['long|2030-01'], 0, 'January is not on the beat');
+  approx(c.dividend['long|2030-02'], 0);
+  ok(c.dividend['long|2030-03'] > 0, 'March is');
+  approx(c.dividend['long|2030-03'],
+    H.round2(c.balances['long|2030-02'] * 0.12 / 12 * 3), 'and carries all three months',
+    0.05);
+  approx(c.dividend['long|2030-04'], 0, 'April is not');
+  ok(c.dividend['long|2030-06'] > 0, 'June is');
+});
+t('an interest override and a dividend adjust one month only', () => {
+  const s = H.coerceShape(fixtureState());
+  const plain = H.computeAll(s, TODAY_FIX)['2030'].balances['long|2030-02'];
+  s.years['2030'].balAdjust['long|2030-02'] = { interest: 0, dividend: 100 };
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const earned = H.round2(c.balances['long|2030-01'] * 0.07 / 12);
+  approx(c.balances['long|2030-02'], H.round2(plain - earned + 100), '', 0.02);
+  approx(c.interest['long|2030-02'], 0, 'the override is what the editor shows');
+  approx(c.dividend['long|2030-02'], 100, 'and so is the dividend one');
+});
+t('an account with a start month is blank and out of Total before it', () => {
+  const s = H.coerceShape(fixtureState());
+  s.settings.accounts.push({ id: 'venmo', name: 'Venmo', rate: 0, creditTo: 'venmo',
+    since: '2030-04' });
+  s.years['2030'].seeds.venmo = 250;
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(c.balances['venmo|2030-03'], undefined, 'nothing before the start month');
+  approx(c.balances['venmo|2030-04'], 250, 'starts from its seed');
+  const bare = H.computeAll(H.coerceShape(fixtureState()), TODAY_FIX)['2030'];
+  approx(c.balances['total|2030-03'], bare.balances['total|2030-03'], 'Total unchanged before');
+  approx(c.balances['total|2030-04'] - bare.balances['total|2030-04'], 250, 'and counts after');
+});
+t('other-money balances become accounts that start this month', () => {
+  const d = H.coerceShape({ years: { '2030': { kind: 'grid', model: 'live',
+      startMonth: '2030-01', monthCount: 12, enteredThrough: '2030-01',
+      categories: [], cells: {}, paychecks: {}, seeds: {}, overrides: {} } },
+    side: { otherMoney: [{ name: 'Venmo', balance: 40 }, { name: 'Apple', balance: 5 }] } });
+  eq(d.side.otherMoney.length, 0, 'source emptied so a delete cannot resurrect it');
+  const venmo = d.settings.accounts.find(a => a.name === 'Venmo');
+  ok(venmo && venmo.since, 'became an account with a start month');
+  eq(d.years['2030'].seeds[venmo.id], 40, 'seeded from the balance it held');
+});
+
+t('the folded Venmo and purchase notes are cleared out', () => {
+  const d = H.coerceShape({
+    years: { '2026': { kind: 'summary', categoryTotals: [], extraNotes: [
+      { where: 'Venmo ledger', note: 'dinner' },
+      { where: 'Planned purchase 2027', note: 'laptop' },
+      { where: 'Sheet note', note: 'kept' }] } },
+    side: { venmo: { '2026': [{ date: 'x', desc: 'y', amount: 1 }] },
+            largePurchases: { '2026': [{ date: 'x', desc: 'y', amount: 1 }] } } });
+  eq(d.years['2026'].extraNotes.map(n => n.where), ['Sheet note'],
+    'only what the import wrote survives');
+  eq(d.side.venmo, undefined);
+  eq(d.side.largePurchases, undefined);
+});
+
+t('PTO dates read out of the old free-text box, once', () => {
+  const d = H.coerceShape({ vacations: { pto: { '2026': { allowance: 32, entries: [
+    { name: 'Chicago', dates: 'Jan 30 - Feb 1', ptoDays: 1 },
+    { name: 'MLK Day', dates: '2026-01-19', ptoDays: 0 },
+    { name: 'Someday', dates: 'whenever we get round to it', ptoDays: 0 }] } } } });
+  const e = d.vacations.pto['2026'].entries;
+  eq([e[0].from, e[0].to], ['2026-01-30', '2026-02-01'], 'a spaced range splits');
+  eq([e[1].from, e[1].to], ['2026-01-19', '2026-01-19'], 'a bare day survives its hyphens');
+  eq(e[2].dates, 'whenever we get round to it', 'unreadable text is left alone');
+  eq(e[2].from, undefined);
+  eq(e[0].dates, undefined, 'the text goes once it has become dates');
+});
+
+group('Untrusted input');
+t('a __proto__ key in a restored file never becomes a prototype', () => {
+  const hostile = '{"years":{},"__proto__":{"pwned":1}}';
+  const guarded = JSON.parse(hostile, (k, v) => k === '__proto__' ? undefined : v);
+  eq(Object.keys(guarded).includes('__proto__'), false, 'the key is dropped on parse');
+  const target = {};
+  Object.assign(target, guarded);
+  eq(Object.getPrototypeOf(target) === Object.prototype, true, 'Object.assign left it alone');
+  eq(({}).pwned, undefined, 'and nothing global was touched');
+});
+t('markup in a year key survives coerceShape as data, not as markup', () => {
+  const evil = '<img src=x onerror=alert(1)>';
+  const d = H.coerceShape({ years: { [evil]: { kind: 'summary', categoryTotals: [] } } });
+  ok(Object.keys(d.years).includes(evil), 'kept verbatim as a key');
+  /* esc() is what stands between that key and the page — pin its behaviour */
+  const escaped = evil.replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  eq(escaped.indexOf('<'), -1, 'no angle bracket survives escaping');
+});
+
+group('Investment panes');
+t('the two fixed holdings lists become named panes, once', () => {
+  const d = H.coerceShape({ side: { taxable: [{ ticker: 'VOO', shares: 2, price: 10 }],
+    hsa: [{ ticker: 'FXAIX', shares: 1, price: 5 }] } });
+  eq(d.side.portfolios.map(p => p.name), ['Taxable investments', 'HSA']);
+  eq(d.side.portfolios[0].rows[0].ticker, 'VOO');
+  eq(d.side.taxable.length, 0, 'sources emptied so a deleted pane cannot come back');
+  eq(d.side.hsa.length, 0);
+  /* a second pass must not add a third pane */
+  const again = H.coerceShape(JSON.parse(JSON.stringify(d)));
+  eq(again.side.portfolios.length, 2);
+});
+t('a pane with no holdings still survives the shape check', () => {
+  const d = H.coerceShape({ side: { portfolios: [{ id: 'x', name: 'Brokerage' }] } });
+  eq(d.side.portfolios[0].name, 'Brokerage');
+  eq(Array.isArray(d.side.portfolios[0].rows), true);
+});
+
+group('Average of last year');
+t('averages the prior year’s stored months, ignoring what it estimated', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2029'].categories.push({ id: 'gas', name: 'Gas', role: 'normal', rule: 'none' });
+  s.years['2029'].cells['gas|2029-01'] = { v: -100, kind: 'actual' };
+  s.years['2029'].cells['gas|2029-02'] = { v: -200, kind: 'actual' };
+  s.years['2029'].cells['gas|2029-03'] = { v: -300, kind: 'actual' };
+  s.years['2030'].categories.push({ id: 'gas', name: 'Gas', role: 'normal',
+    rule: 'avglastyear', section: 'expense' });
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  approx(c.cells['gas|2030-04'].v, -200, 'mean of the three recorded months');
+  eq(c.cells['gas|2030-04'].kind, 'auto');
+});
+t('a row with no history last year stays blank rather than estimating zero', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].categories.push({ id: 'new', name: 'New thing', role: 'normal',
+    rule: 'avglastyear', section: 'expense' });
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(c.cells['new|2030-04'].kind, 'missing');
+});
+
+group('Split months');
+t('a cell’s parts add up to its value and set its kind', () => {
+  const s = H.coerceShape(fixtureState());
+  /* May, not April: April's cash is pinned by an override, so a change there
+     would be swallowed and the test would pass for the wrong reason. */
+  s.years['2030'].cells['cc|2030-05'] = { v: -800, kind: 'mixed', parts: [
+    { v: -500, kind: 'actual' }, { v: -300, kind: 'manual' }] };
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  approx(c.cells['cc|2030-05'].v, -800, 'the engine reads the sum, not the parts');
+  eq(c.cells['cc|2030-05'].kind, 'mixed');
+  eq(c.cells['cc|2030-05'].parts.length, 2, 'parts survive for the editor');
+  /* and the balance chain treats it like any other stored number */
+  const bare = H.computeAll(H.coerceShape(fixtureState()), TODAY_FIX)['2030'];
+  approx(c.balances['cash|2030-05'] - bare.balances['cash|2030-05'],
+    H.round2(-800 - bare.cells['cc|2030-05'].v), '', 0.02);
+});
+t('a split month carries into the next year on rollover', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].monthCount = 18;
+  s.years['2030'].cells['cc|2031-02'] = { v: -90, kind: 'mixed',
+    parts: [{ v: -40, kind: 'actual' }, { v: -50, kind: 'manual' }] };
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  eq(s.years['2031'].cells['cc|2031-02'].parts.length, 2);
+});
+
+group('Building next year early');
+t('a year built before it arrives is not the year the app reads', () => {
+  const s = H.coerceShape(fixtureState());
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  eq(H.yearStarted(s, '2031', TODAY_FIX), false, 'April 2030: 2031 has not begun');
+  eq(H.startedGridYears(s, TODAY_FIX).slice(-1), ['2030'], 'goals still read 2030');
+});
+t('it begins on its own first month, or when December before it is entered', () => {
+  const s = H.coerceShape(fixtureState());
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  eq(H.yearStarted(s, '2031', '2031-01-01'), true, 'New Year');
+  const entered = JSON.parse(JSON.stringify(s));
+  entered.years['2030'].enteredThrough = '2030-12';
+  eq(H.yearStarted(entered, '2031', TODAY_FIX), true, 'December signed off early');
+  entered.years['2030'].enteredThrough = '2030-11';
+  eq(H.yearStarted(entered, '2031', TODAY_FIX), false, 'November is not enough');
+});
+t('its projections keep tracking the year before rather than freezing', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].monthCount = 12;
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  const before = H.computeAll(s, TODAY_FIX)['2031'].balances['cash|2031-06'];
+  /* correct the old year's December and the new year must follow it */
+  s.years['2030'].overrides['cash|2030-12'] = { v: 50000 };
+  const c = H.computeAll(s, TODAY_FIX);
+  ok(c['2031'].balances['cash|2031-06'] !== before, 'the new year moved with the correction');
+  /* January opens on December's corrected figure plus its own flows — no
+     stale seed from whatever the balance happened to be at rollover */
+  const janFlows = s.years['2031'].categories
+    .reduce((t, cat) => t + c['2031'].cells[`${cat.id}|2031-01`].v, 0);
+  approx(c['2031'].balances['cash|2031-01'], H.round2(50000 + janFlows),
+    'opens on the corrected December', 0.02);
+});
+
+group('Year lifecycle');
+t('converting a grid to a summary keeps the flows History charts read', () => {
+  const s = H.coerceShape(fixtureState());
+  const yr = s.years['2030'];
+  const flows = (obj) => {
+    let inn = 0, out = 0;
+    if (obj.kind === 'summary') {
+      for (const i of obj.categoryTotals) {
+        if (i.isBalance) continue;
+        if (i.total > 0) inn += i.total; else out += i.total;
+      }
+    } else {
+      for (const [k, cell] of Object.entries(obj.cells)) {
+        if (!k.split('|')[1].startsWith('2030')) continue;
+        if (cell.v > 0) inn += cell.v; else out += cell.v;
+      }
+    }
+    return [H.round2(inn), H.round2(Math.abs(out))];
+  };
+  const before = flows(yr);
+  const summary = H.gridToSummary(s, '2030');
+  eq(summary.kind, 'summary');
+  eq(flows(summary), before, 'money in and out are unchanged');
+});
+t('a balance row in a converted year keeps December, not a sum of months', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2029'].categories.push({ id: 'bal', name: 'Cash', isBalance: true,
+    role: 'normal', rule: 'none' });
+  s.years['2029'].cells['bal|2029-11'] = { v: 500, kind: 'actual' };
+  s.years['2029'].cells['bal|2029-12'] = { v: 900, kind: 'actual' };
+  const summary = H.gridToSummary(s, '2029');
+  const row = summary.categoryTotals.find(r => r.name === 'Cash');
+  eq(row.total, 900, 'the end-of-year figure');
+  eq(row.isBalance, true);
+});
+t('converting warns when next year looks back into this one', () => {
+  const s = H.coerceShape(fixtureState());
+  /* 2030 has a same-month-last-year row, which reads 2029 */
+  eq(H.rulesNeedingYear(s, '2029'), ['Electric']);
+  eq(H.rulesNeedingYear(s, '2030'), [], 'nothing after 2030 to break');
+});
+
 /* ── Local-only real-data cross-check ─────────────────────────────────────────
    Fetches the two gitignored import files. On this Mac, with a fresh import
    run, it diffs the JS engine against the spreadsheet's own cached values.
@@ -402,12 +725,29 @@ t('engine matches the spreadsheet where the import files exist', () => {
   const liveKey = Object.keys(computed).sort().pop();
   const c = computed[liveKey];
   const bad = [];
+  /* Only the live year's own months are pinned against the sheet. The grid
+     runs a year past that as a PROJECTION now — the spreadsheet had those
+     months typed in by hand, the app works them out from the rules, and the
+     two are not meant to agree. */
+  const ownYear = (key) => key.split('|')[1].startsWith(liveKey);
+  /* Accounts that start partway through the year (money that used to sit in
+     the "other money" list, outside the plan's arithmetic) join Total from
+     their start month. The sheet's own SUM covers the original four accounts
+     only, so from that month on the two totals are measuring different things
+     — deliberately. Every individual account is still pinned. */
+  const firstSince = st.settings.accounts.map(a => a.since).filter(Boolean).sort()[0];
+  const skip = (key) => {
+    const [id, m] = key.split('|');
+    return id === 'total' && firstSince && m >= firstSince;
+  };
   for (const [key, exp] of Object.entries(expected.cells)) {
+    if (!ownYear(key)) continue;
     const got = c.cells[key];
     if (!got || Math.abs(got.v - exp.v) > 0.01)
       bad.push(`${key}: engine ${got ? got.v : 'missing'} vs sheet ${exp.v} (=${exp.f})`);
   }
   for (const [key, exp] of Object.entries(expected.balances)) {
+    if (!ownYear(key) || skip(key)) continue;
     const got = c.balances[key];
     if (got === undefined || Math.abs(got - exp.v) > 1)
       bad.push(`${key}: engine ${got} vs sheet ${exp.v} (=${exp.f})`);

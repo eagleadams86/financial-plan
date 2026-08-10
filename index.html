@@ -7,8 +7,9 @@
      is inline script and style by design, with no build step to generate hashes.
      The host allowlists are the real value: scripts from this origin, Firebase's
      CDN and Google sign-in only; network calls to the Firestore/auth endpoints
-     the optional sync uses, the GitHub API (changelog box), and 'self' (the
-     local-only test fixtures). accounts.google.com appears in script-src,
+     the optional sync uses, the GitHub API (changelog box), Alpha Vantage
+     (holding price lookups — ticker only), and 'self' (the local-only test
+     fixtures). accounts.google.com appears in script-src,
      connect-src AND frame-src because sign-in goes through Google Identity
      Services rather than Firebase's hosted handler (corporate filters block
      firebaseapp.com hostnames unpredictably) — same flow as the sibling apps.
@@ -16,11 +17,16 @@
      commit (family rule). form-action is 'self' rather than 'none' because
      dialogs submit with method="dialog", which some browsers historically
      checked against it. frame-ancestors is ignored in a meta tag. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://api.github.com; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://api.github.com https://www.alphavantage.co; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Money Map · Charlie’s Financial Plan</title>
+<title>Money Map · Charlie’s Epic Financial Plan</title>
 <meta name="description" content="A personal financial planner: monthly budget with projections, savings goals, retirement, vacations and giving.">
-<link rel="icon" href="favicon.ico">
+<!-- The icon is an inline SVG (PapTrack does the same with a PNG): a rounded
+     midnight tile with the plan's line climbing across it and a map marker at
+     the end. img-src allows data: URIs, so no extra request. favicon.ico stays
+     as the fallback for anything that can't read an SVG icon. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'> <defs><linearGradient id='g' x1='10' y1='52' x2='54' y2='12' gradientUnits='userSpaceOnUse'> <stop offset='0' stop-color='%23818cf8'/><stop offset='1' stop-color='%23a5b4fc'/></linearGradient></defs> <rect width='64' height='64' rx='14' fill='%230a0e1a'/> <circle cx='14' cy='52' r='20' fill='%23141c33'/> <path d='M11 47 L24 34 L34 41 L53 17' fill='none' stroke='url(%23g)' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/> <circle cx='53' cy='17' r='6.5' fill='%23a5b4fc'/> <circle cx='53' cy='17' r='2.4' fill='%230a0e1a'/> </svg>">
+<link rel="alternate icon" href="favicon.ico?v=2">
 <script>
   /* Apply the saved theme before first paint so there's no light flash. The list
      is repeated here rather than shared with THEMES below because this has to run
@@ -79,8 +85,13 @@ header {
    carries the auto margin that pushes the control cluster right (this app has
    no sibling applink to carry it, unlike SV/TD). */
 .brand { font-size: 17px; font-weight: 700; letter-spacing: -.01em;
-  margin: 0 auto 0 0; }
+  margin: 0 auto 0 0; display: flex; align-items: center; gap: 9px; }
 .brand span { color: var(--text-muted); font-weight: 500; }
+/* The mark from the browser tab, worn in the header too. Width and height are
+   on the element, not just in CSS, so the row is laid out at its final size
+   before the icon arrives — the header is painted long before anything else
+   runs, and a growing header is the one thing this row must never do. */
+.brand img { width: 22px; height: 22px; flex: none; }
 
 button, select, input, textarea { font: inherit; color: inherit; }
 .btn {
@@ -190,14 +201,22 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
 .checkline { display: flex; gap: 8px; align-items: center; font-size: 14px;
   min-height: 24px; }
 .checkline input { flex: none; }
-/* Fields line up on their boxes, not their labels (family rule): each cell is
-   a full-height column with the control pushed to the bottom. */
+/* Fields line up on their boxes, not their labels (family rule). Bottom-
+   aligning the control used to do that, but a field can carry a hint under its
+   box now and those run to different lengths, which pushed the boxes out of
+   line with each other. So the label gets a fixed two-line allowance instead
+   and the boxes start at the same height — hints take up whatever slack is
+   left, at the bottom where nothing lines up against them. */
 .grid-fields { display: grid; gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .grid-fields > div { display: flex; flex-direction: column; }
-.grid-fields > div > input, .grid-fields > div > select { width: 100%;
-  margin-top: auto; height: 40px; }
+.grid-fields > div > label.field { min-height: 2.5em; margin-bottom: 0; }
+.grid-fields > div > input, .grid-fields > div > select { width: 100%; height: 40px; }
 .grid-fields > div.wide { grid-column: 1 / -1; }
+/* Two columns exactly, for a dialog whose fields come in pairs — a rate beside
+   the account it's paid into — rather than however many auto-fit chooses. */
+.grid-fields.cols2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 560px) { .grid-fields.cols2 { grid-template-columns: 1fr; } }
 /* An editable row shows a hand, and its row-name cell carries the pencil
    affordance — hover alone isn't discoverable on touch. */
 tr.editrow { cursor: pointer; }
@@ -252,6 +271,12 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
    never colour alone (Charlie is red-green colourblind): actuals plain,
    manual estimates get a solid underline, auto estimates italics + a dotted
    underline — the legend under the grid spells all three out. */
+/* The grid scrolls sideways in its own box; DOWN is the page's job, so there
+   is only ever one vertical scrollbar on screen. That means the month header
+   can't use `position: sticky` for the vertical axis — this box is the sticky
+   scroll container and it never scrolls vertically — so pinGridHeader() below
+   nudges the header cells down by hand instead. The sideways pinning of the
+   label and total columns is ordinary sticky, and still works. */
 .gridwrap { overflow-x: auto; border: 1px solid var(--border);
   border-radius: var(--radius-sm); }
 .grid { border-collapse: separate; border-spacing: 0; width: max-content;
@@ -265,6 +290,13 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
   border-right: 1px solid var(--border-strong); max-width: 180px;
   overflow: hidden; text-overflow: ellipsis; }
 .grid thead th.lbl { z-index: 4; }
+/* The year-total column pins to the right the way the labels pin to the left,
+   so a row's total stays in view however far the months scroll. */
+.grid th.rowtot, .grid td.rowtot { position: sticky; right: 0; z-index: 2;
+  background: var(--bg-card); border-left: 1px solid var(--border-strong);
+  font-weight: 600; }
+.grid thead th.rowtot { z-index: 4; }
+.grid tr.sechead td.rowtot { background: var(--bg-card-alt); }
 .grid thead th.now, .grid td.now { background: var(--accent-bg); }
 .grid tr.balance td, .grid tr.balance th { border-top: 1px solid var(--border-strong); }
 /* Section separators: Income / Expenses / Transfers / Accounts */
@@ -283,6 +315,9 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
   text-decoration: underline dotted; text-underline-offset: 3px; }
 .grid td.c-missing { color: var(--text-hint); }
 .grid td.c-pinned { font-weight: 600; }
+/* A month split into parts that disagree — some spent, some still estimated.
+   A third line style, not a third colour. */
+.grid td.c-mixed { text-decoration: underline dashed; text-underline-offset: 3px; }
 /* A note rides in the cell's corner as a dot; the text is in the title
    attribute (hover) and in the edit popover (tap). */
 .grid td.noted { position: relative; }
@@ -295,9 +330,28 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
 .gridlegend .k-manual { text-decoration: underline; text-underline-offset: 3px; }
 .gridlegend .k-auto { font-style: italic; text-decoration: underline dotted;
   text-underline-offset: 3px; }
+.gridlegend .k-mixed { text-decoration: underline dashed; text-underline-offset: 3px; }
 .gridlegend .k-dot { position: relative; padding-right: 10px; }
 .gridlegend .k-dot::after { content: ''; position: absolute; top: 1px; right: 0;
   width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+
+/* ── Info dots ──────────────────────────────────────────────────────────────
+   A small circled "i" beside a label, opening a dialog rather than a hover
+   tooltip so it works the same on a phone. The ::after inflates the tap target
+   to 24px without changing the line's height, and the left margin keeps it off
+   the word it follows (standing preference). */
+.tile-help { display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; margin-left: 7px; border-radius: 50%;
+  border: 1px solid var(--border-strong); background: transparent;
+  color: var(--text-secondary); font-size: 11px; font-weight: 700;
+  line-height: 1; cursor: pointer; position: relative; vertical-align: 1px; }
+.tile-help:hover { border-color: var(--focus-border); color: var(--text-primary); }
+.tile-help::after { content: ''; position: absolute; inset: -4px; }
+th .tile-help, td .tile-help { vertical-align: 1px; }
+td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
+#helpDialog { max-width: 46ch; }
+.field-hint { margin: 6px 0 0; font-size: 12px; line-height: 1.45;
+  color: var(--text-muted); }
 
 /* Summary-year card list */
 .sumlist { columns: 2 260px; column-gap: 32px; }
@@ -310,6 +364,54 @@ details.section { border: 1px solid var(--border); border-radius: var(--radius-s
   padding: 10px 12px; background: var(--bg-card-alt); margin-top: 14px; }
 details.section > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; }
+
+/* The archived spreadsheet rows are up to five columns of imported text in a
+   half-width card. They're a record, not a working table, so they get the
+   smaller type rather than a scrollbar. */
+details.section table { font-size: 11.5px; }
+details.section table th, details.section table td { padding: 4px 6px; }
+
+/* The retirement account table sits in a half-width card. Only the horizontal
+   padding gives way — the row height stays the app's 8px, so the table reads
+   at the same rhythm as every other one rather than looking squeezed. */
+.retaccts th, .retaccts td { padding: 8px 6px; }
+.retaccts tbody th { white-space: normal; }
+
+/* ── Vacations ──────────────────────────────────────────────────────────────
+   Trips group into one row per year. The row scrolls sideways when a year has
+   several trips; each card is wide enough that its own table never needs a
+   second scrollbar inside it. */
+.yearhead { font-size: 13px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-secondary); margin: 20px 0 8px; }
+/* stretch, not flex-start: a year's cards line up top and bottom however
+   many lines each trip's table runs to. */
+.triprow { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 6px;
+  align-items: stretch; }
+/* Each card takes the width its own table needs — a trip without a Credits
+   column is narrower than one with it. `flex: 0 0 auto` is what makes that
+   work AND keeps the promise that a card never scrolls inside itself: the
+   cards refuse to shrink, so a crowded year scrolls the row instead. The
+   bounds stop a sparse trip becoming a sliver or a wordy one running away. */
+.triprow > .card.trip { flex: 0 0 auto; min-width: 300px; max-width: 560px; margin: 0; }
+.triprow > .card.trip .tablewrap { overflow-x: visible; }
+.triprow > .card.trip table { width: 100%; font-size: 13px; }
+.triprow > .card.trip table th, .triprow > .card.trip table td {
+  padding: 6px 10px; white-space: nowrap; }
+/* the item names are the one column allowed to wrap rather than widen the card */
+.triprow > .card.trip table tbody th { white-space: normal; }
+@media (max-width: 700px) {
+  /* No narrower cap on a phone: a five-column money table can't be squeezed
+     under 88vw and stay readable, and squeezing it is what would put a
+     scrollbar back INSIDE the card. The row scrolls sideways instead — it
+     already does — so the card keeps the width its own figures need. */
+  .triprow > .card.trip { min-width: min(88vw, 300px); }
+  /* On a phone, a pinned label column AND a pinned total column leave barely a
+     sliver of month between them. The labels keep their pin (you need to know
+     which row you're reading); the year total unpins and waits at the end of
+     the row, where scrolling right reaches it. */
+  .grid th.rowtot, .grid td.rowtot { position: static; }
+  .grid th.lbl, .grid td.lbl { max-width: 116px; }
+}
 
 /* ── Goals ──────────────────────────────────────────────────────────────── */
 .goalgrid { display: grid; gap: 12px;
@@ -356,6 +458,11 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
 
 .chartbox { position: relative; height: 260px; margin-top: 12px; }
 .cards2 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+/* Four cards that belong in pairs: two columns exactly, so the second row is
+   always the pair it's meant to be rather than whatever auto-fit decides the
+   window is wide enough for. */
+.cards2.pairs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 760px) { .cards2.pairs { grid-template-columns: minmax(0, 1fr); } }
 .cards2 > .card { margin-bottom: 0; }
 .cards2 { margin-bottom: 18px; }
 
@@ -374,7 +481,11 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
     <!-- Everything in this row is written out at its final size, because the header
          is painted long before the script at the foot of the page runs. Starting
          hidden costs nothing; growing does. (Family rule from Sprint Velocity.) -->
-    <h1 class="brand">Money&nbsp;Map <span>· Charlie’s Financial Plan</span></h1>
+    <!-- ?v= is not decoration: a browser holds on to a favicon for a long time,
+         and without it the header would keep showing whatever icon it cached
+         the first time. Bump it whenever make_favicon.py is re-run. -->
+    <h1 class="brand"><img src="favicon.ico?v=2" width="22" height="22" alt=""
+      >Money&nbsp;Map <span>· Charlie’s Epic Financial Plan</span></h1>
     <label class="sr-only" for="themeSel">Theme</label>
     <!-- The four unified themes, listed alphabetically (matches the other apps).
          Midnight is pre-selected to match the theme the boot script in <head> has
@@ -385,7 +496,7 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
       <option value="midnight" selected>✦ Midnight</option>
       <option value="sepia">📜 Sepia</option>
     </select>
-    <button class="btn small" id="prefsBtn" title="Preferences — currency and defaults">⚙</button>
+    <button class="btn small" id="prefsBtn" title="Currency, row order, rates and other app-wide settings">⚙ Preferences</button>
     <button class="btn small" id="dataBtn" title="Back up or restore your data">Back up</button>
     <!-- Ships visible and signed-out at its final width (min-width in CSS), so
          the header doesn't reflow when the Firebase SDK arrives; the module
@@ -400,6 +511,8 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
     <button class="tab" role="tab" id="tab-budget"     aria-controls="views" data-view="budget"     aria-selected="true"  tabindex="0">Budget</button>
     <button class="tab" role="tab" id="tab-goals"      aria-controls="views" data-view="goals"      aria-selected="false" tabindex="-1">Goals</button>
     <button class="tab" role="tab" id="tab-retirement" aria-controls="views" data-view="retirement" aria-selected="false" tabindex="-1">Retirement</button>
+    <button class="tab" role="tab" id="tab-comp"       aria-controls="views" data-view="comp"       aria-selected="false" tabindex="-1">Compensation</button>
+    <button class="tab" role="tab" id="tab-investments" aria-controls="views" data-view="investments" aria-selected="false" tabindex="-1">Investments</button>
     <button class="tab" role="tab" id="tab-vacations"  aria-controls="views" data-view="vacations"  aria-selected="false" tabindex="-1">Vacations</button>
     <button class="tab" role="tab" id="tab-giving"     aria-controls="views" data-view="giving"     aria-selected="false" tabindex="-1">Giving</button>
     <button class="tab" role="tab" id="tab-history"    aria-controls="views" data-view="history"    aria-selected="false" tabindex="-1">History</button>
@@ -483,6 +596,16 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
   </form>
 </dialog>
 
+<!-- ── What does this mean? ───────────────────────────────────────────────
+     Opened by any info dot; its text comes from the HELP table in the script. -->
+<dialog id="helpDialog" aria-labelledby="helpTitle">
+  <h3 id="helpTitle"></h3>
+  <p id="helpBody" class="sub" style="font-size:14px;line-height:1.55"></p>
+  <div class="row" style="justify-content:flex-end;margin-top:18px">
+    <button type="button" class="btn primary" id="helpCloseBtn">Got it</button>
+  </div>
+</dialog>
+
 <!-- ── Cell editor ───────────────────────────────────────────────────────── -->
 <dialog id="cellDialog" aria-labelledby="cellDialogTitle">
   <form method="dialog" id="cellForm">
@@ -491,7 +614,7 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
     <div class="row">
       <div>
         <label class="field" for="cellValue">Amount</label>
-        <input type="number" id="cellValue" step="0.01" inputmode="decimal"
+        <input type="text" id="cellValue" inputmode="decimal" autocomplete="off"
           style="width:160px">
       </div>
       <div id="cellKindWrap">
@@ -499,6 +622,33 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
         <div class="row" role="radiogroup" aria-label="Cell kind" style="gap:14px">
           <label class="checkline"><input type="radio" name="cellKind" value="actual"> actual — it happened</label>
           <label class="checkline"><input type="radio" name="cellKind" value="manual"> my estimate</label>
+        </div>
+      </div>
+    </div>
+    <!-- Split a month into several amounts: three groceries trips, an
+         estimated bill next to a paid one. Each part is actual or estimate on
+         its own, and the cell shows their sum. -->
+    <div id="cellPartsWrap" hidden style="margin-top:12px">
+      <span class="field">Amounts in this month</span>
+      <div id="cellPartsList"></div>
+      <div class="row" style="margin-top:8px">
+        <button type="button" class="btn small" id="cellAddPartBtn">＋ Add an amount</button>
+        <span class="sub muted" id="cellPartsTotal"></span>
+      </div>
+    </div>
+    <!-- Balance months only: what the account earned, and anything it paid
+         out on top. Both are computed until a number is typed here. -->
+    <div id="cellBalWrap" hidden style="margin-top:12px">
+      <div class="row">
+        <div>
+          <label class="field" for="cellInterest">Interest this month</label>
+          <input type="text" id="cellInterest" inputmode="decimal" autocomplete="off"
+            style="width:160px">
+        </div>
+        <div>
+          <label class="field" for="cellDividend">Dividend paid in</label>
+          <input type="text" id="cellDividend" inputmode="decimal" autocomplete="off"
+            style="width:160px">
         </div>
       </div>
     </div>
@@ -511,6 +661,8 @@ details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; 
       <div class="row">
         <button type="button" class="btn" id="cellRowBtn" hidden
           title="Rename this row, or change how its future months are estimated">⚙ Row settings</button>
+        <button type="button" class="btn" id="cellSplitBtn" hidden
+          title="Enter several amounts for this month and total them">✂ Split into amounts</button>
         <button type="button" class="btn" id="cellRevertBtn" hidden>↺ Back to auto estimate</button>
         <button type="button" class="btn" id="cellClearBtn" hidden>Clear this cell</button>
       </div>
@@ -547,9 +699,36 @@ function monthAdd(m, n) {
 function monthDiff(a, b) {   // b - a in months
   return (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7));
 }
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function monthLabel(m) {
-  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${names[+m.slice(5, 7) - 1]} ${m.slice(2, 4)}`;
+  return `${MONTH_ABBR[+m.slice(5, 7) - 1]} ${m.slice(2, 4)}`;
+}
+/* "2026-07-04" -> "Jul 4". Sliced, never parsed into a Date: a Date built from
+   a bare ISO day is UTC midnight, which reads as the day before west of
+   Greenwich — exactly the kind of off-by-one nobody notices until a holiday
+   lands on the wrong date. */
+/* One end of the old free-text range: "2026-01-19", "Jan 30", "Mar 7". */
+function looseDay(part, year) {
+  const t = String(part || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const m = /^([A-Za-z]{3,})\.?\s+(\d{1,2})$/.exec(t);
+  if (!m) return null;
+  const i = MONTH_ABBR.findIndex(x => x.toLowerCase() === m[1].slice(0, 3).toLowerCase());
+  if (i < 0) return null;
+  return `${year}-${String(i + 1).padStart(2, '0')}-${String(+m[2]).padStart(2, '0')}`;
+}
+const MONTH_FULL = ['January','February','March','April','May','June','July',
+  'August','September','October','November','December'];
+const dayLabel = (iso, long) =>
+  `${(long ? MONTH_FULL : MONTH_ABBR)[+iso.slice(5, 7) - 1]} ${+iso.slice(8, 10)}`;
+/* "2026-05-01" -> "May 1 2026", for a date that stands on its own rather than
+   inside a year's table. Sliced, like every other date the app renders. */
+const fullDayLabel = (iso) => /^\d{4}-\d{2}-\d{2}$/.test(iso || '')
+  ? `${dayLabel(iso)} ${iso.slice(0, 4)}` : (iso || '');
+function dateRangeLabel(from, to, long) {
+  if (!from) return '';
+  return to && to !== from
+    ? `${dayLabel(from, long)} – ${dayLabel(to, long)}` : dayLabel(from, long);
 }
 function todayISO(d) {
   const t = d || new Date();
@@ -582,6 +761,39 @@ buildMoneyFormats('USD');
 const fmtMoney  = (v) => moneyFmt.format(v);
 const fmtMoney0 = (v) => moneyFmt0.format(v);
 
+/* Money is typed and read the way it looks on a statement — $1,234.50. A
+   number input can render neither the symbol nor the separator, so money
+   fields are text inputs that format themselves when you leave them and parse
+   leniently on the way back in: $, commas, spaces and stray characters all
+   fall away, and an empty box means "no figure" rather than zero. */
+function parseMoney(raw) {
+  const t = String(raw ?? '').replace(/[^0-9.\-]/g, '');
+  if (t === '' || t === '-' || t === '.') return null;
+  const n = parseFloat(t);
+  return Number.isNaN(n) ? null : round2(n);
+}
+function asMoneyInput(input) {
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.autocomplete = 'off';
+  input.addEventListener('blur', () => {
+    if (input.dataset.money === 'off') return;   // the paycheck count isn't money
+    const n = parseMoney(input.value);
+    input.value = n === null ? '' : fmtMoney(n);
+  });
+  return input;
+}
+const showMoney = (v) => (v === null || v === undefined || v === '') ? '' : fmtMoney(v);
+
+/* JSON from outside — a backup file someone sent, the synced copy, even this
+   browser's own storage after another tab wrote it — is parsed with a reviver
+   that drops __proto__. It never becomes data: Object.assign() copies own
+   properties with [[Set]], and a __proto__ key there reassigns the receiving
+   object's prototype instead. Returning undefined deletes the key outright. */
+const safeParse = (text) => JSON.parse(text, function (k, v) {
+  return k === '__proto__' ? undefined : v;
+});
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -592,30 +804,78 @@ const F = (id) => document.getElementById(id);
    tables. Everything computable (auto-estimates, balances, totals, goals) is
    derived at render time by the engine and never persisted. */
 
+/* ── Accounts ───────────────────────────────────────────────────────────────
+   A budget row's `role` says what its money does to the accounts:
+     normal       — ordinary money through the hub account (the usual)
+     transfer     — hub money that also moves the far account (transferTo)
+     passthrough  — skips the hub entirely and lands on transferTo
+
+   The first model had one fixed role per account (midTransfer, zelle,
+   charitable…). Those names still arrive from old backups and from test
+   fixtures built by hand, so every read goes through normRole(). The two
+   pass-throughs differ in WHEN they land relative to the account's monthly
+   growth, and that timing is load-bearing: the spreadsheet grew investments
+   before the charitable payment came out, and the cross-check pins it. */
+const LEGACY_ROLES = {
+  bankTransfer: { role: 'transfer',    transferTo: 'bank' },
+  midTransfer:  { role: 'transfer',    transferTo: 'mid'  },
+  longTransfer: { role: 'transfer',    transferTo: 'long' },
+  zelle:        { role: 'passthrough', transferTo: 'bank', creditTiming: 'pre'  },
+  charitable:   { role: 'passthrough', transferTo: 'long', creditTiming: 'post' },
+};
+function normRole(cat) {
+  const legacy = LEGACY_ROLES[cat.role];
+  if (legacy) return { ...legacy };
+  if (cat.role === 'transfer' || cat.role === 'passthrough')
+    return { role: cat.role, transferTo: cat.transferTo,
+             creditTiming: cat.creditTiming === 'post' ? 'post' : 'pre' };
+  return { role: 'normal' };
+}
+
+const accountsOf = (st) => (st.settings.accounts || []);
+const accountById = (st, id) => accountsOf(st).find(a => a.id === id);
+const accountName = (st, id) => accountById(st, id)?.name || id;
+const hubAccount = (st) => accountsOf(st).find(a => a.hub) || accountsOf(st)[0];
+/* An account with a start month didn't exist before it — its earlier months
+   stay blank rather than showing a balance that was never tracked. */
+const accountLive = (a, m) => !a.since || m >= a.since;
+
+/* The accounts a fresh budget starts with. Any number of accounts is allowed
+   (see DEFAULT_ACCOUNTS' shape below) but these four ids are the ones the
+   spreadsheet's model was built on, so they stay reserved: seeds, balance
+   overrides and the savings-goal sources all key off them. */
+const DEFAULT_ACCOUNTS = [
+  { id: 'cash', name: 'Cash',        rate: 0,   creditTo: 'cash', hub: true },
+  { id: 'mid',  name: 'Savings',     rate: 0,   creditTo: 'mid' },
+  { id: 'long', name: 'Investments', rate: 0.07, creditTo: 'long' },
+  { id: 'bank', name: 'Other bank',  rate: 0,   creditTo: 'bank' },
+];
+
 function blankState() {
   return {
-    schema: 1,
+    schema: 2,
     settings: {
       midTermRateAnnual: 0.03,   // dividend estimate: rate/12 × prior (cash+mid)
-      longTermRateAnnual: 0.07,  // long-term holdings growth
+      longTermRateAnnual: 0.07,  // legacy: seeds the Investments rate on old data
       ptoAllowance: 32,
-      /* Display names for the four balance accounts — generic by default,
-         renameable by clicking an account row (Charlie's import writes his
-         own: Cash (SPAXX), Mid-term (FDLXX), …). */
-      accountNames: { cash: 'Cash', mid: 'Savings', long: 'Investments',
-                      bank: 'Other bank' },
-      /* Annual growth applied to each account's balance, rate/12 per month.
-         Investments defaults to the spreadsheet's 7%/yr; everything else
-         starts flat. Set per account by clicking its row in the grid. */
-      accountRates: { cash: 0, mid: 0, long: 0.07, bank: 0 },
-      currency: 'USD'   // ISO code; the ⚙ Preferences dialog edits it
+      /* Every tracked account, in grid order. id is permanent (seeds,
+         overrides and goal sources key off it); rate is annual growth applied
+         as rate/12 each month; creditTo says which account that interest
+         lands in; hub marks the one account ordinary money flows through;
+         since (optional, "YYYY-MM") starts an account partway through a year,
+         seeded from yr.seeds — months before it are blank and out of Total. */
+      accounts: DEFAULT_ACCOUNTS.map(a => ({ ...a })),
+      currency: 'USD',   // ISO code; the ⚙ Preferences dialog edits it
+      retirementReturnAnnual: 0.07,  // the retirement projection's assumed return
+      paycheckRule: false,  // show the per-check machinery (Preferences)
+      rowSort: 'manual'     // 'manual' (drag with ↑/↓) or 'alpha' within a section
     },
     years: {},        // "YYYY" → grid year or summary year (see import_xlsx.py)
     goals: [],
     side: {
-      taxable: [], otherMoney: [], rothContribs: {}, k401: {}, hsa: [],
+      portfolios: [], taxable: [], rothContribs: {}, k401: {}, hsa: [],
       comp: {}, bonuses: {}, retirement: {}, rothLimit: {}, daf: [],
-      donations: {}, venmo: {}, largePurchases: {}
+      donations: {}, limits: {}, retirementAccounts: []
     },
     vacations: { trips: [], pto: {} },
     ui: { activeYear: null, activeTab: 'budget' }
@@ -633,17 +893,46 @@ function coerceShape(data) {
   const arr = (v) => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
   d.schema = typeof d.schema === 'number' ? d.schema : 1;
   d.settings = obj(d.settings);
-  d.settings.accountNames = Object.assign(
-    { cash: 'Cash', mid: 'Savings', long: 'Investments', bank: 'Other bank' },
-    obj(d.settings.accountNames));
-  /* Data from before per-account rates: Investments inherits the old global
-     long-term rate (the only account that ever grew), everything else 0. */
-  d.settings.accountRates = Object.assign(
-    { cash: 0, mid: 0,
-      long: typeof d.settings.longTermRateAnnual === 'number'
-        ? d.settings.longTermRateAnnual : 0.07,
-      bank: 0 },
-    obj(d.settings.accountRates));
+  /* Accounts used to be four fixed ids with their names and rates in two
+     parallel maps. They're an ordered list now — any number of accounts, each
+     with its own rate, its own destination for that interest, and optionally a
+     month it starts from. One-time build from the old maps; the maps are
+     deleted so a renamed or deleted account can't come back. */
+  d.settings.accounts = arr(d.settings.accounts);
+  if (!d.settings.accounts.length) {
+    const names = obj(d.settings.accountNames), rates = obj(d.settings.accountRates);
+    d.settings.accounts = DEFAULT_ACCOUNTS.map(a => ({
+      ...a,
+      name: names[a.id] || a.name,
+      /* Data from before per-account rates: Investments inherits the old
+         global long-term rate (the only account that ever grew). */
+      rate: typeof rates[a.id] === 'number' ? rates[a.id]
+        : (a.id === 'long' && typeof d.settings.longTermRateAnnual === 'number')
+          ? d.settings.longTermRateAnnual : a.rate,
+    }));
+  }
+  delete d.settings.accountNames;
+  delete d.settings.accountRates;
+  const acctIds = new Set();
+  for (const a of d.settings.accounts) {
+    a.id = String(a.id || slugJs(a.name || 'account'));
+    a.name = String(a.name || a.id);
+    a.rate = typeof a.rate === 'number' ? a.rate : 0;
+    /* An account whose creditTo points at something deleted would silently
+       drop its interest — fall back to itself. */
+    if (!a.creditTo) a.creditTo = a.id;
+    a.divRate = typeof a.divRate === 'number' ? a.divRate : 0;
+    a.divEvery = [1, 3, 6, 12].includes(+a.divEvery) ? +a.divEvery : 3;
+    if (!a.divTo) a.divTo = a.id;
+    if (!/^\d{4}-\d{2}$/.test(a.since || '')) delete a.since;
+    acctIds.add(a.id);
+  }
+  for (const a of d.settings.accounts) {
+    if (!acctIds.has(a.creditTo)) a.creditTo = a.id;
+    if (!acctIds.has(a.divTo)) a.divTo = a.id;
+  }
+  if (!d.settings.accounts.some(a => a.hub) && d.settings.accounts.length)
+    d.settings.accounts[0].hub = true;
   d.years = obj(d.years);
   for (const y of Object.keys(d.years)) {
     const yr = obj(d.years[y]);
@@ -654,6 +943,8 @@ function coerceShape(data) {
       yr.paychecks = obj(yr.paychecks);
       yr.seeds = obj(yr.seeds);
       yr.overrides = obj(yr.overrides);
+      yr.balAdjust = obj(yr.balAdjust);
+      yr.extraNotes = Array.isArray(yr.extraNotes) ? yr.extraNotes : [];
       yr.monthCount = Math.max(1, Math.min(36, +yr.monthCount || 12));
       if (!/^\d{4}-\d{2}$/.test(yr.startMonth || '')) yr.startMonth = `${y}-01`;
       /* Rows classify into Income / Expenses / Transfers sections. Data from
@@ -661,9 +952,14 @@ function coerceShape(data) {
          by role, everything else by the sign of what's stored — which sticks
          on the next save, so a hand-picked section is never re-guessed. */
       for (const cat of yr.categories) {
+        /* Pass-throughs on a bank account (the old "zelle" role) grouped as
+           transfers too; money paid straight out of investments (the old
+           "charitable" role) never did. */
+        const looksLikeTransfer = ['bankTransfer', 'midTransfer', 'longTransfer',
+          'zelle', 'transfer'].includes(cat.role);
+        Object.assign(cat, normRole(cat));   // one-time role → role + target
         if (cat.section) continue;
-        if (['bankTransfer', 'midTransfer', 'longTransfer', 'zelle']
-            .includes(cat.role)) { cat.section = 'transfer'; continue; }
+        if (looksLikeTransfer) { cat.section = 'transfer'; continue; }
         let sum = 0;
         for (const [key, cell] of Object.entries(yr.cells))
           if (key.startsWith(cat.id + '|')) sum += (cell && cell.v) || 0;
@@ -677,8 +973,22 @@ function coerceShape(data) {
   d.goals = arr(d.goals);
   d.side = obj(d.side);
   const s = d.side;
-  for (const k of ['taxable', 'otherMoney', 'hsa', 'daf',
+  for (const k of ['taxable', 'otherMoney', 'hsa', 'daf', 'portfolios',
                    'retirementAccounts']) s[k] = arr(s[k]);
+  /* Investments used to be two fixed panes, "Taxable investments" and "HSA",
+     because those were the two Charlie had. They're a named list now — add as
+     many as you keep, rename any of them. One-time migration; the old keys are
+     emptied so deleting a pane can't resurrect it. */
+  if (!s.portfolios.length) {
+    for (const [k, name] of [['taxable', 'Taxable investments'], ['hsa', 'HSA']])
+      s.portfolios.push({ id: k, name, rows: arr(s[k]) });
+    s.taxable = []; s.hsa = [];
+  }
+  for (const pf of s.portfolios) {
+    pf.id = String(pf.id || slugJs(pf.name || 'account'));
+    pf.name = String(pf.name || pf.id);
+    pf.rows = arr(pf.rows);
+  }
   /* Retirement accounts used to be six fixed fields (k401) with labels from
      Charlie's employer. They're a generic list now — any number of accounts,
      each Traditional or Roth. One-time migration; k401 is emptied so deleting
@@ -695,11 +1005,93 @@ function coerceShape(data) {
       if (s.k401[k]) s.retirementAccounts.push({ name, kind, amount: s.k401[k] });
     s.k401 = {};
   }
+  /* Retirement accounts gained a type (401k / Roth IRA / HSA…) and their own
+     contribution history. Older rows only knew Traditional-or-Roth, and Roth
+     IRA contributions lived in a separate map that the app treated as special.
+     Give every row a type, then fold that map into the first Roth IRA. */
+  for (const a of s.retirementAccounts) {
+    a.contribs = obj(a.contribs);
+    if (a.type) continue;
+    const n = String(a.name || '').toLowerCase();
+    a.type = n.includes('roth ira') ? 'roth-ira'
+      : n.includes('ira') ? 'trad-ira'
+      : n.includes('hsa') ? 'hsa'
+      : a.kind === 'roth' ? 'roth-401k' : '401k';
+  }
+  if (Object.keys(obj(s.rothContribs)).length) {
+    let target = s.retirementAccounts.find(a => a.type === 'roth-ira');
+    if (!target) {
+      target = { name: 'Roth IRA', type: 'roth-ira', kind: 'roth', amount: 0, contribs: {} };
+      s.retirementAccounts.push(target);
+    }
+    for (const [y, v] of Object.entries(s.rothContribs))
+      if (target.contribs[y] === undefined) target.contribs[y] = v;
+    s.rothContribs = {};
+  }
+
+  /* "Other money" used to be a standalone list of balances on the Retirement
+     tab — money that existed but sat outside the plan's arithmetic. Each one
+     becomes a real account instead, tracked monthly in the grid and counted in
+     Total from the month of the migration onward (earlier months predate the
+     tracking, so they stay blank rather than inventing history). */
+  if (s.otherMoney && s.otherMoney.length) {
+    const gridKeys = Object.keys(d.years)
+      .filter(y => d.years[y].kind === 'grid' && d.years[y].model === 'live').sort();
+    const live = gridKeys.length ? d.years[gridKeys[gridKeys.length - 1]] : null;
+    const start = live && thisMonth() < live.startMonth ? live.startMonth : thisMonth();
+    for (const o of s.otherMoney) {
+      let id = slugJs(o.name || 'account'), n = 2;
+      while (acctIds.has(id)) id = `${slugJs(o.name || 'account')}-${n++}`;
+      acctIds.add(id);
+      d.settings.accounts.push({ id, name: o.name || id, rate: 0,
+        creditTo: id, since: start });
+      if (live) live.seeds[id] = o.balance || 0;
+    }
+    s.otherMoney = [];
+  }
+  /* The Venmo ledger and the large-purchase list were annexes under the
+     budget that nothing in the engine ever read. They're gone, and so are
+     their entries — a note on the cell is where that kind of detail belongs
+     now. The loop clears the copies an earlier version folded into each
+     year's notes; whatever the spreadsheet import wrote is left alone. */
+  delete s.venmo;
+  delete s.largePurchases;
+  const FOLDED = /^(Venmo ledger|Planned purchase)\b/;
+  for (const yr of Object.values(d.years))
+    if (Array.isArray(yr.extraNotes))
+      yr.extraNotes = yr.extraNotes.filter(n => !FOLDED.test(String((n && n.where) || '')));
   for (const k of ['rothContribs', 'k401', 'comp', 'bonuses', 'retirement',
-                   'rothLimit', 'donations', 'venmo', 'largePurchases']) s[k] = obj(s[k]);
+                   'rothLimit', 'donations', 'limits']) s[k] = obj(s[k]);
+  /* The per-check machinery is worth its clutter only if you're actually paid
+     that way, so it's off by default — but a budget already using the rule
+     obviously wants it, and says so once. */
+  if (typeof d.settings.paycheckRule !== 'boolean')
+    d.settings.paycheckRule = Object.values(d.years).some(yr =>
+      (yr.categories || []).some(cat => cat.rule === 'paycheck'));
+  if (d.settings.rowSort !== 'alpha') d.settings.rowSort = 'manual';
   d.vacations = obj(d.vacations);
   d.vacations.trips = arr(d.vacations.trips);
   d.vacations.pto = obj(d.vacations.pto);
+  /* PTO dates were one free-text box ("Jan 30 - Feb 1", or a bare ISO day).
+     They're a from/to pair on real date pickers now. Read the old text once,
+     taking the year from the bucket it's filed under; anything that doesn't
+     parse keeps its text and still shows. */
+  for (const [y, p] of Object.entries(d.vacations.pto)) {
+    const bucket = obj(p);
+    d.vacations.pto[y] = bucket;
+    bucket.entries = arr(bucket.entries);
+    for (const e of bucket.entries) {
+      if (e.from || !e.dates) continue;
+      /* split only on a spaced dash, so the hyphens inside an ISO date survive */
+      const parts = String(e.dates).split(/\s+[–—-]\s+/);
+      const from = looseDay(parts[0], y);
+      const to = parts.length > 1 ? looseDay(parts[1], y) : from;
+      if (!from || (parts.length > 1 && !to)) continue;
+      e.from = from;
+      e.to = to;
+      delete e.dates;
+    }
+  }
   d.ui = obj(d.ui);
   return d;
 }
@@ -721,7 +1113,7 @@ function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return blankState();
-    const parsed = migrate(coerceShape(JSON.parse(raw)));
+    const parsed = migrate(coerceShape(safeParse(raw)));
     return Object.assign(blankState(), parsed, {
       settings: Object.assign(blankState().settings, parsed.settings || {}),
       side: Object.assign(blankState().side, parsed.side || {}),
@@ -753,9 +1145,36 @@ function save() {
 function yearKeys() {
   return Object.keys(state.years).sort();
 }
+/* A year can be created before it arrives, so its projections are there to
+   look at — but it isn't the year the rest of the app reads until it actually
+   begins. It begins on its own first month, or the moment the year before it
+   is entered right through December, whichever comes first. Derived rather
+   than stored: there's no flag to go stale or need clearing. */
+function yearStarted(st, y, todayIso) {
+  const yr = st.years[y];
+  if (!yr || yr.kind !== 'grid') return true;
+  if ((todayIso || todayISO()).slice(0, 7) >= yr.startMonth) return true;
+  const prev = st.years[String(+y - 1)];
+  return !!(prev && prev.kind === 'grid'
+    && (prev.enteredThrough || '') >= `${+y - 1}-12`);
+}
+const startedGridYears = (st, todayIso) => Object.keys(st.years).sort()
+  .filter(y => st.years[y].kind === 'grid' && yearStarted(st, y, todayIso));
+
 function latestGridYear() {
+  const ks = startedGridYears(state);
+  return ks.length ? ks[ks.length - 1] : null;
+}
+/* Includes years created ahead of time — what the Budget tab's picker offers. */
+function newestGridYear() {
   const ks = yearKeys().filter(y => state.years[y].kind === 'grid');
   return ks.length ? ks[ks.length - 1] : null;
+}
+/* Years built beyond the current one, oldest first. They exist to be read, so
+   every projection the app draws runs through them. */
+function previewYears() {
+  const live = latestGridYear();
+  return yearKeys().filter(y => state.years[y].kind === 'grid' && (!live || y > live));
 }
 function activeYearKey() {
   if (state.ui.activeYear && state.years[state.ui.activeYear]) return state.ui.activeYear;
@@ -827,6 +1246,25 @@ const RULES = {
     return n ? sum / n : null;
   },
 
+  /* The steadier cousin of samemonth: what this row averaged across the whole
+     of last calendar year. Only months with a number actually recorded count,
+     so an estimate never feeds itself, and a row with no history stays blank
+     rather than estimating $0. */
+  avglastyear(cat, m, ctx) {
+    const py = +m.slice(0, 4) - 1;
+    let sum = 0, n = 0;
+    for (let i = 1; i <= 12; i++) {
+      const mm = `${py}-${String(i).padStart(2, '0')}`;
+      /* the grid may run long enough to cover last year itself; otherwise the
+         prior year's own computed cells are the source (same as samemonth) */
+      const cell = monthDiff(ctx.yr.startMonth, mm) >= 0
+        ? ctx.yr.cells[`${cat.id}|${mm}`]
+        : ctx.prior?.cells[`${cat.id}|${mm}`];
+      if (cell && cell.kind !== 'missing' && cell.kind !== 'auto') { sum += cell.v; n++; }
+    }
+    return n ? sum / n : null;
+  },
+
   /* Electric: same month a year earlier, rounded to whole dollars — from
      this grid when it reaches back 12 months, else from the prior year. */
   samemonth(cat, m, ctx) {
@@ -863,9 +1301,13 @@ function computeYear(st, yearKey, prior, today) {
   const resolved = {};   // 'catId|m' -> {v, kind, note?}
   const balances = {};   // 'bid|m'   -> dollars
   const balanceKinds = {};
+  const interest = {};   // 'bid|m'   -> the growth that month, shown in the editor
+  const dividend = {};   // 'bid|m'   -> what it paid out that month
   const thisM = today.slice(0, 7);
 
-  if (yr.kind !== 'grid') return { months: [], cells: {}, balances: {}, balanceKinds: {} };
+  if (yr.kind !== 'grid')
+    return { months: [], cells: {}, balances: {}, balanceKinds: {},
+             interest: {}, dividend: {} };
 
   const ctx = { st, yr, months, resolved, balances, prior };
   const live = yr.model === 'live';
@@ -876,7 +1318,8 @@ function computeYear(st, yearKey, prior, today) {
       const key = `${cat.id}|${m}`;
       const stored = yr.cells[key];
       if (stored) {
-        resolved[key] = { v: stored.v, kind: stored.kind, note: stored.note };
+        resolved[key] = { v: stored.v, kind: stored.kind, note: stored.note,
+                          parts: stored.parts };
         continue;
       }
       if (!live || m <= (yr.enteredThrough || '')) {
@@ -888,40 +1331,86 @@ function computeYear(st, yearKey, prior, today) {
                                  : { v: round2(v), kind: 'auto' };
     }
 
-    /* 2 · balances (live model only — the four-account chain from the sheet) */
+    /* 2 · balances (live model only — the account chain from the sheet) */
     if (live) {
-      const flows = { all: 0, mid: 0, long: 0, bank: 0, zelle: 0, charitable: 0 };
+      const accounts = accountsOf(st).filter(a => accountLive(a, m));
+      const hub = hubAccount(st);
+      /* transfersOut: hub money that also moves a far account (the far side is
+         −v, because a transfer of −200 takes 200 out of the hub).
+         preIn / postIn: pass-through money that skips the hub, landing either
+         before or after that account's monthly growth. */
+      let hubFlow = 0;
+      const transfersOut = {}, preIn = {}, postIn = {};
       for (const cat of yr.categories) {
         const v = resolved[`${cat.id}|${m}`].v;
-        if (cat.role === 'charitable') { flows.charitable += v; continue; }
-        if (cat.role === 'zelle') { flows.zelle += v; continue; }
-        flows.all += v;
-        if (cat.role === 'midTransfer') flows.mid += v;
-        if (cat.role === 'longTransfer') flows.long += v;
-        if (cat.role === 'bankTransfer') flows.bank += v;
+        const r = normRole(cat);
+        if (r.role === 'passthrough' && r.transferTo) {
+          const bucket = r.creditTiming === 'post' ? postIn : preIn;
+          bucket[r.transferTo] = (bucket[r.transferTo] || 0) + v;
+          continue;
+        }
+        hubFlow += v;
+        if (r.role === 'transfer' && r.transferTo)
+          transfersOut[r.transferTo] = (transfersOut[r.transferTo] || 0) + v;
       }
       const prevM = monthAdd(m, -1);
-      const priorOf = (bid) =>
-        balances[`${bid}|${prevM}`] !== undefined ? balances[`${bid}|${prevM}`]
-                                                  : (yr.seeds[bid] || 0);
-      /* Each account grows by its own annual rate, applied monthly. At the
-         defaults (only Investments at 7%) this is byte-for-byte the
-         spreadsheet's math: growth multiplies the prior balance net of the
-         month's transfers, and the charitable adjustment lands after. */
-      const rates = st.settings.accountRates || {};
-      const grow = (bid) => 1 + (rates[bid] || 0) / 12;
-      const computed = {
-        cash: priorOf('cash') * grow('cash') + flows.all,
-        mid:  (priorOf('mid') - flows.mid) * grow('mid'),
-        long: (priorOf('long') - flows.long) * grow('long') + flows.charitable,
-        bank: (priorOf('bank') - flows.bank + flows.zelle) * grow('bank'),
+      /* Where a month's opening balance comes from: last month if this year
+         has computed one, else the year before's December if it computed one
+         (so a year created early keeps tracking the current year's projection
+         instead of freezing at whatever it was told at creation), else the
+         year's own seed. */
+      const priorOf = (bid) => {
+        const own = balances[`${bid}|${prevM}`];
+        if (own !== undefined) return own;
+        const carried = prior && prior.balances[`${bid}|${prevM}`];
+        if (carried !== undefined) return carried;
+        return yr.seeds[bid] || 0;
       };
+      /* Each account grows by its own annual rate, applied monthly to what it
+         held after the month's transfers — byte-for-byte the spreadsheet's
+         math at the defaults, which the real-data cross-check pins. The
+         interest itself can be overridden, and can be paid into a DIFFERENT
+         account (creditTo) the way a brokerage sweeps dividends to cash. */
+      const base = {}, earnedInt = {}, earnedDiv = {};
+      for (const a of accounts) {
+        base[a.id] = priorOf(a.id) - (transfersOut[a.id] || 0) + (preIn[a.id] || 0);
+        const adj = (yr.balAdjust || {})[`${a.id}|${m}`] || {};
+        /* Two earnings, because they behave differently: growth usually stays
+           in the account, dividends are usually swept somewhere spendable.
+           Either can be overridden for one month with what really arrived. */
+        earnedInt[a.id] = typeof adj.interest === 'number'
+          ? adj.interest : base[a.id] * (a.rate || 0) / 12;
+        /* Dividends land on a calendar beat rather than every month —
+           quarterly means March, June, September, December — and each payment
+           carries the whole period's worth. A month that isn't on the beat
+           pays nothing, which is what makes a quarterly rate add up to the
+           same year as a monthly one. */
+        const every = [1, 3, 6, 12].includes(+a.divEvery) ? +a.divEvery : 3;
+        const paysThisMonth = (+m.slice(5, 7)) % every === 0;
+        earnedDiv[a.id] = typeof adj.dividend === 'number' ? adj.dividend
+          : paysThisMonth ? base[a.id] * (a.divRate || 0) / 12 * every : 0;
+        interest[`${a.id}|${m}`] = round2(earnedInt[a.id]);
+        dividend[`${a.id}|${m}`] = round2(earnedDiv[a.id]);
+      }
+      const creditedTo = {};
+      const payInto = (want, from) => {
+        const dest = accountById(st, want);
+        return dest && accountLive(dest, m) ? want : from;
+      };
+      for (const a of accounts) {
+        const iTo = payInto(a.creditTo, a.id);
+        creditedTo[iTo] = (creditedTo[iTo] || 0) + earnedInt[a.id];
+        const dTo = payInto(a.divTo || a.id, a.id);
+        creditedTo[dTo] = (creditedTo[dTo] || 0) + earnedDiv[a.id];
+      }
       let total = 0;
-      for (const bid of ['cash', 'mid', 'long', 'bank']) {
-        const ov = yr.overrides[`${bid}|${m}`];
-        const v = round2(ov ? ov.v : computed[bid]);
-        balances[`${bid}|${m}`] = v;
-        balanceKinds[`${bid}|${m}`] = ov ? 'pinned'
+      for (const a of accounts) {
+        const computed = base[a.id] + (creditedTo[a.id] || 0) + (postIn[a.id] || 0)
+          + (hub && a.id === hub.id ? hubFlow : 0);
+        const ov = yr.overrides[`${a.id}|${m}`];
+        const v = round2(ov ? ov.v : computed);
+        balances[`${a.id}|${m}`] = v;
+        balanceKinds[`${a.id}|${m}`] = ov ? 'pinned'
           : (m <= thisM ? 'actual' : 'auto');
         total += v;
       }
@@ -930,7 +1419,7 @@ function computeYear(st, yearKey, prior, today) {
     }
   }
 
-  return { months, cells: resolved, balances, balanceKinds };
+  return { months, cells: resolved, balances, balanceKinds, interest, dividend };
 }
 
 /* Every grid year, oldest first, each handed the previous one for the
@@ -961,8 +1450,7 @@ function currentMonthOf(yr, todayIso) {
    mid-term (capped), midOverflow = mid-term above the capped goal's target,
    long = long-term holdings uncapped. */
 function computeGoals(st, computed, todayIso) {
-  const gridKeys = Object.keys(st.years).sort()
-    .filter(y => st.years[y].kind === 'grid');
+  const gridKeys = startedGridYears(st, todayIso);
   const liveKey = gridKeys[gridKeys.length - 1];
   if (!liveKey) return [];
   const yr = st.years[liveKey];
@@ -989,6 +1477,94 @@ function computeGoals(st, computed, todayIso) {
   });
 }
 
+/* ── Info dots ──────────────────────────────────────────────────────────────
+   Anywhere a number is the result of arithmetic the reader can't see, a small
+   "i" explains it. The text lives here rather than in a title attribute so it
+   can be a paragraph and can be read on a phone. Keys are referenced by
+   helpBtn(key, label) in the renderers. */
+const HELP = {
+  perCheck: { title: 'Per-check amount',
+    body: 'Some money arrives (or leaves) once per paycheck rather than once per month, '
+      + 'and the number of paychecks changes: two in most months, three in a few. A row on '
+      + 'the paycheck rule multiplies its per-check amount by that month\'s paycheck count '
+      + 'from the Paychecks row at the foot of the grid. Set the per-check amount in the '
+      + 'row\'s settings, and correct any month\'s count by clicking it. If you don\'t get '
+      + 'paid this way, turn the whole thing off in Preferences.' },
+  rowTotal: { title: 'The year-total column',
+    body: 'Every month of THIS calendar year in the row, added up — actuals and estimates '
+      + 'alike. A live grid can run past its own December to project the next year; those '
+      + 'months are deliberately left out, because a total spanning two years would not '
+      + 'mean anything.' },
+  mixedCell: { title: 'Part actual, part estimate',
+    body: 'A month can hold several amounts — two grocery runs and a delivery, or a bill '
+      + 'you have paid next to one you have only guessed at. The cell shows their sum, and '
+      + 'a dashed underline means the amounts inside disagree about being real: some '
+      + 'happened, some are still estimates. Click the cell and choose "Split into amounts".' },
+  interestDest: { title: 'Where interest is paid',
+    body: 'An account grows by its own rate each month, applied to what it held after that '
+      + 'month\'s transfers. That growth normally stays in the account — but a brokerage '
+      + 'often sweeps dividends into cash instead, so each account can name where its '
+      + 'interest lands. Any month\'s interest can also be overridden with what really '
+      + 'arrived, by clicking that month\'s balance.' },
+  accountSince: { title: 'Accounts that start partway through',
+    body: 'An account you only began tracking in the middle of a year has no honest history '
+      + 'before then. Its earlier months stay blank and stay out of Total, and its first '
+      + 'tracked month starts from the balance you gave it.' },
+  paceCheck: { title: 'The pace check',
+    body: 'It takes this year\'s projected growth (December\'s total minus last year\'s), '
+      + 'spreads it over twelve months, and compares that with what your next unmet goal '
+      + 'needs each month to arrive on time. The "behind / ahead" figure converts the '
+      + 'monthly gap into how much sooner or later the goal lands at this pace.' },
+  k401Limit: { title: 'The 401(k) limit check',
+    body: 'Your own contributions are salary × the salary percentage, plus bonus × the '
+      + 'bonus percentage. Only your own money counts toward the IRS elective-deferral '
+      + 'limit — the employer match does not — so that total is what this compares with '
+      + 'the limit. The limit is editable because it changes every year.' },
+  magi: { title: 'The Roth IRA income check',
+    body: 'Modified adjusted gross income here is salary plus bonus, less the money that '
+      + 'never shows up as income: pre-tax 401(k) contributions and pre-tax HSA. Roth IRA '
+      + 'eligibility phases out across a band above the limit — inside the band you can '
+      + 'still contribute a reduced amount, above it you cannot contribute directly.' },
+  retProjection: { title: 'The retirement projection',
+    body: 'Each year the balance grows by the assumed return (set in Preferences) and then '
+      + 'the year\'s planned contributions are added. It is a straight-line sketch, not a '
+      + 'forecast: real returns arrive unevenly, and a bad first decade matters far more '
+      + 'than the average suggests.' },
+  summaryBalances: { title: 'Balances in a summary year',
+    body: 'Flow rows in a summary hold the year\'s total. Balance rows can\'t — adding up '
+      + 'twelve monthly balances would be meaningless — so they hold December\'s figure, '
+      + 'what the account held at the end of the year.' },
+  convertSummary: { title: 'Converting a year to a summary',
+    body: 'A finished year\'s months fold into one total per row, and the months themselves '
+      + 'are discarded. The History charts read the totals, so they carry on unchanged. It '
+      + 'cannot be undone from inside the app — only by restoring a backup — and rules that '
+      + 'look a year back (same month last year, average of last year) have nothing to read '
+      + 'from a converted year.' },
+  avgLastYear: { title: 'Average of last year',
+    body: 'The mean of the same row across all twelve months of the previous calendar year, '
+      + 'counting only months with a number actually recorded. It is the steadier cousin of '
+      + '"same month last year": good for spending that wanders month to month but holds its '
+      + 'level over a year.' },
+  raiseVsMoved: { title: 'Raise $ vs Since last year',
+    body: 'Raise $ is this year\'s raise percentage applied to this year\'s salary — the '
+      + 'money the raise itself is worth. "Since last year" compares this year\'s starting '
+      + 'salary with what last year\'s salary came to after ITS raise. If the two match, the '
+      + 'only thing that moved your pay was the annual raise; if they differ, something else '
+      + 'landed in between — a promotion, an adjustment, or a raise that took effect partway '
+      + 'through the year.' },
+  priceLookup: { title: 'Looking up prices',
+    body: 'Prices come from Alpha Vantage, which needs a free API key (Preferences). Only '
+      + 'the ticker is sent. A fetched price is cached for six hours, so opening this tab '
+      + 'repeatedly costs nothing, and every price stays editable by hand — typing one over '
+      + 'a fetched price is fine.' },
+};
+
+function helpBtn(key, label) {
+  if (!HELP[key]) return '';
+  return `<button type="button" class="tile-help" data-help="${esc(key)}"
+    aria-label="What does ${esc(label)} mean?">i</button>`;
+}
+
 /* ── Toast ──────────────────────────────────────────────────────────────── */
 let toastTimer = null;
 function toast(msg) {
@@ -1001,7 +1577,8 @@ function toast(msg) {
 
 /* ── Render skeleton ────────────────────────────────────────────────────── */
 
-const VIEWS = ['budget', 'goals', 'retirement', 'vacations', 'giving', 'history'];
+const VIEWS = ['budget', 'goals', 'retirement', 'comp', 'investments',
+  'vacations', 'giving', 'history'];
 
 let C = {};   // computeAll() output, rebuilt on every render
 
@@ -1019,6 +1596,7 @@ function render() {
   C = computeAll(state, todayISO());
   const fn = {
     budget: renderBudget, goals: renderGoals, retirement: renderRetirement,
+    comp: renderComp, investments: renderInvestments,
     vacations: renderVacations, giving: renderGiving, history: renderHistory
   }[view];
   target.innerHTML = fn();
@@ -1061,7 +1639,7 @@ const STARTER_CATEGORIES = [
   ['Credit Card', 'avg', 'normal', 'expense'],
   /* A real transfer, so the Savings account row works from day one:
      type −200 here and Cash drops $200 while Savings gains it. */
-  ['To savings', 'carry', 'midTransfer', 'transfer'],
+  ['To savings', 'carry', 'transfer:mid', 'transfer'],
   ['Everything else', 'avg', 'normal', 'expense'],
 ];
 
@@ -1073,12 +1651,15 @@ function startFresh() {
     startMonth: `${y}-01`, monthCount: 12,
     enteredThrough: monthAdd(thisMonth(), -1),
     categories: STARTER_CATEGORIES.map(([name, rule, role, section]) => {
-      const cat = { id: slugJs(name), name, rule, role, section };
+      const [r, to] = role.split(':');
+      const cat = { id: slugJs(name), name, rule, role: r, section };
+      if (to) cat.transferTo = to;
       if (rule === 'paycheck') cat.perCheck = 0;
       return cat;
     }),
-    cells: {}, paychecks: {}, seeds: { cash: 0, mid: 0, long: 0, bank: 0 },
-    overrides: {}, extraNotes: [],
+    cells: {}, paychecks: {},
+    seeds: Object.fromEntries(accountsOf(state).map(a => [a.id, 0])),
+    overrides: {}, balAdjust: {}, extraNotes: [],
   };
   state.ui.activeYear = y;
   save(); render();
@@ -1094,7 +1675,8 @@ const fmtCell = (v) => (v === 0 ? '·' : fmtMoney(v));
 function yearPickerHtml(active) {
   const opts = yearKeys().slice().reverse().map(y => {
     const yr = state.years[y];
-    const tag = yr.kind === 'summary' ? ' (summary)' : '';
+    const tag = yr.kind === 'summary' ? ' (summary)'
+      : !yearStarted(state, y) ? ' (not started yet)' : '';
     return `<option value="${esc(y)}" ${y === active ? 'selected' : ''}>${esc(y)}${tag}</option>`;
   }).join('');
   return `<label class="sr-only" for="yearSel">Year</label>
@@ -1106,7 +1688,7 @@ function renderBudget() {
   const yr = state.years[y];
   const picker = `<div class="row" style="margin-bottom:14px">${yearPickerHtml(y)}</div>`;
   if (yr.kind === 'summary') return picker + summaryCard(y, yr);
-  return picker + gridCard(y, yr) + venmoSection(y) + purchasesSection(y);
+  return picker + gridCard(y, yr);
 }
 
 function summaryCard(y, yr) {
@@ -1121,22 +1703,24 @@ function summaryCard(y, yr) {
   };
   const flows = yr.categoryTotals.filter(i => !i.isBalance);
   const bals = yr.categoryTotals.filter(i => i.isBalance);
-  const extras = (yr.extraNotes || []).map(n =>
-    `<li><span class="muted">${esc(n.where)}</span> — ${esc(n.note)}</li>`).join('');
   return `<div class="card">
     <h2>${esc(y)} — yearly summary</h2>
-    <p class="sub">This year predates the monthly layout, so it's imported as totals only.
+    <p class="sub">${yr.convertedFrom
+      ? 'The months of this year were folded into totals.'
+      : 'This year predates the monthly layout, so it\'s imported as totals only.'}
       ${yr.eoyCash !== undefined ? `End of year: <strong>${fmtMoney(yr.eoyCash)}</strong>.` : ''}
       Click any row to edit it.</p>
     <div class="sumlist">${flows.map(line).join('')}</div>
-    ${bals.length ? `<h2 style="margin-top:18px">Balances &amp; derived rows</h2>
+    ${bals.length ? `<h2 style="margin-top:18px">Balances &amp; derived rows${
+        helpBtn('summaryBalances', 'balances in a summary year')}</h2>
       <div class="sumlist">${bals.map(line).join('')}</div>` : ''}
     <div class="addbar">
       <button class="btn small" data-add="sumrow" data-year="${esc(y)}">＋ Add row</button>
       <button class="btn small" data-edit="sumyear" data-year="${esc(y)}">✎ End-of-year figure</button>
+      <button class="btn small" id="deleteYearBtn"
+        title="Remove ${esc(y)} from the app entirely">🗑 Delete ${esc(y)}</button>
     </div>
-    ${extras ? `<details class="section"><summary>Notes from the spreadsheet</summary>
-      <ul style="margin:10px 0 0;padding-left:18px;font-size:13px">${extras}</ul></details>` : ''}
+    ${gridNotes(yr)}
   </div>`;
 }
 
@@ -1145,15 +1729,38 @@ function gridCard(y, yr) {
   const months = c.months;
   const thisM = thisMonth();
   const live = yr.model === 'live';
+  const started = yearStarted(state, y);
+  /* A row with no rule can't project anything, so a year made entirely of
+     projections is quietly missing it. Worth saying out loud rather than
+     leaving a total that looks wrong for no visible reason. */
+  const ruleless = yr.categories.filter(cat =>
+    !cat.isBalance && (cat.rule || 'none') === 'none');
+
+  /* A year-total column pinned to the right end. A live grid can run past its
+     own December (the projection tail), and a total mixing two calendar years
+     would mean nothing — so this column sums THIS year's months only, which
+     is also what the History charts count. */
+  const ownMonths = months.filter(m => m.startsWith(y));
+  const rowTotalTd = (v, plain) => v === undefined
+    ? '<td class="rowtot"></td>'
+    : `<td class="rowtot">${plain ? esc(String(v)) : fmtCell(v)}</td>`;
+  const catTotal = (cat) => round2(ownMonths.reduce((s, m) =>
+    s + (c.cells[`${cat.id}|${m}`]?.v || 0), 0));
 
   const head = `<tr><th class="lbl">Category</th>${months.map(m =>
-    `<th ${m === thisM ? 'class="now"' : ''}>${esc(monthLabel(m))}</th>`).join('')}</tr>`;
+    `<th ${m === thisM ? 'class="now"' : ''}>${esc(monthLabel(m))}</th>`).join('')
+    }<th class="rowtot" title="Every ${esc(y)} month in this row added up">${esc(y)} total</th></tr>`;
 
   const cellTd = (cat, m) => {
     const r = c.cells[`${cat.id}|${m}`] || { v: 0, kind: 'missing' };
     const cls = ['cell', `c-${r.kind}`, r.note ? 'noted' : '', m === thisM ? 'now' : '']
       .filter(Boolean).join(' ');
-    const title = [fmtMoney(r.v), KIND_LABEL[r.kind], r.note].filter(Boolean).join(' · ');
+    const parts = r.parts && r.parts.length > 1
+      ? r.parts.map(p => `${fmtMoney(p.v)}${p.note ? ` ${p.note}` : ''}${
+          p.kind === 'manual' ? ' (est)' : ''}`).join(' + ')
+      : '';
+    const title = [fmtMoney(r.v), KIND_LABEL[r.kind], parts, r.note]
+      .filter(Boolean).join(' · ');
     return `<td class="${cls}" data-cat="${esc(cat.id)}" data-m="${m}"
       title="${esc(title)}">${fmtCell(r.v)}</td>`;
   };
@@ -1165,23 +1772,29 @@ function gridCard(y, yr) {
 
   /* ── The grid is grouped: Income / Expenses / Transfers, each with a header
      line and a per-month subtotal, then the Accounts block below. ── */
-  const secheadRow = (label) => `<tr class="sechead"><th class="lbl">${esc(label)}</th>${
-    months.map(m => `<td class="${m === thisM ? 'now' : ''}"></td>`).join('')}</tr>`;
+  const secheadRow = (label) => `<tr class="sechead"${label ? '' : ' aria-hidden="true"'
+    }><th class="lbl">${esc(label)}</th>${
+    months.map(m => `<td class="${m === thisM ? 'now' : ''}"></td>`).join('')}${rowTotalTd()}</tr>`;
   const subtotalRow = (label, cats) => `<tr class="subtotal">
     <th class="lbl" scope="row">${esc(label)}</th>${months.map(m => {
       const sum = round2(cats.reduce((s, cat) =>
         s + (c.cells[`${cat.id}|${m}`]?.v || 0), 0));
       return `<td class="${m === thisM ? 'now' : ''}">${fmtCell(sum)}</td>`;
-    }).join('')}</tr>`;
+    }).join('')}${rowTotalTd(round2(cats.reduce((s, cat) => s + catTotal(cat), 0)))}</tr>`;
 
   const catRows = ['income', 'expense', 'transfer'].map(sec => {
-    const cats = yr.categories.filter(cat =>
+    let cats = yr.categories.filter(cat =>
       !cat.isBalance && (cat.section || 'expense') === sec);
     if (!cats.length) return '';
+    /* Alphabetical is a display choice — the stored order is left alone, so
+       switching back to manual restores the order you arranged. */
+    if (state.settings.rowSort === 'alpha')
+      cats = cats.slice().sort((a, b) => a.name.localeCompare(b.name));
     return secheadRow(SECTION_LABEL[sec])
       + cats.map(cat => `<tr>${catTh(cat)}${
-          months.map(m => cellTd(cat, m)).join('')}</tr>`).join('')
-      + subtotalRow(`${SECTION_LABEL[sec]} total`, cats);
+          months.map(m => cellTd(cat, m)).join('')}${rowTotalTd(catTotal(cat))}</tr>`).join('')
+      /* One row is its own subtotal — repeating it just adds a line to read. */
+      + (cats.length > 1 ? subtotalRow(`${SECTION_LABEL[sec]} total`, cats) : '');
   }).join('');
 
   /* pinned history grids keep their balance-ish rows in a block below */
@@ -1189,68 +1802,98 @@ function gridCard(y, yr) {
   const pinnedBalRows = !pinnedBals.length ? '' : secheadRow('Accounts')
     + pinnedBals.map(cat =>
       `<tr class="balance">${catTh(cat)}${
-        months.map(m => cellTd(cat, m)).join('')}</tr>`).join('');
+        months.map(m => cellTd(cat, m)).join('')}${rowTotalTd()}</tr>`).join('');
 
-  /* the live year's four accounts + total are computed, not rows. A basic
-     budget (Start fresh) has no transfer rows, seeds or pins for mid/long/
-     bank, so those accounts sit at $0 forever — hide them rather than show
-     three dead rows. They appear the moment anything feeds them. */
-  const ROLE_TO_BAL = { midTransfer: 'mid', longTransfer: 'long',
-                        bankTransfer: 'bank', zelle: 'bank', charitable: 'long' };
-  const activeBal = (bid) => bid === 'cash'
-    || (yr.seeds[bid] || 0) !== 0
-    || Object.keys(yr.overrides).some(k => k.startsWith(bid + '|'))
-    || yr.categories.some(cat => ROLE_TO_BAL[cat.role] === bid);
-  const activeBals = ['cash', 'mid', 'long', 'bank'].filter(activeBal);
-  const balName = (bid) => state.settings.accountNames[bid] || bid;
+  /* the live year's account balances + total are computed, not rows. A basic
+     budget (Start fresh) has no transfer rows, seeds or pins for the accounts
+     beside the hub, so those would sit at $0 forever — hide them rather than
+     show dead rows. They appear the moment anything feeds them. */
+  const accounts = accountsOf(state);
+  const activeBal = (a) => a.hub
+    || (yr.seeds[a.id] || 0) !== 0
+    || !!a.since
+    || Object.keys(yr.overrides).some(k => k.startsWith(a.id + '|'))
+    || Object.keys(yr.balAdjust || {}).some(k => k.startsWith(a.id + '|'))
+    || yr.categories.some(cat => normRole(cat).transferTo === a.id)
+    || accounts.some(o => o.id !== a.id && o.creditTo === a.id);
+  const activeAccounts = accounts.filter(activeBal);
   /* The paychecks row is machinery for the per-check rule — clutter for a
      budget that doesn't use it. */
-  const usesPaychecks = yr.categories.some(cat => cat.rule === 'paycheck');
+  const usesPaychecks = state.settings.paycheckRule
+    && yr.categories.some(cat => cat.rule === 'paycheck');
+  const acctTitle = (a) => [
+    a.name,
+    (a.rate || 0) ? `grows ${round2(a.rate * 100)}%/yr` : '',
+    (a.rate || 0) && a.creditTo !== a.id ? `interest paid into ${accountName(state, a.creditTo)}` : '',
+    a.since ? `tracked from ${monthLabel(a.since)}` : '',
+  ].filter(Boolean).join(' — ') + ' — click for name, rate & interest destination';
   const liveBalRows = !live ? '' : secheadRow('Accounts')
-    + activeBals.map((bid, i) =>
-    `<tr class="balance"><th class="lbl" scope="row" data-edit="accountName"
-      data-bal="${bid}" style="cursor:pointer"
-      title="${esc(balName(bid))}${(state.settings.accountRates[bid] || 0)
-        ? ` — grows ${round2((state.settings.accountRates[bid]) * 100)}%/yr`
-        : ''} — click for name & interest rate">${esc(balName(bid))}</th>${
+    + activeAccounts.map(a =>
+    `<tr class="balance"><th class="lbl" scope="row" data-edit="account"
+      data-bal="${esc(a.id)}" style="cursor:pointer"
+      title="${esc(acctTitle(a))}">${esc(a.name)}</th>${
       months.map(m => {
-        const v = c.balances[`${bid}|${m}`];
-        const kind = c.balanceKinds[`${bid}|${m}`];
-        const ov = yr.overrides[`${bid}|${m}`];
+        if (!accountLive(a, m))
+          return `<td class="${m === thisM ? 'now' : ''}"
+            title="Not tracked until ${esc(monthLabel(a.since))}">·</td>`;
+        const v = c.balances[`${a.id}|${m}`];
+        const kind = c.balanceKinds[`${a.id}|${m}`];
+        const ov = yr.overrides[`${a.id}|${m}`];
         return `<td class="cell c-${kind} ${m === thisM ? 'now' : ''}"
-          data-bal="${bid}" data-m="${m}"
+          data-bal="${esc(a.id)}" data-m="${m}"
           title="${esc(fmtMoney(v || 0))}${ov ? ' · stated balance' : ''}">${fmtCell(v || 0)}</td>`;
-      }).join('')}</tr>`).join('')
+      }).join('')}${rowTotalTd()}</tr>`).join('')
+    + secheadRow('')   // the same band that opens the block, closing it off
     + `<tr class="total"><th class="lbl" scope="row">Total</th>${
         months.map(m => `<td class="${m === thisM ? 'now' : ''}">${
-          fmtCell(c.balances[`total|${m}`] || 0)}</td>`).join('')}</tr>`
+          fmtCell(c.balances[`total|${m}`] || 0)}</td>`).join('')}${rowTotalTd()}</tr>`
     + (!usesPaychecks ? '' :
       `<tr class="paych"><th class="lbl" scope="row">Paychecks</th>${
         months.map(m => `<td class="cell ${m === thisM ? 'now' : ''}" data-pay="${m}">${
-          yr.paychecks[m] ?? '·'}</td>`).join('')}</tr>`);
+          yr.paychecks[m] ?? '·'}</td>`).join('')}${rowTotalTd(
+            round2(months.filter(m => m.startsWith(y))
+              .reduce((s, m) => s + (yr.paychecks[m] || 0), 0)), true)}</tr>`);
 
   const nextM = live ? monthAdd(yr.enteredThrough, 1) : null;
-  const canClose = live && monthDiff(yr.startMonth, nextM) < yr.monthCount;
-  const canReopen = live && yr.enteredThrough >= yr.startMonth;
+  /* A year that hasn't begun has nothing to enter and nothing to roll over
+     from: every month in it is still a projection of the year before. */
+  const canClose = live && started && monthDiff(yr.startMonth, nextM) < yr.monthCount;
+  const canReopen = live && started && yr.enteredThrough >= yr.startMonth;
   const addRowBtn = `<button class="btn small" data-add="category" data-year="${esc(y)}"
       title="Add a row to this year's grid">＋ Add row</button>`;
   const monthControls = `<div class="row" style="margin:2px 0 12px">
       ${addRowBtn}
+      ${live ? `<button class="btn small" data-add="account"
+        title="Track another account's balance in this grid">＋ Add account</button>` : ''}
       ${live && canClose ? `<button class="btn small" id="closeMonthBtn"
         title="Freeze ${esc(monthLabel(nextM))}'s estimates as entered numbers — like overtyping the formulas in Numbers">
         ✓ Mark ${esc(monthLabel(nextM))} entered</button>` : ''}
       ${live && canReopen ? `<button class="btn small" id="reopenMonthBtn"
         title="Move the entered-through marker back a month (your numbers stay put)">
         ↩ Re-open ${esc(monthLabel(yr.enteredThrough))}</button>` : ''}
-      ${live && y === latestGridYear() && !state.years[String(+y + 1)]
+      ${live && y === newestGridYear() && !state.years[String(+y + 1)]
         ? `<button class="btn small" id="rolloverBtn"
-            title="Create the ${esc(String(+y + 1))} grid — like duplicating the sheet in Numbers">
-            ⊕ Start ${esc(String(+y + 1))}</button>` : ''}
+            title="Build the ${esc(String(+y + 1))} grid now so you can see where the plan is heading">
+            ⊕ Build ${esc(String(+y + 1))}</button>` : ''}
+      ${!live ? `<button class="btn small" id="toSummaryBtn"
+          title="Replace this year's months with its yearly totals — permanent">
+          ⇩ Convert to a summary</button>` : ''}
+      <button class="btn small" id="deleteYearBtn"
+        title="Remove ${esc(y)} from the app entirely">🗑 Delete ${esc(y)}</button>
     </div>`;
 
   return `<div class="card">
     <h2>${esc(y)} budget</h2>
-    <p class="sub">${live
+    <p class="sub">${!started
+      ? `Every month here is a projection, built from ${esc(String(+y - 1))}'s rules and its
+         December balances — it keeps up as ${esc(String(+y - 1))} changes. ${esc(y)} takes over
+         as the current year on 1 January, or as soon as you mark December ${esc(String(+y - 1))}
+         entered. Until then Goals, History and the other tabs stay on ${esc(String(+y - 1))}.${
+         ruleless.length ? ` <strong>${ruleless.length} row${ruleless.length === 1 ? '' : 's'}
+           ${ruleless.length === 1 ? 'has' : 'have'} no rule</strong>, so ${
+           ruleless.length === 1 ? 'it stays' : 'they stay'} blank all year and the totals here
+           understate what ${esc(y)} will really cost — open a row to give it one.` : ''}`
+      : live
       ? `Entered through <strong>${esc(monthLabel(yr.enteredThrough))}</strong>; later months are estimates that update as real numbers land. Click any cell to edit it.`
       : 'A finished year — every figure is history. Click a cell to correct it.'}</p>
     ${monthControls}
@@ -1262,14 +1905,30 @@ function gridCard(y, yr) {
       <span>Plain — actual</span>
       <span class="k-manual">Underlined — your estimate</span>
       <span class="k-auto">Italic dotted — auto estimate</span>
+      <span class="k-mixed">Dashed — part actual, part estimate</span>
       <span class="k-dot">Dot — has a note</span>
       <span>· — nothing recorded</span>
     </div>
+    ${usesPaychecks ? `<p class="sub muted" style="margin-top:10px">Paycheck rows estimate a
+      future month as their per-check amount × that month's paycheck count (the Paychecks row —
+      click a month to change it).${helpBtn('perCheck', 'the paycheck rule')}</p>` : ''}
   </div>`;
 }
 
+/* Loose notes that arrived with the imported data. Only the summary years show
+   them: a live grid says what it means in its own cells, and per-cell notes
+   are where anything else belongs. They stay in the data either way, so an
+   export still carries them. */
+function gridNotes(yr) {
+  const extras = (yr.extraNotes || []).map(n =>
+    `<li><span class="muted">${esc(n.where)}</span> — ${esc(n.note)}</li>`).join('');
+  return extras ? `<details class="section"><summary>Notes from the spreadsheet</summary>
+    <ul style="margin:10px 0 0;padding-left:18px;font-size:13px">${extras}</ul></details>` : '';
+}
+
 const KIND_LABEL = { actual: 'actual', manual: 'your estimate',
-  auto: 'auto estimate', missing: 'nothing recorded', pinned: 'stated balance' };
+  auto: 'auto estimate', missing: 'nothing recorded', pinned: 'stated balance',
+  mixed: 'part actual, part estimate' };
 
 /* Plain-English names for the estimate rules — shown wherever a rule needs
    identifying (cell editor, row tooltips). Keep in step with the option list
@@ -1279,8 +1938,9 @@ const RULE_LABEL = {
   carry: 'repeats the last month',
   quarterly: 'repeats on a cycle (every few months)',
   avg: 'average of the months so far',
+  avglastyear: 'average of last year',
   samemonth: 'same month last year',
-  dividends: 'interest on Cash + Savings balances',
+  dividends: 'interest on the cash + savings balances',
   paycheck: 'per-check amount × paychecks',
 };
 
@@ -1293,50 +1953,12 @@ function ruleDesc(cat) {
   if (r === 'quarterly')
     return `repeats every ${Math.max(1, Math.round(cat.every || 3))} months`;
   if (r === 'dividends')
-    return `${round2(((cat.rate ?? state.settings.midTermRateAnnual) || 0) * 100)}%/yr interest on Cash + Savings`;
+    return `${round2(((cat.rate ?? state.settings.midTermRateAnnual) || 0) * 100)}%/yr interest on ${
+      accountName(state, 'cash')} + ${accountName(state, 'mid')}`;
   return RULE_LABEL[r] || RULE_LABEL.none;
 }
 
 const SECTION_LABEL = { income: 'Income', expense: 'Expenses', transfer: 'Transfers' };
-
-function venmoSection(y) {
-  const items = (state.side.venmo || {})[y] || [];
-  const total = round2(items.reduce((s, i) => s + i.amount, 0));
-  const rows = items.map((i, idx) => `<tr class="editrow" data-edit="venmo"
-      data-year="${esc(y)}" data-idx="${idx}">
-    <td style="text-align:left">${esc(i.date)}</td>
-    <th scope="row">${esc(i.desc)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
-    <td>${fmtMoney(i.amount)}</td>
-    <td style="text-align:left">${i.fromBank ? 'Bank' : ''}</td></tr>`).join('');
-  return `<details class="section"><summary>${esc(y)} Venmo ledger — ${items.length} items,
-      ${fmtMoney(total)} (${fmtMoney(round2(total / 12))}/mo)</summary>
-    <div class="tablewrap"><table>
-      <thead><tr><th style="text-align:left">Date</th><th style="text-align:left">Who / what</th>
-        <th>Amount</th><th style="text-align:left">Settled</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-    <div class="addbar"><button class="btn small" data-add="venmo"
-      data-year="${esc(y)}">＋ Add entry</button></div></details>`;
-}
-
-function purchasesSection(y) {
-  const items = (state.side.largePurchases || {})[y] || [];
-  const total = round2(items.reduce((s, i) => s + (i.amount || 0), 0));
-  const rows = items.map((i, idx) => `<tr class="editrow" data-edit="purchase"
-      data-year="${esc(y)}" data-idx="${idx}">
-    <td style="text-align:left">${esc((i.date || '').slice(0, 7))}</td>
-    <th scope="row">${esc(i.desc)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
-    <td>${i.amount === null || i.amount === undefined ? '' : fmtMoney(i.amount)}</td></tr>`).join('');
-  return `<details class="section"><summary>${esc(y)} large credit-card purchases —
-      ${fmtMoney(total)} planned</summary>
-    <div class="tablewrap"><table>
-      <thead><tr><th style="text-align:left">Month</th><th style="text-align:left">What</th>
-        <th>Amount</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-    <div class="addbar"><button class="btn small" data-add="purchase"
-      data-year="${esc(y)}">＋ Add purchase</button></div></details>`;
-}
 
 /* ═══════════════════════════ Goals view ═══════════════════════════════════ */
 
@@ -1370,7 +1992,7 @@ function renderGoals() {
         aria-valuenow="${Math.round(pct * 100)}" aria-label="${esc(g.name)} progress">
         <i style="width:${(pct * 100).toFixed(1)}%"></i></div>
       <div class="foot">${Math.round(g.progress * 100)}%
-        ${g.targetDate ? ` · target ${esc(g.targetDate.slice(0, 7))} (${fmtYrMo(g.monthsLeft)})` : ''}
+        ${g.targetDate ? ` · target ${esc(monthLabel(g.targetDate.slice(0, 7)))} (${fmtYrMo(g.monthsLeft)})` : ''}
         ${!done && g.monthlyReq ? ` · needs ${fmtMoney0(g.monthlyReq)}/mo` : ''}</div>
     </div>`;
   };
@@ -1387,29 +2009,32 @@ function renderGoals() {
   const eoyPrev = state.years[prevYear]?.eoyCash;
   const growth = (eoyThis !== undefined && eoyPrev !== undefined)
     ? round2(eoyThis - eoyPrev) : null;
-  const reno = computeGoals(state, C, todayISO()).find(g => g.source === 'midCapped');
+  /* The pace check follows whichever goal is next: the soonest deadline you
+     haven't met yet. Meet it and the check moves on by itself. */
+  const next = goals
+    .filter(g => g.targetDate && g.target && g.saved < g.target && g.monthlyReq > 0)
+    .sort((a, b) => a.targetDate.localeCompare(b.targetDate))[0];
   let paceHtml = '';
-  if (growth !== null && reno && reno.monthlyReq > 0) {
-    /* the sheet's pace check: this year's projected growth, spread monthly,
-       against what the renovations goal needs per month */
-    const paceGap = round2(growth / 12 - reno.monthlyReq);
+  if (growth !== null && next) {
+    const paceGap = round2(growth / 12 - next.monthlyReq);
     const behind = paceGap < 0;
-    const gapMonths = Math.round(Math.abs(paceGap) * reno.monthsLeft / reno.monthlyReq);
-    paceHtml = `<p class="sub" style="margin-top:12px">${esc(reno.name)} pace check: on this year's
+    const gapMonths = Math.round(Math.abs(paceGap) * next.monthsLeft / next.monthlyReq);
+    paceHtml = `<p class="sub" style="margin-top:12px">Next goal — ${esc(next.name)}${
+      helpBtn('paceCheck', 'the pace check')}: on this year's
       projected growth you're saving ${fmtMoney0(Math.abs(paceGap))}/mo
-      ${behind ? 'less' : 'more'} than the goal needs —
+      ${behind ? 'less' : 'more'} than it needs —
       <span class="pill ${behind ? 'warn' : 'good'}">${behind ? '!' : '✓'} ${fmtYrMo(gapMonths)} ${behind ? 'behind' : 'ahead'}</span></p>`;
   }
 
   const yearsWithEoy = yearKeys().filter(y => state.years[y].eoyCash !== undefined);
   const eoyRows = [...yearsWithEoy.slice(-3).map(y => ({ y, v: state.years[y].eoyCash })),
     ...(eoyThis !== undefined ? [{ y: liveKey, v: eoyThis, est: true }] : []),
-    ...(() => {   // the live grid projects into next year too
-      const months = c.months;
-      const decNext = `${+liveKey + 1}-12`;
-      const v = c.balances[`total|${decNext}`];
-      return v !== undefined ? [{ y: String(+liveKey + 1), v, est: true }] : [];
-    })()];
+    /* and each year built ahead of this one, which is the point of building
+       them: seeing where the plan lands two and three years out */
+    ...previewYears().flatMap(py => {
+      const v = C[py]?.balances[`total|${py}-12`];
+      return v === undefined ? [] : [{ y: py, v, est: true }];
+    })];
   const eoyTable = `<div class="tablewrap"><table>
     <thead><tr><th style="text-align:left">Year end</th><th>Total</th><th>Growth</th></tr></thead>
     <tbody>${eoyRows.map((r, i) => {
@@ -1440,12 +2065,17 @@ function renderGoals() {
   <div class="cards2">
     <div class="card">
       <h2>Where the total is heading</h2>
-      <p class="sub">Computed total liquidity across every month of the ${esc(liveKey)} plan.</p>
+      <p class="sub">Computed total liquidity, month by month, across ${esc(liveKey)}${
+        previewYears().length ? ` and the ${esc(previewYears().join(', '))} plan${
+          previewYears().length > 1 ? 's' : ''} you've built ahead (dashed)` : ''}.</p>
       <div class="chartbox"><canvas id="goalChart"></canvas></div>
     </div>
     <div class="card">
       <h2>End-of-year liquidity</h2>
-      <p class="sub">Actuals from past years; the plan's projection for this year and next.</p>
+      <p class="sub">Actuals from past years, then the plan's own projection —
+        ${eoyRows.filter(r => r.est).length > 1
+          ? `this year and the ${eoyRows.filter(r => r.est).length - 1} you've built ahead`
+          : 'this year'}.</p>
       ${eoyTable}
     </div>
   </div>`;
@@ -1455,6 +2085,17 @@ function renderGoals() {
 
 const holdingsValue = (rows) =>
   round2(rows.reduce((s, h) => s + (h.shares || 0) * (h.price || 0), 0));
+
+/* A holdings table is either one of the named investment panes ("pf:<id>") or
+   the giving fund, which lives on its own tab. One resolver so the renderer,
+   the editor and the price lookup all read the same array. */
+function holdingList(key) {
+  if (key && key.startsWith('pf:')) {
+    const pf = (state.side.portfolios || []).find(p => p.id === key.slice(3));
+    return pf ? pf.rows : [];
+  }
+  return state.side[key] || [];
+}
 
 function holdingsTable(rows, list) {
   const body = rows.map((h, idx) => `<tr class="editrow" data-edit="holding"
@@ -1499,15 +2140,39 @@ function looseTable(map, year) {
       data-map="${esc(map)}" data-year="${esc(year)}">＋ Add line</button></div>`;
 }
 
+/* Retirement accounts carry a tax treatment (which the Traditional/Roth split
+   reads) and a type (which is what "how much can I still put in?" turns on).
+   RET_TYPES is the one list both the editor and the labels read. */
+const RET_TYPES = [
+  ['401k',      '401(k) pre-tax',  'traditional'],
+  ['roth-401k', '401(k) Roth',     'roth'],
+  ['trad-ira',  'Traditional IRA', 'traditional'],
+  ['roth-ira',  'Roth IRA',        'roth'],
+  ['hsa',       'HSA',             'traditional'],
+  ['other',     'Other',           'traditional'],
+];
+const RET_TYPE_LABEL = Object.fromEntries(RET_TYPES.map(([v, l]) => [v, l]));
+const retKind = (a) => a.kind === 'roth' ? 'roth' : 'traditional';
+/* Contributions to every account of a type, keyed by year. */
+function contribYears(filter) {
+  const out = {};
+  for (const a of (state.side.retirementAccounts || [])) {
+    if (filter && !filter(a)) continue;
+    for (const [y, v] of Object.entries(a.contribs || {}))
+      out[y] = round2((out[y] || 0) + (v || 0));
+  }
+  return out;
+}
+
 function renderRetirement() {
   const s = state.side;
   const year = latestGridYear() || String(new Date().getFullYear());
-
-  /* Traditional vs Roth, from the generic account list */
   const accts = s.retirementAccounts || [];
-  const trad = round2(accts.filter(a => a.kind !== 'roth')
+
+  /* Traditional vs Roth, from the account list */
+  const trad = round2(accts.filter(a => retKind(a) !== 'roth')
     .reduce((t, a) => t + (a.amount || 0), 0));
-  const roth = round2(accts.filter(a => a.kind === 'roth')
+  const roth = round2(accts.filter(a => retKind(a) === 'roth')
     .reduce((t, a) => t + (a.amount || 0), 0));
   const total = round2(trad + roth);
   const tradPct = total ? trad / total : 0;
@@ -1521,126 +2186,405 @@ function renderRetirement() {
       <span><span class="sw"></span>Traditional ${fmtMoney0(trad)} (${(tradPct * 100).toFixed(0)}%)</span>
       <span><span class="sw b"></span>Roth ${fmtMoney0(roth)} (${((1 - tradPct) * 100).toFixed(0)}%)</span>
     </div>`}
-    ${accts.length ? `<div class="tablewrap" style="margin-top:12px"><table>
-      <thead><tr><th style="text-align:left">Account</th><th style="text-align:left">Tax treatment</th><th>Balance</th></tr></thead>
+    ${accts.length ? `<div class="tablewrap" style="margin-top:12px"><table class="retaccts">
+      <thead><tr><th style="text-align:left">Account</th><th style="text-align:left">Type</th>
+        <th>Balance</th><th>${esc(year)} in</th></tr></thead>
       <tbody>${accts.map((a, idx) => `<tr class="editrow" data-edit="retAcct" data-idx="${idx}">
         <th scope="row">${esc(a.name)}</th>
-        <td style="text-align:left">${a.kind === 'roth' ? 'Roth' : 'Traditional'}</td>
-        <td>${fmtMoney(a.amount || 0)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><th>Total</th><td></td><td>${fmtMoney(total)}</td></tr></tfoot>
+        <td style="text-align:left">${esc(RET_TYPE_LABEL[a.type] || 'Other')}</td>
+        <td>${fmtMoney(a.amount || 0)}</td>
+        <td>${(a.contribs || {})[year] ? fmtMoney0(a.contribs[year]) : ''}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th>Total</th><td></td><td>${fmtMoney(total)}</td><td></td></tr></tfoot>
     </table></div>` : '<p class="sub">Nothing recorded.</p>'}
     <div class="addbar"><button class="btn small" data-add="retAcct">＋ Add account</button></div>`;
 
-  /* Comp */
-  const comp = (s.comp || {})[year];
-  const bonuses = s.bonuses || {};
-  const compHtml = `${comp ? `<div class="tablewrap"><table><tbody>
-      <tr><th scope="row">Salary</th><td>${fmtMoney0(comp.salary || 0)}</td></tr>
-      <tr><th scope="row">Raise</th><td>${((comp.raisePct || 0) * 100).toFixed(1)}%</td></tr>
-      <tr><th scope="row">Bonus</th><td>${fmtMoney0(comp.bonus || 0)}</td></tr>
-      <tr><th scope="row">Total comp</th><td>${fmtMoney0(round2((comp.salary || 0) * (1 + (comp.raisePct || 0)) + (comp.bonus || 0)))}</td></tr>
-    </tbody></table></div>` : ''}
-    <div class="addbar">
-      ${comp ? `<button class="btn small" data-edit="comp" data-key="${esc(year)}">✎ Edit ${esc(year)}</button>` : ''}
-      <button class="btn small" data-add="comp">＋ Add a year</button>
-    </div>
-    ${Object.keys(bonuses).length ? `<h2 style="margin-top:18px">Bonuses by year</h2>
-    <div class="tablewrap"><table><tbody>${Object.keys(bonuses).sort().map(y =>
-      `<tr class="editrow" data-edit="yearAmount" data-map="bonuses" data-key="${esc(y)}">
-        <th scope="row">${esc(y)}</th><td>${fmtMoney0(bonuses[y])}</td></tr>`).join('')}
-    </tbody></table></div>` : ''}
-    <div class="addbar"><button class="btn small" data-add="yearAmount"
-      data-map="bonuses">＋ Add a bonus year</button></div>`;
-
-  /* Roth IRA contributions */
-  const contribs = s.rothContribs || {};
-  const cYears = Object.keys(contribs).sort();
+  /* IRA contributions, per account rather than the one hard-wired Roth IRA.
+     One line per contribution, so every one of them is a row you can click —
+     the account column only appears when more than one IRA is paying in. */
+  const iraAccts = accts.filter(a => a.type === 'roth-ira' || a.type === 'trad-ira');
+  const showAcct = iraAccts.length > 1;
+  const entries = [];
+  for (const a of iraAccts)
+    for (const [y, amount] of Object.entries(a.contribs || {}))
+      entries.push({ y, amount, a, idx: accts.indexOf(a) });
+  entries.sort((p, q) => p.y.localeCompare(q.y) || p.a.name.localeCompare(q.a.name));
   let cum = 0;
-  const contribRows = cYears.map(y => {
-    cum = round2(cum + contribs[y]);
-    return `<tr class="editrow" data-edit="yearAmount" data-map="rothContribs" data-key="${esc(y)}">
-      <th scope="row">${esc(y)}${+y > new Date().getFullYear() ? ' <span class="muted">(planned)</span>' : ''}</th>
-      <td>${fmtMoney0(contribs[y])}</td><td>${fmtMoney0(cum)}</td></tr>`;
+  const contribRows = entries.map(e => {
+    cum = round2(cum + (e.amount || 0));
+    return `<tr class="editrow" data-edit="contrib" data-idx="${e.idx}" data-key="${esc(e.y)}">
+      <th scope="row">${esc(e.y)}${
+        +e.y > new Date().getFullYear() ? ' <span class="muted">(planned)</span>' : ''}</th>
+      ${showAcct ? `<td style="text-align:left">${esc(e.a.name)}</td>` : ''}
+      <td>${fmtMoney0(e.amount)}</td><td>${fmtMoney0(cum)}</td></tr>`;
   }).join('');
 
-  return `<div class="cards2">
+  return `<div class="cards2 pairs">
     <div class="card">
       <h2>Traditional vs Roth</h2>
-      <p class="sub">Your retirement accounts, split by tax treatment. Click a row to edit.</p>
+      <p class="sub">Your retirement accounts, split by tax treatment — the type says which
+        side of the bar each one is on. Click a row to edit its balance, its type, or what
+        you put in each year.</p>
       ${splitHtml}
     </div>
     <div class="card">
-      <h2>Roth IRA contributions</h2>
-      <p class="sub">Per year, with the running total.</p>
-      <div class="chartbox" style="height:180px"><canvas id="rothChart"></canvas></div>
-      <div class="tablewrap" style="margin-top:10px"><table>
-        <thead><tr><th style="text-align:left">Year</th><th>Put in</th><th>Running total</th></tr></thead>
-        <tbody>${contribRows}</tbody></table></div>
-      <div class="addbar"><button class="btn small" data-add="yearAmount"
-        data-map="rothContribs">＋ Add a year</button></div>
+      <h2>IRA contributions</h2>
+      <p class="sub">${iraAccts.length
+        ? `Every year across ${iraAccts.map(a => esc(a.name)).join(' + ')}, with the running total.`
+        : 'Mark an account as a Roth or Traditional IRA and its yearly contributions show up here.'}</p>
+      ${entries.length ? '<div class="chartbox" style="height:180px"><canvas id="rothChart"></canvas></div>' : ''}
+      ${entries.length ? `<div class="tablewrap" style="margin-top:10px"><table>
+        <thead><tr><th style="text-align:left">Year</th>
+          ${showAcct ? '<th style="text-align:left">Account</th>' : ''}
+          <th>Put in</th><th>Running total</th></tr></thead>
+        <tbody>${contribRows}</tbody></table></div>` : ''}
+      ${iraAccts.length ? `<div class="addbar"><button class="btn small" data-add="contrib"
+        >＋ Add a contribution</button></div>` : ''}
     </div>
     <div class="card">
-      <h2>Comp</h2>
-      <p class="sub">${esc(year)} salary and bonus.</p>
-      ${compHtml || '<p class="sub">Nothing recorded.</p>'}
+      <h2>401(k) limit check${helpBtn('k401Limit', 'the 401(k) limit check')}</h2>
+      ${limitsCard(year)}
     </div>
     <div class="card">
-      <h2>Contributions &amp; limits</h2>
-      <p class="sub">${esc(year)} retirement contributions, and the Roth income (MAGI) check.
-        Free-form lines — click one to edit.</p>
-      ${looseTable('retirement', year)}
-      ${looseTable('rothLimit', year)}
+      <h2>Roth IRA eligibility${helpBtn('magi', 'the Roth IRA income check')}</h2>
+      ${magiCard(year)}
     </div>
-    <div class="card">
-      <h2>Taxable investments</h2>
-      ${holdingsTable(s.taxable || [], 'taxable')}
-    </div>
-    <div class="card">
-      <h2>HSA</h2>
-      ${holdingsTable(s.hsa || [], 'hsa')}
-    </div>
-    <div class="card">
-      <h2>Other money</h2>
-      ${(s.otherMoney || []).length ? `<div class="tablewrap"><table><tbody>${
-        s.otherMoney.map((o, idx) => `<tr class="editrow" data-edit="otherMoney" data-idx="${idx}">
-          <th scope="row">${esc(o.name)}</th>
-          <td>${fmtMoney(o.balance || 0)}</td></tr>`).join('')}</tbody>
-        <tfoot><tr><th>Total</th><td>${fmtMoney(round2(s.otherMoney.reduce((t, o) => t + (o.balance || 0), 0)))}</td></tr></tfoot>
-        </table></div>` : '<p class="sub">Nothing recorded.</p>'}
-      <div class="addbar"><button class="btn small" data-add="otherMoney">＋ Add account</button></div>
+    <div class="card" style="grid-column:1/-1">
+      <h2>Holdings &amp; where they're heading${helpBtn('retProjection', 'the retirement projection')}</h2>
+      <p class="sub">Today's balances grown at ${round2((state.settings.retirementReturnAnnual ?? 0.07) * 100)}%/yr
+        (Preferences), with each year's planned contributions added on top.</p>
+      ${accts.length
+        ? '<div class="chartbox" style="height:280px"><canvas id="retChart"></canvas></div>'
+        : '<p class="sub">Add an account above and its projection appears here.</p>'}
     </div>
   </div>`;
+}
+
+/* ── The two calculators ────────────────────────────────────────────────────
+   These replaced two free-form tables imported from the spreadsheet: the
+   numbers were right but nothing recomputed, so a raise meant retyping every
+   line. Inputs live in side.limits[year]; everything else is derived here. */
+
+const LIMIT_DEFAULTS = { k401Limit: 24500, magiLimit: 153000, magiPhaseOut: 15000 };
+
+function limitsFor(year) {
+  const stored = (state.side.limits || {})[year] || {};
+  const comp = (state.side.comp || {})[year];
+  /* First open borrows from the comp figures rather than opening blank. */
+  return {
+    salary: stored.salary ?? (comp ? round2((comp.salary || 0) * (1 + (comp.raisePct || 0))) : 0),
+    bonus: stored.bonus ?? (comp ? comp.bonus || 0 : 0),
+    pretaxPct: stored.pretaxPct ?? 0,
+    bonusPct: stored.bonusPct ?? 0,
+    hsaPretax: stored.hsaPretax ?? 0,
+    k401Limit: stored.k401Limit ?? LIMIT_DEFAULTS.k401Limit,
+    magiLimit: stored.magiLimit ?? LIMIT_DEFAULTS.magiLimit,
+    magiPhaseOut: stored.magiPhaseOut ?? LIMIT_DEFAULTS.magiPhaseOut,
+  };
+}
+
+function limitsCard(year) {
+  const L = limitsFor(year);
+  const fromSalary = round2(L.salary * L.pretaxPct);
+  const fromBonus = round2(L.bonus * L.bonusPct);
+  const put = round2(fromSalary + fromBonus);
+  const headroom = round2(L.k401Limit - put);
+  const pct = L.k401Limit ? Math.min(1, put / L.k401Limit) : 0;
+  const over = headroom < 0;
+  return `<p class="sub">${esc(year)} — what your own contributions add up to against the
+    IRS limit. The employer match doesn't count toward it.</p>
+  <div class="tablewrap"><table><tbody>
+    <tr><th scope="row">Salary × ${(L.pretaxPct * 100).toFixed(1)}%</th><td>${fmtMoney(fromSalary)}</td></tr>
+    <tr><th scope="row">Bonus × ${(L.bonusPct * 100).toFixed(1)}%</th><td>${fmtMoney(fromBonus)}</td></tr>
+    <tr><th scope="row">You put in</th><td>${fmtMoney(put)}</td></tr>
+    <tr><th scope="row">${esc(year)} limit</th><td>${fmtMoney0(L.k401Limit)}</td></tr>
+    <tr><th scope="row">${over ? 'Over by' : 'Room left'}</th>
+      <td>${fmtMoney(Math.abs(headroom))}</td></tr>
+  </tbody></table></div>
+  <div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100"
+    aria-valuenow="${Math.round(pct * 100)}" aria-label="401(k) contributions against the limit"
+    style="margin-top:12px"><i style="width:${(pct * 100).toFixed(1)}%"></i></div>
+  <p class="sub" style="margin-top:8px">${Math.round(pct * 100)}% of the limit
+    ${over ? `· <span class="pill bad">✕ over the limit</span>` : ''}</p>
+  <div class="addbar"><button class="btn small" data-edit="limits"
+    data-year="${esc(year)}">✎ Edit the figures</button></div>`;
+}
+
+function magiCard(year) {
+  const L = limitsFor(year);
+  const gross = round2(L.salary + L.bonus);
+  const pretax = round2(L.salary * L.pretaxPct + L.bonus * L.bonusPct);
+  const magi = round2(gross - pretax - L.hsaPretax);
+  const band = L.magiLimit + L.magiPhaseOut;
+  const verdict = magi < L.magiLimit ? ['good', '✓', 'Full contribution']
+    : magi < band ? ['warn', '!', 'Reduced contribution (in the phase-out band)']
+    : ['bad', '✕', 'No direct contribution'];
+  return `<p class="sub">${esc(year)} — the income figure Roth IRA eligibility is judged on.</p>
+  <div class="tablewrap"><table><tbody>
+    <tr><th scope="row">Salary + bonus</th><td>${fmtMoney(gross)}</td></tr>
+    <tr><th scope="row">− pre-tax 401(k)</th><td>${fmtMoney(pretax)}</td></tr>
+    <tr><th scope="row">− pre-tax HSA</th><td>${fmtMoney(L.hsaPretax)}</td></tr>
+    <tr><th scope="row">MAGI</th><td>${fmtMoney(magi)}</td></tr>
+    <tr><th scope="row">Phase-out starts</th><td>${fmtMoney0(L.magiLimit)}</td></tr>
+    <tr><th scope="row">Fully out at</th><td>${fmtMoney0(band)}</td></tr>
+  </tbody></table></div>
+  <p class="sub" style="margin-top:10px"><span class="pill ${verdict[0]}">${verdict[1]} ${
+    esc(verdict[2])}</span>
+    ${magi < L.magiLimit ? ` · ${fmtMoney0(L.magiLimit - magi)} of headroom` : ''}</p>
+  <div class="addbar"><button class="btn small" data-edit="limits"
+    data-year="${esc(year)}">✎ Edit the figures</button></div>
+  ${looseArchive(year)}`;
+}
+
+/* The spreadsheet's original free-form lines. Nothing computes from them any
+   more, but they're the record of how past years were worked out, so they stay
+   readable (and editable) rather than being thrown away. */
+function looseArchive(year) {
+  const years = new Set([...Object.keys(state.side.retirement || {}),
+                         ...Object.keys(state.side.rothLimit || {})]);
+  if (!years.size) return '';
+  return `<details class="section"><summary>Imported spreadsheet rows</summary>
+    ${[...years].sort().reverse().map(y => `<h2 style="margin:12px 0 6px;font-size:14px">${esc(y)}</h2>
+      ${looseTable('retirement', y)}${looseTable('rothLimit', y)}`).join('')}</details>`;
+}
+
+function buildRetirementChart() {
+  const accts = state.side.retirementAccounts || [];
+  if (!accts.length) return;
+  const r = state.settings.retirementReturnAnnual ?? 0.07;
+  const thisYear = new Date().getFullYear();
+  const labels = [], data = [];
+  let bal = round2(accts.reduce((t, a) => t + (a.amount || 0), 0));
+  const contribs = contribYears();
+  for (let i = 0; i <= 25; i++) {
+    const y = thisYear + i;
+    if (i) bal = round2(bal * (1 + r) + (contribs[String(y)] || 0));
+    labels.push(String(y));
+    data.push(bal);
+  }
+  const accent = cssVar('--accent');
+  newChart('retChart', {
+    type: 'line',
+    data: { labels, datasets: [{
+      label: 'Projected balance', data,
+      borderColor: accent, backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 0, tension: .2,
+      /* every point past today is a projection, and says so */
+      borderDash: [6, 4],
+    }]},
+    options: {
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (t) => fmtMoney0(t.parsed.y) + ' (projected)' } } },
+      scales: { x: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
+          maxRotation: 0, autoSkipPadding: 14 } }),
+        y: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
+          callback: (v) => fmtMoney0(v) } }) },
+    },
+  }, `Projected retirement balance at ${round2(r * 100)}% a year: ${fmtMoney0(data[0])} in ${
+    labels[0]}, reaching ${fmtMoney0(data[data.length - 1])} by ${
+    labels[labels.length - 1]}. A straight-line projection, not a forecast.`);
+}
+
+/* ═══════════════════════════ Compensation view ════════════════════════════ */
+
+function renderComp() {
+  const s = state.side;
+  const comp = s.comp || {};
+  const years = Object.keys(comp).sort();
+  const latest = years[years.length - 1];
+  const cur = latest ? comp[latest] : null;
+  const bonuses = s.bonuses || {};
+  const totalComp = (c) => round2((c.salary || 0) * (1 + (c.raisePct || 0)) + (c.bonus || 0));
+
+  const currentCard = `<div class="card">
+    <h2>Where comp stands${latest ? ` — ${esc(latest)}` : ''}</h2>
+    ${cur ? `<p class="sub">Total comp is salary with this year's raise applied, plus the bonus.</p>
+      <div class="tablewrap"><table><tbody>
+      <tr><th scope="row">Salary</th><td>${fmtMoney0(cur.salary || 0)}</td></tr>
+      <tr><th scope="row">Raise</th><td>${((cur.raisePct || 0) * 100).toFixed(1)}%</td></tr>
+      <tr><th scope="row">Salary after the raise</th>
+        <td>${fmtMoney0(round2((cur.salary || 0) * (1 + (cur.raisePct || 0))))}</td></tr>
+      <tr><th scope="row">Bonus</th><td>${fmtMoney0(cur.bonus || 0)}</td></tr>
+      <tr><th scope="row">Total comp</th><td>${fmtMoney0(totalComp(cur))}</td></tr>
+    </tbody></table></div>` : '<p class="sub">Nothing recorded yet.</p>'}
+    <div class="addbar">
+      ${latest ? `<button class="btn small" data-edit="comp" data-key="${esc(latest)}">✎ Edit ${esc(latest)}</button>` : ''}
+      <button class="btn small" data-add="comp">＋ Add a year</button>
+    </div>
+  </div>`;
+
+  /* Two different "changes" live in this table and they are easy to confuse:
+     the raise itself in dollars (this year's percentage applied to this year's
+     salary), and how the salary figure actually moved since last year. They
+     disagree whenever a mid-year change lands, which is the interesting case. */
+  const raiseRows = years.map((y, i) => {
+    const c = comp[y];
+    const raiseAmt = round2((c.salary || 0) * (c.raisePct || 0));
+    const prev = i ? comp[years[i - 1]] : null;
+    const prevAfter = prev ? round2((prev.salary || 0) * (1 + (prev.raisePct || 0))) : null;
+    const moved = prevAfter !== null ? round2((c.salary || 0) - prevAfter) : null;
+    const movedPct = prevAfter ? moved / prevAfter : null;
+    return `<tr class="editrow" data-edit="comp" data-key="${esc(y)}">
+      <th scope="row">${esc(y)}</th>
+      <td>${fmtMoney0(c.salary || 0)}</td>
+      <td>${((c.raisePct || 0) * 100).toFixed(1)}%</td>
+      <td>${raiseAmt ? '+' + fmtMoney(raiseAmt) : '—'}</td>
+      <td>${moved === null ? '<span class="muted">first year</span>'
+        : `${moved >= 0 ? '+' : '−'}${fmtMoney(Math.abs(moved))}
+           <span class="muted">(${(movedPct * 100).toFixed(1)}%)</span>`}</td>
+      <td>${fmtMoney0(round2((c.salary || 0) * (1 + (c.raisePct || 0))))}</td></tr>`;
+  }).join('');
+
+  const historyCard = `<div class="card">
+    <h2>Raises over time</h2>
+    <p class="sub">Raise $ is this year's percentage applied to this year's salary. Since last
+      year compares this salary with what last year's ended at${
+      helpBtn('raiseVsMoved', 'the two change columns')} — the two disagree whenever
+      something landed mid-year.</p>
+    ${years.length > 1
+      ? '<div class="chartbox" style="height:220px"><canvas id="compChart"></canvas></div>'
+      : '<p class="sub">A second year is what turns this into a trend — add one below.</p>'}
+    ${years.length ? `<div class="tablewrap" style="margin-top:12px"><table>
+      <thead><tr><th style="text-align:left">Year</th><th>Salary</th><th>Raise</th>
+        <th>Raise $</th><th>Since last year</th>
+        <th>Salary after the raise</th></tr></thead>
+      <tbody>${raiseRows}</tbody></table></div>` : '<p class="sub">Add a year to get started.</p>'}
+    <div class="addbar"><button class="btn small" data-add="comp">＋ Add a year</button></div>
+  </div>`;
+
+  const bonusYears = Object.keys(bonuses).sort();
+  const bonusCard = `<div class="card">
+    <h2>Bonuses by year</h2>
+    <p class="sub">What actually landed, whatever the comp plan said.</p>
+    ${bonusYears.length ? `<div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Year</th><th>Bonus</th></tr></thead>
+      <tbody>${bonusYears.map(y =>
+        `<tr class="editrow" data-edit="yearAmount" data-map="bonuses" data-key="${esc(y)}">
+          <th scope="row">${esc(y)}</th><td>${fmtMoney0(bonuses[y])}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th>Total</th><td>${fmtMoney0(round2(bonusYears
+        .reduce((t, y) => t + (bonuses[y] || 0), 0)))}</td></tr></tfoot>
+    </table></div>` : '<p class="sub">Nothing recorded.</p>'}
+    <div class="addbar"><button class="btn small" data-add="yearAmount"
+      data-map="bonuses">＋ Add a bonus year</button></div>
+  </div>`;
+
+  return `<div class="cards2">${currentCard}${bonusCard}</div>${historyCard}`;
+}
+
+function buildCompChart() {
+  const comp = state.side.comp || {};
+  const years = Object.keys(comp).sort();
+  if (years.length < 2) return;
+  const accent = cssVar('--accent');
+  newChart('compChart', {
+    type: 'line',
+    data: { labels: years, datasets: [{
+      label: 'Salary',
+      data: years.map(y => comp[y].salary || 0),
+      borderColor: accent, backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 3, pointBackgroundColor: accent, tension: .2,
+    }]},
+    options: {
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (t) => `${fmtMoney0(t.parsed.y)} · raise ${
+          ((comp[years[t.dataIndex]].raisePct || 0) * 100).toFixed(1)}%` } } },
+      scales: { x: chartAxes(), y: Object.assign(chartAxes(),
+        { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
+    },
+  }, `Salary by year: ${years.map(y =>
+    `${y}, ${fmtMoney0(comp[y].salary || 0)}`).join('; ')}.`);
+}
+
+/* ═══════════════════════════ Investments view ═════════════════════════════ */
+
+function renderInvestments() {
+  const s = state.side;
+  const asOf = pricesAsOf();
+  const stale = stalePrices().length;
+  const priceBar = `<div class="row" style="margin:0 0 14px;align-items:center">
+    <button class="btn small" id="refreshPricesBtn">↻ Refresh prices</button>
+    <span class="sub muted">${asOf
+      ? `Prices as of ${new Date(asOf).toLocaleString()}${stale ? ` · ${stale} out of date` : ''}`
+      : priceKey() ? 'No prices fetched yet' : 'Add an Alpha Vantage key in ⚙ Preferences to fetch prices'}
+      ${helpBtn('priceLookup', 'the price lookup')}</span>
+  </div>`;
+  const panes = (s.portfolios || []).map(pf => `<div class="card">
+      <h2>${esc(pf.name)} <button class="h-edit" data-edit="portfolio"
+        data-id="${esc(pf.id)}" title="Rename this account, reorder it, or delete it">✎ Edit</button></h2>
+      <p class="sub">Value is shares × price. Type a price over a fetched one any time.</p>
+      ${holdingsTable(pf.rows, 'pf:' + pf.id)}
+    </div>`).join('');
+  return priceBar
+    + (panes ? `<div class="cards2">${panes}</div>`
+             : `<div class="card"><div class="empty"><h2>No investment accounts yet</h2>
+                <p>Add one for each place you hold investments — a brokerage, an HSA, a
+                  pension pot. Each gets its own pane of holdings.</p></div></div>`)
+    + `<div class="addbar"><button class="btn small" data-add="portfolio">＋ Add an investment account</button></div>`;
+}
+
+function wireInvestments() {
+  const btn = F('refreshPricesBtn');
+  if (btn) btn.onclick = () => refreshPrices(false);
+  /* Opening the tab is the natural moment to top up anything stale — quiet,
+     because an automatic refresh shouldn't nag when it can't run. */
+  if (priceKey() && stalePrices().length) refreshPrices(true);
 }
 
 /* ═══════════════════════════ Vacations view ═══════════════════════════════ */
 
 function renderVacations() {
-  const trips = (state.vacations.trips || []).slice()
-    .sort((a, b) => b.year - a.year || a.name.localeCompare(b.name));
   const ptoYears = Object.keys(state.vacations.pto || {}).sort().reverse();
+  /* One row per year, newest first, and within a row the order you arranged
+     with the ↑/↓ buttons. A year with a lot of trips scrolls sideways rather
+     than wrapping, so a year always reads as one line of cards. */
+  const byYear = new Map();
+  for (const t of (state.vacations.trips || [])) {
+    const y = String(t.year || '—');
+    if (!byYear.has(y)) byYear.set(y, []);
+    byYear.get(y).push(t);
+  }
+  const years = [...byYear.keys()].sort().reverse();
 
   const tripCard = (t) => {
-    const hasCredits = t.items.some(i => 'credits' in i);
+    /* a credit of zero is no credit — the imported trips carry the field
+       whether or not anything was ever credited */
+    const hasCredits = t.items.some(i => i.credits);
     const paid = round2(t.items.reduce((s, i) => s + (i.paid || 0), 0));
     const credits = round2(t.items.reduce((s, i) => s + (i.credits || 0), 0));
     const due = round2(t.items.reduce((s, i) => s + (i.due || 0), 0));
     const total = round2(paid + credits + due);
     const perNight = t.nights ? round2(total / t.nights) : null;
-    return `<div class="card">
+    /* A column of nothing is noise. Paid and Due each appear only if some line
+       has one, the way Credits already did — so a settled trip loses Due, and
+       one still being planned loses Paid. A trip with nothing entered yet keeps
+       both, because that's the one you're about to fill in.
+       Total then earns its place only when there's more than one column to add
+       up; with a single money column it would just repeat it, and the footer
+       still carries the sum. */
+    const hasPaid = t.items.some(i => i.paid) || !total;
+    const hasDue = t.items.some(i => i.due) || !total;
+    const cols = [hasPaid, hasCredits, hasDue].filter(Boolean).length;
+    const hasTotal = cols > 1;
+    return `<div class="card trip">
       <h2>${esc(t.name)} <button class="h-edit" data-edit="trip" data-id="${esc(t.id)}"
         title="Rename the trip, change nights, or delete it">✎ Edit</button></h2>
-      <p class="sub">${t.nights ? `${t.nights} nights` : ''}${perNight ? ` · ${fmtMoney0(perNight)}/night` : ''}${due ? ` · <strong>${fmtMoney(due)} still due</strong>` : ' · fully paid'}</p>
+      <p class="sub">${t.nights ? `${t.nights} nights` : ''}${perNight ? ` · ${fmtMoney0(perNight)}/night` : ''}${due ? ` · <strong>${fmtMoney(due)} still due</strong>`
+        : total ? ' · fully paid' : ' · nothing entered yet'}</p>
       <div class="tablewrap"><table>
-        <thead><tr><th style="text-align:left">Item</th><th>Paid</th>${hasCredits ? '<th>Credits</th>' : ''}<th>Due</th><th>Total</th></tr></thead>
+        <thead><tr><th style="text-align:left">Item</th>${hasPaid ? '<th>Paid</th>' : ''}${
+          hasCredits ? '<th>Credits</th>' : ''}${hasDue ? '<th>Due</th>' : ''}${
+          hasTotal ? '<th>Total</th>' : ''}</tr></thead>
         <tbody>${t.items.map((i, idx) => `<tr class="editrow" data-edit="tripItem"
           data-id="${esc(t.id)}" data-idx="${idx}">
           <th scope="row">${esc(i.label)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
-          <td>${i.paid ? fmtMoney(i.paid) : ''}</td>
+          ${hasPaid ? `<td>${i.paid ? fmtMoney(i.paid) : ''}</td>` : ''}
           ${hasCredits ? `<td>${i.credits ? fmtMoney(i.credits) : ''}</td>` : ''}
-          <td>${i.due ? fmtMoney(i.due) : ''}</td>
-          <td>${fmtMoney(round2((i.paid || 0) + (i.credits || 0) + (i.due || 0)))}</td></tr>`).join('')}</tbody>
-        <tfoot><tr><th>Total</th><td>${fmtMoney(paid)}</td>${hasCredits ? `<td>${fmtMoney(credits)}</td>` : ''}
-          <td>${fmtMoney(due)}</td><td>${fmtMoney(total)}</td></tr></tfoot>
+          ${hasDue ? `<td>${i.due ? fmtMoney(i.due) : ''}</td>` : ''}
+          ${hasTotal ? `<td>${fmtMoney(round2((i.paid || 0) + (i.credits || 0)
+            + (i.due || 0)))}</td>` : ''}</tr>`).join('')}</tbody>
+        <tfoot><tr><th>Total</th>${hasPaid ? `<td>${fmtMoney(paid)}</td>` : ''}${
+          hasCredits ? `<td>${fmtMoney(credits)}</td>` : ''}${
+          hasDue ? `<td>${fmtMoney(due)}</td>` : ''}${
+          hasTotal ? `<td>${fmtMoney(total)}</td>` : ''}</tr></tfoot>
       </table></div>
       <div class="addbar"><button class="btn small" data-add="tripItem"
         data-id="${esc(t.id)}">＋ Add line</button></div>
@@ -1663,7 +2607,7 @@ function renderVacations() {
         <thead><tr><th style="text-align:left">Trip / holiday</th><th style="text-align:left">Dates</th><th>Nights</th><th>PTO days</th></tr></thead>
         <tbody>${p.entries.map((e, idx) => `<tr class="editrow" data-edit="ptoEntry"
           data-year="${esc(y)}" data-idx="${idx}"><th scope="row">${esc(e.name)}</th>
-          <td style="text-align:left">${esc(e.dates || '')}</td>
+          <td style="text-align:left">${esc(dateRangeLabel(e.from, e.to, true) || e.dates || '')}</td>
           <td>${e.nights ?? ''}</td><td>${e.ptoDays || 0}</td></tr>`).join('')}</tbody>
         <tfoot><tr><th>Used</th><td></td><td></td><td>${used}</td></tr></tfoot>
       </table></div>
@@ -1677,7 +2621,8 @@ function renderVacations() {
       <button class="btn small" data-add="ptoYear">＋ Add PTO year</button>
     </div>`
     + ptoYears.map(ptoCard).join('')
-    + `<div class="cards2">${trips.map(tripCard).join('')}</div>`;
+    + years.map(y => `<h2 class="yearhead">${esc(y)}</h2>
+        <div class="triprow">${byYear.get(y).map(tripCard).join('')}</div>`).join('');
 }
 
 /* ═══════════════════════════ Giving view ══════════════════════════════════ */
@@ -1705,7 +2650,7 @@ function renderGiving() {
           const amount = i.funding || i.grant || i.cash || 0;
           const how = i.funding ? 'fund deposit' : i.grant ? 'DAF grant' : 'cash';
           return `<tr class="editrow" data-edit="donation" data-year="${esc(y)}" data-idx="${idx}">
-            <td style="text-align:left">${esc(i.date)}</td>
+            <td style="text-align:left">${esc(fullDayLabel(i.date))}</td>
             <th scope="row">${esc(i.foundation)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
             <td style="text-align:left">${esc(i.cause || '')}</td>
             <td>${fmtMoney(amount)}</td>
@@ -1743,13 +2688,27 @@ function yearFlows(y) {
     }
   } else {
     const balIds = new Set(yr.categories.filter(c => c.isBalance).map(c => c.id));
-    for (const [key, cell] of Object.entries(yr.cells)) {
+    /* The COMPUTED cells, not just the stored ones: a finished year has the
+       same figures either way, but this is what lets a year still running —
+       and a year built ahead, which has nothing stored at all — show what it
+       comes to rather than a bar of whatever has been typed in so far. */
+    const cells = (C[y] && C[y].cells) || yr.cells;
+    for (const [key, cell] of Object.entries(cells)) {
       const [cid, m] = key.split('|');
       if (balIds.has(cid) || !m.startsWith(y)) continue;
       if (cell.v > 0) inn += cell.v; else out += cell.v;
     }
   }
   return { in: round2(inn), out: round2(Math.abs(out)) };
+}
+
+/* True where a year's bars include figures the plan worked out rather than
+   ones that happened — this year past the entered marker, and every year
+   built ahead of it. */
+function yearIsProjected(y) {
+  const yr = state.years[y];
+  if (!yr || yr.kind !== 'grid' || yr.model !== 'live') return false;
+  return (yr.enteredThrough || '') < `${y}-12`;
 }
 
 function renderHistory() {
@@ -1764,7 +2723,8 @@ function renderHistory() {
   </div>
   <div class="card">
     <h2>Money in vs money out</h2>
-    <p class="sub">All account flows per year, transfers included — striped bars are money out.
+    <p class="sub">All account flows per year, transfers included — striped bars are money out,
+      and a dashed edge means the year is still being worked out or hasn't arrived yet.
       Early years are best-effort reads of the old bi-weekly sheets.</p>
     <div class="chartbox" style="height:300px"><canvas id="flowChart"></canvas></div>
   </div>`;
@@ -1777,12 +2737,10 @@ function buildHistoryCharts() {
     if (state.years[y].eoyCash !== undefined)
       pts.push({ y, v: state.years[y].eoyCash, est: false });
   }
-  if (liveKey && C[liveKey]) {
-    const c = C[liveKey];
-    for (const yy of [liveKey, String(+liveKey + 1)]) {
-      const v = c.balances[`total|${yy}-12`];
-      if (v !== undefined) pts.push({ y: yy, v, est: true });
-    }
+  /* this year's projected December, then each year built ahead of it */
+  for (const key of [liveKey, ...previewYears()].filter(Boolean)) {
+    const v = C[key]?.balances[`total|${key}-12`];
+    if (v !== undefined) pts.push({ y: key, v, est: true });
   }
   const accent = cssVar('--accent');
   newChart('eoyChart', {
@@ -1803,7 +2761,8 @@ function buildHistoryCharts() {
       scales: { x: chartAxes(), y: Object.assign(chartAxes(),
         { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
     },
-  });
+  }, `End-of-year total liquidity: ${pts.map(p =>
+    `${p.y}, ${fmtMoney0(p.v)}${p.est ? ' projected' : ''}`).join('; ')}.`);
 
   const flowYears = yearKeys();
   const flows = flowYears.map(yearFlows);
@@ -1819,23 +2778,31 @@ function buildHistoryCharts() {
     g.moveTo(2, 10); g.lineTo(10, 2); g.stroke();
     return (typeof Chart !== 'undefined') ? g.createPattern(c, 'repeat') : tint;
   };
+  /* a projected year's bars are outlined with a dashed edge — the same signal
+     the two line charts use for a figure the plan worked out */
+  const projected = flowYears.map(yearIsProjected);
+  const dashed = (ctx) => projected[ctx.dataIndex] ? [5, 3] : undefined;
   newChart('flowChart', {
     type: 'bar',
     data: { labels: flowYears, datasets: [
       { label: 'Money in', data: flows.map(f => f.in),
         backgroundColor: cssVar('--ok-bg'), borderColor: cssVar('--ok'),
-        borderWidth: 2, borderSkipped: false },
+        borderWidth: 2, borderSkipped: false, borderDash: dashed },
       { label: 'Money out', data: flows.map(f => f.out),
         backgroundColor: stripes(cssVar('--err'), cssVar('--err-bg')),
-        borderColor: cssVar('--err'), borderWidth: 2, borderSkipped: false },
+        borderColor: cssVar('--err'), borderWidth: 2, borderSkipped: false,
+        borderDash: dashed },
     ]},
     options: {
       plugins: { legend: { labels: { color: cssVar('--chart-tick') } },
-        tooltip: { callbacks: { label: (t) => `${t.dataset.label}: ${fmtMoney0(t.parsed.y)}` } } },
+        tooltip: { callbacks: { label: (t) => `${t.dataset.label}: ${fmtMoney0(t.parsed.y)}`
+          + (projected[t.dataIndex] ? ' (projected)' : '') } } },
       scales: { x: chartAxes(), y: Object.assign(chartAxes(),
         { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
     },
-  });
+  }, `Money in and money out per year: ${flowYears.map((y, i) =>
+    `${y}, in ${fmtMoney0(flows[i].in)}, out ${fmtMoney0(flows[i].out)}${
+      projected[i] ? ', projected' : ''}`).join('; ')}.`);
 }
 
 /* ═══════════════════════════ Year rollover ════════════════════════════════ */
@@ -1855,26 +2822,98 @@ function rolloverYear(st, computed, fromKey) {
   for (const m of months12) {
     for (const cat of src.categories) {
       const old = src.cells[`${cat.id}|${m}`];
-      if (old && old.kind === 'manual') cells[`${cat.id}|${m}`] = { ...old };
+      /* hand-typed knowledge carries forward; a split month keeps its parts */
+      if (old && (old.kind === 'manual' || old.kind === 'mixed'))
+        cells[`${cat.id}|${m}`] = JSON.parse(JSON.stringify(old));
     }
     if (src.paychecks[m] !== undefined) paychecks[m] = src.paychecks[m];
   }
   const dec = `${fromKey}-12`;
   const c = computed[fromKey];
   const seeds = {};
-  for (const bid of ['cash', 'mid', 'long', 'bank'])
-    seeds[bid] = round2(c?.balances[`${bid}|${dec}`] || 0);
+  for (const a of accountsOf(st)) {
+    const v = c?.balances[`${a.id}|${dec}`];
+    if (v !== undefined) seeds[a.id] = round2(v);
+  }
   st.years[newKey] = {
     kind: 'grid', model: 'live',
     startMonth: start, monthCount: 12,
     enteredThrough: monthAdd(start, -1),
     categories: src.categories.map(cat => ({ ...cat })),
-    cells, paychecks, seeds, overrides: {}, extraNotes: [],
+    cells, paychecks, seeds, overrides: {}, balAdjust: {}, extraNotes: [],
   };
   return newKey;
 }
 
+/* ═══════════════════════════ Year lifecycle ═══════════════════════════════ */
+
+/* Fold a finished year's months into one total per row. Flow rows sum across
+   the year; balance rows can't be summed — twelve monthly balances added up
+   is meaningless — so they keep December's figure, what the account actually
+   held at the end. Pure state-in, value-out so tests can pin it. */
+function gridToSummary(st, y) {
+  const yr = st.years[y];
+  const months = yearMonths(yr).filter(m => m.startsWith(y));
+  const last = months[months.length - 1];
+  const categoryTotals = yr.categories.map(cat => {
+    const row = { name: cat.name };
+    if (cat.isBalance) {
+      row.total = round2(yr.cells[`${cat.id}|${last}`]?.v || 0);
+      row.isBalance = true;
+    } else {
+      row.total = round2(months.reduce((s, m) => s + (yr.cells[`${cat.id}|${m}`]?.v || 0), 0));
+    }
+    if (cat.note) row.note = cat.note;
+    return row;
+  });
+  return { kind: 'summary', convertedFrom: 'grid', categoryTotals,
+    extraNotes: (yr.extraNotes || []).slice(),
+    ...(yr.eoyCash !== undefined ? { eoyCash: yr.eoyCash } : {}) };
+}
+
+/* Rules that reach a year back need the previous year's GRID; converting it
+   would quietly blank those estimates. Warn with the row names, not a shrug. */
+function rulesNeedingYear(st, y) {
+  const nextKey = String(+y + 1);
+  const next = st.years[nextKey];
+  if (!next || next.kind !== 'grid') return [];
+  return (next.categories || [])
+    .filter(cat => cat.rule === 'samemonth' || cat.rule === 'avglastyear')
+    .map(cat => cat.name);
+}
+
+function convertYearToSummary(y) {
+  const yr = state.years[y];
+  if (!yr || yr.kind !== 'grid') return;
+  const needed = rulesNeedingYear(state, y);
+  const warn = needed.length
+    ? `\n\n${String(+y + 1)} has ${needed.length} row(s) that look back into ${y} — `
+      + `${needed.slice(0, 4).join(', ')}${needed.length > 4 ? '…' : ''}. `
+      + `Their estimates will go blank.`
+    : '';
+  if (!confirm(`Convert ${y} to a yearly summary? Its ${yearMonths(yr).length} months of `
+    + `figures are replaced by one total per row, and the months are gone for good — `
+    + `only restoring a backup brings them back. The History charts carry on unchanged.${warn}`))
+    return;
+  state.years[y] = gridToSummary(state, y);
+  save(); render();
+  toast(`${y} is a summary now`);
+}
+
+function deleteYear(y) {
+  if (!confirm(`Delete ${y} completely? Every figure in it goes, and there's no undo `
+    + `beyond a backup file.`)) return;
+  delete state.years[y];
+  if (state.ui.activeYear === y) state.ui.activeYear = null;
+  save(); render();
+  toast(`${y} deleted`);
+}
+
 function wireView(view) {
+  const delBtn = F('deleteYearBtn');
+  if (delBtn) delBtn.onclick = () => deleteYear(activeYearKey());
+  const sumBtn = F('toSummaryBtn');
+  if (sumBtn) sumBtn.onclick = () => convertYearToSummary(activeYearKey());
   const btn = F('welcomeRestoreBtn');
   if (btn) btn.onclick = () => F('dataDialog').showModal();
   const yearSel = F('yearSel');
@@ -1884,7 +2923,9 @@ function wireView(view) {
   };
   if (view === 'budget') wireBudget();
   if (view === 'goals') buildGoalChart();
-  if (view === 'retirement') buildRothChart();
+  if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
+  if (view === 'comp') buildCompChart();
+  if (view === 'investments') wireInvestments();
   if (view === 'history') buildHistoryCharts();
 }
 
@@ -1896,9 +2937,14 @@ const cssVar = (name) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 let charts = [];
-function newChart(id, config) {
+/* Every chart takes a `summary`: a canvas is a picture to a screen reader and
+   announces nothing at all without one. The summary carries the figures the
+   chart is drawn from, so the information is available without seeing it. */
+function newChart(id, config, summary) {
   const el = F(id);
   if (!el || typeof Chart === 'undefined') return;
+  el.setAttribute('role', 'img');
+  if (summary) el.setAttribute('aria-label', summary);
   charts = charts.filter(ch => {
     if (!document.body.contains(ch.canvas)) { ch.destroy(); return false; }
     return true;
@@ -1918,20 +2964,32 @@ function chartAxes() {
 function buildGoalChart() {
   const liveKey = latestGridYear();
   if (!liveKey) return;
-  const c = C[liveKey];
-  const labels = c.months.map(monthLabel);
-  const data = c.months.map(m => c.balances[`total|${m}`]);
+  /* The line runs through the current year and then through every year built
+     ahead of it, so the whole plan reads as one curve. The years that haven't
+     arrived are dashed — the same signal the History chart uses — because a
+     projection should never look like a record. */
+  const pts = [];
+  for (const key of [liveKey, ...previewYears()]) {
+    const c = C[key];
+    if (!c) continue;
+    for (const m of c.months)
+      pts.push({ m, v: c.balances[`total|${m}`], ahead: key !== liveKey });
+  }
+  if (!pts.length) return;
   newChart('goalChart', {
     type: 'line',
-    data: { labels, datasets: [{
+    data: { labels: pts.map(p => monthLabel(p.m)), datasets: [{
       label: 'Total liquidity',
-      data,
+      data: pts.map(p => p.v),
       borderColor: cssVar('--accent'),
       backgroundColor: 'transparent',
       borderWidth: 2, pointRadius: 0, tension: .25,
+      segment: { borderDash: (ctx) => pts[ctx.p1DataIndex]?.ahead ? [6, 4] : undefined },
     }]},
     options: {
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (t) =>
+          fmtMoney0(t.parsed.y) + (pts[t.dataIndex].ahead ? ' (year built ahead)' : '') } } },
       scales: {
         x: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
           maxRotation: 0, autoSkipPadding: 14 } }),
@@ -1939,18 +2997,23 @@ function buildGoalChart() {
           callback: (v) => fmtMoney0(v) } }),
       },
     },
-  });
+  }, `Total liquidity month by month, ${monthLabel(pts[0].m)} to ${
+    monthLabel(pts[pts.length - 1].m)}: from ${fmtMoney0(pts[0].v || 0)} to ${
+    fmtMoney0(pts[pts.length - 1].v || 0)}.${
+    pts.some(p => p.ahead) ? ' The later years are projections.' : ''}`);
 }
 
 function buildRothChart() {
-  const contribs = state.side.rothContribs || {};
+  const contribs = contribYears(a => a.type === 'roth-ira' || a.type === 'trad-ira');
+  /* Planning rows can sit decades out; charting them would flatten every real
+     year into the axis, so the chart stops just past today. */
   const years = Object.keys(contribs).sort().filter(y => +y <= new Date().getFullYear() + 1);
   if (!years.length) return;
   const accent = cssVar('--accent');
   newChart('rothChart', {
     type: 'bar',
     data: { labels: years, datasets: [{
-      label: 'Roth IRA contribution',
+      label: 'IRA contribution',
       data: years.map(y => contribs[y]),
       backgroundColor: cssVar('--accent-bg'),
       borderColor: accent, borderWidth: 2, borderSkipped: false,
@@ -1963,7 +3026,112 @@ function buildRothChart() {
           callback: (v) => fmtMoney0(v) } }),
       },
     },
-  });
+  }, `IRA contributions by year: ${years.map(y =>
+    `${y}, ${fmtMoney0(contribs[y])}`).join('; ')}.`);
+}
+
+/* ═══════════════════════════ Price lookups ════════════════════════════════
+   Holdings carry a hand-typed price. Alpha Vantage can fill it in instead —
+   a free key, 25 lookups a day, and only the ticker ever leaves this browser.
+
+   The key deliberately does NOT live in state: state syncs to Firestore and
+   rides along in every backup file, and a credential doesn't belong in either.
+   It stays in this browser, re-entered per device (Preferences).
+
+   Prices cache for six hours. That is what makes the daily allowance enough —
+   opening the tab repeatedly costs nothing — and it means a fetched price is
+   still just a number in the holding row, editable by hand like any other. */
+
+const PRICE_KEY = 'fin-avkey';
+const QUOTE_CACHE = 'fin-quotes';
+const QUOTE_TTL_MS = 6 * 60 * 60 * 1000;
+
+const priceKey = () => { try { return localStorage.getItem(PRICE_KEY) || ''; }
+                         catch (e) { return ''; } };
+function setPriceKey(k) {
+  try {
+    const v = (k || '').trim();
+    if (v) localStorage.setItem(PRICE_KEY, v);
+    else localStorage.removeItem(PRICE_KEY);
+  } catch (e) { /* private mode — lookups just stay off */ }
+}
+function quoteCache() {
+  try { return safeParse(localStorage.getItem(QUOTE_CACHE) || '{}') || {}; }
+  catch (e) { return {}; }
+}
+function writeQuoteCache(c) {
+  try { localStorage.setItem(QUOTE_CACHE, JSON.stringify(c)); } catch (e) {}
+}
+const quoteFresh = (q) => q && typeof q.price === 'number'
+  && (Date.now() - (q.ts || 0)) < QUOTE_TTL_MS;
+
+/* Every ticker across the three holdings tables, deduplicated. */
+const priceLists = () => [
+  ...(state.side.portfolios || []).map(pf => pf.rows),
+  state.side.daf || [],
+];
+function allTickers() {
+  const out = new Set();
+  for (const rows of priceLists())
+    for (const h of rows)
+      if (h.ticker && h.ticker !== '?') out.add(h.ticker.trim().toUpperCase());
+  return [...out];
+}
+const stalePrices = () => {
+  const cache = quoteCache();
+  return allTickers().filter(t => !quoteFresh(cache[t]));
+};
+/* When the oldest cached price was fetched — what the "as of" line reports. */
+function pricesAsOf() {
+  const cache = quoteCache();
+  const stamps = allTickers().map(t => cache[t]?.ts).filter(Boolean);
+  return stamps.length ? Math.min(...stamps) : null;
+}
+
+let refreshingPrices = false;
+async function refreshPrices(quiet) {
+  if (refreshingPrices) return;
+  const key = priceKey();
+  const want = stalePrices();
+  if (!key) { if (!quiet) toast('Add an Alpha Vantage API key in ⚙ Preferences first'); return; }
+  if (!want.length) { if (!quiet) toast('Every price is already less than six hours old'); return; }
+  refreshingPrices = true;
+  const cache = quoteCache();
+  let got = 0, limited = false;
+  try {
+    for (const ticker of want) {
+      const url = 'https://www.alphavantage.co/query?function=GLOBAL_QUOTE'
+        + `&symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(key)}`;
+      const res = await fetch(url);
+      if (!res.ok) break;
+      const data = await res.json();
+      /* Alpha Vantage answers 200 with a prose message rather than an error
+         status when the daily allowance is gone, or the key is wrong. */
+      if (data.Note || data.Information) { limited = true; break; }
+      const price = parseFloat(data['Global Quote']?.['05. price']);
+      if (!Number.isFinite(price)) continue;   // a fund it doesn't cover
+      cache[ticker] = { price: round2(price), ts: Date.now() };
+      got++;
+    }
+  } catch (e) {
+    console.warn('price lookup failed', e);
+  }
+  refreshingPrices = false;
+  writeQuoteCache(cache);
+  if (got) {
+    for (const rows of priceLists())
+      for (const h of rows) {
+        const q = cache[(h.ticker || '').trim().toUpperCase()];
+        if (quoteFresh(q)) h.price = q.price;
+      }
+    save();
+  }
+  render();
+  if (limited) toast(got
+    ? `Updated ${got} price(s), then Alpha Vantage cut us off for today`
+    : 'Alpha Vantage says no more lookups today (or the key is wrong)');
+  else if (got) toast(`Updated ${got} price${got === 1 ? '' : 's'}`);
+  else if (!quiet) toast('No prices came back — check the tickers, or try later');
 }
 
 /* ═══════════════════════════ Generic row editing ══════════════════════════
@@ -1983,6 +3151,7 @@ function buildFields(fields, values) {
   wrap.innerHTML = '';
   for (const f of fields) {
     const cell = document.createElement('div');
+    cell.dataset.field = f.key;
     if (f.type === 'note' || f.wide) cell.className = 'wide';
     const label = document.createElement('label');
     label.className = 'field';
@@ -2009,18 +3178,52 @@ function buildFields(fields, values) {
       input.value = values[f.key] ?? '';
     } else {
       input = document.createElement('input');
-      input.type = { money: 'number', number: 'number', percent: 'number',
+      input.type = { number: 'number', percent: 'number',
                      date: 'date', month: 'month' }[f.type] || 'text';
-      if (f.type === 'money') { input.step = '0.01'; input.inputMode = 'decimal'; }
+      if (f.type === 'money') asMoneyInput(input);
       if (f.type === 'percent') { input.step = '0.1'; input.inputMode = 'decimal'; }
       if (f.type === 'number') { input.step = f.step || 'any'; input.inputMode = 'decimal'; }
       const v = values[f.key];
       input.value = v === undefined || v === null ? ''
-        : f.type === 'percent' ? round2(v * 100) : v;
+        : f.type === 'percent' ? round2(v * 100)
+        : f.type === 'money' ? fmtMoney(v) : v;
     }
     input.id = `rf-${f.key}`;
+    /* A field that only matters for one choice re-evaluates whenever any
+       select moves, so picking a rule reveals exactly that rule's setting. */
+    if (input.tagName === 'SELECT')
+      input.addEventListener('change', () => applyFieldVisibility(fields));
     cell.appendChild(input);
+    /* A line under the input, for a field whose label can't carry the whole
+       story — easier to read than one paragraph at the top explaining five
+       fields at once. */
+    if (f.hint) {
+      const hint = document.createElement('p');
+      hint.className = 'field-hint';
+      hint.textContent = f.hint;
+      hint.id = `rf-${f.key}-hint`;
+      input.setAttribute('aria-describedby', hint.id);
+      cell.appendChild(hint);
+    }
     wrap.appendChild(cell);
+  }
+  applyFieldVisibility(fields);
+}
+
+/* Show/hide the fields whose spec carries showIf, reading the form's current
+   values rather than the saved ones — the dialog reacts as you change it. */
+function applyFieldVisibility(fields) {
+  if (!fields.some(f => f.showIf)) return;
+  const now = {};
+  for (const f of fields) {
+    const el = F(`rf-${f.key}`);
+    if (!el) continue;
+    now[f.key] = f.type === 'check' ? el.checked : el.value;
+  }
+  for (const f of fields) {
+    if (!f.showIf) continue;
+    const cell = F('rowFields').querySelector(`[data-field="${CSS.escape(f.key)}"]`);
+    if (cell) cell.hidden = !f.showIf(now);
   }
 }
 
@@ -2030,11 +3233,11 @@ function readFields(fields) {
     const el = F(`rf-${f.key}`);
     if (f.type === 'check') { out[f.key] = el.checked; continue; }
     const raw = el.value.trim();
-    if (f.type === 'money' || f.type === 'number' || f.type === 'percent') {
+    if (f.type === 'money') { out[f.key] = parseMoney(raw); continue; }
+    if (f.type === 'number' || f.type === 'percent') {
       const n = raw === '' ? null : parseFloat(raw);
       out[f.key] = (n === null || Number.isNaN(n)) ? null
-        : f.type === 'percent' ? round2(n) / 100
-        : f.type === 'money' ? round2(n) : n;
+        : f.type === 'percent' ? round2(n) / 100 : n;
     } else out[f.key] = raw;
   }
   return out;
@@ -2043,15 +3246,19 @@ function readFields(fields) {
 function openRowEditor(section, ds, isNew) {
   const ed = EDITORS[section];
   if (!ed) return;
-  const spec = typeof ed.fields === 'function' ? ed.fields(ds) : ed.fields;
+  const spec = typeof ed.fields === 'function' ? ed.fields(ds, isNew) : ed.fields;
   rowCtx = { section, ds, spec };
   F('rowDialogTitle').textContent =
     (typeof ed.title === 'function' ? ed.title(ds, isNew) : ed.title) || 'Edit';
   F('rowDialogSub').textContent =
     (typeof ed.sub === 'function' ? ed.sub(ds, isNew) : ed.sub) || '';
+  F('rowFields').classList.toggle('cols2', ed.cols === 2);
   buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds));
   F('rowDeleteBtn').hidden = isNew || !ed.del;
-  F('rowUpBtn').hidden = F('rowDownBtn').hidden = isNew || !ed.move;
+  /* Reordering a list the grid is sorting alphabetically would look broken —
+     the row wouldn't move. Preferences is where that switches back. */
+  const canMove = ed.move && !(section === 'category' && state.settings.rowSort === 'alpha');
+  F('rowUpBtn').hidden = F('rowDownBtn').hidden = isNew || !canMove;
   rowDialog.showModal();
 }
 
@@ -2063,10 +3270,11 @@ F('rowForm').onsubmit = () => {
 F('rowCancelBtn').onclick = () => rowDialog.close();
 F('rowDeleteBtn').onclick = () => {
   const { section, ds } = rowCtx;
-  EDITORS[section].del(ds);
+  /* A section can refuse a delete (and say why itself) by returning false. */
+  const done = EDITORS[section].del(ds) !== false;
   rowDialog.close();
   save(); render();
-  toast('Deleted');
+  if (done) toast('Deleted');
 };
 F('rowUpBtn').onclick = () => moveRow(-1);
 F('rowDownBtn').onclick = () => moveRow(1);
@@ -2089,6 +3297,11 @@ function yearBucket(map, y) {
 }
 const noteField = { key: 'note', label: 'Note', type: 'note' };
 
+/* The lines nearly every trip turns out to need. A new trip starts from these
+   so the list isn't retyped each time; the amounts stay empty, because what
+   carries between trips is their shape, not last trip's prices. */
+const TRIP_TEMPLATE = ['Airfare', 'Stay', 'Transport', 'Excursions', 'Food', 'Tips', 'Spa'];
+
 /* ── The registry ─────────────────────────────────────────────────────────── */
 const EDITORS = {
 
@@ -2109,28 +3322,47 @@ const EDITORS = {
         ['carry', 'Repeat the last month'],
         ['quarterly', 'Repeat on a cycle (every N months)'],
         ['avg', 'Average of the months so far'],
+        ['avglastyear', 'Average of last year'],
         ['samemonth', 'Same month last year'],
-        ['dividends', 'Interest on Cash + Savings balances'],
-        ['paycheck', 'Per-check amount × paychecks'],
+        ['dividends', `Interest on the ${accountName(state, 'cash')} + ${
+          accountName(state, 'mid')} balances`],
+        ...(state.settings.paycheckRule
+          ? [['paycheck', 'Per-check amount × paychecks']] : []),
       ]},
-      { key: 'perCheck', label: 'Per-check amount (paycheck rule)', type: 'money' },
-      { key: 'every', label: 'Months between payments (cycle rule)', type: 'number', step: 1 },
-      { key: 'rate', label: 'Interest %/yr (interest rule)', type: 'percent' },
+      /* Each rule's own setting shows only when that rule is picked — an
+         inert "months between payments" box on an average row is just a
+         question the reader has to decide to ignore. */
+      { key: 'perCheck', label: 'Per-check amount', type: 'money',
+        showIf: (v) => v.rule === 'paycheck' },
+      { key: 'every', label: 'Months between payments', type: 'number', step: 1,
+        showIf: (v) => v.rule === 'quarterly' },
+      { key: 'rate', label: 'Interest %/yr', type: 'percent',
+        showIf: (v) => v.rule === 'dividends' },
+      /* Behaviour is two questions, not one long list: what the money does,
+         and (only then) which account it does it with. */
       { key: 'role', label: 'Behaves as', type: 'select', options: [
-        ['normal', 'Ordinary Cash money — the usual'],
-        ['bankTransfer', 'Transfer with the Other-bank account'],
-        ['midTransfer', 'Transfer with the Savings account'],
-        ['longTransfer', 'Transfer with the Investments account'],
-        ['zelle', 'Pass-through on Other bank (skips Cash)'],
-        ['charitable', 'Paid from Investments, not Cash (giving fund)'],
+        ['normal', `Ordinary ${hubAccount(state)?.name || 'cash'} money — the usual`],
+        ['transfer', `Moves ${hubAccount(state)?.name || 'cash'} into another account`],
+        ['pass', `Never touches ${hubAccount(state)?.name || 'cash'} — another account pays it`],
       ]},
+      { key: 'transferTo', label: 'The other account', type: 'select',
+        options: accountsOf(state).filter(a => !a.hub).map(a => [a.id, a.name]),
+        showIf: (v) => v.role !== 'normal' },
+      { key: 'creditTiming', label: 'Counted against that account', type: 'select', options: [
+        ['pre', 'Before its monthly interest'],
+        ['post', 'After its monthly interest'],
+      ], showIf: (v) => v.role === 'pass' },
       noteField,
     ],
     get(ds) {
       const yr = state.years[ds.year];
-      return yr.categories.find(c => c.id === ds.id);
+      const cat = yr.categories.find(c => c.id === ds.id);
+      const r = normRole(cat);
+      return { ...cat, role: r.role === 'passthrough' ? 'pass' : r.role,
+        transferTo: r.transferTo, creditTiming: r.creditTiming || 'pre' };
     },
-    blank: () => ({ rule: 'none', role: 'normal', section: 'expense' }),
+    blank: () => ({ rule: 'none', role: 'normal', section: 'expense',
+                    creditTiming: 'pre' }),
     save(ds, v) {
       const yr = state.years[ds.year];
       if (!v.name) return;
@@ -2139,11 +3371,20 @@ const EDITORS = {
          The reverse is deliberately allowed — a Transfers-section row may
          behave as ordinary Cash money when the other side of the transfer
          (a Roth IRA, someone else's account) isn't tracked here. */
-      const transferRoles = ['bankTransfer', 'midTransfer', 'longTransfer', 'zelle'];
-      let role = v.role, section = v.section;
-      if (section !== 'transfer' && transferRoles.includes(role)) section = 'transfer';
+      const role = v.role === 'transfer' ? 'transfer'
+        : v.role === 'pass' ? 'passthrough' : 'normal';
+      const target = accountById(state, v.transferTo) ? v.transferTo : null;
+      let section = v.section;
+      if (section !== 'transfer' && role === 'transfer') section = 'transfer';
       const apply = (cat) => {
         Object.assign(cat, { name: v.name, rule: v.rule, role, section });
+        if (role === 'normal' || !target) {
+          cat.role = 'normal'; delete cat.transferTo; delete cat.creditTiming;
+        } else {
+          cat.transferTo = target;
+          if (role === 'passthrough') cat.creditTiming = v.creditTiming === 'post' ? 'post' : 'pre';
+          else delete cat.creditTiming;
+        }
         cat.note = v.note || undefined;
         if (v.rule === 'paycheck') cat.perCheck = v.perCheck || 0;
         else delete cat.perCheck;
@@ -2187,14 +3428,34 @@ const EDITORS = {
   /* App-wide preferences (the header's ⚙ button) */
   prefs: {
     title: 'Preferences',
-    sub: () => 'Currency is the 3-letter code (USD, EUR, GBP, CAD…) — it changes how '
-      + 'numbers display, not their values. PTO days seed new holiday-planner years.',
+    sub: () => 'Settings that apply everywhere. Currency is the 3-letter code (USD, EUR, '
+      + 'GBP, CAD…) — it changes how numbers display, not their values. PTO days seed new '
+      + 'holiday-planner years. Turn the paycheck setting on if some months bring three '
+      + 'paychecks instead of two: rows can then be set as an amount per check, and the '
+      + 'budget grows a row for the count. The price-lookup key stays on this device and is '
+      + 'never synced or backed up.',
     fields: [
       { key: 'currency', label: 'Currency code', type: 'text' },
       { key: 'ptoAllowance', label: 'PTO days per year', type: 'number', step: 1 },
+      { key: 'rowSort', label: 'Budget rows within a section', type: 'select', options: [
+        ['manual', 'The order I put them in'],
+        ['alpha', 'Alphabetical'],
+      ]},
+      { key: 'paycheckRule',
+        label: "I don't get the same number of paychecks every month", type: 'check' },
+      { key: 'midTermRateAnnual', label: 'Default interest %/yr for dividend rows',
+        type: 'percent' },
+      { key: 'retirementReturnAnnual', label: 'Assumed retirement return %/yr',
+        type: 'percent' },
+      { key: 'avKey', label: 'Alpha Vantage API key (price lookups)', type: 'text', wide: true },
     ],
     get: () => ({ currency: state.settings.currency || 'USD',
-                  ptoAllowance: state.settings.ptoAllowance }),
+                  ptoAllowance: state.settings.ptoAllowance,
+                  rowSort: state.settings.rowSort || 'manual',
+                  paycheckRule: !!state.settings.paycheckRule,
+                  midTermRateAnnual: state.settings.midTermRateAnnual ?? 0.03,
+                  retirementReturnAnnual: state.settings.retirementReturnAnnual ?? 0.07,
+                  avKey: priceKey() }),
     save(ds, v) {
       const code = (v.currency || 'USD').trim().toUpperCase();
       /* Intl accepts any well-formed 3-letter code and renders unknown ones
@@ -2212,24 +3473,107 @@ const EDITORS = {
       }
       state.settings.currency = code;
       if (v.ptoAllowance) state.settings.ptoAllowance = v.ptoAllowance;
+      state.settings.rowSort = v.rowSort === 'alpha' ? 'alpha' : 'manual';
+      state.settings.paycheckRule = !!v.paycheckRule;
+      if (v.midTermRateAnnual !== null) state.settings.midTermRateAnnual = v.midTermRateAnnual;
+      if (v.retirementReturnAnnual !== null)
+        state.settings.retirementReturnAnnual = v.retirementReturnAnnual;
+      setPriceKey(v.avKey);
     },
   },
 
-  /* An account's display name and interest rate (click the row's label) */
-  accountName: {
-    title: 'Account settings',
-    sub: () => 'The rate compounds monthly on the account\'s balance in future months — '
-      + 'set 0 for a plain account. Past months and pinned balances are untouched.',
-    fields: [
-      { key: 'name', label: 'Account name', type: 'text' },
-      { key: 'rate', label: 'Interest / growth %/yr', type: 'percent' },
+  /* An account: its name, its growth rate, where that interest is paid, and
+     (optionally) the month it starts being tracked. Click an account row. */
+  account: {
+    title: (ds, isNew) => isNew ? 'Add an account' : 'Account settings',
+    cols: 2,
+    sub: (ds, isNew) => isNew
+      ? 'A new account is tracked from this month on. Earlier months stay blank and out of '
+        + 'Total rather than inventing a history it never had.'
+      : 'How this account behaves in the budget grid.',
+    fields: (ds) => [
+      { key: 'name', label: 'Account name', type: 'text', wide: true },
+      { key: 'rate', label: 'Interest / growth %/yr', type: 'percent',
+        hint: 'Compounds monthly on the balance, in future months only. 0 for an account '
+          + 'that just holds money.' },
+      { key: 'creditTo', label: 'Interest is paid into', type: 'select',
+        options: accountsOf(state).map(a => [a.id, a.name]),
+        hint: 'Usually itself — growth that stays where it grew.' },
+      { key: 'divRate', label: 'Dividends %/yr', type: 'percent',
+        hint: 'Earned on the balance each month like interest, but paid out to wherever '
+          + 'you send it below instead of compounding here. 0 for an account that pays '
+          + 'none.' },
+      { key: 'divTo', label: 'Dividends are paid into', type: 'select',
+        options: accountsOf(state).map(a => [a.id, a.name]),
+        hint: 'Often somewhere spendable: a brokerage usually sweeps its dividends into '
+          + 'cash rather than reinvesting them here.' },
+      { key: 'divEvery', label: 'Paid how often', type: 'select', options: [
+        ['3', 'Quarterly — Mar, Jun, Sep, Dec'],
+        ['1', 'Every month'],
+        ['6', 'Twice a year — Jun and Dec'],
+        ['12', 'Once a year — December'],
+      ], hint: 'The rate above is a yearly one either way; this only decides which months '
+          + 'it arrives in.' },
+      ...(ds.bal ? [] : [{ key: 'seed', label: 'Balance right now', type: 'money',
+        hint: 'What the account holds today — the figure every later month builds on.' }]),
     ],
-    get: (ds) => ({ name: state.settings.accountNames[ds.bal] || ds.bal,
-                    rate: state.settings.accountRates[ds.bal] || 0 }),
-    save(ds, v) {
-      if (v.name) state.settings.accountNames[ds.bal] = v.name;
-      state.settings.accountRates[ds.bal] = v.rate ?? 0;
+    get: (ds) => {
+      const a = accountById(state, ds.bal) || {};
+      return { name: a.name, rate: a.rate || 0, creditTo: a.creditTo || a.id,
+               divRate: a.divRate || 0, divTo: a.divTo || a.id,
+               divEvery: String(a.divEvery || 3) };
     },
+    blank: () => ({ rate: 0, divRate: 0, divEvery: '3',
+                    creditTo: hubAccount(state)?.id, divTo: hubAccount(state)?.id }),
+    save(ds, v) {
+      if (!v.name) return;
+      if (ds.bal) {
+        const a = accountById(state, ds.bal);
+        if (!a) return;
+        /* `since` is deliberately not edited here: when an account started
+           being tracked is a fact about the data, not a setting, and changing
+           it would either blank months that have figures or invent months
+           that never did. */
+        Object.assign(a, { name: v.name, rate: v.rate ?? 0, divRate: v.divRate ?? 0,
+          divEvery: +v.divEvery || 3,
+          creditTo: accountById(state, v.creditTo) ? v.creditTo : a.id,
+          divTo: accountById(state, v.divTo) ? v.divTo : a.id });
+        return;
+      }
+      let id = slugJs(v.name), n = 2;
+      while (accountById(state, id)) id = `${slugJs(v.name)}-${n++}`;
+      state.settings.accounts.push({ id, name: v.name, rate: v.rate ?? 0,
+        divRate: v.divRate ?? 0, divEvery: +v.divEvery || 3,
+        creditTo: accountById(state, v.creditTo) ? v.creditTo : id,
+        divTo: accountById(state, v.divTo) ? v.divTo : id,
+        since: thisMonth() });
+      const live = latestGridYear();
+      if (live && v.seed) state.years[live].seeds[id] = v.seed;
+    },
+    /* Deleting an account that money still flows into would silently swallow
+       that money, so the rows have to be pointed elsewhere first. */
+    del(ds) {
+      const a = accountById(state, ds.bal);
+      if (!a) return;
+      if (a.hub) { toast('The main account can\'t be deleted — everything flows through it'); return false; }
+      for (const y of yearKeys()) {
+        const yr = state.years[y];
+        if (yr.kind !== 'grid') continue;
+        const used = (yr.categories || []).some(cat => normRole(cat).transferTo === a.id);
+        if (used) { toast(`${y} still has rows moving money into ${a.name} — repoint them first`); return false; }
+      }
+      state.settings.accounts = state.settings.accounts.filter(x => x.id !== a.id);
+      for (const x of state.settings.accounts) if (x.creditTo === a.id) x.creditTo = x.id;
+      for (const y of yearKeys()) {
+        const yr = state.years[y];
+        if (yr.kind !== 'grid') continue;
+        delete yr.seeds[a.id];
+        for (const map of [yr.overrides, yr.balAdjust || {}])
+          for (const k of Object.keys(map)) if (k.startsWith(a.id + '|')) delete map[k];
+      }
+    },
+    move: (ds, dir) => listSwap(state.settings.accounts,
+      state.settings.accounts.findIndex(a => a.id === ds.bal), dir),
   },
 
   /* Summary-year rows (2011–2019) */
@@ -2301,50 +3645,135 @@ const EDITORS = {
       { key: 'shares', label: 'Shares', type: 'number' },
       { key: 'price', label: 'Price', type: 'money' },
     ],
-    get: (ds) => state.side[ds.list][+ds.idx],
+    get: (ds) => holdingList(ds.list)[+ds.idx],
     save(ds, v) {
-      const list = state.side[ds.list];
+      const list = holdingList(ds.list);
       const row = { ticker: v.ticker || '?', shares: v.shares ?? 0, price: v.price ?? 0 };
       if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
     },
-    del: (ds) => state.side[ds.list].splice(+ds.idx, 1),
+    del: (ds) => holdingList(ds.list).splice(+ds.idx, 1),
+    move: (ds, dir) => listSwap(holdingList(ds.list), +ds.idx, dir),
   },
 
-  otherMoney: {
-    title: (ds, isNew) => isNew ? 'Add an account' : 'Other money',
-    fields: [
-      { key: 'name', label: 'Account', type: 'text' },
-      { key: 'balance', label: 'Balance', type: 'money' },
-    ],
-    get: (ds) => state.side.otherMoney[+ds.idx],
+  /* An investment pane: a named group of holdings on the Investments tab */
+  portfolio: {
+    title: (ds, isNew) => isNew ? 'Add an investment account' : 'Investment account',
+    sub: (ds, isNew) => isNew
+      ? 'A separate pane on the Investments tab — a brokerage, an HSA, a pension pot.'
+      : 'Renaming changes only the heading. Deleting takes its holdings with it.',
+    fields: [{ key: 'name', label: 'Name', type: 'text', wide: true }],
+    get: (ds) => ({ name: (state.side.portfolios.find(p => p.id === ds.id) || {}).name }),
     save(ds, v) {
-      const row = { name: v.name || '?', balance: v.balance ?? 0 };
-      if (ds.idx !== undefined) state.side.otherMoney[+ds.idx] = row;
-      else state.side.otherMoney.push(row);
+      if (!v.name) return;
+      if (ds.id) {
+        const pf = state.side.portfolios.find(p => p.id === ds.id);
+        if (pf) pf.name = v.name;
+        return;
+      }
+      let id = slugJs(v.name), n = 2;
+      while (state.side.portfolios.some(p => p.id === id)) id = `${slugJs(v.name)}-${n++}`;
+      state.side.portfolios.push({ id, name: v.name, rows: [] });
     },
-    del: (ds) => state.side.otherMoney.splice(+ds.idx, 1),
-    move: (ds, dir) => listSwap(state.side.otherMoney, +ds.idx, dir),
+    del(ds) {
+      state.side.portfolios = state.side.portfolios.filter(p => p.id !== ds.id);
+    },
+    move: (ds, dir) => listSwap(state.side.portfolios,
+      state.side.portfolios.findIndex(p => p.id === ds.id), dir),
   },
 
-  /* Retirement accounts — any number, each Traditional or Roth */
+  /* Retirement accounts — any number, each with a type and a contribution
+     history. The type drives the Traditional/Roth split and the IRA table;
+     nothing about Roth IRAs is special-cased in code any more. */
   retAcct: {
     title: (ds, isNew) => isNew ? 'Add a retirement account' : 'Retirement account',
+    sub: () => 'The type decides which side of the Traditional / Roth split it counts on, '
+      + 'and whether its yearly contributions show in the IRA table. Those are edited there, '
+      + 'a row at a time.',
     fields: [
       { key: 'name', label: 'Account', type: 'text' },
-      { key: 'kind', label: 'Tax treatment', type: 'select', options: [
-        ['traditional', 'Traditional (pre-tax)'],
-        ['roth', 'Roth (after-tax)'],
-      ]},
+      { key: 'type', label: 'Type', type: 'select',
+        options: RET_TYPES.map(([v, label]) => [v, label]) },
       { key: 'amount', label: 'Balance', type: 'money' },
     ],
     get: (ds) => state.side.retirementAccounts[+ds.idx],
+    blank: () => ({ type: '401k' }),
     save(ds, v) {
-      const row = { name: v.name || '?', kind: v.kind, amount: v.amount ?? 0 };
-      if (ds.idx !== undefined) state.side.retirementAccounts[+ds.idx] = row;
-      else state.side.retirementAccounts.push(row);
+      const list = state.side.retirementAccounts;
+      const old = ds.idx !== undefined ? list[+ds.idx] : null;
+      const type = RET_TYPE_LABEL[v.type] ? v.type : 'other';
+      const row = { name: v.name || '?', type,
+        kind: (RET_TYPES.find(t => t[0] === type) || [])[2] || 'traditional',
+        amount: v.amount ?? 0, contribs: { ...(old?.contribs || {}) } };
+      if (old) list[+ds.idx] = row; else list.push(row);
     },
     del: (ds) => state.side.retirementAccounts.splice(+ds.idx, 1),
     move: (ds, dir) => listSwap(state.side.retirementAccounts, +ds.idx, dir),
+  },
+
+  /* One year's contribution into one retirement account. Kept separate from
+     the account editor so a contribution is a row you click, not a field you
+     have to go hunting for. */
+  contrib: {
+    title: (ds, isNew) => isNew ? 'Add a contribution' : 'Contribution',
+    sub: () => 'Which account the money went into, the year it counted for, and how much. '
+      + 'Clearing the amount removes the year.',
+    fields: () => [
+      { key: 'idx', label: 'Account', type: 'select',
+        options: (state.side.retirementAccounts || [])
+          .map((a, i) => [String(i), a.name]) },
+      { key: 'year', label: 'Year', type: 'number', step: 1 },
+      { key: 'amount', label: 'Put in', type: 'money' },
+    ],
+    get: (ds) => ({ idx: String(ds.idx), year: +ds.key,
+      amount: (state.side.retirementAccounts[+ds.idx].contribs || {})[ds.key] }),
+    blank() {
+      const accts = state.side.retirementAccounts || [];
+      const ira = accts.findIndex(a => a.type === 'roth-ira' || a.type === 'trad-ira');
+      return { idx: String(ira < 0 ? 0 : ira), year: new Date().getFullYear() };
+    },
+    save(ds, v) {
+      const accts = state.side.retirementAccounts || [];
+      const to = accts[+v.idx];
+      if (!to || !v.year) return;
+      /* the year or the account may have changed — clear where it was first */
+      if (ds.idx !== undefined && ds.key !== undefined)
+        delete (accts[+ds.idx].contribs || {})[ds.key];
+      to.contribs = to.contribs || {};
+      if (v.amount === null) delete to.contribs[String(v.year)];
+      else to.contribs[String(v.year)] = v.amount;
+    },
+    del(ds) {
+      delete (state.side.retirementAccounts[+ds.idx].contribs || {})[ds.key];
+    },
+  },
+
+  /* The two calculators' inputs (401(k) limit, Roth IRA income check) */
+  limits: {
+    title: (ds) => `${ds.year} contribution figures`,
+    sub: () => 'Both calculators read these. Percentages are what you elect; the limits change '
+      + 'every year, so they are yours to set rather than baked in.',
+    fields: [
+      { key: 'salary', label: 'Salary', type: 'money' },
+      { key: 'bonus', label: 'Bonus', type: 'money' },
+      { key: 'pretaxPct', label: '401(k) % of salary', type: 'percent' },
+      { key: 'bonusPct', label: '401(k) % of bonus', type: 'percent' },
+      { key: 'hsaPretax', label: 'Pre-tax HSA', type: 'money' },
+      { key: 'k401Limit', label: '401(k) limit this year', type: 'money' },
+      { key: 'magiLimit', label: 'Roth IRA phase-out starts at', type: 'money' },
+      { key: 'magiPhaseOut', label: 'Phase-out band width', type: 'money' },
+    ],
+    get: (ds) => limitsFor(ds.year),
+    save(ds, v) {
+      state.side.limits[ds.year] = {
+        salary: v.salary ?? 0, bonus: v.bonus ?? 0,
+        pretaxPct: v.pretaxPct ?? 0, bonusPct: v.bonusPct ?? 0,
+        hsaPretax: v.hsaPretax ?? 0,
+        k401Limit: v.k401Limit ?? LIMIT_DEFAULTS.k401Limit,
+        magiLimit: v.magiLimit ?? LIMIT_DEFAULTS.magiLimit,
+        magiPhaseOut: v.magiPhaseOut ?? LIMIT_DEFAULTS.magiPhaseOut,
+      };
+    },
+    del: (ds) => { delete state.side.limits[ds.year]; },
   },
 
   /* Year → amount maps: Roth contributions, bonuses (ds.map picks which) */
@@ -2366,6 +3795,10 @@ const EDITORS = {
 
   comp: {
     title: (ds, isNew) => isNew ? 'Add a comp year' : `${ds.key} comp`,
+    sub: (ds, isNew) => isNew
+      ? 'A new year opens on what last year came to after its raise — the number you were '
+        + 'actually being paid at the end of it. Change it if something else landed.'
+      : 'Salary is what the year starts on; the raise applies to it.',
     fields: [
       { key: 'year', label: 'Year', type: 'number', step: 1 },
       { key: 'salary', label: 'Salary', type: 'money' },
@@ -2373,6 +3806,17 @@ const EDITORS = {
       { key: 'bonus', label: 'Bonus', type: 'money' },
     ],
     get: (ds) => Object.assign({ year: +ds.key }, state.side.comp[ds.key]),
+    /* Carry the previous year forward: next year, opening on the salary that
+       year ended at. Guessing the raise or the bonus would be inventing
+       numbers, so those stay empty. */
+    blank() {
+      const years = Object.keys(state.side.comp || {}).sort();
+      const last = years[years.length - 1];
+      if (!last) return { year: new Date().getFullYear() };
+      const prev = state.side.comp[last] || {};
+      return { year: +last + 1,
+        salary: round2((prev.salary || 0) * (1 + (prev.raisePct || 0))) };
+    },
     save(ds, v) {
       if (!v.year) return;
       if (ds.key !== undefined && String(v.year) !== ds.key)
@@ -2411,62 +3855,6 @@ const EDITORS = {
     move: (ds, dir) => listSwap(state.side[ds.map][ds.year], +ds.idx, dir),
   },
 
-  /* Venmo ledger */
-  venmo: {
-    title: (ds, isNew) => isNew ? 'Add a Venmo entry' : 'Venmo entry',
-    fields: [
-      { key: 'date', label: 'Date', type: 'date' },
-      { key: 'desc', label: 'Who / what', type: 'text', wide: true },
-      { key: 'amount', label: 'Amount (− = you paid)', type: 'money' },
-      { key: 'fromBank', label: 'Settled via bank', type: 'check' },
-      noteField,
-    ],
-    get: (ds) => state.side.venmo[ds.year][+ds.idx],
-    blank: (ds) => ({ date: todayISO() }),
-    save(ds, v) {
-      const row = { date: v.date || '', desc: v.desc || '', amount: v.amount ?? 0,
-        fromBank: !!v.fromBank };
-      if (v.note) row.note = v.note;
-      const y = v.date ? v.date.slice(0, 4) : ds.year;
-      if (ds.idx !== undefined && y === ds.year)
-        state.side.venmo[ds.year][+ds.idx] = row;
-      else {
-        if (ds.idx !== undefined) state.side.venmo[ds.year].splice(+ds.idx, 1);
-        yearBucket(state.side.venmo, y).push(row);
-      }
-    },
-    del: (ds) => state.side.venmo[ds.year].splice(+ds.idx, 1),
-  },
-
-  /* Large CC purchases */
-  purchase: {
-    title: (ds, isNew) => isNew ? 'Add a planned purchase' : 'Planned purchase',
-    fields: [
-      { key: 'date', label: 'Month', type: 'month' },
-      { key: 'desc', label: 'What', type: 'text', wide: true },
-      { key: 'amount', label: 'Amount', type: 'money' },
-      noteField,
-    ],
-    get(ds) {
-      const r = state.side.largePurchases[ds.year][+ds.idx];
-      return { ...r, date: (r.date || '').slice(0, 7) };
-    },
-    blank: () => ({ date: thisMonth() }),
-    save(ds, v) {
-      const row = { date: v.date ? v.date + '-01' : '', desc: v.desc || '',
-        amount: v.amount };
-      if (v.note) row.note = v.note;
-      const y = v.date ? v.date.slice(0, 4) : ds.year;
-      if (ds.idx !== undefined && y === ds.year)
-        state.side.largePurchases[ds.year][+ds.idx] = row;
-      else {
-        if (ds.idx !== undefined) state.side.largePurchases[ds.year].splice(+ds.idx, 1);
-        yearBucket(state.side.largePurchases, y).push(row);
-      }
-    },
-    del: (ds) => state.side.largePurchases[ds.year].splice(+ds.idx, 1),
-  },
-
   /* Donations */
   donation: {
     title: (ds, isNew) => isNew ? 'Add a donation' : 'Donation',
@@ -2502,10 +3890,17 @@ const EDITORS = {
   /* Vacations: the trip itself, and its line items */
   trip: {
     title: (ds, isNew) => isNew ? 'Add a trip' : 'Trip',
-    fields: [
+    sub: (ds, isNew) => isNew
+      ? 'A new trip can start with the lines most trips end up having, so you fill in '
+        + 'amounts instead of typing the same list out again.' : '',
+    fields: (ds, isNew) => [
       { key: 'name', label: 'Trip name (e.g. "2027 Lisbon")', type: 'text', wide: true },
       { key: 'year', label: 'Year', type: 'number', step: 1 },
       { key: 'nights', label: 'Nights', type: 'number' },
+      ...(isNew ? [{ key: 'template', label: 'Start with', type: 'select', options: [
+        ['standard', `The usual lines — ${TRIP_TEMPLATE.join(', ')}`],
+        ['blank', "Nothing, I'll add my own"],
+      ]}] : []),
     ],
     get(ds) {
       const t = state.vacations.trips.find(t => t.id === ds.id);
@@ -2521,12 +3916,27 @@ const EDITORS = {
         let id = slugJs(v.name || 'trip'), n = 2;
         while (state.vacations.trips.some(t => t.id === id))
           id = `${slugJs(v.name || 'trip')}-${n++}`;
+        const items = v.template === 'blank' ? []
+          : TRIP_TEMPLATE.map(label => ({ label, paid: 0, due: 0 }));
         state.vacations.trips.push({ id, name: v.name || 'New trip',
-          year: v.year || new Date().getFullYear(), nights: v.nights, items: [] });
+          year: v.year || new Date().getFullYear(), nights: v.nights, items });
       }
     },
     del(ds) {
       state.vacations.trips = state.vacations.trips.filter(t => t.id !== ds.id);
+    },
+    /* Reorder within the trip's own year — the cards are grouped by year, so
+       hopping into another year's row would look like nothing happened. */
+    move(ds, dir) {
+      const trips = state.vacations.trips;
+      const i = trips.findIndex(t => t.id === ds.id);
+      if (i < 0) return false;
+      const year = trips[i].year;
+      let j = i + dir;
+      while (j >= 0 && j < trips.length && trips[j].year !== year) j += dir;
+      if (j < 0 || j >= trips.length) return false;
+      [trips[i], trips[j]] = [trips[j], trips[i]];
+      return true;
     },
   },
 
@@ -2578,17 +3988,26 @@ const EDITORS = {
 
   ptoEntry: {
     title: (ds, isNew) => isNew ? 'Add a trip / holiday' : 'PTO entry',
+    sub: () => 'Leave "to" empty for a single day. Nights and PTO days stay yours to set — '
+      + 'a long weekend and a week off can cover the same dates and cost different leave.',
     fields: [
       { key: 'name', label: 'Trip / holiday', type: 'text', wide: true },
-      { key: 'dates', label: 'Dates (free text)', type: 'text' },
+      { key: 'from', label: 'From', type: 'date' },
+      { key: 'to', label: 'To', type: 'date' },
       { key: 'nights', label: 'Nights', type: 'number' },
       { key: 'ptoDays', label: 'PTO days', type: 'number' },
     ],
     get: (ds) => state.vacations.pto[ds.year].entries[+ds.idx],
+    blank: (ds) => ({ from: `${ds.year}-01-01` }),
     save(ds, v) {
       const list = state.vacations.pto[ds.year].entries;
-      const row = { name: v.name || '?', dates: v.dates || '',
-        nights: v.nights, ptoDays: v.ptoDays ?? 0 };
+      const row = { name: v.name || '?', nights: v.nights, ptoDays: v.ptoDays ?? 0 };
+      if (v.from) row.from = v.from;
+      /* a single day is stored as from === to, so every entry reads the same */
+      if (v.from) row.to = v.to || v.from;
+      /* text that never parsed into dates is kept until it's replaced */
+      const old = ds.idx !== undefined ? list[+ds.idx] : null;
+      if (!v.from && old && old.dates) row.dates = old.dates;
       if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
     },
     del: (ds) => state.vacations.pto[ds.year].entries.splice(+ds.idx, 1),
@@ -2606,6 +4025,10 @@ function slugJs(name) {
 /* One delegated listener routes every row click and add button. Attached
    once — it survives every re-render of #views. */
 F('views').addEventListener('click', (e) => {
+  /* Info dots first: they sit inside clickable rows, and asking what a number
+     means shouldn't open that row's editor. */
+  const help = e.target.closest('[data-help]');
+  if (help) { e.stopPropagation(); openHelp(help.dataset.help); return; }
   /* The welcome card renders before wireView() runs (render() returns early
      when there's no data), so its buttons must be handled here, in the one
      listener that survives every re-render. */
@@ -2617,12 +4040,26 @@ F('views').addEventListener('click', (e) => {
   if (row) openRowEditor(row.dataset.edit, row.dataset, false);
 });
 
+const helpDialog = F('helpDialog');
+function openHelp(key) {
+  const h = HELP[key];
+  if (!h) return;
+  F('helpTitle').textContent = h.title;
+  /* textContent, never markup: help text is copy, not a template. */
+  F('helpBody').textContent = h.body;
+  helpDialog.showModal();
+}
+F('helpCloseBtn').onclick = () => helpDialog.close();
+
 /* ═══════════════════════════ Cell editing ═════════════════════════════════ */
 
 const cellDialog = F('cellDialog');
 let editing = null;   // { yearKey, type: 'cat'|'bal'|'pay', id, m }
+['cellValue', 'cellInterest', 'cellDividend'].forEach(id => asMoneyInput(F(id)));
 
 function wireBudget() {
+  pinnedShift = -1;  // fresh cells, so force a write
+  pinGridHeader();   // a render starts with the header wherever the page is
   const grid = document.querySelector('.grid');
   if (grid) grid.addEventListener('click', (e) => {
     const td = e.target.closest('td.cell');
@@ -2638,20 +4075,135 @@ function wireBudget() {
   if (reopenBtn) reopenBtn.onclick = reopenMonth;
   const rollBtn = F('rolloverBtn');
   if (rollBtn) rollBtn.onclick = () => {
-    const from = latestGridYear();
+    const from = newestGridYear();
     const next = String(+from + 1);
-    if (!confirm(`Start the ${next} budget? It copies the ${from} categories and rules, `
-      + `keeps your hand-typed ${next} estimates from the ${from} grid, and opens with `
-      + `balances seeded from ${from}'s projected December. ${from} stays exactly as it is.`))
+    const early = thisMonth() < `${next}-01`;
+    if (!confirm(`Build the ${next} budget? It copies the ${from} categories and rules and `
+      + `keeps any hand-typed ${next} estimates. ${from} stays exactly as it is.`
+      + (early ? `\n\n${next} won't become the current year yet — Goals, History and the `
+        + `other tabs carry on reading ${from}. It takes over on 1 January, or as soon as `
+        + `you mark December ${from} entered.` : '')))
       return;
     const created = rolloverYear(state, C, from);
     if (created) {
       state.ui.activeYear = created;
       save(); render();
-      toast(`${created} is ready — check the seeded balances`);
+      toast(early ? `${created} is built — every month is a projection for now`
+                  : `${created} is ready — check the seeded balances`);
     }
   };
 }
+
+/* ── Splitting a month into several amounts ─────────────────────────────────
+   A month is often more than one number: two grocery runs and a delivery, or
+   a bill you've paid next to one you've only estimated. The parts live on the
+   cell as `parts`, the cell's own `v` stays their sum (so the engine, the
+   subtotals and every chart carry on reading one number per month), and the
+   cell's kind is derived: all actual, all estimate, or `mixed`. */
+let cellParts = null;   // null = plain single amount
+
+function setParts(parts, canEstimate) {
+  cellParts = parts ? parts.map(p => ({ ...p })) : null;
+  F('cellPartsWrap').hidden = !cellParts;
+  F('cellValue').disabled = !!cellParts;
+  F('cellSplitBtn').textContent = cellParts ? '↩ Back to one amount' : '✂ Split into amounts';
+  if (!cellParts) return;
+  const list = F('cellPartsList');
+  list.innerHTML = '';
+  cellParts.forEach((p, i) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.cssText = 'margin-top:6px;align-items:center';
+    const amount = asMoneyInput(document.createElement('input'));
+    amount.style.width = '150px';
+    amount.value = showMoney(p.v ?? '');
+    amount.setAttribute('aria-label', `Amount ${i + 1}`);
+    /* parsed as you type so the running total keeps up; reformatted on blur */
+    amount.oninput = () => { cellParts[i].v = parseMoney(amount.value) || 0; partsTotal(); };
+    row.appendChild(amount);
+    if (canEstimate) {
+      const kindSel = document.createElement('select');
+      for (const [v, text] of [['actual', 'actual'], ['manual', 'estimate']]) {
+        const o = document.createElement('option');
+        o.value = v; o.textContent = text;
+        kindSel.appendChild(o);
+      }
+      kindSel.value = p.kind === 'manual' ? 'manual' : 'actual';
+      kindSel.setAttribute('aria-label', `Amount ${i + 1} is`);
+      kindSel.onchange = () => { cellParts[i].kind = kindSel.value; partsTotal(); };
+      row.appendChild(kindSel);
+    }
+    const label = document.createElement('input');
+    label.type = 'text';
+    label.placeholder = 'what it was (optional)';
+    label.value = p.note || '';
+    label.style.flex = '1';
+    label.setAttribute('aria-label', `Amount ${i + 1} label`);
+    label.oninput = () => { cellParts[i].note = label.value; };
+    row.appendChild(label);
+    const del = document.createElement('button');
+    del.type = 'button'; del.className = 'btn small'; del.textContent = '🗑';
+    del.title = 'Remove this amount';
+    del.onclick = () => { cellParts.splice(i, 1); setParts(cellParts, canEstimate); };
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+  partsTotal();
+}
+
+function partsTotal() {
+  if (!cellParts) return 0;
+  const sum = round2(cellParts.reduce((s, p) => s + (p.v || 0), 0));
+  const kinds = new Set(cellParts.map(p => p.kind === 'manual' ? 'manual' : 'actual'));
+  F('cellPartsTotal').textContent = `${cellParts.length} amount${
+    cellParts.length === 1 ? '' : 's'} · ${fmtMoney(sum)}${
+    kinds.size > 1 ? ' · part actual, part estimate' : ''}`;
+  return sum;
+}
+
+/* The cell's kind from its parts: mixed only when they genuinely disagree. */
+function partsKind(parts) {
+  const kinds = new Set(parts.map(p => p.kind === 'manual' ? 'manual' : 'actual'));
+  return kinds.size > 1 ? 'mixed' : [...kinds][0] || 'actual';
+}
+
+/* ── Pinning the month header ────────────────────────────────────────────────
+   The header row should stop under the app header and stay there while the
+   rest of the grid scrolls past. `position: sticky` can't do it: the grid
+   scrolls sideways, which makes .gridwrap the sticky scroll container, and
+   that container has no vertical scroll of its own to stick inside. Giving it
+   one would put a second scrollbar on screen.
+
+   So the header cells are moved by hand instead. Each `th` is shifted down by
+   however far the table's top has passed under the app header, clamped so the
+   header never leaves its own table. The transform goes on the cells rather
+   than on <thead>, because a transformed ANCESTOR would become the containing
+   block for the sticky label column inside it and break its sideways pinning;
+   transforming a sticky element itself just moves it, which is what we want. */
+let pinnedShift = -1;   // reset by wireBudget: a new grid starts unpinned
+function pinGridHeader() {
+  const wrap = document.querySelector('.gridwrap');
+  const table = wrap && wrap.querySelector('table.grid');
+  const cells = table && table.querySelectorAll('thead th');
+  if (!cells || !cells.length) return;
+  /* bottom, not height: it's where the app header actually ends on screen,
+     so the two edges meet with no seam for a row to peek through. */
+  const stop = document.querySelector('header').getBoundingClientRect().bottom;
+  const box = table.getBoundingClientRect();
+  const headH = cells[0].getBoundingClientRect().height;
+  const shift = Math.round(
+    Math.max(0, Math.min(stop - box.top, box.height - headH)));
+  /* Runs straight off the scroll event rather than through rAF — the writes
+     only happen when the number actually changes, and rAF is starved to a
+     standstill in a background tab, which is exactly when a queued update
+     would be left stranded. */
+  if (shift === pinnedShift) return;
+  pinnedShift = shift;
+  const value = shift ? `translateY(${shift}px)` : '';
+  for (const th of cells) th.style.transform = value;
+}
+addEventListener('scroll', pinGridHeader, { passive: true });
+addEventListener('resize', pinGridHeader);
 
 function openCellEditor(yearKey, type, id, m) {
   const yr = state.years[yearKey];
@@ -2663,6 +4215,7 @@ function openCellEditor(yearKey, type, id, m) {
   const hint = F('cellAutoHint');
   F('cellNote').value = '';
   hint.textContent = '';
+  F('cellBalWrap').hidden = true;
 
   if (type === 'cat') {
     const cat = yr.categories.find(c => c.id === id);
@@ -2678,7 +4231,8 @@ function openCellEditor(yearKey, type, id, m) {
       : KIND_LABEL[resolvedCell?.kind || 'missing'];
     F('cellContext').textContent = kindText
       + (resolvedCell ? ` · currently ${fmtMoney(resolvedCell.v)}` : '');
-    F('cellValue').value = stored ? stored.v : (resolvedCell?.v || '');
+    F('cellValue').dataset.money = 'on';
+    F('cellValue').value = showMoney(stored ? stored.v : (resolvedCell?.v ?? ''));
     F('cellNote').value = stored?.note || '';
     const future = live && m > yr.enteredThrough;
     kindWrap.hidden = !future;
@@ -2687,6 +4241,8 @@ function openCellEditor(yearKey, type, id, m) {
       r.checked = r.value === kind);
     const hasRule = rule !== 'none';
     F('cellRowBtn').hidden = false;
+    F('cellSplitBtn').hidden = false;
+    setParts(stored?.parts || null, future);
     revertBtn.hidden = !(stored && future && hasRule);
     clearBtn.hidden = !stored;
     if (future && rule === 'paycheck' && !cat.perCheck)
@@ -2701,21 +4257,50 @@ function openCellEditor(yearKey, type, id, m) {
       hint.textContent = 'This is an auto estimate — saving a number here takes over from the rule.';
   } else if (type === 'bal') {
     F('cellRowBtn').hidden = true;
+    F('cellSplitBtn').hidden = true;
+    setParts(null, false);
+    const acct = accountById(state, id) || { name: id, rate: 0, creditTo: id };
     const ov = yr.overrides[`${id}|${m}`];
+    const adj = (yr.balAdjust || {})[`${id}|${m}`] || {};
     const cur = C[yearKey]?.balances[`${id}|${m}`];
-    F('cellDialogTitle').textContent = `Balance — ${monthLabel(m)}`;
-    F('cellContext').textContent = ov
-      ? 'This balance is stated (pinned), not computed.'
-      : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held.`;
-    F('cellValue').value = ov ? ov.v : (cur ?? '');
+    const earned = C[yearKey]?.interest[`${id}|${m}`];
+    const paidOut = C[yearKey]?.dividend[`${id}|${m}`];
+    F('cellDialogTitle').textContent = `${acct.name} — ${monthLabel(m)}`;
+    /* Say where the number came from before asking to change it: the rate, what
+       that rate earned this month, and where the interest was paid. */
+    const rateLine = [
+      (acct.rate || 0) ? `Grows ${round2(acct.rate * 100)}%/yr — ${fmtMoney(earned || 0)} this month${
+        acct.creditTo !== acct.id ? `, into ${accountName(state, acct.creditTo)}` : ''}.` : '',
+      (acct.divRate || 0) ? `Pays ${round2(acct.divRate * 100)}%/yr in dividends, ${
+        { 1: 'every month', 3: 'quarterly', 6: 'twice a year', 12: 'once a year' }[
+          acct.divEvery || 3]} — ${paidOut ? fmtMoney(paidOut) : 'nothing'} this month${
+        (acct.divTo || acct.id) !== acct.id ? `, into ${accountName(state, acct.divTo)}` : ''}.` : '',
+    ].filter(Boolean).join(' ') || 'No growth or dividend rate set on this account.';
+    F('cellContext').textContent = (ov
+      ? 'This balance is stated (pinned), not computed. '
+      : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held. `)
+      + rateLine;
+    F('cellValue').dataset.money = 'on';
+    F('cellValue').value = showMoney(ov ? ov.v : (cur ?? ''));
     F('cellNote').value = ov?.note || '';
+    /* The computed figures show as placeholders rather than values: typing one
+       in is what makes it an override, so simply opening the dialog and saving
+       can't freeze this month's interest by accident. */
+    F('cellBalWrap').hidden = false;
+    F('cellInterest').value = showMoney(typeof adj.interest === 'number' ? adj.interest : '');
+    F('cellInterest').placeholder = fmtMoney(round2(earned || 0));
+    F('cellDividend').value = showMoney(typeof adj.dividend === 'number' ? adj.dividend : '');
+    F('cellDividend').placeholder = fmtMoney(round2(paidOut || 0));
     kindWrap.hidden = true;
-    revertBtn.hidden = !ov;
+    revertBtn.hidden = !(ov || adj.interest !== undefined || adj.dividend !== undefined);
     clearBtn.hidden = true;
   } else {   // paychecks count
     F('cellRowBtn').hidden = true;
+    F('cellSplitBtn').hidden = true;
+    setParts(null, false);
     F('cellDialogTitle').textContent = `Paychecks — ${monthLabel(m)}`;
     F('cellContext').textContent = 'How many paychecks land this month (2 most months, 3 in a three-check month).';
+    F('cellValue').dataset.money = 'off';
     F('cellValue').value = yr.paychecks[m] ?? '';
     kindWrap.hidden = true;
     revertBtn.hidden = true;
@@ -2728,10 +4313,30 @@ F('cellForm').onsubmit = () => {
   const { yearKey, type, id, m } = editing;
   const yr = state.years[yearKey];
   const raw = F('cellValue').value.trim();
-  const v = raw === '' ? null : round2(parseFloat(raw));
+  const v = type === 'pay'
+    ? (raw === '' ? null : parseFloat(raw))
+    : parseMoney(raw);
   if (type === 'cat') {
     const key = `${id}|${m}`;
-    if (v === null || Number.isNaN(v)) { delete yr.cells[key]; }
+    if (cellParts) {
+      /* A split month stores its parts AND their sum: `v` is what every other
+         part of the app reads, so nothing downstream has to know about parts. */
+      const parts = cellParts.filter(p => p.v || p.note);
+      if (!parts.length) delete yr.cells[key];
+      else {
+        const live = yr.model === 'live';
+        const future = live && m > yr.enteredThrough;
+        for (const p of parts) if (!future) p.kind = 'actual';
+        const cell = { v: round2(parts.reduce((s, p) => s + (p.v || 0), 0)),
+          kind: partsKind(parts),
+          parts: parts.map(p => ({ v: p.v || 0, kind: p.kind === 'manual' ? 'manual' : 'actual',
+            ...(p.note ? { note: p.note } : {}) })) };
+        const note = F('cellNote').value.trim();
+        if (note) cell.note = note;
+        yr.cells[key] = cell;
+      }
+    }
+    else if (v === null || Number.isNaN(v)) { delete yr.cells[key]; }
     else {
       const live = yr.model === 'live';
       const future = live && m > yr.enteredThrough;
@@ -2751,6 +4356,19 @@ F('cellForm').onsubmit = () => {
       if (note) ov.note = note;
       yr.overrides[key] = ov;
     }
+    /* Interest and dividend are separate from the pin: the pin states the
+       balance outright, these two adjust how the computed one is built. */
+    yr.balAdjust = yr.balAdjust || {};
+    const adj = {};
+    const num = (elId) => {
+      const n = parseMoney(F(elId).value);
+      return n === null ? undefined : n;
+    };
+    const int = num('cellInterest'), div = num('cellDividend');
+    if (int !== undefined) adj.interest = int;
+    if (div !== undefined) adj.dividend = div;
+    if (Object.keys(adj).length) yr.balAdjust[key] = adj;
+    else delete yr.balAdjust[key];
   } else {
     if (v === null || Number.isNaN(v)) delete yr.paychecks[m];
     else yr.paychecks[m] = v;
@@ -2764,11 +4382,42 @@ F('cellRowBtn').onclick = () => {
   cellDialog.close();
   openRowEditor('category', { year: yearKey, id }, false);
 };
+F('cellAddPartBtn').onclick = () => {
+  const { yearKey, m } = editing;
+  const yr = state.years[yearKey];
+  const future = yr.model === 'live' && m > yr.enteredThrough;
+  setParts([...(cellParts || []), { v: 0, kind: future ? 'manual' : 'actual' }], future);
+  /* focus the amount that just appeared, so a second entry is one keystroke away */
+  const inputs = F('cellPartsList').querySelectorAll('input[type=number]');
+  inputs[inputs.length - 1]?.focus();
+};
+F('cellSplitBtn').onclick = () => {
+  const { yearKey, m } = editing;
+  const yr = state.years[yearKey];
+  const future = yr.model === 'live' && m > yr.enteredThrough;
+  if (cellParts) {
+    /* Back to one amount keeps the total that was on screen, so collapsing a
+       split never silently changes the month's number. */
+    const sum = partsTotal();
+    setParts(null, future);
+    F('cellValue').value = sum || '';
+    return;
+  }
+  const raw = F('cellValue').value.trim();
+  const start = raw === '' ? 0 : round2(parseFloat(raw) || 0);
+  const kind = future
+    ? (document.querySelector('input[name=cellKind]:checked')?.value || 'manual')
+    : 'actual';
+  setParts([{ v: start, kind }], future);
+};
 F('cellRevertBtn').onclick = () => {
   const { yearKey, type, id, m } = editing;
   const yr = state.years[yearKey];
   if (type === 'cat') delete yr.cells[`${id}|${m}`];
-  else if (type === 'bal') delete yr.overrides[`${id}|${m}`];
+  else if (type === 'bal') {
+    delete yr.overrides[`${id}|${m}`];
+    delete (yr.balAdjust || {})[`${id}|${m}`];
+  }
   cellDialog.close();
   save(); render();
   toast('Back to the computed number');
@@ -2866,7 +4515,7 @@ F('importFile').onchange = (e) => {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const rawParsed = JSON.parse(reader.result);
+      const rawParsed = safeParse(reader.result);
       /* Shape-check the RAW parse, before coerceShape(): coercion would turn
          any JSON into a valid empty state, and the wrong file picked out of a
          Downloads folder must be refused, not imported as nothing. */
@@ -2896,6 +4545,34 @@ F('importFile').onchange = (e) => {
   };
   reader.readAsText(file);
 };
+
+/* ── Clicking outside a dialog closes it ────────────────────────────────────
+   A modal <dialog> ignores backdrop clicks by default, which reads as the app
+   being stuck. Clicking outside now cancels, exactly like Cancel and Escape —
+   the family pattern from Sprint Velocity, and nothing is saved on the way out.
+   Two details are load-bearing:
+     · the hit test is against the dialog's box, not `e.target === dialog` —
+       the dialog has padding, and a click on that padding is still inside it;
+     · the press has to have STARTED outside too, so selecting text in a field
+       and releasing past the edge doesn't throw away what you were typing. */
+function closeOnBackdropClick(dlg) {
+  if (!dlg) return;
+  const outside = (e) => {
+    const r = dlg.getBoundingClientRect();
+    return e.clientX < r.left || e.clientX > r.right
+        || e.clientY < r.top || e.clientY > r.bottom;
+  };
+  let startedOutside = false;
+  dlg.addEventListener('mousedown', (e) => { startedOutside = outside(e); });
+  dlg.addEventListener('click', (e) => {
+    if (startedOutside && outside(e)) dlg.close();
+    startedOutside = false;
+  });
+}
+/* syncChoiceDialog is deliberately excluded: "which copy of your data?" has no
+   safe default, so it must be answered rather than dismissed. */
+['dataDialog', 'rowDialog', 'cellDialog', 'helpDialog'].forEach(id =>
+  closeOnBackdropClick(F(id)));
 
 /* ═════════════════════════════ Theme & chrome ═════════════════════════════ */
 
@@ -2945,7 +4622,9 @@ render();
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { round2, fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  currentMonthOf, rolloverYear, yearMonthsOf: yearMonths };
+  currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
+  normRole, gridToSummary, rulesNeedingYear, partsKind, limitsFor,
+  yearStarted, startedGridYears };
 
 /* ── Hooks the sync module calls ──────────────────────────────────────────
    The module is a separate <script type="module"> and can't see this scope. */
@@ -3212,7 +4891,10 @@ const touchLocal = () => localStorage.setItem('fin-updated', String(Date.now()))
 const remotePayload = (r) => {
   if (!r) return null;
   if (typeof r.json === 'string') {
-    try { return JSON.parse(r.json); } catch (e) {
+    /* same __proto__ guard as the main script — this payload came off the
+       network and is handed straight to Object.assign() */
+    try { return JSON.parse(r.json, (k, v) => k === '__proto__' ? undefined : v); }
+    catch (e) {
       console.warn('cloud copy unreadable', e);
       return null;
     }
