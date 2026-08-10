@@ -54,6 +54,7 @@ must never show them.
   about Roth IRAs is special-cased; a **401(k) limit calculator** and a **Roth
   IRA income (MAGI) calculator** that both recompute as you change the figures;
   and a projection of where the balances are heading at an assumed return.
+  Contributions are rows you click to edit, one per year and account.
 - **Compensation** — where comp stands, raises over time (the raise in dollars
   and how the salary actually moved since last year, which differ whenever
   something lands mid-year), and bonuses by year.

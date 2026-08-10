@@ -432,6 +432,11 @@ details.section table th, details.section table td { padding: 4px 6px; }
 
 .chartbox { position: relative; height: 260px; margin-top: 12px; }
 .cards2 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+/* Four cards that belong in pairs: two columns exactly, so the second row is
+   always the pair it's meant to be rather than whatever auto-fit decides the
+   window is wide enough for. */
+.cards2.pairs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 760px) { .cards2.pairs { grid-template-columns: minmax(0, 1fr); } }
 .cards2 > .card { margin-bottom: 0; }
 .cards2 { margin-bottom: 18px; }
 
@@ -1045,10 +1050,16 @@ function latestGridYear() {
   const ks = startedGridYears(state);
   return ks.length ? ks[ks.length - 1] : null;
 }
-/* Includes a year created ahead of time — what the Budget tab's picker offers. */
+/* Includes years created ahead of time — what the Budget tab's picker offers. */
 function newestGridYear() {
   const ks = yearKeys().filter(y => state.years[y].kind === 'grid');
   return ks.length ? ks[ks.length - 1] : null;
+}
+/* Years built beyond the current one, oldest first. They exist to be read, so
+   every projection the app draws runs through them. */
+function previewYears() {
+  const live = latestGridYear();
+  return yearKeys().filter(y => state.years[y].kind === 'grid' && (!live || y > live));
 }
 function activeYearKey() {
   if (state.ui.activeYear && state.years[state.ui.activeYear]) return state.ui.activeYear;
@@ -1719,7 +1730,7 @@ function gridCard(y, yr) {
       ${live && canReopen ? `<button class="btn small" id="reopenMonthBtn"
         title="Move the entered-through marker back a month (your numbers stay put)">
         ↩ Re-open ${esc(monthLabel(yr.enteredThrough))}</button>` : ''}
-      ${live && started && y === newestGridYear() && !state.years[String(+y + 1)]
+      ${live && y === newestGridYear() && !state.years[String(+y + 1)]
         ? `<button class="btn small" id="rolloverBtn"
             title="Build the ${esc(String(+y + 1))} grid now so you can see where the plan is heading">
             ⊕ Build ${esc(String(+y + 1))}</button>` : ''}
@@ -1873,12 +1884,12 @@ function renderGoals() {
   const yearsWithEoy = yearKeys().filter(y => state.years[y].eoyCash !== undefined);
   const eoyRows = [...yearsWithEoy.slice(-3).map(y => ({ y, v: state.years[y].eoyCash })),
     ...(eoyThis !== undefined ? [{ y: liveKey, v: eoyThis, est: true }] : []),
-    ...(() => {   // the live grid projects into next year too
-      const months = c.months;
-      const decNext = `${+liveKey + 1}-12`;
-      const v = c.balances[`total|${decNext}`];
-      return v !== undefined ? [{ y: String(+liveKey + 1), v, est: true }] : [];
-    })()];
+    /* and each year built ahead of this one, which is the point of building
+       them: seeing where the plan lands two and three years out */
+    ...previewYears().flatMap(py => {
+      const v = C[py]?.balances[`total|${py}-12`];
+      return v === undefined ? [] : [{ y: py, v, est: true }];
+    })];
   const eoyTable = `<div class="tablewrap"><table>
     <thead><tr><th style="text-align:left">Year end</th><th>Total</th><th>Growth</th></tr></thead>
     <tbody>${eoyRows.map((r, i) => {
@@ -1909,13 +1920,17 @@ function renderGoals() {
   <div class="cards2">
     <div class="card">
       <h2>Where the total is heading</h2>
-      <p class="sub">Computed total liquidity across every month of the ${esc(liveKey)} plan.</p>
+      <p class="sub">Computed total liquidity, month by month, across ${esc(liveKey)}${
+        previewYears().length ? ` and the ${previewYears().join(', ')} plan${
+          previewYears().length > 1 ? 's' : ''} you've built ahead (dashed)` : ''}.</p>
       <div class="chartbox"><canvas id="goalChart"></canvas></div>
     </div>
     <div class="card">
       <h2>End-of-year liquidity</h2>
-      <p class="sub">Actuals from past years; the plan's projection for
-        ${eoyRows.filter(r => r.est).length > 1 ? 'this year and next' : 'this year'}.</p>
+      <p class="sub">Actuals from past years, then the plan's own projection —
+        ${eoyRows.filter(r => r.est).length > 1
+          ? `this year and the ${eoyRows.filter(r => r.est).length - 1} you've built ahead`
+          : 'this year'}.</p>
       ${eoyTable}
     </div>
   </div>`;
@@ -2038,19 +2053,27 @@ function renderRetirement() {
     </table></div>` : '<p class="sub">Nothing recorded.</p>'}
     <div class="addbar"><button class="btn small" data-add="retAcct">＋ Add account</button></div>`;
 
-  /* IRA contributions, per account rather than the one hard-wired Roth IRA */
+  /* IRA contributions, per account rather than the one hard-wired Roth IRA.
+     One line per contribution, so every one of them is a row you can click —
+     the account column only appears when more than one IRA is paying in. */
   const iraAccts = accts.filter(a => a.type === 'roth-ira' || a.type === 'trad-ira');
-  const iraYears = Object.keys(contribYears(a => iraAccts.includes(a))).sort();
+  const showAcct = iraAccts.length > 1;
+  const entries = [];
+  for (const a of iraAccts)
+    for (const [y, amount] of Object.entries(a.contribs || {}))
+      entries.push({ y, amount, a, idx: accts.indexOf(a) });
+  entries.sort((p, q) => p.y.localeCompare(q.y) || p.a.name.localeCompare(q.a.name));
   let cum = 0;
-  const contribRows = iraYears.map(y => {
-    const per = contribYears(a => iraAccts.includes(a))[y];
-    cum = round2(cum + per);
-    return `<tr><th scope="row">${esc(y)}${
-      +y > new Date().getFullYear() ? ' <span class="muted">(planned)</span>' : ''}</th>
-      <td>${fmtMoney0(per)}</td><td>${fmtMoney0(cum)}</td></tr>`;
+  const contribRows = entries.map(e => {
+    cum = round2(cum + (e.amount || 0));
+    return `<tr class="editrow" data-edit="contrib" data-idx="${e.idx}" data-key="${esc(e.y)}">
+      <th scope="row">${esc(e.y)}${
+        +e.y > new Date().getFullYear() ? ' <span class="muted">(planned)</span>' : ''}</th>
+      ${showAcct ? `<td style="text-align:left">${esc(e.a.name)}</td>` : ''}
+      <td>${fmtMoney0(e.amount)}</td><td>${fmtMoney0(cum)}</td></tr>`;
   }).join('');
 
-  return `<div class="cards2">
+  return `<div class="cards2 pairs">
     <div class="card">
       <h2>Traditional vs Roth</h2>
       <p class="sub">Your retirement accounts, split by tax treatment — the type says which
@@ -2064,9 +2087,13 @@ function renderRetirement() {
         ? `Every year across ${iraAccts.map(a => esc(a.name)).join(' + ')}, with the running total.`
         : 'Mark an account as a Roth or Traditional IRA and its yearly contributions show up here.'}</p>
       <div class="chartbox" style="height:180px"><canvas id="rothChart"></canvas></div>
-      ${iraYears.length ? `<div class="tablewrap" style="margin-top:10px"><table>
-        <thead><tr><th style="text-align:left">Year</th><th>Put in</th><th>Running total</th></tr></thead>
+      ${entries.length ? `<div class="tablewrap" style="margin-top:10px"><table>
+        <thead><tr><th style="text-align:left">Year</th>
+          ${showAcct ? '<th style="text-align:left">Account</th>' : ''}
+          <th>Put in</th><th>Running total</th></tr></thead>
         <tbody>${contribRows}</tbody></table></div>` : ''}
+      ${iraAccts.length ? `<div class="addbar"><button class="btn small" data-add="contrib"
+        >＋ Add a contribution</button></div>` : ''}
     </div>
     <div class="card">
       <h2>401(k) limit check${helpBtn('k401Limit', 'the 401(k) limit check')}</h2>
@@ -2524,12 +2551,10 @@ function buildHistoryCharts() {
     if (state.years[y].eoyCash !== undefined)
       pts.push({ y, v: state.years[y].eoyCash, est: false });
   }
-  if (liveKey && C[liveKey]) {
-    const c = C[liveKey];
-    for (const yy of [liveKey, String(+liveKey + 1)]) {
-      const v = c.balances[`total|${yy}-12`];
-      if (v !== undefined) pts.push({ y: yy, v, est: true });
-    }
+  /* this year's projected December, then each year built ahead of it */
+  for (const key of [liveKey, ...previewYears()].filter(Boolean)) {
+    const v = C[key]?.balances[`total|${key}-12`];
+    if (v !== undefined) pts.push({ y: key, v, est: true });
   }
   const accent = cssVar('--accent');
   newChart('eoyChart', {
@@ -2739,20 +2764,32 @@ function chartAxes() {
 function buildGoalChart() {
   const liveKey = latestGridYear();
   if (!liveKey) return;
-  const c = C[liveKey];
-  const labels = c.months.map(monthLabel);
-  const data = c.months.map(m => c.balances[`total|${m}`]);
+  /* The line runs through the current year and then through every year built
+     ahead of it, so the whole plan reads as one curve. The years that haven't
+     arrived are dashed — the same signal the History chart uses — because a
+     projection should never look like a record. */
+  const pts = [];
+  for (const key of [liveKey, ...previewYears()]) {
+    const c = C[key];
+    if (!c) continue;
+    for (const m of c.months)
+      pts.push({ m, v: c.balances[`total|${m}`], ahead: key !== liveKey });
+  }
+  if (!pts.length) return;
   newChart('goalChart', {
     type: 'line',
-    data: { labels, datasets: [{
+    data: { labels: pts.map(p => monthLabel(p.m)), datasets: [{
       label: 'Total liquidity',
-      data,
+      data: pts.map(p => p.v),
       borderColor: cssVar('--accent'),
       backgroundColor: 'transparent',
       borderWidth: 2, pointRadius: 0, tension: .25,
+      segment: { borderDash: (ctx) => pts[ctx.p1DataIndex]?.ahead ? [6, 4] : undefined },
     }]},
     options: {
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (t) =>
+          fmtMoney0(t.parsed.y) + (pts[t.dataIndex].ahead ? ' (year built ahead)' : '') } } },
       scales: {
         x: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
           maxRotation: 0, autoSkipPadding: 14 } }),
@@ -3398,26 +3435,17 @@ const EDITORS = {
      nothing about Roth IRAs is special-cased in code any more. */
   retAcct: {
     title: (ds, isNew) => isNew ? 'Add a retirement account' : 'Retirement account',
-    sub: () => 'Contributions are per year — one line per year you put money in, which is '
-      + 'what the IRA table and the projection read.',
+    sub: () => 'The type decides which side of the Traditional / Roth split it counts on, '
+      + 'and whether its yearly contributions show in the IRA table. Those are edited there, '
+      + 'a row at a time.',
     fields: [
       { key: 'name', label: 'Account', type: 'text' },
       { key: 'type', label: 'Type', type: 'select',
         options: RET_TYPES.map(([v, label]) => [v, label]) },
       { key: 'amount', label: 'Balance', type: 'money' },
-      { key: 'contribYear', label: 'Contribution year', type: 'number', step: 1 },
-      { key: 'contribAmount', label: 'Put in that year', type: 'money' },
     ],
-    get(ds) {
-      const a = state.side.retirementAccounts[+ds.idx];
-      /* the editor edits one contribution year at a time — the newest, which
-         is nearly always the one being corrected */
-      const years = Object.keys(a.contribs || {}).sort();
-      const y = years[years.length - 1];
-      return { ...a, contribYear: y ? +y : new Date().getFullYear(),
-               contribAmount: y ? a.contribs[y] : null };
-    },
-    blank: () => ({ type: '401k', contribYear: new Date().getFullYear() }),
+    get: (ds) => state.side.retirementAccounts[+ds.idx],
+    blank: () => ({ type: '401k' }),
     save(ds, v) {
       const list = state.side.retirementAccounts;
       const old = ds.idx !== undefined ? list[+ds.idx] : null;
@@ -3425,14 +3453,47 @@ const EDITORS = {
       const row = { name: v.name || '?', type,
         kind: (RET_TYPES.find(t => t[0] === type) || [])[2] || 'traditional',
         amount: v.amount ?? 0, contribs: { ...(old?.contribs || {}) } };
-      if (v.contribYear) {
-        if (v.contribAmount === null) delete row.contribs[String(v.contribYear)];
-        else row.contribs[String(v.contribYear)] = v.contribAmount;
-      }
       if (old) list[+ds.idx] = row; else list.push(row);
     },
     del: (ds) => state.side.retirementAccounts.splice(+ds.idx, 1),
     move: (ds, dir) => listSwap(state.side.retirementAccounts, +ds.idx, dir),
+  },
+
+  /* One year's contribution into one retirement account. Kept separate from
+     the account editor so a contribution is a row you click, not a field you
+     have to go hunting for. */
+  contrib: {
+    title: (ds, isNew) => isNew ? 'Add a contribution' : 'Contribution',
+    sub: () => 'Which account the money went into, the year it counted for, and how much. '
+      + 'Clearing the amount removes the year.',
+    fields: () => [
+      { key: 'idx', label: 'Account', type: 'select',
+        options: (state.side.retirementAccounts || [])
+          .map((a, i) => [String(i), a.name]) },
+      { key: 'year', label: 'Year', type: 'number', step: 1 },
+      { key: 'amount', label: 'Put in', type: 'money' },
+    ],
+    get: (ds) => ({ idx: String(ds.idx), year: +ds.key,
+      amount: (state.side.retirementAccounts[+ds.idx].contribs || {})[ds.key] }),
+    blank() {
+      const accts = state.side.retirementAccounts || [];
+      const ira = accts.findIndex(a => a.type === 'roth-ira' || a.type === 'trad-ira');
+      return { idx: String(ira < 0 ? 0 : ira), year: new Date().getFullYear() };
+    },
+    save(ds, v) {
+      const accts = state.side.retirementAccounts || [];
+      const to = accts[+v.idx];
+      if (!to || !v.year) return;
+      /* the year or the account may have changed — clear where it was first */
+      if (ds.idx !== undefined && ds.key !== undefined)
+        delete (accts[+ds.idx].contribs || {})[ds.key];
+      to.contribs = to.contribs || {};
+      if (v.amount === null) delete to.contribs[String(v.year)];
+      else to.contribs[String(v.year)] = v.amount;
+    },
+    del(ds) {
+      delete (state.side.retirementAccounts[+ds.idx].contribs || {})[ds.key];
+    },
   },
 
   /* The two calculators' inputs (401(k) limit, Roth IRA income check) */

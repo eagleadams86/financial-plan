@@ -143,7 +143,9 @@ own setting. Retirement accounts are a generic list
 the old fixed `k401` fields and the separate `rothContribs` map migrate once
 in `coerceShape` and the sources are emptied so deletions can't resurrect
 them. Nothing about Roth IRAs is special-cased in code.
-`side.limits[year]` holds the inputs to the two calculators (401(k) limit,
+IRA contributions edit through the `contrib` section — one row per (account,
+year) so each one is clickable, rather than a field buried in the account
+editor. `side.limits[year]` holds the inputs to the two calculators (401(k) limit,
 Roth MAGI) and prefills from `side.comp` on first open. App-wide preferences
 (currency code — validated against `Intl.supportedValuesOf('currency')`,
 since Intl renders unknown codes literally rather than throwing — PTO
