@@ -65,8 +65,12 @@ must never show them.
   first, reorderable within a year, and the holidays & PTO planner.
 - **Giving** — the Fidelity Charitable fund and the donations log.
 - **History** — total liquidity 2011→now and money in vs out per year.
-- **Year rollover** — "Start ⟨next year⟩" duplicates the live grid the way
-  Charlie used to duplicate the sheet.
+- **Year rollover** — "Build ⟨next year⟩" duplicates the live grid the way
+  Charlie used to duplicate the sheet. Build it as early as you like to see
+  where the plan is heading: a year that hasn't arrived shows nothing but
+  projections, keeps tracking the current year as that changes, and doesn't
+  become the current year — Goals, History and the rest carry on reading this
+  one — until 1 January, or until you mark December entered.
 
 ## Getting started
 

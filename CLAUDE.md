@@ -90,8 +90,20 @@ numbers only. If a change needs a realistic payload, invent one.
   and keeps the numbers. Rollover (`rolloverYear`) copies categories+rules,
   keeps overlap manuals, seeds from computed December, and never touches the
   old year.
+- **A year can be built before it arrives.** `yearStarted(st, y, today)` is
+  derived, never stored: a grid year has begun once today reaches its own
+  first month, or once the year before it is entered through December.
+  `latestGridYear()` / `startedGridYears()` skip a year that hasn't begun, so
+  Goals, History, Retirement and Comp carry on reading the current year while
+  the Budget tab can show next year's projections. `newestGridYear()` includes
+  it — that's what the year picker and the Build button use.
+- A month's opening balance comes from last month, else the PRIOR YEAR's same
+  month if that year computed one, else the year's own seed. That ordering is
+  what keeps a year built early tracking the current year's projection instead
+  of freezing at whatever it was seeded with.
 - Prior years: `model: 'pinned'` grids (every cell an actual, no balance
-  model) and `kind: 'summary'` years. The live year is always the newest grid.
+  model) and `kind: 'summary'` years. The live year is always the newest grid
+  that has begun.
   `gridToSummary()` folds a pinned grid into totals — flows sum, balance rows
   keep DECEMBER (a sum of monthly balances is meaningless). It is permanent,
   and it refuses quietly to be useful: `rulesNeedingYear()` warns when the
@@ -139,8 +151,9 @@ default, row sort, the paycheck-rule toggle, the dividend fallback rate, the
 assumed retirement return, and the price-lookup key) live behind the header's
 ⚙ button; `buildMoneyFormats()` rebuilds the formatters on every render.
 `extraNotes` renders on summary years only — a live grid says what it means in
-its own cells. The folded ledger entries still live in the data (and in every
-export); they just aren't a panel on the budget page.
+its own cells. The Venmo and large-purchase ledgers are gone entirely, entries
+included; `coerceShape` also strips the copies an earlier version folded into
+`extraNotes`, matching on `where`, leaving the import's own notes alone.
 Investment panes are `side.portfolios` — `{id, name, rows}` each, add/rename/
 reorder through the `portfolio` section; the old fixed `taxable`/`hsa` lists
 migrate once and are emptied. A holdings table reads through `holdingList()`,

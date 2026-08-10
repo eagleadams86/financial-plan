@@ -950,27 +950,16 @@ function coerceShape(data) {
     s.otherMoney = [];
   }
   /* The Venmo ledger and the large-purchase list were annexes under the
-     budget: nothing in the engine ever read them. They're gone, but the
-     entries were real records, so they fold into the year's notes rather than
-     being dropped, and the source maps are emptied so they can't come back. */
-  for (const [map, where] of [['venmo', 'Venmo ledger'],
-                              ['largePurchases', 'Planned purchase']]) {
-    const src = obj(s[map]);
-    const anyYear = Object.keys(d.years).sort().pop();
-    for (const y of Object.keys(src)) {
-      const rows = Array.isArray(src[y]) ? src[y] : [];
-      /* a ledger year with no budget year behind it still keeps its entries —
-         they land on the newest year, labelled with where they came from */
-      const target = d.years[y] || d.years[anyYear];
-      if (!rows.length || !target) continue;
-      target.extraNotes = target.extraNotes || [];
-      for (const r of rows)
-        target.extraNotes.push({ where: d.years[y] ? where : `${where} ${y}`,
-          note: [r.date, r.desc, r.amount != null ? r.amount : null, r.note]
-            .filter(x => x || x === 0).join(' · ') });
-    }
-    delete s[map];
-  }
+     budget that nothing in the engine ever read. They're gone, and so are
+     their entries — a note on the cell is where that kind of detail belongs
+     now. The loop clears the copies an earlier version folded into each
+     year's notes; whatever the spreadsheet import wrote is left alone. */
+  delete s.venmo;
+  delete s.largePurchases;
+  const FOLDED = /^(Venmo ledger|Planned purchase)\b/;
+  for (const yr of Object.values(d.years))
+    if (Array.isArray(yr.extraNotes))
+      yr.extraNotes = yr.extraNotes.filter(n => !FOLDED.test(String((n && n.where) || '')));
   for (const k of ['rothContribs', 'k401', 'comp', 'bonuses', 'retirement',
                    'rothLimit', 'donations', 'limits']) s[k] = obj(s[k]);
   /* The per-check machinery is worth its clutter only if you're actually paid
@@ -1036,7 +1025,28 @@ function save() {
 function yearKeys() {
   return Object.keys(state.years).sort();
 }
+/* A year can be created before it arrives, so its projections are there to
+   look at — but it isn't the year the rest of the app reads until it actually
+   begins. It begins on its own first month, or the moment the year before it
+   is entered right through December, whichever comes first. Derived rather
+   than stored: there's no flag to go stale or need clearing. */
+function yearStarted(st, y, todayIso) {
+  const yr = st.years[y];
+  if (!yr || yr.kind !== 'grid') return true;
+  if ((todayIso || todayISO()).slice(0, 7) >= yr.startMonth) return true;
+  const prev = st.years[String(+y - 1)];
+  return !!(prev && prev.kind === 'grid'
+    && (prev.enteredThrough || '') >= `${+y - 1}-12`);
+}
+const startedGridYears = (st, todayIso) => Object.keys(st.years).sort()
+  .filter(y => st.years[y].kind === 'grid' && yearStarted(st, y, todayIso));
+
 function latestGridYear() {
+  const ks = startedGridYears(state);
+  return ks.length ? ks[ks.length - 1] : null;
+}
+/* Includes a year created ahead of time — what the Budget tab's picker offers. */
+function newestGridYear() {
   const ks = yearKeys().filter(y => state.years[y].kind === 'grid');
   return ks.length ? ks[ks.length - 1] : null;
 }
@@ -1216,9 +1226,18 @@ function computeYear(st, yearKey, prior, today) {
           transfersOut[r.transferTo] = (transfersOut[r.transferTo] || 0) + v;
       }
       const prevM = monthAdd(m, -1);
-      const priorOf = (bid) =>
-        balances[`${bid}|${prevM}`] !== undefined ? balances[`${bid}|${prevM}`]
-                                                  : (yr.seeds[bid] || 0);
+      /* Where a month's opening balance comes from: last month if this year
+         has computed one, else the year before's December if it computed one
+         (so a year created early keeps tracking the current year's projection
+         instead of freezing at whatever it was told at creation), else the
+         year's own seed. */
+      const priorOf = (bid) => {
+        const own = balances[`${bid}|${prevM}`];
+        if (own !== undefined) return own;
+        const carried = prior && prior.balances[`${bid}|${prevM}`];
+        if (carried !== undefined) return carried;
+        return yr.seeds[bid] || 0;
+      };
       /* Each account grows by its own annual rate, applied monthly to what it
          held after the month's transfers — byte-for-byte the spreadsheet's
          math at the defaults, which the real-data cross-check pins. The
@@ -1286,8 +1305,7 @@ function currentMonthOf(yr, todayIso) {
    mid-term (capped), midOverflow = mid-term above the capped goal's target,
    long = long-term holdings uncapped. */
 function computeGoals(st, computed, todayIso) {
-  const gridKeys = Object.keys(st.years).sort()
-    .filter(y => st.years[y].kind === 'grid');
+  const gridKeys = startedGridYears(st, todayIso);
   const liveKey = gridKeys[gridKeys.length - 1];
   if (!liveKey) return [];
   const yr = st.years[liveKey];
@@ -1512,7 +1530,8 @@ const fmtCell = (v) => (v === 0 ? '·' : fmtMoney(v));
 function yearPickerHtml(active) {
   const opts = yearKeys().slice().reverse().map(y => {
     const yr = state.years[y];
-    const tag = yr.kind === 'summary' ? ' (summary)' : '';
+    const tag = yr.kind === 'summary' ? ' (summary)'
+      : !yearStarted(state, y) ? ' (not started yet)' : '';
     return `<option value="${esc(y)}" ${y === active ? 'selected' : ''}>${esc(y)}${tag}</option>`;
   }).join('');
   return `<label class="sr-only" for="yearSel">Year</label>
@@ -1565,6 +1584,7 @@ function gridCard(y, yr) {
   const months = c.months;
   const thisM = thisMonth();
   const live = yr.model === 'live';
+  const started = yearStarted(state, y);
 
   /* A year-total column pinned to the right end. A live grid can run past its
      own December (the projection tail), and a total mixing two calendar years
@@ -1683,8 +1703,10 @@ function gridCard(y, yr) {
               .reduce((s, m) => s + (yr.paychecks[m] || 0), 0)), true)}</tr>`);
 
   const nextM = live ? monthAdd(yr.enteredThrough, 1) : null;
-  const canClose = live && monthDiff(yr.startMonth, nextM) < yr.monthCount;
-  const canReopen = live && yr.enteredThrough >= yr.startMonth;
+  /* A year that hasn't begun has nothing to enter and nothing to roll over
+     from: every month in it is still a projection of the year before. */
+  const canClose = live && started && monthDiff(yr.startMonth, nextM) < yr.monthCount;
+  const canReopen = live && started && yr.enteredThrough >= yr.startMonth;
   const addRowBtn = `<button class="btn small" data-add="category" data-year="${esc(y)}"
       title="Add a row to this year's grid">＋ Add row</button>`;
   const monthControls = `<div class="row" style="margin:2px 0 12px">
@@ -1697,10 +1719,10 @@ function gridCard(y, yr) {
       ${live && canReopen ? `<button class="btn small" id="reopenMonthBtn"
         title="Move the entered-through marker back a month (your numbers stay put)">
         ↩ Re-open ${esc(monthLabel(yr.enteredThrough))}</button>` : ''}
-      ${live && y === latestGridYear() && !state.years[String(+y + 1)]
+      ${live && started && y === newestGridYear() && !state.years[String(+y + 1)]
         ? `<button class="btn small" id="rolloverBtn"
-            title="Create the ${esc(String(+y + 1))} grid — like duplicating the sheet in Numbers">
-            ⊕ Start ${esc(String(+y + 1))}</button>` : ''}
+            title="Build the ${esc(String(+y + 1))} grid now so you can see where the plan is heading">
+            ⊕ Build ${esc(String(+y + 1))}</button>` : ''}
       ${!live ? `<button class="btn small" id="toSummaryBtn"
           title="Replace this year's months with its yearly totals — permanent">
           ⇩ Convert to a summary</button>` : ''}
@@ -1710,7 +1732,12 @@ function gridCard(y, yr) {
 
   return `<div class="card">
     <h2>${esc(y)} budget</h2>
-    <p class="sub">${live
+    <p class="sub">${!started
+      ? `Every month here is a projection, built from ${esc(String(+y - 1))}'s rules and its
+         December balances — it keeps up as ${esc(String(+y - 1))} changes. ${esc(y)} takes over
+         as the current year on 1 January, or as soon as you mark December ${esc(String(+y - 1))}
+         entered. Until then Goals, History and the other tabs stay on ${esc(String(+y - 1))}.`
+      : live
       ? `Entered through <strong>${esc(monthLabel(yr.enteredThrough))}</strong>; later months are estimates that update as real numbers land. Click any cell to edit it.`
       : 'A finished year — every figure is history. Click a cell to correct it.'}</p>
     ${monthControls}
@@ -3702,17 +3729,21 @@ function wireBudget() {
   if (reopenBtn) reopenBtn.onclick = reopenMonth;
   const rollBtn = F('rolloverBtn');
   if (rollBtn) rollBtn.onclick = () => {
-    const from = latestGridYear();
+    const from = newestGridYear();
     const next = String(+from + 1);
-    if (!confirm(`Start the ${next} budget? It copies the ${from} categories and rules, `
-      + `keeps your hand-typed ${next} estimates from the ${from} grid, and opens with `
-      + `balances seeded from ${from}'s projected December. ${from} stays exactly as it is.`))
+    const early = thisMonth() < `${next}-01`;
+    if (!confirm(`Build the ${next} budget? It copies the ${from} categories and rules and `
+      + `keeps any hand-typed ${next} estimates. ${from} stays exactly as it is.`
+      + (early ? `\n\n${next} won't become the current year yet — Goals, History and the `
+        + `other tabs carry on reading ${from}. It takes over on 1 January, or as soon as `
+        + `you mark December ${from} entered.` : '')))
       return;
     const created = rolloverYear(state, C, from);
     if (created) {
       state.ui.activeYear = created;
       save(); render();
-      toast(`${created} is ready — check the seeded balances`);
+      toast(early ? `${created} is built — every month is a projection for now`
+                  : `${created} is ready — check the seeded balances`);
     }
   };
 }
@@ -4241,7 +4272,8 @@ render();
 window.__finTestHooks = { round2, fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
-  normRole, gridToSummary, rulesNeedingYear, partsKind, limitsFor };
+  normRole, gridToSummary, rulesNeedingYear, partsKind, limitsFor,
+  yearStarted, startedGridYears };
 
 /* ── Hooks the sync module calls ──────────────────────────────────────────
    The module is a separate <script type="module"> and can't see this scope. */

@@ -492,6 +492,20 @@ t('other-money balances become accounts that start this month', () => {
   eq(d.years['2030'].seeds[venmo.id], 40, 'seeded from the balance it held');
 });
 
+t('the folded Venmo and purchase notes are cleared out', () => {
+  const d = H.coerceShape({
+    years: { '2026': { kind: 'summary', categoryTotals: [], extraNotes: [
+      { where: 'Venmo ledger', note: 'dinner' },
+      { where: 'Planned purchase 2027', note: 'laptop' },
+      { where: 'Sheet note', note: 'kept' }] } },
+    side: { venmo: { '2026': [{ date: 'x', desc: 'y', amount: 1 }] },
+            largePurchases: { '2026': [{ date: 'x', desc: 'y', amount: 1 }] } } });
+  eq(d.years['2026'].extraNotes.map(n => n.where), ['Sheet note'],
+    'only what the import wrote survives');
+  eq(d.side.venmo, undefined);
+  eq(d.side.largePurchases, undefined);
+});
+
 group('Investment panes');
 t('the two fixed holdings lists become named panes, once', () => {
   const d = H.coerceShape({ side: { taxable: [{ ticker: 'VOO', shares: 2, price: 10 }],
@@ -554,6 +568,40 @@ t('a split month carries into the next year on rollover', () => {
     parts: [{ v: -40, kind: 'actual' }, { v: -50, kind: 'manual' }] };
   H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
   eq(s.years['2031'].cells['cc|2031-02'].parts.length, 2);
+});
+
+group('Building next year early');
+t('a year built before it arrives is not the year the app reads', () => {
+  const s = H.coerceShape(fixtureState());
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  eq(H.yearStarted(s, '2031', TODAY_FIX), false, 'April 2030: 2031 has not begun');
+  eq(H.startedGridYears(s, TODAY_FIX).slice(-1), ['2030'], 'goals still read 2030');
+});
+t('it begins on its own first month, or when December before it is entered', () => {
+  const s = H.coerceShape(fixtureState());
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  eq(H.yearStarted(s, '2031', '2031-01-01'), true, 'New Year');
+  const entered = JSON.parse(JSON.stringify(s));
+  entered.years['2030'].enteredThrough = '2030-12';
+  eq(H.yearStarted(entered, '2031', TODAY_FIX), true, 'December signed off early');
+  entered.years['2030'].enteredThrough = '2030-11';
+  eq(H.yearStarted(entered, '2031', TODAY_FIX), false, 'November is not enough');
+});
+t('its projections keep tracking the year before rather than freezing', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].monthCount = 12;
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  const before = H.computeAll(s, TODAY_FIX)['2031'].balances['cash|2031-06'];
+  /* correct the old year's December and the new year must follow it */
+  s.years['2030'].overrides['cash|2030-12'] = { v: 50000 };
+  const c = H.computeAll(s, TODAY_FIX);
+  ok(c['2031'].balances['cash|2031-06'] !== before, 'the new year moved with the correction');
+  /* January opens on December's corrected figure plus its own flows — no
+     stale seed from whatever the balance happened to be at rollover */
+  const janFlows = s.years['2031'].categories
+    .reduce((t, cat) => t + c['2031'].cells[`${cat.id}|2031-01`].v, 0);
+  approx(c['2031'].balances['cash|2031-01'], H.round2(50000 + janFlows),
+    'opens on the corrected December', 0.02);
 });
 
 group('Year lifecycle');
