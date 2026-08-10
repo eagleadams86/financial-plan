@@ -144,7 +144,15 @@ its money is ordinary cash-out). Row reorder moves within a section, and is
 hidden when `settings.rowSort === 'alpha'` (which sorts at render time and
 never touches the stored order). Accounts edit through the `account` section
 (click an account row); deleting one is refused while a category still moves
-money into it. Money fields are TEXT inputs, not number ones: a number input can render
+money into it. **Everything user-typed goes through `esc()` on its way into HTML** — the app
+builds markup with template literals, so an unescaped interpolation is an XSS
+hole. That includes values you might not think of as user input: year keys and
+account ids come out of a restored file. JSON that didn't come from this code
+(`safeParse`, and the same reviver in the sync module) drops `__proto__`,
+because `Object.assign` copies it with [[Set]] and would reassign a prototype.
+Charts get a `summary` argument: a `<canvas>` announces nothing to a screen
+reader, and a chart that can't be drawn shouldn't render an empty one.
+Money fields are TEXT inputs, not number ones: a number input can render
 neither `$` nor a thousands separator. `asMoneyInput()` formats on blur and
 `parseMoney()` reads leniently — symbol, commas and spaces all fall away, and
 an empty box is null rather than zero. Anything counted rather than paid (the

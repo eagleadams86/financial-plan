@@ -551,6 +551,26 @@ t('PTO dates read out of the old free-text box, once', () => {
   eq(e[0].dates, undefined, 'the text goes once it has become dates');
 });
 
+group('Untrusted input');
+t('a __proto__ key in a restored file never becomes a prototype', () => {
+  const hostile = '{"years":{},"__proto__":{"pwned":1}}';
+  const guarded = JSON.parse(hostile, (k, v) => k === '__proto__' ? undefined : v);
+  eq(Object.keys(guarded).includes('__proto__'), false, 'the key is dropped on parse');
+  const target = {};
+  Object.assign(target, guarded);
+  eq(Object.getPrototypeOf(target) === Object.prototype, true, 'Object.assign left it alone');
+  eq(({}).pwned, undefined, 'and nothing global was touched');
+});
+t('markup in a year key survives coerceShape as data, not as markup', () => {
+  const evil = '<img src=x onerror=alert(1)>';
+  const d = H.coerceShape({ years: { [evil]: { kind: 'summary', categoryTotals: [] } } });
+  ok(Object.keys(d.years).includes(evil), 'kept verbatim as a key');
+  /* esc() is what stands between that key and the page — pin its behaviour */
+  const escaped = evil.replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  eq(escaped.indexOf('<'), -1, 'no angle bracket survives escaping');
+});
+
 group('Investment panes');
 t('the two fixed holdings lists become named panes, once', () => {
   const d = H.coerceShape({ side: { taxable: [{ ticker: 'VOO', shares: 2, price: 10 }],

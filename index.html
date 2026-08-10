@@ -785,6 +785,15 @@ function asMoneyInput(input) {
 }
 const showMoney = (v) => (v === null || v === undefined || v === '') ? '' : fmtMoney(v);
 
+/* JSON from outside — a backup file someone sent, the synced copy, even this
+   browser's own storage after another tab wrote it — is parsed with a reviver
+   that drops __proto__. It never becomes data: Object.assign() copies own
+   properties with [[Set]], and a __proto__ key there reassigns the receiving
+   object's prototype instead. Returning undefined deletes the key outright. */
+const safeParse = (text) => JSON.parse(text, function (k, v) {
+  return k === '__proto__' ? undefined : v;
+});
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -1104,7 +1113,7 @@ function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return blankState();
-    const parsed = migrate(coerceShape(JSON.parse(raw)));
+    const parsed = migrate(coerceShape(safeParse(raw)));
     return Object.assign(blankState(), parsed, {
       settings: Object.assign(blankState().settings, parsed.settings || {}),
       side: Object.assign(blankState().side, parsed.side || {}),
@@ -1763,7 +1772,8 @@ function gridCard(y, yr) {
 
   /* ── The grid is grouped: Income / Expenses / Transfers, each with a header
      line and a per-month subtotal, then the Accounts block below. ── */
-  const secheadRow = (label) => `<tr class="sechead"><th class="lbl">${esc(label)}</th>${
+  const secheadRow = (label) => `<tr class="sechead"${label ? '' : ' aria-hidden="true"'
+    }><th class="lbl">${esc(label)}</th>${
     months.map(m => `<td class="${m === thisM ? 'now' : ''}"></td>`).join('')}${rowTotalTd()}</tr>`;
   const subtotalRow = (label, cats) => `<tr class="subtotal">
     <th class="lbl" scope="row">${esc(label)}</th>${months.map(m => {
@@ -2056,7 +2066,7 @@ function renderGoals() {
     <div class="card">
       <h2>Where the total is heading</h2>
       <p class="sub">Computed total liquidity, month by month, across ${esc(liveKey)}${
-        previewYears().length ? ` and the ${previewYears().join(', ')} plan${
+        previewYears().length ? ` and the ${esc(previewYears().join(', '))} plan${
           previewYears().length > 1 ? 's' : ''} you've built ahead (dashed)` : ''}.</p>
       <div class="chartbox"><canvas id="goalChart"></canvas></div>
     </div>
@@ -2221,7 +2231,7 @@ function renderRetirement() {
       <p class="sub">${iraAccts.length
         ? `Every year across ${iraAccts.map(a => esc(a.name)).join(' + ')}, with the running total.`
         : 'Mark an account as a Roth or Traditional IRA and its yearly contributions show up here.'}</p>
-      <div class="chartbox" style="height:180px"><canvas id="rothChart"></canvas></div>
+      ${entries.length ? '<div class="chartbox" style="height:180px"><canvas id="rothChart"></canvas></div>' : ''}
       ${entries.length ? `<div class="tablewrap" style="margin-top:10px"><table>
         <thead><tr><th style="text-align:left">Year</th>
           ${showAcct ? '<th style="text-align:left">Account</th>' : ''}
@@ -2242,7 +2252,9 @@ function renderRetirement() {
       <h2>Holdings &amp; where they're heading${helpBtn('retProjection', 'the retirement projection')}</h2>
       <p class="sub">Today's balances grown at ${round2((state.settings.retirementReturnAnnual ?? 0.07) * 100)}%/yr
         (Preferences), with each year's planned contributions added on top.</p>
-      <div class="chartbox" style="height:280px"><canvas id="retChart"></canvas></div>
+      ${accts.length
+        ? '<div class="chartbox" style="height:280px"><canvas id="retChart"></canvas></div>'
+        : '<p class="sub">Add an account above and its projection appears here.</p>'}
     </div>
   </div>`;
 }
@@ -2367,7 +2379,9 @@ function buildRetirementChart() {
         y: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
           callback: (v) => fmtMoney0(v) } }) },
     },
-  });
+  }, `Projected retirement balance at ${round2(r * 100)}% a year: ${fmtMoney0(data[0])} in ${
+    labels[0]}, reaching ${fmtMoney0(data[data.length - 1])} by ${
+    labels[labels.length - 1]}. A straight-line projection, not a forecast.`);
 }
 
 /* ═══════════════════════════ Compensation view ════════════════════════════ */
@@ -2426,7 +2440,9 @@ function renderComp() {
       year compares this salary with what last year's ended at${
       helpBtn('raiseVsMoved', 'the two change columns')} — the two disagree whenever
       something landed mid-year.</p>
-    <div class="chartbox" style="height:220px"><canvas id="compChart"></canvas></div>
+    ${years.length > 1
+      ? '<div class="chartbox" style="height:220px"><canvas id="compChart"></canvas></div>'
+      : '<p class="sub">A second year is what turns this into a trend — add one below.</p>'}
     ${years.length ? `<div class="tablewrap" style="margin-top:12px"><table>
       <thead><tr><th style="text-align:left">Year</th><th>Salary</th><th>Raise</th>
         <th>Raise $</th><th>Since last year</th>
@@ -2474,7 +2490,8 @@ function buildCompChart() {
       scales: { x: chartAxes(), y: Object.assign(chartAxes(),
         { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
     },
-  });
+  }, `Salary by year: ${years.map(y =>
+    `${y}, ${fmtMoney0(comp[y].salary || 0)}`).join('; ')}.`);
 }
 
 /* ═══════════════════════════ Investments view ═════════════════════════════ */
@@ -2744,7 +2761,8 @@ function buildHistoryCharts() {
       scales: { x: chartAxes(), y: Object.assign(chartAxes(),
         { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
     },
-  });
+  }, `End-of-year total liquidity: ${pts.map(p =>
+    `${p.y}, ${fmtMoney0(p.v)}${p.est ? ' projected' : ''}`).join('; ')}.`);
 
   const flowYears = yearKeys();
   const flows = flowYears.map(yearFlows);
@@ -2782,7 +2800,9 @@ function buildHistoryCharts() {
       scales: { x: chartAxes(), y: Object.assign(chartAxes(),
         { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
     },
-  });
+  }, `Money in and money out per year: ${flowYears.map((y, i) =>
+    `${y}, in ${fmtMoney0(flows[i].in)}, out ${fmtMoney0(flows[i].out)}${
+      projected[i] ? ', projected' : ''}`).join('; ')}.`);
 }
 
 /* ═══════════════════════════ Year rollover ════════════════════════════════ */
@@ -2917,9 +2937,14 @@ const cssVar = (name) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 let charts = [];
-function newChart(id, config) {
+/* Every chart takes a `summary`: a canvas is a picture to a screen reader and
+   announces nothing at all without one. The summary carries the figures the
+   chart is drawn from, so the information is available without seeing it. */
+function newChart(id, config, summary) {
   const el = F(id);
   if (!el || typeof Chart === 'undefined') return;
+  el.setAttribute('role', 'img');
+  if (summary) el.setAttribute('aria-label', summary);
   charts = charts.filter(ch => {
     if (!document.body.contains(ch.canvas)) { ch.destroy(); return false; }
     return true;
@@ -2972,7 +2997,10 @@ function buildGoalChart() {
           callback: (v) => fmtMoney0(v) } }),
       },
     },
-  });
+  }, `Total liquidity month by month, ${monthLabel(pts[0].m)} to ${
+    monthLabel(pts[pts.length - 1].m)}: from ${fmtMoney0(pts[0].v || 0)} to ${
+    fmtMoney0(pts[pts.length - 1].v || 0)}.${
+    pts.some(p => p.ahead) ? ' The later years are projections.' : ''}`);
 }
 
 function buildRothChart() {
@@ -2998,7 +3026,8 @@ function buildRothChart() {
           callback: (v) => fmtMoney0(v) } }),
       },
     },
-  });
+  }, `IRA contributions by year: ${years.map(y =>
+    `${y}, ${fmtMoney0(contribs[y])}`).join('; ')}.`);
 }
 
 /* ═══════════════════════════ Price lookups ════════════════════════════════
@@ -3027,7 +3056,7 @@ function setPriceKey(k) {
   } catch (e) { /* private mode — lookups just stay off */ }
 }
 function quoteCache() {
-  try { return JSON.parse(localStorage.getItem(QUOTE_CACHE) || '{}') || {}; }
+  try { return safeParse(localStorage.getItem(QUOTE_CACHE) || '{}') || {}; }
   catch (e) { return {}; }
 }
 function writeQuoteCache(c) {
@@ -4486,7 +4515,7 @@ F('importFile').onchange = (e) => {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const rawParsed = JSON.parse(reader.result);
+      const rawParsed = safeParse(reader.result);
       /* Shape-check the RAW parse, before coerceShape(): coercion would turn
          any JSON into a valid empty state, and the wrong file picked out of a
          Downloads folder must be refused, not imported as nothing. */
@@ -4862,7 +4891,10 @@ const touchLocal = () => localStorage.setItem('fin-updated', String(Date.now()))
 const remotePayload = (r) => {
   if (!r) return null;
   if (typeof r.json === 'string') {
-    try { return JSON.parse(r.json); } catch (e) {
+    /* same __proto__ guard as the main script — this payload came off the
+       network and is handed straight to Object.assign() */
+    try { return JSON.parse(r.json, (k, v) => k === '__proto__' ? undefined : v); }
+    catch (e) {
       console.warn('cloud copy unreadable', e);
       return null;
     }
