@@ -79,7 +79,9 @@ must never show them.
 - **Year rollover** — "Build ⟨next year⟩" duplicates the live grid the way
   Charlie used to duplicate the sheet. Build it as early as you like to see
   where the plan is heading: a year that hasn't arrived shows nothing but
-  projections, keeps tracking the current year as that changes, and doesn't
+  projections — its "repeat last month" rows open at December of the year
+  before, so January doesn't start from a blank page — keeps tracking the
+  current year as that changes, and doesn't
   become the current year — Goals, History and the rest carry on reading this
   one — until 1 January, or until you mark December entered.
 

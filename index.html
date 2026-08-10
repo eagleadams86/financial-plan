@@ -1298,18 +1298,40 @@ const hasData = () => yearKeys().length > 0;
      missing  — a blank inside an entered month; counts as 0, flagged
      pinned   — a balance the sheet stated outright rather than derived */
 
+/* The last figure a row carried in the year BEFORE `m` — how "repeats the
+   last month" crosses a year boundary. Only the immediately preceding grid
+   year is on hand (computeAll hands each year its predecessor), which is the
+   same reach `samemonth` and `avglastyear` have. A month with nothing
+   recorded is skipped rather than repeated as $0. */
+function priorYearCarry(cat, m, ctx) {
+  const pm = ctx.prior?.months;
+  if (!pm) return null;
+  for (let i = pm.length - 1; i >= 0; i--) {
+    if (pm[i] >= m) continue;
+    const cell = ctx.prior.cells[`${cat.id}|${pm[i]}`];
+    if (cell && cell.kind !== 'missing') return cell.v;
+  }
+  return null;
+}
+
 /* One estimate rule per category, table-driven. Each is a small pure function
    (cat, month, ctx) -> dollars; ctx carries everything a rule may read. */
 const RULES = {
   none: () => null,
 
-  /* Internet & friends: repeat the nearest earlier stored value. */
+  /* Internet & friends: repeat the nearest earlier stored value. A year built
+     ahead of time starts with nothing stored, so January reaches back over the
+     year boundary into the year before — December, or the nearest month before
+     it that has a figure. Without that, a whole projected year of rent and
+     paycheck rows would read as blank. Those months are RESOLVED cells, so a
+     December that was itself an estimate still counts: carrying an estimate
+     forward hands back the same number the row was already showing. */
   carry(cat, m, ctx) {
     for (let i = monthDiff(ctx.yr.startMonth, m) - 1; i >= 0; i--) {
       const cell = ctx.yr.cells[`${cat.id}|${ctx.months[i]}`];
       if (cell) return cell.v;
     }
-    return null;
+    return priorYearCarry(cat, m, ctx);
   },
 
   /* Cycle bills (a quarterly water bill, semi-annual insurance, an annual

@@ -46,7 +46,9 @@ numbers only. If a change needs a realistic payload, invent one.
   STYLE in the grid, never a colour.
 - Estimate rules are table-driven in `RULES`: `carry` (Internet only — the
   sheet types Phone/Parking/Water into each month they apply, so a carry rule
-  there would invent charges), `quarterly` (repeat on a cycle, `cat.every`
+  there would invent charges; it reaches over the year boundary via
+  `priorYearCarry()`, because a year built ahead has no cells of its own and
+  January would otherwise be blank), `quarterly` (repeat on a cycle, `cat.every`
   months, default 3), `avg` (Credit Card, Venmo — mean of stored months
   before the estimate), `avglastyear` (mean of the prior calendar year's
   STORED months — never autos, so an estimate can't feed itself),
