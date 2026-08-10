@@ -189,6 +189,14 @@ numbers only. If a change needs a realistic payload, invent one.
   converts them once — one account per distinct row NAME, folding into an
   existing account where the slug already matches, cells moved to `overrides`,
   rows deleted so it can't run twice.
+- **Money in vs money out counts what the accounts EARNED**, not just what the
+  budget rows moved. `yearFlows(yr, computed, y)` adds `computed.interest` and
+  `computed.dividend` to money in (a negative one counts as money out, same as
+  a cell) — it used to read category cells only, so the interest that makes
+  total liquidity outrun the budget was invisible, thousands a year and growing
+  with the balances. A PINNED year adds nothing: its balances are stated, so
+  what they earned is already inside them. It takes its year and computed year
+  as arguments rather than reaching for globals, so the tests can pin it.
 - **`until` closes an account**, the mirror of `since`. Set only on accounts
   built out of history, to the last month ANY year states for that name. Without
   it a bank you left in 2021 keeps its closing balance and rides forward for

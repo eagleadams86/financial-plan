@@ -3098,29 +3098,38 @@ function renderGiving() {
 
 /* ═══════════════════════════ History view ═════════════════════════════════ */
 
-/* Money in vs money out per year. Flows only — rows the import flagged as
-   balances stay out. Transfers between accounts are still flows here, so
-   this reads as "cash through the checking account", not pure income/spend. */
-function yearFlows(y) {
-  const yr = state.years[y];
+/* Money in vs money out per year. Transfers between accounts count as flows
+   here, so this reads as "money through the accounts", not pure income and
+   spend. A summary year's balance rows stay out; a grid year has none, since
+   those became accounts. */
+function yearFlows(yr, computed, y) {
   let inn = 0, out = 0;
+  const add = (v) => { if (v > 0) inn += v; else out += v; };
   if (yr.kind === 'summary') {
     for (const item of yr.categoryTotals) {
       if (item.isBalance) continue;
-      if (item.total > 0) inn += item.total; else out += item.total;
+      add(item.total);
     }
   } else {
-    const balIds = new Set(yr.categories.filter(c => c.isBalance).map(c => c.id));
     /* The COMPUTED cells, not just the stored ones: a finished year has the
        same figures either way, but this is what lets a year still running —
        and a year built ahead, which has nothing stored at all — show what it
        comes to rather than a bar of whatever has been typed in so far. */
-    const cells = (C[y] && C[y].cells) || yr.cells;
+    const cells = (computed && computed.cells) || yr.cells;
     for (const [key, cell] of Object.entries(cells)) {
-      const [cid, m] = key.split('|');
-      if (balIds.has(cid) || !m.startsWith(y)) continue;
-      if (cell.v > 0) inn += cell.v; else out += cell.v;
+      const [, m] = key.split('|');
+      if (m.startsWith(y)) add(cell.v);
     }
+    /* What the accounts earned on their own. It lands in an account exactly
+       like any other money, and it is why total liquidity climbs faster than
+       the budget rows on their own explain — leaving it out understated money
+       in by thousands a year, growing with the balances. A negative figure (an
+       overdrawn month, or a correction) counts as money out, same as a cell.
+       A PINNED year adds nothing here: its balances are stated outright, so
+       whatever they earned is already inside the figures. */
+    for (const map of [(computed || {}).interest, (computed || {}).dividend])
+      for (const [key, v] of Object.entries(map || {}))
+        if (key.split('|')[1].startsWith(y)) add(v);
   }
   return { in: round2(inn), out: round2(Math.abs(out)) };
 }
@@ -3146,9 +3155,10 @@ function renderHistory() {
   </div>
   <div class="card">
     <h2>Money in vs money out</h2>
-    <p class="sub">All account flows per year, transfers included — striped bars are money out,
-      and a dashed edge means the year is still being worked out or hasn't arrived yet.
-      Early years are best-effort reads of the old bi-weekly sheets.</p>
+    <p class="sub">Everything that moved through the accounts each year — transfers between
+      them included, and the interest they earned counted as money in. Striped bars are
+      money out, and a dashed edge means the year is still being worked out or hasn't
+      arrived yet. Early years are best-effort reads of the old bi-weekly sheets.</p>
     <div class="chartbox" style="height:300px"><canvas id="flowChart"></canvas></div>
   </div>`;
 }
@@ -3216,7 +3226,7 @@ function buildHistoryCharts() {
     `${p.y}, ${fmtMoney(p.v)}${p.est ? ' projected' : ''}`).join('; ')}.`);
 
   const flowYears = yearKeys();
-  const flows = flowYears.map(yearFlows);
+  const flows = flowYears.map(y => yearFlows(state.years[y], C[y], y));
   /* stripes carry the in/out distinction alongside the colour (the family
      rule: never hue alone) — full-strength colour over the tint */
   const stripes = (color, tint) => {
@@ -5510,7 +5520,7 @@ render();
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
-  afterRaise, bonusBase, bonusShare,
+  afterRaise, bonusBase, bonusShare, yearFlows,
   fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,

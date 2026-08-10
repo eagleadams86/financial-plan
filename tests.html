@@ -874,6 +874,49 @@ t('other-money balances become accounts stated in the month they joined', () => 
   eq(stated[1].v, 40);
 });
 
+group('Money in vs money out');
+t('interest an account earned counts as money in', () => {
+  /* It lands in the account exactly like any other money, and it is why total
+     liquidity climbs faster than the budget rows alone explain. */
+  const yr = { kind: 'grid', model: 'live' };
+  const computed = {
+    cells: { 'pay|2030-01': { v: 4000 }, 'rent|2030-01': { v: -1500 } },
+    interest: { 'cash|2030-01': 25.5, 'long|2030-01': 100 },
+    dividend: { 'long|2030-03': 40 },
+  };
+  const f = H.yearFlows(yr, computed, '2030');
+  approx(f.in, 4165.5, '4000 of pay + 25.50 + 100 + 40');
+  approx(f.out, 1500);
+});
+t('interest that went backwards counts as money out', () => {
+  const f = H.yearFlows({ kind: 'grid' },
+    { cells: {}, interest: { 'cash|2030-01': -12 }, dividend: {} }, '2030');
+  approx(f.in, 0);
+  approx(f.out, 12);
+});
+t('another year’s months are not counted', () => {
+  const f = H.yearFlows({ kind: 'grid' }, { cells: { 'pay|2031-01': { v: 900 } },
+    interest: { 'cash|2031-01': 5 }, dividend: {} }, '2030');
+  approx(f.in, 0);
+  approx(f.out, 0);
+});
+t('a pinned year adds no interest — its balances already hold it', () => {
+  /* A stated balance is what the account actually held, earnings included, so
+     adding a computed figure on top would count them twice. */
+  const f = H.yearFlows({ kind: 'grid', model: 'pinned' },
+    { cells: { 'pay|2022-01': { v: 3000 } }, interest: {}, dividend: {} }, '2022');
+  approx(f.in, 3000);
+});
+t('a summary year still leaves its balance rows out', () => {
+  const f = H.yearFlows({ kind: 'summary', categoryTotals: [
+    { name: 'Income', total: 30000 },
+    { name: 'Expenses', total: -25000 },
+    { name: 'Checking', total: 900, isBalance: true },
+  ] }, undefined, '2015');
+  approx(f.in, 30000, 'the closing balance is not money that moved');
+  approx(f.out, 25000);
+});
+
 group('Past-year balance rows become accounts');
 function historyState() {
   const bal = (id, name) => ({ id, name, role: 'normal', rule: 'none', isBalance: true });
