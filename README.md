@@ -31,9 +31,11 @@ must never show them.
   each with its own name, growth rate, a choice of which account that interest
   is paid into, and a start that follows your data: an account is tracked from the first month
   you put a figure in, earlier months stay blank rather than zero, and typing
-  into one of them moves the start back. The current year is live: past months are
-  actuals, future months are estimates that recompute the way the spreadsheet's
-  formulas did. Click any cell to edit — or **split a month into several
+  into one of them moves the start back. The current year is live: months you've
+  entered are actuals, everything after them is an estimate that recomputes the
+  way the spreadsheet's formulas did — **the account balances included**, so the
+  current month reads as the estimate it is until you mark it entered, rather
+  than looking like money already counted. Click any cell to edit — or **split a month into several
   amounts**, each actual or estimated on its own, totalled on save. A month's
   balance cell shows what the account earned that month and lets you override
   the interest or add a dividend — correct either and the balance recomputes

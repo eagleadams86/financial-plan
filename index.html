@@ -1456,7 +1456,10 @@ function resolvePaychecks(yr, months, prior) {
   return out;
 }
 
-function computeYear(st, yearKey, prior, today) {
+/* No `today`: what a year computes depends on what you have entered, not on
+   what day it is. computeAll still takes one — the goal figures and the live
+   year's own months are read as of a date — but the grid itself isn't. */
+function computeYear(st, yearKey, prior) {
   const yr = st.years[yearKey];
   const months = yearMonths(yr);
   const resolved = {};   // 'catId|m' -> {v, kind, note?}
@@ -1464,7 +1467,14 @@ function computeYear(st, yearKey, prior, today) {
   const balanceKinds = {};
   const interest = {};   // 'bid|m'   -> the growth that month, shown in the editor
   const dividend = {};   // 'bid|m'   -> what it paid out that month
-  const thisM = today.slice(0, 7);
+  /* A balance is only a real one once the month it is built from has been
+     ENTERED. What day it is has nothing to do with it: the current month is
+     part-lived and its category cells are still estimates, so a balance
+     chained off them is an estimate too, and saying otherwise let the one
+     figure a plan is read for — what's in the accounts right now — pass itself
+     off as fact. Entered months materialise their estimates into stored
+     numbers, which is exactly when the balance stops being a guess. */
+  const kindAt = (m) => m <= (yr.enteredThrough || '') ? 'actual' : 'auto';
 
   if (yr.kind !== 'grid')
     return { months: [], cells: {}, balances: {}, balanceKinds: {},
@@ -1583,12 +1593,11 @@ function computeYear(st, yearKey, prior, today) {
         const ov = yr.overrides[`${a.id}|${m}`];
         const v = round2(ov ? ov.v : computed);
         balances[`${a.id}|${m}`] = v;
-        balanceKinds[`${a.id}|${m}`] = ov ? 'pinned'
-          : (m <= thisM ? 'actual' : 'auto');
+        balanceKinds[`${a.id}|${m}`] = ov ? 'pinned' : kindAt(m);
         total += v;
       }
       balances[`total|${m}`] = round2(total);
-      balanceKinds[`total|${m}`] = m <= thisM ? 'actual' : 'auto';
+      balanceKinds[`total|${m}`] = kindAt(m);
     }
   }
 
@@ -1597,13 +1606,15 @@ function computeYear(st, yearKey, prior, today) {
 }
 
 /* Every grid year, oldest first, each handed the previous one for the
-   look-a-year-back rules. */
+   look-a-year-back rules. The date is still in the signature — every caller
+   passes one and the goal figures downstream need it — but the grid no longer
+   asks what day it is. */
 function computeAll(st, todayIso) {
   const out = {};
   let prior = null;
   for (const y of Object.keys(st.years).sort()) {
     if (st.years[y].kind !== 'grid') continue;
-    out[y] = computeYear(st, y, prior, todayIso);
+    out[y] = computeYear(st, y, prior);
     prior = out[y];
   }
   return out;
@@ -2031,8 +2042,13 @@ function gridCard(y, yr) {
           title="${esc(fmtMoney(v || 0))}${ov ? ' · stated balance' : ''}">${fmtCell(v || 0)}</td>`;
       }).join('')}${rowTotalTd()}</tr>`).join('')
     + secheadRow('')   // the same band that opens the block, closing it off
+    /* Total carries the same estimate mark as the accounts it adds up. It is
+       the figure the whole plan gets read for, so it is the last one that
+       should be able to look like a fact while every account above it says
+       otherwise. */
     + `<tr class="total"><th class="lbl" scope="row">Total</th>${
-        months.map(m => `<td class="${m === thisM ? 'now' : ''}">${
+        months.map(m => `<td class="c-${c.balanceKinds[`total|${m}`]} ${
+          m === thisM ? 'now' : ''}">${
           fmtCell(c.balances[`total|${m}`] || 0)}</td>`).join('')}${rowTotalTd()}</tr>`
     + (!usesPaychecks ? '' :
       /* The count the income row is actually multiplying by, not just the ones

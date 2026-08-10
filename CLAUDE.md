@@ -140,6 +140,16 @@ numbers only. If a change needs a realistic payload, invent one.
   Goals, History, Retirement and Comp carry on reading the current year while
   the Budget tab can show next year's projections. `newestGridYear()` includes
   it — that's what the year picker and the Build button use.
+- **A balance is an `actual` once its month is ENTERED, never because the date
+  has passed.** `computeYear` takes no `today` at all now — what a year computes
+  depends on what you have filled in, not on what day it is. The current month
+  is part-lived and its category cells are still estimates, so a balance chained
+  off them is one too; marking the month entered materialises those cells, which
+  is precisely when it stops being a guess. The Accounts **Total** row renders
+  `c-${kind}` like the rows it adds up — it used to render no kind at all, so
+  the headline figure looked like fact while every account above it said
+  otherwise. (Flow subtotals — Income/Expenses total — still render unmarked;
+  they sum cells of mixed kinds, so they'd need a mixed-kind rule.)
 - A month's opening balance comes from last month, else the PRIOR YEAR's same
   month if that year computed one, else the year's own seed. That ordering is
   what keeps a year built early tracking the current year's projection instead
