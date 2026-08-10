@@ -1572,7 +1572,10 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+  /* Long enough to actually read: "Saved" and a sentence explaining why
+     something was refused don't deserve the same two and a half seconds. */
+  const ms = Math.min(9000, Math.max(2600, String(msg).length * 55));
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
 /* ── Render skeleton ────────────────────────────────────────────────────── */
@@ -3556,11 +3559,19 @@ const EDITORS = {
       const a = accountById(state, ds.bal);
       if (!a) return;
       if (a.hub) { toast('The main account can\'t be deleted — everything flows through it'); return false; }
+      /* Name the rows. "Repoint them first" is only useful if you're told
+         which ones, and they can be anywhere in any year's grid. */
       for (const y of yearKeys()) {
         const yr = state.years[y];
         if (yr.kind !== 'grid') continue;
-        const used = (yr.categories || []).some(cat => normRole(cat).transferTo === a.id);
-        if (used) { toast(`${y} still has rows moving money into ${a.name} — repoint them first`); return false; }
+        const used = (yr.categories || [])
+          .filter(cat => normRole(cat).transferTo === a.id).map(cat => cat.name);
+        if (used.length) {
+          toast(`${a.name} still has ${y} rows pointing at it — open ${
+            used.slice(0, 3).join(', ')}${used.length > 3 ? ` and ${used.length - 3} more` : ''
+            } and change "The other account"`);
+          return false;
+        }
       }
       state.settings.accounts = state.settings.accounts.filter(x => x.id !== a.id);
       for (const x of state.settings.accounts) if (x.creditTo === a.id) x.creditTo = x.id;
