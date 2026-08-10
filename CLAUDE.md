@@ -496,6 +496,12 @@ Investment panes are `side.portfolios` — `{id, name, rows}` each, add/rename/
 reorder through the `portfolio` section; the old fixed `taxable`/`hsa` lists
 migrate once and are emptied. A holdings table reads through `holdingList()`,
 whose key is either `pf:<id>` or a plain side key (`daf`, on the Giving tab).
+**Headings are Title Case** — card `<h2>`s, dialog `<h3>`s and help-sheet
+titles — with the small words left lowercase ("Bonuses by Year", "Money in vs
+Money Out", "Raises over Time", "Average of Last Year") unless they lead. Done
+as literals, NOT `text-transform: capitalize`: that would give "DAF Grant" and
+"Of", and it would title-case the interpolated names — a portfolio, a trip, a
+budget row — which belong to the user and are shown exactly as typed.
 Info dots (`helpBtn(key, label)` + the `HELP` table + `#helpDialog`) explain
 arithmetic the reader can't see; clicking outside any dialog except the
 sync-choice one closes it without saving.
