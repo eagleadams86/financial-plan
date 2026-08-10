@@ -317,6 +317,10 @@ key, the daily limit, being offline) stays stale — and `refreshPrices()` ends 
 `render()`, which re-opens the tab. `priceAutoTried` remembers what the quiet
 auto-refresh has attempted this page load so it can't re-fire in a tight loop;
 the manual Refresh button ignores the set and always retries.
+Both History charts carry a `.chartkey` under them for the dashed projected
+outline — the signal was explained only in the prose above the chart, which is
+not where you look when wondering why two bars are drawn differently. Its swatch
+is neutral, not either series colour: the DASH is the meaning.
 Charts get a `summary` argument: a `<canvas>` announces nothing to a screen
 reader, and a chart that can't be drawn shouldn't render an empty one. Chart.js
 4's BAR element ignores `borderDash` (only lines and arcs honour it), so the
