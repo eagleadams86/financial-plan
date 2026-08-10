@@ -4645,7 +4645,30 @@ function partsTotal() {
   F('cellPartsTotal').textContent = `${cellParts.length} amount${
     cellParts.length === 1 ? '' : 's'} · ${fmtMoney(sum)}${
     kinds.size > 1 ? ' · part actual, part estimate' : ''}`;
+  /* The Amount box is disabled while a month is split, but it is still the
+     figure being read at the top of the dialog — so it tracks the parts rather
+     than sitting on whatever the total was when the split opened. */
+  F('cellValue').value = showMoney(sum);
   return sum;
+}
+
+/* A per-check row opens as the checks themselves rather than one lump sum.
+   The estimate IS a count of paychecks times an amount, so the lump hides the
+   very thing the rule is built on, and correcting a single check — a bonus, a
+   missed shift, a raise landing mid-month — meant splitting by hand first,
+   every time. Nothing is written until Save, exactly as the single Amount box
+   isn't.
+
+   A fractional count (the sheet has half-check months) puts the remainder in a
+   part of its own, so what's on screen still adds up to the estimate. */
+function paycheckParts(cat, n, future) {
+  if (!future || (cat.rule || 'none') !== 'paycheck' || !cat.perCheck) return null;
+  const parts = [];
+  for (let i = 0; i < Math.floor(n); i++)
+    parts.push({ v: round2(cat.perCheck), kind: 'manual' });
+  const rest = round2((n - Math.floor(n)) * cat.perCheck);
+  if (rest) parts.push({ v: rest, kind: 'manual' });
+  return parts.length ? parts : null;
 }
 
 /* The cell's kind from its parts: mixed only when they genuinely disagree. */
@@ -4746,7 +4769,8 @@ function openCellEditor(yearKey, type, id, m) {
     const hasRule = rule !== 'none';
     F('cellRowBtn').hidden = false;
     F('cellSplitBtn').hidden = false;
-    setParts(stored?.parts || null, future);
+    setParts(stored?.parts
+      || paycheckParts(cat, C[yearKey]?.paychecks[m] ?? 2, future), future);
     revertBtn.hidden = !(stored && future && hasRule);
     clearBtn.hidden = !stored;
     if (future && rule === 'paycheck' && !cat.perCheck)
@@ -4912,7 +4936,7 @@ F('cellAddPartBtn').onclick = () => {
   inputs[inputs.length - 1]?.focus();
 };
 F('cellSplitBtn').onclick = () => {
-  const { yearKey, m } = editing;
+  const { yearKey, id, m } = editing;
   const yr = state.years[yearKey];
   const future = yr.model === 'live' && m > yr.enteredThrough;
   if (cellParts) {
@@ -4920,15 +4944,24 @@ F('cellSplitBtn').onclick = () => {
        split never silently changes the month's number. */
     const sum = partsTotal();
     setParts(null, future);
-    F('cellValue').value = sum || '';
+    F('cellValue').value = showMoney(sum || '');
     return;
   }
-  const raw = F('cellValue').value.trim();
-  const start = raw === '' ? 0 : round2(parseFloat(raw) || 0);
+  /* parseMoney, not parseFloat: the box holds a formatted figure ("$1,800.00"),
+     and parseFloat reads that as nothing — splitting a month used to drop its
+     amount and open at zero. */
+  const start = parseMoney(F('cellValue').value) || 0;
   const kind = future
     ? (document.querySelector('input[name=cellKind]:checked')?.value || 'manual')
     : 'actual';
-  setParts([{ v: start, kind }], future);
+  /* A per-check row splits back into its checks rather than one row holding
+     the lot — but only while the total still IS the rule's estimate, so this
+     can never quietly replace a figure that was typed over it. */
+  const cat = yr.categories.find(c => c.id === id);
+  const checks = cat && paycheckParts(cat, C[yearKey]?.paychecks[m] ?? 2, future);
+  const isRuleTotal = checks
+    && round2(checks.reduce((s, p) => s + p.v, 0)) === round2(start);
+  setParts(isRuleTotal ? checks : [{ v: start, kind }], future);
 };
 F('cellRevertBtn').onclick = () => {
   const { yearKey, type, id, m } = editing;
@@ -5143,7 +5176,8 @@ render();
 window.__finTestHooks = { round2, fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
-  normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, limitsFor,
+  normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,
+  limitsFor,
   yearStarted, startedGridYears,
   projectionYearsAfter, applyToRow, dropRow, swapRows, andList };
 

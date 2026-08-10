@@ -38,7 +38,10 @@ must never show them.
   than looking like money already counted. Every figure says what it's made of,
   subtotals and year totals too: plain for what happened, italic for a
   projection, dashed for a total spanning both. Click any cell to edit — or **split a month into several
-  amounts**, each actual or estimated on its own, totalled on save. A month's
+  amounts**, each actual or estimated on its own, totalled on save. A row paid
+  per check opens that way already, one line per payday with the amount filled
+  in, so correcting a single cheque — a bonus, a missed shift — is one box to
+  type in rather than a lump sum to break apart first. A month's
   balance cell shows what the account earned that month and lets you override
   the interest or add a dividend — correct either and the balance recomputes
   around it, in whichever account the money is paid into, for that month and

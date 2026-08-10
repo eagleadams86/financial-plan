@@ -122,6 +122,19 @@ numbers only. If a change needs a realistic payload, invent one.
 - A cell may carry `parts: [{v, kind, note?}]`. Its `v` stays the sum and its
   `kind` is derived (all-actual, all-manual, or `mixed`), so the engine,
   subtotals, rollover and the charts never have to know about parts.
+- **A per-check row's future months OPEN as their checks** — `paycheckParts(cat,
+  n, future)` returns one part per payday, prefilled at `perCheck`, with a
+  fractional count's remainder as a part of its own so the split always adds up
+  to the estimate (there's a test on that invariant). It is a prefill, not
+  stored data: nothing is written until Save, same as the single Amount box.
+  Returns null — leaving the plain one-amount view — for any other rule, for
+  `perCheck: 0` (the existing warning says more than a column of $0 rows would),
+  for an entered month, and for a month with no paydays. `cellSplitBtn` restores
+  the same breakdown, but only while the total still equals the rule's estimate,
+  so re-splitting can't overwrite a figure typed over it. The disabled Amount
+  box now tracks the parts (`partsTotal`) instead of sitting on the total the
+  split opened with. Note `parseMoney`, NOT `parseFloat`, when reading that box:
+  it holds a formatted figure and parseFloat reads "$1,800.00" as nothing.
 - "Mark month entered" **materialises** that month's autos into stored
   actuals (the app's overtyping-in-Numbers); re-opening moves the marker back
   and keeps the numbers. Rollover (`rolloverYear`) copies categories+rules,
