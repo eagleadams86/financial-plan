@@ -210,6 +210,10 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
 .grid-fields { display: grid; gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .grid-fields > div { display: flex; flex-direction: column; }
+/* `display: flex` above outranks the browser's own `[hidden] { display: none }`,
+   so a field hidden by its showIf would stay on screen. This is what actually
+   hides it. */
+.grid-fields > div[hidden] { display: none; }
 .grid-fields > div > label.field { min-height: 2.5em; margin-bottom: 0; }
 .grid-fields > div > input, .grid-fields > div > select { width: 100%; height: 40px; }
 .grid-fields > div.wide { grid-column: 1 / -1; }
@@ -350,6 +354,8 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
 th .tile-help, td .tile-help { vertical-align: 1px; }
 td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 #helpDialog { max-width: 46ch; }
+.checkset { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 4px 0; }
+.checkset .checkline { font-weight: 400; }
 .field-hint { margin: 6px 0 0; font-size: 12px; line-height: 1.45;
   color: var(--text-muted); }
 
@@ -971,6 +977,24 @@ function coerceShape(data) {
     }
   }
   d.goals = arr(d.goals);
+  /* Goals used to name one of four fixed sources, which stopped meaning
+     anything once accounts became a list you can split and rename. Each one
+     becomes the accounts it actually referred to, plus how to count them. */
+  const capped = d.goals.find(g => g.source === 'midCapped');
+  for (const g of d.goals) {
+    if (Array.isArray(g.accounts)) { delete g.source; continue; }
+    const from = { cashBank: ['cash', 'bank'], midCapped: ['mid'],
+                   midOverflow: ['mid'], long: ['long'] }[g.source] || ['cash'];
+    g.accounts = from;
+    g.count = g.source === 'long' ? 'all'
+      : g.source === 'midOverflow' ? 'overflow' : 'capped';
+    if (g.count === 'overflow' && capped) g.overflowOf = capped.id;
+    delete g.source;
+  }
+  for (const g of d.goals) {
+    if (!Array.isArray(g.accounts)) g.accounts = [];
+    if (!['all', 'capped', 'overflow'].includes(g.count)) g.count = 'capped';
+  }
   d.side = obj(d.side);
   const s = d.side;
   for (const k of ['taxable', 'otherMoney', 'hsa', 'daf', 'portfolios',
@@ -1457,19 +1481,28 @@ function computeGoals(st, computed, todayIso) {
   const c = computed[liveKey];
   const cur = currentMonthOf(yr, todayIso);
   const bal = (bid) => c.balances[`${bid}|${cur}`] || 0;
-  const capTarget = st.goals.find(g => g.source === 'midCapped')?.target || 0;
+  const byId = (id) => st.goals.find(g => g.id === id);
 
   return st.goals.map(g => {
-    let saved = 0;
-    if (g.source === 'cashBank') saved = Math.min(bal('cash') + bal('bank'), g.target);
-    else if (g.source === 'midCapped') saved = Math.min(bal('mid'), g.target);
-    else if (g.source === 'midOverflow') saved = Math.max(0, bal('mid') - capTarget);
-    else saved = bal('long');
+    /* An account named by a goal but since deleted contributes nothing rather
+       than breaking the goal — splitting one account into several is normal,
+       and the goal should keep working while you repoint it. */
+    const held = round2((g.accounts || []).reduce((t, id) => t + bal(id), 0));
+    let saved;
+    if (g.count === 'overflow') {
+      /* what these accounts hold beyond what another goal already claims */
+      const claimed = byId(g.overflowOf)?.target || 0;
+      saved = Math.max(0, held - claimed);
+    } else if (g.count === 'all') {
+      saved = held;
+    } else {
+      saved = Math.min(held, g.target || 0);   // capped: never more than the goal
+    }
     saved = round2(saved);
     const monthsLeft = g.targetDate
       ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
     return {
-      ...g, saved,
+      ...g, saved, held,
       progress: g.target ? saved / g.target : 0,
       monthsLeft,
       monthlyReq: monthsLeft > 0 ? round2((g.target - saved) / monthsLeft) : 0,
@@ -3190,6 +3223,7 @@ function buildFields(fields, values) {
     label.className = 'field';
     label.textContent = f.label;
     label.htmlFor = `rf-${f.key}`;
+    label.id = `rf-${f.key}-lbl`;
     cell.appendChild(label);
     let input;
     if (f.type === 'select') {
@@ -3200,6 +3234,26 @@ function buildFields(fields, values) {
         input.appendChild(o);
       }
       input.value = values[f.key] ?? f.options[0][0];
+    } else if (f.type === 'checks') {
+      /* One checkbox per option rather than a multi-select: picking several
+         accounts out of a list is the whole point, and a multi-select hides
+         that you can. */
+      input = document.createElement('div');
+      input.className = 'checkset';
+      input.setAttribute('role', 'group');
+      input.setAttribute('aria-labelledby', `rf-${f.key}-lbl`);
+      const chosen = new Set(values[f.key] || []);
+      for (const [v, text] of f.options) {
+        const line = document.createElement('label');
+        line.className = 'checkline';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.value = v;
+        box.checked = chosen.has(v);
+        line.appendChild(box);
+        line.appendChild(document.createTextNode(' ' + text));
+        input.appendChild(line);
+      }
     } else if (f.type === 'check') {
       input = document.createElement('input');
       input.type = 'checkbox';
@@ -3264,6 +3318,10 @@ function readFields(fields) {
   const out = {};
   for (const f of fields) {
     const el = F(`rf-${f.key}`);
+    if (f.type === 'checks') {
+      out[f.key] = [...el.querySelectorAll('input:checked')].map(b => b.value);
+      continue;
+    }
     if (f.type === 'check') { out[f.key] = el.checked; continue; }
     const raw = el.value.trim();
     if (f.type === 'money') { out[f.key] = parseMoney(raw); continue; }
@@ -3653,25 +3711,41 @@ const EDITORS = {
   /* Savings goals */
   goal: {
     title: (ds, isNew) => isNew ? 'Add a goal' : 'Savings goal',
-    sub: () => '"Saved" reads the chosen account\'s balance this month.',
-    fields: [
+    sub: () => '"Saved" adds up the balances of the accounts you tick, as they stand this '
+      + 'month. Split an account later and just tick the new ones here.',
+    cols: 2,
+    fields: (ds) => [
       { key: 'name', label: 'Name', type: 'text' },
-      { key: 'source', label: 'Saved reads from', type: 'select', options: [
-        ['cashBank', 'Cash + Banks (capped at target)'],
-        ['midCapped', 'Mid-term (capped at target)'],
-        ['midOverflow', 'Mid-term above the capped goal'],
-        ['long', 'Long-term holdings'],
-      ]},
       { key: 'target', label: 'Target', type: 'money' },
+      { key: 'accounts', label: 'Saved adds up', type: 'checks', wide: true,
+        options: accountsOf(state).map(a => [a.id, a.name]),
+        hint: 'Every account whose balance counts toward this goal.' },
+      { key: 'count', label: 'How much of it counts', type: 'select', options: [
+        ['capped', 'Up to the target, no further'],
+        ['all', 'All of it, however far past the target'],
+        ['overflow', 'Only what another goal has not claimed'],
+      ], hint: 'Two goals can share an account: cap the first, and let the second take '
+        + 'whatever sits above it.' },
+      { key: 'overflowOf', label: 'Claimed first by', type: 'select',
+        options: state.goals
+          .filter((g, i) => String(i) !== String(ds.idx))
+          .map(g => [g.id, g.name || g.id]),
+        showIf: (v) => v.count === 'overflow' },
       { key: 'targetDate', label: 'Target date', type: 'date' },
       noteField,
     ],
-    get: (ds) => state.goals[+ds.idx],
+    get: (ds) => ({ ...state.goals[+ds.idx],
+                    accounts: state.goals[+ds.idx].accounts || [] }),
+    blank: () => ({ count: 'capped',
+                    accounts: [hubAccount(state)?.id].filter(Boolean) }),
     save(ds, v) {
       const g = ds.idx !== undefined ? state.goals[+ds.idx]
         : (state.goals.push({ id: slugJs(v.name || 'goal') }), state.goals[state.goals.length - 1]);
-      Object.assign(g, { name: v.name, source: v.source, target: v.target ?? 0,
+      Object.assign(g, { name: v.name, accounts: v.accounts || [],
+        count: v.count, target: v.target ?? 0,
         targetDate: v.targetDate || null });
+      if (v.count === 'overflow' && v.overflowOf) g.overflowOf = v.overflowOf;
+      else delete g.overflowOf;
       g.note = v.note || undefined;
     },
     del: (ds) => state.goals.splice(+ds.idx, 1),

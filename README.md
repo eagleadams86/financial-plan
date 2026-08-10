@@ -46,9 +46,12 @@ must never show them.
   editor shows only the settings the current choice actually uses. Clicking
   outside any dialog closes it without saving, and a small ⓘ beside a figure
   explains the arithmetic behind it.
-- **Goals** — savings goals with progress, target dates, required monthly
-  saving, end-of-year liquidity, and a pace check that follows whichever goal
-  is next: the soonest deadline you haven't met yet.
+- **Goals** — savings goals that add up whichever accounts you tick, so
+  splitting an account is a matter of ticking the new ones. Each goal counts
+  its accounts up to the target, in full, or only what another goal hasn't
+  already claimed. Plus progress, target dates, required monthly saving,
+  end-of-year liquidity, and a pace check that follows whichever goal is next:
+  the soonest deadline you haven't met yet.
 - **Retirement** — Traditional vs Roth split; retirement accounts with a type
   (401(k), Roth IRA, HSA…) and their own contribution history, so nothing
   about Roth IRAs is special-cased; a **401(k) limit calculator** and a **Roth

@@ -264,16 +264,38 @@ t('total is the sum of the four accounts', () => {
 });
 
 group('Goals');
-t('each source maps to its balance, with caps and overflow', () => {
+t('the four old sources become the accounts they meant', () => {
   const s = H.coerceShape(fixtureState());
   const computed = H.computeAll(s, TODAY_FIX);
   const goals = H.computeGoals(s, computed, TODAY_FIX);
   const c = computed['2030'];
   const cur = '2030-04';
-  eq(goals[0].saved, 5000, 'cashBank capped at target');
+  eq(s.goals[0].accounts, ['cash', 'bank'], 'cashBank named two accounts');
+  eq(s.goals[0].source, undefined, 'and the old key is gone');
+  eq(goals[0].saved, 5000, 'capped at target');
   eq(goals[1].saved, 1200, 'mid capped at its target');
-  approx(goals[2].saved, c.balances[`mid|${cur}`] - 1200, 'overflow above the cap');
+  approx(goals[2].saved, c.balances[`mid|${cur}`] - 1200, 'overflow above the capped goal');
   approx(goals[3].saved, c.balances[`long|${cur}`], 'long uncapped');
+});
+t('a goal adds up every account it names', () => {
+  const s = H.coerceShape(fixtureState());
+  s.goals[0].accounts = ['cash', 'bank', 'mid'];
+  s.goals[0].count = 'all';
+  const computed = H.computeAll(s, TODAY_FIX);
+  const c = computed['2030'], cur = '2030-04';
+  const g = H.computeGoals(s, computed, TODAY_FIX)[0];
+  approx(g.saved, H.round2(c.balances[`cash|${cur}`] + c.balances[`bank|${cur}`]
+    + c.balances[`mid|${cur}`]), 'three accounts summed');
+});
+t('splitting an account does not break the goal that named it', () => {
+  /* the failure this replaced: a goal pointed at an account that no longer
+     exists, and read as if there were no money at all */
+  const s = H.coerceShape(fixtureState());
+  s.goals[0].accounts = ['cash', 'gone-account'];
+  s.goals[0].count = 'all';
+  const g = H.computeGoals(s, H.computeAll(s, TODAY_FIX), TODAY_FIX)[0];
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  approx(g.saved, c.balances['cash|2030-04'], 'the surviving account still counts');
 });
 t('monthly requirement divides the gap by the months left', () => {
   const s = H.coerceShape(fixtureState());

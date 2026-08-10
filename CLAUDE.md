@@ -98,6 +98,13 @@ numbers only. If a change needs a realistic payload, invent one.
   and keeps the numbers. Rollover (`rolloverYear`) copies categories+rules,
   keeps overlap manuals, seeds from computed December, and never touches the
   old year.
+- **Goals name the accounts they read.** `goal.accounts` is a list of account
+  ids and `goal.count` is `capped` / `all` / `overflow` (with `overflowOf`
+  naming the goal that claims the money first). The four fixed sources
+  (cashBank, midCapped, midOverflow, long) migrate once into that shape. An id
+  that no longer exists contributes nothing rather than breaking the goal —
+  splitting one account into several is normal, and the goal has to keep
+  working while you repoint it.
 - **A year can be built before it arrives.** `yearStarted(st, y, today)` is
   derived, never stored: a grid year has begun once today reaches its own
   first month, or once the year before it is entered through December.
@@ -163,7 +170,10 @@ neither `$` nor a thousands separator. `asMoneyInput()` formats on blur and
 `parseMoney()` reads leniently — symbol, commas and spaces all fall away, and
 an empty box is null rather than zero. Anything counted rather than paid (the
 paycheck count) opts out with `data-money="off"`.
-A field spec may carry `showIf(values)` — `buildFields()`
+`.grid-fields > div` sets `display: flex`, which outranks the browser's own
+`[hidden] { display: none }` — the explicit `div[hidden]` rule is what actually
+hides a field, and without it `showIf` looks like it works while changing
+nothing on screen. A field spec may carry `showIf(values)` — `buildFields()`
 re-evaluates on every select change, which is how each rule shows only its
 own setting — and `hint`, a line under the input for a field whose label can't
 carry the whole story. Retirement accounts are a generic list
