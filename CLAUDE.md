@@ -413,6 +413,12 @@ text is read once in `coerceShape` using the year it's filed under, and text
 that doesn't parse is kept and still displayed. Dates are formatted by slicing
 the ISO string, never by building a Date — a bare ISO day parses as UTC
 midnight, which renders as the day before west of Greenwich.
+**A donation is filed under the year its DATE falls in**, so editing one whose
+date sits outside the table it was in moves it to another table further down
+the page — which reads as the row vanishing, especially when you only came to
+fix a name. `donation.save` returns a "Moved to 2025 — dated Nov 1 2025" toast
+whenever the bucket changes (and "Added to" for a new one). Don't make the move
+silent again; a dateless row stays put and says nothing, which is right.
 IRA contributions edit through the `contrib` section — one row per (account,
 year) so each one is clickable, rather than a field buried in the account
 editor. `side.limits[year]` holds the inputs to the two calculators (401(k) limit,
