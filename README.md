@@ -48,7 +48,8 @@ must never show them.
   every month after. **Every note you've written anywhere in a year is gathered
   into one collapsible list at the foot of it** — cells, split parts, balances
   and rows — each one clickable to jump back to what it was about; the list
-  isn't there at all in a year you haven't annotated. Mark a month "entered" to freeze its
+  isn't there at all in a year you haven't annotated, and it stays open or shut
+  the way you left it, on this device, across years and refreshes. Mark a month "entered" to freeze its
   estimates into numbers, like overtyping formulas in Numbers. A finished year
   can be **converted to a yearly summary** (permanent — the History charts
   carry on unchanged), or deleted outright. A finished year holds its account

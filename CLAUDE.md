@@ -27,7 +27,7 @@ numbers only. If a change needs a realistic payload, invent one.
   default, anti-flash boot script, Back up dialog, privacy footer, Recent
   changes box) is the family pattern from Sprint Velocity — if a chrome rule
   changes in the family, mirror it here.
-- localStorage keys: `fin-state`, `fin-theme`, `fin-updated`. `save()` is the
+- localStorage keys: `fin-state`, `fin-theme`, `fin-updated`, `fin-open`. `save()` is the
   single write chokepoint (and where a future sync layer would hook in, SV
   style). `blankState()`/`coerceShape()`/`migrate()` guard every entry point;
   Restore shape-checks the RAW parse before coercing, so a wrong file is
@@ -416,7 +416,19 @@ twelve-by-forty grid. The collector is pure over state so it can be tested;
 `yearNotes(y)` renders it, and returns '' when there are none so the section
 isn't drawn at all rather than sitting empty. Each line carries the cell it
 came from and opens it on click — wired in `wireBudget`, because the list sits
-outside `.grid` and the grid's own listener can't reach it. The Venmo and large-purchase ledgers are gone entirely, entries
+outside `.grid` and the grid's own listener can't reach it.
+**A collapsible panel stays as you left it**: tag it `data-keep="<name>"` and
+`restoreOpenSections()` (called from `wireView`, so it re-applies after every
+render) does the rest. The set of open names lives in `fin-open`, its own
+localStorage key beside `fin-theme` — NOT a field on the state, because opening
+a panel is not an edit and must not push a new version of the plan to the cloud
+or ride along in every backup. `parseOpen`/`withSection` hold the logic away
+from storage so tests can pin them without writing to the real page's own keys;
+a corrupt value leaves everything closed rather than throwing mid-render. The
+notes panel is one preference across all years rather than one per year —
+re-opening it on every year change is the annoyance this removes. The changelog
+box is deliberately NOT remembered: it fetches the GitHub API when opened, and
+remembering it would fire that request on every page load. The Venmo and large-purchase ledgers are gone entirely, entries
 included; `coerceShape` also strips the copies an earlier version folded into
 `extraNotes`, matching on `where`, leaving the import's own notes alone.
 Investment panes are `side.portfolios` — `{id, name, rows}` each, add/rename/

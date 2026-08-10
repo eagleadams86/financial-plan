@@ -699,6 +699,43 @@ details.section table th, details.section table td { padding: 4px 6px; }
 const STORAGE_KEY = 'fin-state';
 const UPDATED_KEY = 'fin-updated';   // written by save(); the hook a future sync layer keys off
 const THEME_KEY   = 'fin-theme';
+/* Which collapsible sections you left open. Its own key, beside the theme,
+   rather than a field on the state: this is how one device is set up to look,
+   not part of the plan. Keeping it out of the state also keeps it out of every
+   backup file and out of the synced copy — opening a panel is not an edit, and
+   should not push a new version of your finances to the cloud. */
+const OPEN_KEY    = 'fin-open';
+
+/* The reading and writing are kept apart from localStorage itself so the tests
+   can pin them without touching it — the suite runs in an iframe on the real
+   page, and its own storage is the user's. Anything but a list of strings is
+   treated as nothing: this is a convenience, and a corrupt one must leave the
+   sections closed rather than throw on the way to drawing the page. */
+const parseOpen = (raw) => {
+  try {
+    const v = JSON.parse(raw || '[]');
+    return new Set(Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
+  } catch (e) { return new Set(); }
+};
+const withSection = (raw, key, isOpen) => {
+  const set = parseOpen(raw);
+  set[isOpen ? 'add' : 'delete'](key);
+  return JSON.stringify([...set]);
+};
+const openSections = () => parseOpen(localStorage.getItem(OPEN_KEY));
+const rememberSection = (key, isOpen) => localStorage.setItem(OPEN_KEY,
+  withSection(localStorage.getItem(OPEN_KEY), key, isOpen));
+
+/* Re-applied after every render, because a render rebuilds the elements. The
+   handler is ASSIGNED, not added, so re-rendering replaces it instead of
+   stacking a new one on each pass. */
+function restoreOpenSections() {
+  const open = openSections();
+  for (const d of document.querySelectorAll('details[data-keep]')) {
+    d.open = open.has(d.dataset.keep);
+    d.ontoggle = () => rememberSection(d.dataset.keep, d.open);
+  }
+}
 
 /* ── Date & number helpers ──────────────────────────────────────────────────
    Months are "YYYY-MM" strings throughout — comparable with <, sortable, and
@@ -2421,7 +2458,7 @@ function yearNotes(y) {
   const line = (n) => `<li${n.edit ? ` data-note="${esc(n.edit)}" data-id="${esc(n.id)}"${
     n.m ? ` data-m="${esc(n.m)}"` : ''} style="cursor:pointer" title="Click to open it"` : ''
     }><span class="muted">${esc(n.where)}</span> — ${esc(n.note)}</li>`;
-  return `<details class="section"><summary>Notes for ${esc(y)} (${items.length})</summary>
+  return `<details class="section" data-keep="notes"><summary>Notes for ${esc(y)} (${items.length})</summary>
     <ul class="notelist">${items.map(line).join('')}</ul></details>`;
 }
 
@@ -2844,7 +2881,7 @@ function looseArchive(year) {
   const years = new Set([...Object.keys(state.side.retirement || {}),
                          ...Object.keys(state.side.rothLimit || {})]);
   if (!years.size) return '';
-  return `<details class="section"><summary>Imported spreadsheet rows</summary>
+  return `<details class="section" data-keep="imported"><summary>Imported spreadsheet rows</summary>
     ${[...years].sort().reverse().map(y => `<h2 style="margin:12px 0 6px;font-size:14px">${esc(y)}</h2>
       ${looseTable('retirement', y)}${looseTable('rothLimit', y)}`).join('')}</details>`;
 }
@@ -3498,6 +3535,7 @@ function wireView(view) {
     state.ui.activeYear = e.target.value;
     save(); render();
   };
+  restoreOpenSections();
   if (view === 'budget') wireBudget();
   if (view === 'goals') buildGoalChart();
   if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
@@ -5640,6 +5678,7 @@ render();
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   afterRaise, bonusBase, bonusShare, yearFlows, summaryRowIsFlow, notesOfYear,
+  parseOpen, withSection,
   fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
