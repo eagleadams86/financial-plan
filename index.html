@@ -689,10 +689,18 @@ function looseDay(part, year) {
   if (i < 0) return null;
   return `${year}-${String(i + 1).padStart(2, '0')}-${String(+m[2]).padStart(2, '0')}`;
 }
-const dayLabel = (iso) => `${MONTH_ABBR[+iso.slice(5, 7) - 1]} ${+iso.slice(8, 10)}`;
-function dateRangeLabel(from, to) {
+const MONTH_FULL = ['January','February','March','April','May','June','July',
+  'August','September','October','November','December'];
+const dayLabel = (iso, long) =>
+  `${(long ? MONTH_FULL : MONTH_ABBR)[+iso.slice(5, 7) - 1]} ${+iso.slice(8, 10)}`;
+/* "2026-05-01" -> "May 1 2026", for a date that stands on its own rather than
+   inside a year's table. Sliced, like every other date the app renders. */
+const fullDayLabel = (iso) => /^\d{4}-\d{2}-\d{2}$/.test(iso || '')
+  ? `${dayLabel(iso)} ${iso.slice(0, 4)}` : (iso || '');
+function dateRangeLabel(from, to, long) {
   if (!from) return '';
-  return to && to !== from ? `${dayLabel(from)} – ${dayLabel(to)}` : dayLabel(from);
+  return to && to !== from
+    ? `${dayLabel(from, long)} – ${dayLabel(to, long)}` : dayLabel(from, long);
 }
 function todayISO(d) {
   const t = d || new Date();
@@ -1637,6 +1645,11 @@ function gridCard(y, yr) {
   const thisM = thisMonth();
   const live = yr.model === 'live';
   const started = yearStarted(state, y);
+  /* A row with no rule can't project anything, so a year made entirely of
+     projections is quietly missing it. Worth saying out loud rather than
+     leaving a total that looks wrong for no visible reason. */
+  const ruleless = yr.categories.filter(cat =>
+    !cat.isBalance && (cat.rule || 'none') === 'none');
 
   /* A year-total column pinned to the right end. A live grid can run past its
      own December (the projection tail), and a total mixing two calendar years
@@ -1788,7 +1801,11 @@ function gridCard(y, yr) {
       ? `Every month here is a projection, built from ${esc(String(+y - 1))}'s rules and its
          December balances — it keeps up as ${esc(String(+y - 1))} changes. ${esc(y)} takes over
          as the current year on 1 January, or as soon as you mark December ${esc(String(+y - 1))}
-         entered. Until then Goals, History and the other tabs stay on ${esc(String(+y - 1))}.`
+         entered. Until then Goals, History and the other tabs stay on ${esc(String(+y - 1))}.${
+         ruleless.length ? ` <strong>${ruleless.length} row${ruleless.length === 1 ? '' : 's'}
+           ${ruleless.length === 1 ? 'has' : 'have'} no rule</strong>, so ${
+           ruleless.length === 1 ? 'it stays' : 'they stay'} blank all year and the totals here
+           understate what ${esc(y)} will really cost — open a row to give it one.` : ''}`
       : live
       ? `Entered through <strong>${esc(monthLabel(yr.enteredThrough))}</strong>; later months are estimates that update as real numbers land. Click any cell to edit it.`
       : 'A finished year — every figure is history. Click a cell to correct it.'}</p>
@@ -1888,7 +1905,7 @@ function renderGoals() {
         aria-valuenow="${Math.round(pct * 100)}" aria-label="${esc(g.name)} progress">
         <i style="width:${(pct * 100).toFixed(1)}%"></i></div>
       <div class="foot">${Math.round(g.progress * 100)}%
-        ${g.targetDate ? ` · target ${esc(g.targetDate.slice(0, 7))} (${fmtYrMo(g.monthsLeft)})` : ''}
+        ${g.targetDate ? ` · target ${esc(monthLabel(g.targetDate.slice(0, 7)))} (${fmtYrMo(g.monthsLeft)})` : ''}
         ${!done && g.monthlyReq ? ` · needs ${fmtMoney0(g.monthlyReq)}/mo` : ''}</div>
     </div>`;
   };
@@ -2477,7 +2494,7 @@ function renderVacations() {
         <thead><tr><th style="text-align:left">Trip / holiday</th><th style="text-align:left">Dates</th><th>Nights</th><th>PTO days</th></tr></thead>
         <tbody>${p.entries.map((e, idx) => `<tr class="editrow" data-edit="ptoEntry"
           data-year="${esc(y)}" data-idx="${idx}"><th scope="row">${esc(e.name)}</th>
-          <td style="text-align:left">${esc(dateRangeLabel(e.from, e.to) || e.dates || '')}</td>
+          <td style="text-align:left">${esc(dateRangeLabel(e.from, e.to, true) || e.dates || '')}</td>
           <td>${e.nights ?? ''}</td><td>${e.ptoDays || 0}</td></tr>`).join('')}</tbody>
         <tfoot><tr><th>Used</th><td></td><td></td><td>${used}</td></tr></tfoot>
       </table></div>
@@ -2520,7 +2537,7 @@ function renderGiving() {
           const amount = i.funding || i.grant || i.cash || 0;
           const how = i.funding ? 'fund deposit' : i.grant ? 'DAF grant' : 'cash';
           return `<tr class="editrow" data-edit="donation" data-year="${esc(y)}" data-idx="${idx}">
-            <td style="text-align:left">${esc(i.date)}</td>
+            <td style="text-align:left">${esc(fullDayLabel(i.date))}</td>
             <th scope="row">${esc(i.foundation)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
             <td style="text-align:left">${esc(i.cause || '')}</td>
             <td>${fmtMoney(amount)}</td>
@@ -2558,13 +2575,27 @@ function yearFlows(y) {
     }
   } else {
     const balIds = new Set(yr.categories.filter(c => c.isBalance).map(c => c.id));
-    for (const [key, cell] of Object.entries(yr.cells)) {
+    /* The COMPUTED cells, not just the stored ones: a finished year has the
+       same figures either way, but this is what lets a year still running —
+       and a year built ahead, which has nothing stored at all — show what it
+       comes to rather than a bar of whatever has been typed in so far. */
+    const cells = (C[y] && C[y].cells) || yr.cells;
+    for (const [key, cell] of Object.entries(cells)) {
       const [cid, m] = key.split('|');
       if (balIds.has(cid) || !m.startsWith(y)) continue;
       if (cell.v > 0) inn += cell.v; else out += cell.v;
     }
   }
   return { in: round2(inn), out: round2(Math.abs(out)) };
+}
+
+/* True where a year's bars include figures the plan worked out rather than
+   ones that happened — this year past the entered marker, and every year
+   built ahead of it. */
+function yearIsProjected(y) {
+  const yr = state.years[y];
+  if (!yr || yr.kind !== 'grid' || yr.model !== 'live') return false;
+  return (yr.enteredThrough || '') < `${y}-12`;
 }
 
 function renderHistory() {
@@ -2579,7 +2610,8 @@ function renderHistory() {
   </div>
   <div class="card">
     <h2>Money in vs money out</h2>
-    <p class="sub">All account flows per year, transfers included — striped bars are money out.
+    <p class="sub">All account flows per year, transfers included — striped bars are money out,
+      and a dashed edge means the year is still being worked out or hasn't arrived yet.
       Early years are best-effort reads of the old bi-weekly sheets.</p>
     <div class="chartbox" style="height:300px"><canvas id="flowChart"></canvas></div>
   </div>`;
@@ -2632,19 +2664,25 @@ function buildHistoryCharts() {
     g.moveTo(2, 10); g.lineTo(10, 2); g.stroke();
     return (typeof Chart !== 'undefined') ? g.createPattern(c, 'repeat') : tint;
   };
+  /* a projected year's bars are outlined with a dashed edge — the same signal
+     the two line charts use for a figure the plan worked out */
+  const projected = flowYears.map(yearIsProjected);
+  const dashed = (ctx) => projected[ctx.dataIndex] ? [5, 3] : undefined;
   newChart('flowChart', {
     type: 'bar',
     data: { labels: flowYears, datasets: [
       { label: 'Money in', data: flows.map(f => f.in),
         backgroundColor: cssVar('--ok-bg'), borderColor: cssVar('--ok'),
-        borderWidth: 2, borderSkipped: false },
+        borderWidth: 2, borderSkipped: false, borderDash: dashed },
       { label: 'Money out', data: flows.map(f => f.out),
         backgroundColor: stripes(cssVar('--err'), cssVar('--err-bg')),
-        borderColor: cssVar('--err'), borderWidth: 2, borderSkipped: false },
+        borderColor: cssVar('--err'), borderWidth: 2, borderSkipped: false,
+        borderDash: dashed },
     ]},
     options: {
       plugins: { legend: { labels: { color: cssVar('--chart-tick') } },
-        tooltip: { callbacks: { label: (t) => `${t.dataset.label}: ${fmtMoney0(t.parsed.y)}` } } },
+        tooltip: { callbacks: { label: (t) => `${t.dataset.label}: ${fmtMoney0(t.parsed.y)}`
+          + (projected[t.dataIndex] ? ' (projected)' : '') } } },
       scales: { x: chartAxes(), y: Object.assign(chartAxes(),
         { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
     },
