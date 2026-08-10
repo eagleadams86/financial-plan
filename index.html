@@ -671,9 +671,28 @@ function monthAdd(m, n) {
 function monthDiff(a, b) {   // b - a in months
   return (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7));
 }
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function monthLabel(m) {
-  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${names[+m.slice(5, 7) - 1]} ${m.slice(2, 4)}`;
+  return `${MONTH_ABBR[+m.slice(5, 7) - 1]} ${m.slice(2, 4)}`;
+}
+/* "2026-07-04" -> "Jul 4". Sliced, never parsed into a Date: a Date built from
+   a bare ISO day is UTC midnight, which reads as the day before west of
+   Greenwich — exactly the kind of off-by-one nobody notices until a holiday
+   lands on the wrong date. */
+/* One end of the old free-text range: "2026-01-19", "Jan 30", "Mar 7". */
+function looseDay(part, year) {
+  const t = String(part || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const m = /^([A-Za-z]{3,})\.?\s+(\d{1,2})$/.exec(t);
+  if (!m) return null;
+  const i = MONTH_ABBR.findIndex(x => x.toLowerCase() === m[1].slice(0, 3).toLowerCase());
+  if (i < 0) return null;
+  return `${year}-${String(i + 1).padStart(2, '0')}-${String(+m[2]).padStart(2, '0')}`;
+}
+const dayLabel = (iso) => `${MONTH_ABBR[+iso.slice(5, 7) - 1]} ${+iso.slice(8, 10)}`;
+function dateRangeLabel(from, to) {
+  if (!from) return '';
+  return to && to !== from ? `${dayLabel(from)} – ${dayLabel(to)}` : dayLabel(from);
 }
 function todayISO(d) {
   const t = d || new Date();
@@ -979,6 +998,26 @@ function coerceShape(data) {
   d.vacations = obj(d.vacations);
   d.vacations.trips = arr(d.vacations.trips);
   d.vacations.pto = obj(d.vacations.pto);
+  /* PTO dates were one free-text box ("Jan 30 - Feb 1", or a bare ISO day).
+     They're a from/to pair on real date pickers now. Read the old text once,
+     taking the year from the bucket it's filed under; anything that doesn't
+     parse keeps its text and still shows. */
+  for (const [y, p] of Object.entries(d.vacations.pto)) {
+    const bucket = obj(p);
+    d.vacations.pto[y] = bucket;
+    bucket.entries = arr(bucket.entries);
+    for (const e of bucket.entries) {
+      if (e.from || !e.dates) continue;
+      /* split only on a spaced dash, so the hyphens inside an ISO date survive */
+      const parts = String(e.dates).split(/\s+[–—-]\s+/);
+      const from = looseDay(parts[0], y);
+      const to = parts.length > 1 ? looseDay(parts[1], y) : from;
+      if (!from || (parts.length > 1 && !to)) continue;
+      e.from = from;
+      e.to = to;
+      delete e.dates;
+    }
+  }
   d.ui = obj(d.ui);
   return d;
 }
@@ -2438,7 +2477,7 @@ function renderVacations() {
         <thead><tr><th style="text-align:left">Trip / holiday</th><th style="text-align:left">Dates</th><th>Nights</th><th>PTO days</th></tr></thead>
         <tbody>${p.entries.map((e, idx) => `<tr class="editrow" data-edit="ptoEntry"
           data-year="${esc(y)}" data-idx="${idx}"><th scope="row">${esc(e.name)}</th>
-          <td style="text-align:left">${esc(e.dates || '')}</td>
+          <td style="text-align:left">${esc(dateRangeLabel(e.from, e.to) || e.dates || '')}</td>
           <td>${e.nights ?? ''}</td><td>${e.ptoDays || 0}</td></tr>`).join('')}</tbody>
         <tfoot><tr><th>Used</th><td></td><td></td><td>${used}</td></tr></tfoot>
       </table></div>
@@ -3730,17 +3769,26 @@ const EDITORS = {
 
   ptoEntry: {
     title: (ds, isNew) => isNew ? 'Add a trip / holiday' : 'PTO entry',
+    sub: () => 'Leave "to" empty for a single day. Nights and PTO days stay yours to set — '
+      + 'a long weekend and a week off can cover the same dates and cost different leave.',
     fields: [
       { key: 'name', label: 'Trip / holiday', type: 'text', wide: true },
-      { key: 'dates', label: 'Dates (free text)', type: 'text' },
+      { key: 'from', label: 'From', type: 'date' },
+      { key: 'to', label: 'To', type: 'date' },
       { key: 'nights', label: 'Nights', type: 'number' },
       { key: 'ptoDays', label: 'PTO days', type: 'number' },
     ],
     get: (ds) => state.vacations.pto[ds.year].entries[+ds.idx],
+    blank: (ds) => ({ from: `${ds.year}-01-01` }),
     save(ds, v) {
       const list = state.vacations.pto[ds.year].entries;
-      const row = { name: v.name || '?', dates: v.dates || '',
-        nights: v.nights, ptoDays: v.ptoDays ?? 0 };
+      const row = { name: v.name || '?', nights: v.nights, ptoDays: v.ptoDays ?? 0 };
+      if (v.from) row.from = v.from;
+      /* a single day is stored as from === to, so every entry reads the same */
+      if (v.from) row.to = v.to || v.from;
+      /* text that never parsed into dates is kept until it's replaced */
+      const old = ds.idx !== undefined ? list[+ds.idx] : null;
+      if (!v.from && old && old.dates) row.dates = old.dates;
       if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
     },
     del: (ds) => state.vacations.pto[ds.year].entries.splice(+ds.idx, 1),

@@ -143,6 +143,11 @@ own setting. Retirement accounts are a generic list
 the old fixed `k401` fields and the separate `rothContribs` map migrate once
 in `coerceShape` and the sources are emptied so deletions can't resurrect
 them. Nothing about Roth IRAs is special-cased in code.
+PTO entries carry `from`/`to` ISO days rather than a free-text range; the old
+text is read once in `coerceShape` using the year it's filed under, and text
+that doesn't parse is kept and still displayed. Dates are formatted by slicing
+the ISO string, never by building a Date — a bare ISO day parses as UTC
+midnight, which renders as the day before west of Greenwich.
 IRA contributions edit through the `contrib` section — one row per (account,
 year) so each one is clickable, rather than a field buried in the account
 editor. `side.limits[year]` holds the inputs to the two calculators (401(k) limit,
