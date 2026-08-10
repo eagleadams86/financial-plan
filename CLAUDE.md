@@ -138,6 +138,9 @@ since Intl renders unknown codes literally rather than throwing — PTO
 default, row sort, the paycheck-rule toggle, the dividend fallback rate, the
 assumed retirement return, and the price-lookup key) live behind the header's
 ⚙ button; `buildMoneyFormats()` rebuilds the formatters on every render.
+`extraNotes` renders on summary years only — a live grid says what it means in
+its own cells. The folded ledger entries still live in the data (and in every
+export); they just aren't a panel on the budget page.
 Investment panes are `side.portfolios` — `{id, name, rows}` each, add/rename/
 reorder through the `portfolio` section; the old fixed `taxable`/`hsa` lists
 migrate once and are emptied. A holdings table reads through `holdingList()`,
