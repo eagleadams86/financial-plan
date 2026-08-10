@@ -3535,19 +3535,23 @@ function openRowEditor(section, ds, isNew) {
   rowDialog.showModal();
 }
 
+/* A section that did something the reader can't see on the page in front of
+   them says so by returning the sentence to show; saving is otherwise silent,
+   because the change is right there in the grid. */
 F('rowForm').onsubmit = () => {
   const { section, ds, spec } = rowCtx;
-  EDITORS[section].save(ds, readFields(spec));
+  const said = EDITORS[section].save(ds, readFields(spec));
   save(); render();
+  if (typeof said === 'string') toast(said);
 };
 F('rowCancelBtn').onclick = () => rowDialog.close();
 F('rowDeleteBtn').onclick = () => {
   const { section, ds } = rowCtx;
   /* A section can refuse a delete (and say why itself) by returning false. */
-  const done = EDITORS[section].del(ds) !== false;
+  const said = EDITORS[section].del(ds);
   rowDialog.close();
   save(); render();
-  if (done) toast('Deleted');
+  if (said !== false) toast(typeof said === 'string' ? said : 'Deleted');
 };
 F('rowUpBtn').onclick = () => moveRow(-1);
 F('rowDownBtn').onclick = () => moveRow(1);
@@ -3574,6 +3578,65 @@ const noteField = { key: 'note', label: 'Note', type: 'note' };
    so the list isn't retyped each time; the amounts stay empty, because what
    carries between trips is their shape, not last trip's prices. */
 const TRIP_TEMPLATE = ['Airfare', 'Stay', 'Transport', 'Excursions', 'Food', 'Tips', 'Spa'];
+
+/* ── Row edits flow forward into the years built ahead ────────────────────
+   A projection year is a copy of this one taken at rollover. Its FIGURES look
+   after themselves — the engine recomputes them from this year's cells every
+   render, so a number typed here moves next year immediately. Its ROWS were a
+   one-time snapshot, so without this a row you add, retire, re-rule or rename
+   would leave next year quietly describing a budget you no longer have, and
+   its totals understating (or inventing) what the year will cost.
+
+   Only years that have not STARTED are touched: once a year is live it owns
+   its rows, and reaching back into a year holding real figures would be
+   rewriting history. Only the edited row is touched, so anything you set up in
+   next year alone is left as it is — including a row you deleted there, which
+   stays deleted rather than reappearing. A row that exists in both years does
+   NOT keep a different rule in each, though: same id, same row, and a rule
+   that disagreed across the boundary is the drift this closes. */
+function projectionYearsAfter(st, year, todayIso) {
+  const started = startedGridYears(st, todayIso);
+  const live = started[started.length - 1];
+  /* History doesn't rewrite the future: tidying a row in a year that has been
+     and gone says nothing about what next year's budget should look like. */
+  if (live && year < live) return [];
+  return Object.keys(st.years).sort().filter(y =>
+    st.years[y].kind === 'grid' && y > year && !yearStarted(st, y, todayIso));
+}
+const projectionsAfter = (year) => projectionYearsAfter(state, year);
+
+/* The three shapes a row edit takes, each over a list of year objects — the
+   edited year first, then the years built ahead — so what reaches which year
+   is decided in one place above and these just do as they're told. */
+function applyToRow(yrs, id, apply, add) {
+  for (const yr of yrs) {
+    const cat = yr.categories.find(c => c.id === id);
+    if (cat) apply(cat);
+    /* `add` is the adding-a-row case, and it builds a fresh object per year:
+       one shared object would make every year's row the same row, so a later
+       edit to one of them would silently change all the others. */
+    else if (add) yr.categories.push(add());
+  }
+}
+function dropRow(yrs, id) {
+  for (const yr of yrs) {
+    yr.categories = yr.categories.filter(c => c.id !== id);
+    for (const k of Object.keys(yr.cells))       // orphaned cells go too
+      if (k.startsWith(id + '|')) delete yr.cells[k];
+  }
+}
+function swapRows(yrs, a, b) {
+  for (const yr of yrs) {
+    const i = yr.categories.findIndex(c => c.id === a);
+    const j = yr.categories.findIndex(c => c.id === b);
+    if (i >= 0 && j >= 0)
+      [yr.categories[i], yr.categories[j]] = [yr.categories[j], yr.categories[i]];
+  }
+}
+
+/* "2027", "2027 and 2028", "2027, 2028 and 2029" — for saying which. */
+const andList = (xs) => xs.length < 2 ? xs.join('')
+  : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 
 /* ── The registry ─────────────────────────────────────────────────────────── */
 const EDITORS = {
@@ -3667,21 +3730,29 @@ const EDITORS = {
           cat.rate = v.rate;
         else delete cat.rate;
       };
+      const ahead = projectionsAfter(ds.year);
+      const yrs = [yr, ...ahead.map(y => state.years[y])];
       if (ds.id) {
-        apply(yr.categories.find(c => c.id === ds.id));
+        applyToRow(yrs, ds.id, apply);
       } else {
         let id = slugJs(v.name), n = 2;
         while (yr.categories.some(c => c.id === id)) id = `${slugJs(v.name)}-${n++}`;
-        const cat = { id };
-        apply(cat);
-        yr.categories.push(cat);
+        /* A row of that name may already be up there — added to next year
+           alone, before it was added here — in which case the two are one row
+           and it takes these settings rather than being duplicated. */
+        applyToRow(yrs, id, apply, () => { const cat = { id }; apply(cat); return cat; });
       }
+      /* Said out loud, because the year you can see isn't the only one that
+         changed — and a row turning up in a year you weren't looking at is
+         exactly the kind of surprise a plan shouldn't spring on you. */
+      if (ahead.length) return `Saved — ${andList(ahead)} updated to match`;
     },
     del(ds) {
-      const yr = state.years[ds.year];
-      yr.categories = yr.categories.filter(c => c.id !== ds.id);
-      for (const k of Object.keys(yr.cells))       // orphaned cells go too
-        if (k.startsWith(ds.id + '|')) delete yr.cells[k];
+      const ahead = projectionsAfter(ds.year);
+      dropRow([state.years[ds.year], ...ahead.map(y => state.years[y])], ds.id);
+      /* Naming the years matters more here than on a save: the row's figures
+         in them go with it, and there is no undo. */
+      if (ahead.length) return `Deleted from ${ds.year} and ${andList(ahead)}`;
     },
     /* Reorder within the row's own section — the grid renders grouped, so
        hopping over a row of another section would look like nothing moved. */
@@ -3693,7 +3764,11 @@ const EDITORS = {
       while (j >= 0 && j < yr.categories.length
              && yr.categories[j].section !== sec) j += dir;
       if (j < 0 || j >= yr.categories.length) return false;
-      [yr.categories[i], yr.categories[j]] = [yr.categories[j], yr.categories[i]];
+      /* The same two rows swap next year, so the two grids stay readable side
+         by side. A year missing one of them keeps its own order — there is no
+         sensible swap to make there. */
+      swapRows([yr, ...projectionsAfter(ds.year).map(y => state.years[y])],
+        ds.id, yr.categories[j].id);
       return true;
     },
   },
@@ -4988,7 +5063,8 @@ window.__finTestHooks = { round2, fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
   normRole, gridToSummary, rulesNeedingYear, partsKind, limitsFor,
-  yearStarted, startedGridYears };
+  yearStarted, startedGridYears,
+  projectionYearsAfter, applyToRow, dropRow, swapRows, andList };
 
 /* ── Hooks the sync module calls ──────────────────────────────────────────
    The module is a separate <script type="module"> and can't see this scope. */

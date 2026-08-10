@@ -519,6 +519,100 @@ t('the old year is untouched by a rollover', () => {
   eq(JSON.stringify(s.years['2030']), before);
 });
 
+group('Row edits reach the years built ahead');
+/* 2030 is live (TODAY_FIX sits in it); 2031 and 2032 are built ahead of it. */
+function withYearsAhead() {
+  const s = H.coerceShape(fixtureState());
+  for (const y of ['2031', '2032']) s.years[y] = {
+    kind: 'grid', model: 'live', startMonth: `${y}-01`, monthCount: 12,
+    enteredThrough: `${+y - 1}-12`,
+    categories: [{ id: 'internet', name: 'Internet', role: 'normal', rule: 'carry' }],
+    cells: {}, paychecks: {}, seeds: {}, overrides: {}
+  };
+  return s;
+}
+t('an edit in the live year reaches every year built ahead of it', () => {
+  const s = withYearsAhead();
+  eq(H.projectionYearsAfter(s, '2030', TODAY_FIX), ['2031', '2032']);
+  eq(H.projectionYearsAfter(s, '2031', TODAY_FIX), ['2032'],
+    'and a projection year reaches the one built on top of it');
+  eq(H.projectionYearsAfter(s, '2032', TODAY_FIX), [], 'the last one reaches nothing');
+});
+t('history does not rewrite the future', () => {
+  const s = withYearsAhead();
+  eq(H.projectionYearsAfter(s, '2029', TODAY_FIX), [],
+    'tidying a row in a year gone by says nothing about next year');
+});
+t('a year that has started owns its own rows again', () => {
+  const s = withYearsAhead();
+  s.years['2030'].enteredThrough = '2030-12';    // 2031 goes live
+  eq(H.projectionYearsAfter(s, '2031', TODAY_FIX), ['2032'],
+    'the new live year still feeds the one ahead of it');
+  eq(H.projectionYearsAfter(s, '2030', TODAY_FIX), [],
+    'but 2030 is history now and reaches nothing');
+});
+t('a summary year ahead is never rewritten', () => {
+  const s = withYearsAhead();
+  s.years['2032'] = { kind: 'summary', categoryTotals: [] };
+  eq(H.projectionYearsAfter(s, '2030', TODAY_FIX), ['2031']);
+});
+t('a rule change lands ahead, and skips a year that dropped the row', () => {
+  const yrs = [
+    { categories: [{ id: 'gym', rule: 'none' }], cells: {} },
+    { categories: [{ id: 'gym', rule: 'none' }], cells: {} },
+    { categories: [], cells: {} },
+  ];
+  H.applyToRow(yrs, 'gym', (c) => { c.rule = 'carry'; });
+  eq(yrs[0].categories[0].rule, 'carry');
+  eq(yrs[1].categories[0].rule, 'carry');
+  eq(yrs[2].categories, [], 'a row deleted up there stays deleted');
+});
+t('a new row is added to each year as its own object', () => {
+  const yrs = [{ categories: [], cells: {} }, { categories: [], cells: {} }];
+  const apply = (c) => { c.name = 'Gym'; c.rule = 'carry'; };
+  H.applyToRow(yrs, 'gym', apply, () => { const c = { id: 'gym' }; apply(c); return c; });
+  eq(yrs[1].categories[0], { id: 'gym', name: 'Gym', rule: 'carry' });
+  yrs[0].categories[0].rule = 'avg';
+  eq(yrs[1].categories[0].rule, 'carry', 'not one object shared between years');
+});
+t('a row already in next year is taken over, not duplicated', () => {
+  const yrs = [{ categories: [], cells: {} },
+               { categories: [{ id: 'gym', name: 'Gym', rule: 'none' }], cells: {} }];
+  const apply = (c) => { c.name = 'Gym'; c.rule = 'carry'; };
+  H.applyToRow(yrs, 'gym', apply, () => { const c = { id: 'gym' }; apply(c); return c; });
+  eq(yrs[1].categories.length, 1);
+  eq(yrs[1].categories[0].rule, 'carry');
+});
+t('deleting a row takes its figures out of every year it reached', () => {
+  const yrs = [
+    { categories: [{ id: 'gym' }, { id: 'rent' }],
+      cells: { 'gym|2030-01': { v: -45 }, 'rent|2030-01': { v: -1800 } } },
+    { categories: [{ id: 'gym' }], cells: { 'gym|2031-04': { v: -45 } } },
+  ];
+  H.dropRow(yrs, 'gym');
+  eq(yrs[0].categories.map(c => c.id), ['rent']);
+  eq(Object.keys(yrs[0].cells), ['rent|2030-01'], 'orphaned cells go too');
+  eq(yrs[1].categories, []);
+  eq(Object.keys(yrs[1].cells), []);
+});
+t('reordering swaps the same two rows ahead, whatever order they were in', () => {
+  const yrs = [
+    { categories: [{ id: 'a' }, { id: 'b' }] },
+    { categories: [{ id: 'x' }, { id: 'b' }, { id: 'a' }] },
+    { categories: [{ id: 'a' }] },
+  ];
+  H.swapRows(yrs, 'a', 'b');
+  eq(yrs[0].categories.map(c => c.id), ['b', 'a']);
+  eq(yrs[1].categories.map(c => c.id), ['x', 'a', 'b']);
+  eq(yrs[2].categories.map(c => c.id), ['a'], 'a year without both keeps its order');
+});
+t('the years changed are named in plain English', () => {
+  eq(H.andList([]), '');
+  eq(H.andList(['2027']), '2027');
+  eq(H.andList(['2027', '2028']), '2027 and 2028');
+  eq(H.andList(['2027', '2028', '2029']), '2027, 2028 and 2029');
+});
+
 group('Accounts');
 t('the legacy roles compute identically to the fixed four-account chain', () => {
   /* The engine used to hard-code cash/mid/long/bank and five role names. It

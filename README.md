@@ -83,9 +83,13 @@ must never show them.
   "repeat last month" rows open at December, "average so far" rows at last
   year's average, and a cycle bill keeps its beat, so an annual renewal still
   lands in its own month. Each hands over as soon as you type a real month in.
-  It keeps tracking the current year as that changes, and doesn't
-  become the current year — Goals, History and the rest carry on reading this
-  one — until 1 January, or until you mark December entered.
+  It keeps tracking the current year as that changes — **rows included**: add a
+  row to this year, retire one, rename it, change its rule or move it, and next
+  year is changed to match, so a year you built in advance never quietly
+  describes a budget you no longer have. Anything you set up in next year alone
+  is left alone. And it doesn't become the current year — Goals, History and
+  the rest carry on reading this one — until 1 January, or until you mark
+  December entered.
 
 ## Getting started
 

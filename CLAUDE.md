@@ -150,7 +150,21 @@ keys the section needs — `data-year`, `data-idx`, `data-id`, `data-map`,
 `data-list`); add buttons carry `data-add`. ONE delegated listener on
 `#views` routes both and passes isNew explicitly — don't add per-row
 handlers. New sections: register in EDITORS, stamp the attributes in the
-renderer, done. Budget grid *cells* are the exception — they keep their own
+renderer, done. `save`/`del` may RETURN A STRING to be toasted — that is how a
+section reports something the reader can't see on the page in front of them;
+returning nothing stays silent, and `del` returning `false` still refuses.
+**Budget row edits flow forward into the years built ahead** — a projection
+year's figures already track every number you type (the engine recomputes
+them), but its ROWS were a snapshot taken at rollover, so adding, deleting,
+renaming, re-ruling or reordering a row applies there too, and the toast names
+the years. `projectionYearsAfter(st, year, today)` decides which years (grid,
+later, NOT yet started, and nothing at all if the edited year is behind the
+live one — history doesn't rewrite the future); `applyToRow`/`dropRow`/
+`swapRows` do the work over a plain list of year objects, so both halves are
+pure and pinned by tests. Only the edited row is touched: a row you set up in
+next year alone survives, and one you deleted there stays deleted rather than
+reappearing. A row present in both does NOT keep a different rule in each.
+Budget grid *cells* are the exception — they keep their own
 `#cellDialog` (kind/note/revert semantics the generic editor doesn't have).
 In its balance branch **every computed figure is a placeholder, never a value**
 — the balance as much as the interest and dividend boxes. Filling the balance
