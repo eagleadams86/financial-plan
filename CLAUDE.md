@@ -424,6 +424,20 @@ outside that card. Defaulted once from the data like `paycheckRule`: on if there
 is a holding in the fund or any donation with a `funding`/`grant`, off for
 cash-only giving, and never overruling a choice already made. Turning it off
 HIDES, never deletes — the holdings come back intact.
+**Donations sort by date, oldest first, undated last** — `data-idx` stays the
+position in the STORED list, which is what every edit, delete and move keys off,
+so never sort the array itself. A donation carries `pending`: planned, not yet
+made. Planned ones are OUT of the year's totals (counting money you haven't
+given would overstate the year and the deduction) and called out after them;
+the row reads italic plus the word "Planned", the estimate convention, never
+colour.
+**A field explains itself in its own `hint`, not in the dialog's `sub`.**
+Preferences had grown an eight-line paragraph describing five settings at once —
+one more sentence each time a setting was added — until the thing you came to
+change was unfindable. Its sub is one line now. A `type: 'check'` box is
+centred in the 40px an input occupies (`margin-top:10px`), NOT `margin-top:auto`
+— that pinned it to the bottom of its cell, so it drifted with however many
+lines its hint ran to.
 **A donation is filed under the year its DATE falls in**, so editing one whose
 date sits outside the table it was in moves it to another table further down
 the page — which reads as the row vanishing, especially when you only came to

@@ -103,7 +103,9 @@ must never show them.
   date one in any year, past or future, and that year gets its own table, which
   appears when it has something in it and goes when it doesn't. Plus a
   donor-advised fund's holdings, for those who have one — a Preferences switch,
-  since plenty of people don't, and donations are tracked either way.
+  since plenty of people don't, and donations are tracked either way. Each
+  donation is either done or **planned**: a planned one reads in italics, stays
+  out of the year's totals, and is counted up separately as what's still to go.
 - **History** — total liquidity 2011→now, and money in vs out for every one of
   those years, with the interest your accounts earned counted as money in so the
   two charts tell the same story. The oldest years come from bi-weekly sheets

@@ -232,6 +232,10 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
 /* An editable row shows a hand, and its row-name cell carries the pencil
    affordance — hover alone isn't discoverable on touch. */
 tr.editrow { cursor: pointer; }
+/* A donation you have only planned is an estimate, and reads like every other
+   estimate in the app — italic, plus the word "Planned" in its own column.
+   Never colour alone. */
+tr.planned td, tr.planned th { font-style: italic; color: var(--text-secondary); }
 tr.editrow > th:first-child::after, tr.editrow > td:first-child::after {
   content: ' ✎'; opacity: 0; font-size: 11px; color: var(--text-muted); }
 tr.editrow:hover > th:first-child::after,
@@ -3264,28 +3268,46 @@ function renderGiving() {
 
   const donTable = (y) => {
     const items = s.donations[y];
-    const funded = round2(items.reduce((t, i) => t + (i.funding || 0), 0));
-    const granted = round2(items.reduce((t, i) => t + (i.grant || 0), 0));
-    const cash = round2(items.reduce((t, i) => t + (i.cash || 0), 0));
-    const deductible = round2(items.filter(i => i.deductible)
+    const gone = items.filter(i => !i.pending);   // what has actually left
+    const sum = (rows, k) => round2(rows.reduce((t, i) => t + (i[k] || 0), 0));
+    const planned = round2(items.filter(i => i.pending)
+      .reduce((t, i) => t + Math.abs(i.funding || 0) + Math.abs(i.grant || 0)
+        + Math.abs(i.cash || 0), 0));
+    /* The summary counts what has HAPPENED. A donation you have only planned
+       is not money given, and folding it in would overstate both the year and
+       what you can deduct — it is called out separately instead. */
+    const deductible = round2(gone.filter(i => i.deductible)
       .reduce((t, i) => t + (i.funding || 0) + Math.abs(i.grant || 0) + Math.abs(i.cash || 0), 0));
+    /* Sorted by date, oldest first, with anything undated after — the order
+       they happen in. `data-idx` stays the position in the STORED list, which
+       is what every edit, delete and move keys off. */
+    const rows = items.map((i, idx) => ({ i, idx }))
+      .sort((a, b) => (a.i.date || '9999').localeCompare(b.i.date || '9999'));
     return `<div class="card">
       <h2>${esc(y)} donations</h2>
-      <p class="sub">${fmtMoney(funded)} into the giving fund, ${fmtMoney(Math.abs(granted))} granted out,
-        ${fmtMoney(Math.abs(cash))} given as cash · ${fmtMoney(deductible)} deductible.</p>
+      <p class="sub">${fmtMoney(sum(gone, 'funding'))} into the giving fund, ${
+        fmtMoney(Math.abs(sum(gone, 'grant')))} granted out, ${
+        fmtMoney(Math.abs(sum(gone, 'cash')))} given as cash · ${
+        fmtMoney(deductible)} deductible.${planned
+          ? ` ${fmtMoney(planned)} more is planned but hasn't gone yet.` : ''}</p>
       <div class="tablewrap"><table>
         <thead><tr><th style="text-align:left">Date</th><th style="text-align:left">Foundation</th>
           <th style="text-align:left">Cause</th><th>Amount</th><th style="text-align:left">How</th>
+          <th style="text-align:left">Status</th>
           <th style="text-align:left">Deductible</th></tr></thead>
-        <tbody>${items.map((i, idx) => {
+        <tbody>${rows.map(({ i, idx }) => {
           const amount = i.funding || i.grant || i.cash || 0;
           const how = i.funding ? 'fund deposit' : i.grant ? 'DAF grant' : 'cash';
-          return `<tr class="editrow" data-edit="donation" data-year="${esc(y)}" data-idx="${idx}">
+          /* Planned rows read as the estimates they are — the same italic the
+             budget grid gives an auto estimate, plus the word. Never colour. */
+          return `<tr class="editrow${i.pending ? ' planned' : ''}" data-edit="donation"
+            data-year="${esc(y)}" data-idx="${idx}">
             <td style="text-align:left">${esc(fullDayLabel(i.date))}</td>
             <th scope="row">${esc(i.foundation)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
             <td style="text-align:left">${esc(i.cause || '')}</td>
             <td>${fmtMoney(amount)}</td>
             <td style="text-align:left">${how}</td>
+            <td style="text-align:left">${i.pending ? 'Planned' : 'Done'}</td>
             <td style="text-align:left">${i.deductible ? 'Yes' : 'No'}</td></tr>`;
         }).join('')}</tbody>
       </table></div>
@@ -3916,7 +3938,11 @@ function buildFields(fields, values, link) {
       input = document.createElement('input');
       input.type = 'checkbox';
       input.checked = !!values[f.key];
-      input.style.cssText = 'width:20px;height:20px;margin-top:auto;align-self:flex-start';
+      /* Centred in the 40px an input would occupy, so a checkbox lines up with
+         the boxes beside it. NOT `margin-top:auto` — that pinned it to the
+         bottom of its cell, which made it drift up or down with however many
+         lines its hint happened to run to. */
+      input.style.cssText = 'width:20px;height:20px;margin-top:10px;align-self:flex-start';
     } else if (f.type === 'note') {
       input = document.createElement('textarea');
       input.rows = 2;
@@ -4333,29 +4359,30 @@ const EDITORS = {
   /* App-wide preferences (the header's ⚙ button) */
   prefs: {
     title: 'Preferences',
-    sub: () => 'Settings that apply everywhere. Currency is the 3-letter code (USD, EUR, '
-      + 'GBP, CAD…) — it changes how numbers display, not their values. PTO days seed new '
-      + 'holiday-planner years. Turn the paycheck setting on if some months bring three '
-      + 'paychecks instead of two: rows can then be set as an amount per check, and the '
-      + 'budget grows a row for the count. The donor-advised fund section is off for anyone '
-      + 'who has no such fund — donations are tracked either way. The price-lookup key stays '
-      + 'on this device and is never synced or backed up.',
+    /* One line. Every setting explains ITSELF underneath, which is what field
+       hints are for — this paragraph used to describe five settings at once
+       and grew by a sentence every time one was added, until nobody could find
+       the thing they came to change. */
+    sub: () => 'Settings that apply everywhere.',
     fields: [
-      { key: 'currency', label: 'Currency code', type: 'text' },
-      { key: 'ptoAllowance', label: 'PTO days per year', type: 'number', step: 1 },
-      { key: 'rowSort', label: 'Budget rows within a section', type: 'select', options: [
+      { key: 'currency', label: 'Currency', type: 'text',
+        hint: 'Three-letter code — USD, EUR, GBP, CAD. Changes how figures read, not what they are.' },
+      { key: 'ptoAllowance', label: 'PTO days a year', type: 'number', step: 1,
+        hint: 'What each new holiday-planner year starts with.' },
+      { key: 'rowSort', label: 'Budget row order', type: 'select', options: [
         ['manual', 'The order I put them in'],
         ['alpha', 'Alphabetical'],
-      ]},
-      { key: 'paycheckRule',
-        label: "I don't get the same number of paychecks every month", type: 'check' },
-      { key: 'givingFund', label: 'I have a donor-advised fund', type: 'check',
-        hint: 'Adds its holdings to the Giving tab. Donations are tracked either way.' },
-      { key: 'midTermRateAnnual', label: 'Default interest %/yr for dividend rows',
-        type: 'percent' },
-      { key: 'retirementReturnAnnual', label: 'Assumed retirement return %/yr',
-        type: 'percent' },
-      { key: 'avKey', label: 'Alpha Vantage API key (price lookups)', type: 'text', wide: true },
+      ], hint: 'Within a section. Alphabetical sorts on screen and leaves your order stored.' },
+      { key: 'paycheckRule', label: 'Paychecks vary by month', type: 'check',
+        hint: 'Three some months, two in others. Rows can then be an amount per check.' },
+      { key: 'givingFund', label: 'Donor-advised fund', type: 'check',
+        hint: 'Shows its holdings on Giving. Donations are tracked either way.' },
+      { key: 'midTermRateAnnual', label: 'Dividend row interest %/yr', type: 'percent',
+        hint: 'Used by a dividend row with no rate of its own.' },
+      { key: 'retirementReturnAnnual', label: 'Retirement return %/yr', type: 'percent',
+        hint: 'What the retirement projection assumes.' },
+      { key: 'avKey', label: 'Alpha Vantage key', type: 'text', wide: true,
+        hint: 'For share-price lookups. Stays on this device — never synced, never in a backup.' },
     ],
     get: () => ({ currency: state.settings.currency || 'USD',
                   ptoAllowance: state.settings.ptoAllowance,
@@ -4877,6 +4904,8 @@ const EDITORS = {
       { key: 'funding', label: 'Fund deposit', type: 'money' },
       { key: 'grant', label: 'DAF grant', type: 'money' },
       { key: 'cash', label: 'Cash gift', type: 'money' },
+      { key: 'pending', label: 'Planned — hasn’t gone out yet', type: 'check',
+        hint: 'Kept out of the year’s totals until you untick it.' },
       { key: 'deductible', label: 'Tax deductible', type: 'check' },
       noteField,
     ],
@@ -4885,7 +4914,7 @@ const EDITORS = {
     save(ds, v) {
       const row = { date: v.date || '', foundation: v.foundation || '?',
         cause: v.cause || '', funding: v.funding ?? 0, grant: v.grant ?? 0,
-        cash: v.cash ?? 0, deductible: !!v.deductible };
+        cash: v.cash ?? 0, deductible: !!v.deductible, pending: !!v.pending };
       if (v.note) row.note = v.note;
       /* A donation is filed under the year it happened, so its date decides
          which table it belongs to — change the date and it moves. */
