@@ -46,9 +46,7 @@ numbers only. If a change needs a realistic payload, invent one.
   STYLE in the grid, never a colour.
 - Estimate rules are table-driven in `RULES`: `carry` (Internet only — the
   sheet types Phone/Parking/Water into each month they apply, so a carry rule
-  there would invent charges; it reaches over the year boundary via
-  `priorYearCarry()`, because a year built ahead has no cells of its own and
-  January would otherwise be blank), `quarterly` (repeat on a cycle, `cat.every`
+  there would invent charges), `quarterly` (repeat on a cycle, `cat.every`
   months, default 3), `avg` (Credit Card, Venmo — mean of stored months
   before the estimate), `avglastyear` (mean of the prior calendar year's
   STORED months — never autos, so an estimate can't feed itself),
@@ -56,7 +54,21 @@ numbers only. If a change needs a realistic payload, invent one.
   `dividends` (per-row `cat.rate`, falling back to
   `settings.midTermRateAnnual` — rate/12 × prior cash+mid), `paycheck`
   (perCheck × count, incl. fractional counts; hidden entirely unless
-  `settings.paycheckRule`), `none`. `ruleDesc()` renders a rule with its
+  `settings.paycheckRule`), `none`.
+- **The backward-looking rules reach over the year boundary**, through the one
+  shared helper `priorYearRun()` (the prior year's recorded months for a row,
+  oldest first). A year built ahead has no cells of its own, so without it
+  `carry`, `quarterly` and `avg` all go blank for twelve months and the
+  projection's totals lie. `carry` takes the last month, `quarterly` takes the
+  last month AS ITS ANCHOR (a month, not just an amount — an annual bill must
+  land in its own month, and the last month with a figure is by definition on
+  the beat), `avg` takes the mean, and each defers the moment the new year has
+  a real month of its own. It reads RESOLVED cells, autos included — unlike
+  `avglastyear`, which must exclude them because it reads the same run it
+  writes. Here an auto hands back the figure already on screen, so nothing
+  drifts, and a SECOND year built ahead still fills in off the projection
+  behind it (the mean of a year of one mean is that mean — there's a test).
+  `ruleDesc()` renders a rule with its
   row's own numbers — use it, not RULE_LABEL, wherever a rule is named next
   to a specific row.
 - **Accounts are a list, not four fixed ids.** `settings.accounts` is ordered

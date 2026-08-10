@@ -1298,21 +1298,29 @@ const hasData = () => yearKeys().length > 0;
      missing  — a blank inside an entered month; counts as 0, flagged
      pinned   — a balance the sheet stated outright rather than derived */
 
-/* The last figure a row carried in the year BEFORE `m` — how "repeats the
-   last month" crosses a year boundary. Only the immediately preceding grid
-   year is on hand (computeAll hands each year its predecessor), which is the
-   same reach `samemonth` and `avglastyear` have. A month with nothing
-   recorded is skipped rather than repeated as $0. */
-function priorYearCarry(cat, m, ctx) {
+/* What a row recorded in the year BEFORE `m`, oldest first — the history the
+   backward-looking rules fall back on when the year they're estimating has
+   nothing of its own yet, which is every month of a year built ahead of time.
+   Only the immediately preceding grid year is on hand (computeAll hands each
+   year its predecessor), the same reach `samemonth` and `avglastyear` have. A
+   month with nothing recorded is left out rather than counted as $0.
+
+   These are RESOLVED cells, so a month the prior year itself estimated counts.
+   That is deliberate for all three callers: an estimate hands back the figure
+   the row was already showing, so nothing drifts, and building two years ahead
+   doesn't blank out again the moment the year behind is all projection. */
+function priorYearRun(cat, m, ctx) {
   const pm = ctx.prior?.months;
-  if (!pm) return null;
-  for (let i = pm.length - 1; i >= 0; i--) {
-    if (pm[i] >= m) continue;
-    const cell = ctx.prior.cells[`${cat.id}|${pm[i]}`];
-    if (cell && cell.kind !== 'missing') return cell.v;
+  if (!pm) return [];
+  const out = [];
+  for (const mm of pm) {
+    if (mm >= m) break;
+    const cell = ctx.prior.cells[`${cat.id}|${mm}`];
+    if (cell && cell.kind !== 'missing') out.push({ m: mm, v: cell.v });
   }
-  return null;
+  return out;
 }
+const priorYearLast = (cat, m, ctx) => priorYearRun(cat, m, ctx).slice(-1)[0] || null;
 
 /* One estimate rule per category, table-driven. Each is a small pure function
    (cat, month, ctx) -> dollars; ctx carries everything a rule may read. */
@@ -1331,7 +1339,7 @@ const RULES = {
       const cell = ctx.yr.cells[`${cat.id}|${ctx.months[i]}`];
       if (cell) return cell.v;
     }
-    return priorYearCarry(cat, m, ctx);
+    return priorYearLast(cat, m, ctx)?.v ?? null;
   },
 
   /* Cycle bills (a quarterly water bill, semi-annual insurance, an annual
@@ -1346,7 +1354,17 @@ const RULES = {
       const cell = ctx.yr.cells[`${cat.id}|${mm}`];
       if (cell) { lastV = cell.v; lastM = mm; }
     }
-    if (lastM === null) return null;
+    /* Nothing typed into this year yet — a year built ahead of time — so the
+       beat is measured from the last payment of the year before instead of
+       going silent for twelve months. The anchor has to be a MONTH, not just
+       an amount: an annual bill anchored on last April must land in April, and
+       "the last month with a figure" is by definition one that was on the beat,
+       so picking it up keeps the cycle in phase. */
+    if (lastM === null) {
+      const prev = priorYearLast(cat, m, ctx);
+      if (!prev) return null;
+      lastV = prev.v; lastM = prev.m;
+    }
     return monthDiff(lastM, m) % interval === 0 ? lastV : null;
   },
 
@@ -1360,7 +1378,13 @@ const RULES = {
       const cell = ctx.yr.cells[`${cat.id}|${mm}`];
       if (cell) { sum += cell.v; n++; }
     }
-    return n ? sum / n : null;
+    if (n) return sum / n;
+    /* No months of its own to average — a year built ahead of time — so it
+       averages the year before instead of showing nothing. The moment a real
+       month IS typed into this year, the branch above takes over and the rule
+       goes back to meaning "the months so far", exactly as it does mid-year. */
+    const run = priorYearRun(cat, m, ctx);
+    return run.length ? run.reduce((s, c) => s + c.v, 0) / run.length : null;
   },
 
   /* The steadier cousin of samemonth: what this row averaged across the whole

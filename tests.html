@@ -191,6 +191,19 @@ function computeFixture() {
   return H.computeAll(H.coerceShape(fixtureState()), TODAY_FIX);
 }
 
+/* The shape a rolled-over year arrives in: rules copied from the year before,
+   no cells of its own, entered through the December before it. Every
+   backward-looking rule has to keep working across that boundary or the whole
+   year reads as blank. */
+function projectNextYear(s, categories, cells) {
+  s.years['2031'] = {
+    kind: 'grid', model: 'live', startMonth: '2031-01', monthCount: 12,
+    enteredThrough: '2030-12',
+    categories, cells: cells || {}, paychecks: {}, seeds: {}, overrides: {}
+  };
+  return H.computeAll(H.coerceShape(s), TODAY_FIX);
+}
+
 group('Formula engine — rules');
 t('paycheck rule multiplies per-check by that month count (incl. the 3.5 case)', () => {
   const c = computeFixture()['2030'];
@@ -215,20 +228,10 @@ t('carry repeats the nearest earlier stored value', () => {
   approx(c.cells['internet|2030-06'].v, -50);
 });
 t('carry crosses the year boundary — a projected year opens at last December', () => {
-  /* The shape a rolled-over year arrives in: categories and rules copied, no
-     cells of its own, entered through the December before it. Every month of
-     it has to keep repeating what the row last held. */
-  const s = fixtureState();
-  s.years['2031'] = {
-    kind: 'grid', model: 'live', startMonth: '2031-01', monthCount: 12,
-    enteredThrough: '2030-12',
-    categories: [
-      { id: 'internet', name: 'Internet', role: 'normal', rule: 'carry' },
-      { id: 'newrow', name: 'Never recorded', role: 'normal', rule: 'carry' },
-    ],
-    cells: {}, paychecks: {}, seeds: {}, overrides: {}
-  };
-  const c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2031'];
+  const c = projectNextYear(fixtureState(), [
+    { id: 'internet', name: 'Internet', role: 'normal', rule: 'carry' },
+    { id: 'newrow', name: 'Never recorded', role: 'normal', rule: 'carry' },
+  ])['2031'];
   eq(c.cells['internet|2031-01'].kind, 'auto');
   approx(c.cells['internet|2031-01'].v, -50, 'January picks up the last figure from 2030');
   approx(c.cells['internet|2031-12'].v, -50, 'and it holds all year');
@@ -236,17 +239,70 @@ t('carry crosses the year boundary — a projected year opens at last December',
     'a row with no history anywhere stays blank rather than estimating $0');
 });
 t('a carried figure typed into the new year beats the year before it', () => {
-  const s = fixtureState();
-  s.years['2031'] = {
-    kind: 'grid', model: 'live', startMonth: '2031-01', monthCount: 12,
-    enteredThrough: '2030-12',
-    categories: [{ id: 'internet', name: 'Internet', role: 'normal', rule: 'carry' }],
-    cells: { 'internet|2031-02': { v: -65, kind: 'manual' } },
-    paychecks: {}, seeds: {}, overrides: {}
-  };
-  const c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2031'];
+  const c = projectNextYear(fixtureState(),
+    [{ id: 'internet', name: 'Internet', role: 'normal', rule: 'carry' }],
+    { 'internet|2031-02': { v: -65, kind: 'manual' } })['2031'];
   approx(c.cells['internet|2031-01'].v, -50, 'before the new figure, the old one');
   approx(c.cells['internet|2031-03'].v, -65, 'after it, the new one');
+});
+t('average so far falls back to last year while the new year has no months', () => {
+  const c = projectNextYear(fixtureState(), [
+    { id: 'cc', name: 'Credit Card', role: 'normal', rule: 'avg' },
+    { id: 'newrow', name: 'Never recorded', role: 'normal', rule: 'avg' },
+  ])['2031'];
+  // 2030's six resolved months: -900, -1100, -1000, -1000, -1234, -1058.50
+  approx(c.cells['cc|2031-01'].v, -1048.75, 'the mean of everything 2030 held');
+  approx(c.cells['cc|2031-09'].v, -1048.75, 'steady until a real month lands');
+  eq(c.cells['newrow|2031-03'].kind, 'missing', 'nothing to average anywhere: blank');
+});
+t('one month typed into the projected year takes the average back over', () => {
+  const c = projectNextYear(fixtureState(),
+    [{ id: 'cc', name: 'Credit Card', role: 'normal', rule: 'avg' }],
+    { 'cc|2031-01': { v: -600, kind: 'manual' } })['2031'];
+  approx(c.cells['cc|2031-02'].v, -600,
+    'back to meaning "the months so far", exactly as it does mid-year');
+});
+t('a cycle bill keeps its beat across the year boundary', () => {
+  const water = { id: 'water', name: 'Water', role: 'normal',
+    rule: 'quarterly', section: 'expense' };
+  const s = fixtureState();
+  s.years['2030'].categories.push({ ...water });
+  s.years['2030'].cells['water|2030-03'] = { v: -56, kind: 'actual' };
+  const c = projectNextYear(s, [{ ...water }])['2031'];
+  eq(c.cells['water|2031-01'].kind, 'missing', 'off the beat: blank');
+  approx(c.cells['water|2031-03'].v, -56, 'the Mar/Jun/Sep/Dec beat carries on');
+  approx(c.cells['water|2031-12'].v, -56);
+  eq(c.cells['water|2031-11'].kind, 'missing');
+});
+t('an annual bill lands in the same month a year later, not in January', () => {
+  const domain = { id: 'domain', name: 'Domain renewal', role: 'normal',
+    rule: 'quarterly', every: 12, section: 'expense' };
+  const s = fixtureState();
+  s.years['2030'].categories.push({ ...domain });
+  s.years['2030'].cells['domain|2030-02'] = { v: -18, kind: 'actual' };
+  const c = projectNextYear(s, [{ ...domain }])['2031'];
+  eq(c.cells['domain|2031-01'].kind, 'missing');
+  approx(c.cells['domain|2031-02'].v, -18, 'February again — the anchor is a month');
+  eq(c.cells['domain|2031-03'].kind, 'missing');
+});
+t('a second year built ahead fills in off the projection behind it', () => {
+  /* 2032's only history is 2031, which is nothing but estimates. Reading them
+     is what stops the far year going blank, and it can't drift: the mean of a
+     year of one mean is that mean. */
+  const s = fixtureState();
+  const cats = () => [
+    { id: 'internet', name: 'Internet', role: 'normal', rule: 'carry' },
+    { id: 'cc', name: 'Credit Card', role: 'normal', rule: 'avg' },
+  ];
+  projectNextYear(s, cats());
+  s.years['2032'] = {
+    kind: 'grid', model: 'live', startMonth: '2032-01', monthCount: 12,
+    enteredThrough: '2031-12',
+    categories: cats(), cells: {}, paychecks: {}, seeds: {}, overrides: {}
+  };
+  const c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2032'];
+  approx(c.cells['internet|2032-06'].v, -50);
+  approx(c.cells['cc|2032-06'].v, -1048.75);
 });
 t('same-month-last-year reaches into the prior year and rounds', () => {
   const s = H.coerceShape(fixtureState());
