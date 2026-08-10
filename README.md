@@ -48,7 +48,10 @@ must never show them.
   every month after. Mark a month "entered" to freeze its
   estimates into numbers, like overtyping formulas in Numbers. A finished year
   can be **converted to a yearly summary** (permanent — the History charts
-  carry on unchanged), or deleted outright.
+  carry on unchanged), or deleted outright. A finished year holds its account
+  balances as figures you stated at the time rather than a chain to recompute,
+  and an account you've since closed stops at its last month instead of
+  following you into later years.
 - **Everything is editable, everywhere** — click any row (budget categories,
   accounts, goals, holdings, retirement accounts, trips and their line items,
   PTO entries, donations, the old yearly summaries) to change, annotate, or

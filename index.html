@@ -1018,6 +1018,10 @@ function coerceShape(data) {
     a.divEvery = [1, 3, 6, 12].includes(+a.divEvery) ? +a.divEvery : 3;
     if (!a.divTo) a.divTo = a.id;
     if (!/^\d{4}-\d{2}$/.test(a.since || '')) delete a.since;
+    /* `until` closes an account: the last month it held anything. Set once,
+       when a past year's balance row becomes an account, and like `since` it
+       is a fact about the data rather than something to type. */
+    if (!/^\d{4}-\d{2}$/.test(a.until || '')) delete a.until;
     acctIds.add(a.id);
   }
   for (const a of d.settings.accounts) {
@@ -1204,6 +1208,57 @@ function coerceShape(data) {
       yr.extraNotes = yr.extraNotes.filter(n => !FOLDED.test(String((n && n.where) || '')));
   for (const k of ['rothContribs', 'k401', 'comp', 'bonuses', 'retirement',
                    'rothLimit', 'donations', 'limits']) s[k] = obj(s[k]);
+  /* A past year's account balances used to be ordinary budget ROWS flagged
+     `isBalance` — a row called "Checking" carrying twelve monthly figures,
+     sitting under an Accounts heading but editable as a budget line and
+     invisible to everything that reads accounts. They become real accounts
+     with STATED balances, which is what a pinned year holds anyway.
+
+     One account per distinct row NAME, reused wherever that name recurs, so
+     "Checking" across three years is one account rather than three. A name
+     whose slug is already an account id folds into that account — which is how
+     the 2025 "Cash" row rejoins the Cash it demonstrably became (its December
+     figure is the live year's opening balance). Names are kept as they were;
+     merging or renaming afterwards is a click in the account editor. */
+  /* Taken BEFORE the loop: a name that recurs across years is one account, and
+     its closing month is the last one ANY of those years states — not just the
+     year that happened to create it. */
+  const liveAccountIds = new Set(d.settings.accounts.map(a => a.id));
+  for (const [y, yr] of Object.entries(d.years)) {
+    if (!yr || yr.kind !== 'grid') continue;
+    const bals = (yr.categories || []).filter(c => c && c.isBalance);
+    if (!bals.length) continue;
+    yr.overrides = obj(yr.overrides);
+    yr.cells = obj(yr.cells);
+    for (const cat of bals) {
+      const id = slugJs(cat.name || cat.id) || cat.id;
+      /* An account built out of history is one you no longer hold — it stops
+         at its last stated month. Without that it would keep its closing
+         balance and ride forward into every later year, because a live year
+         carries the prior December on. An account that already existed before
+         this ran is a live one and keeps no end. */
+      const fromHistory = !liveAccountIds.has(id);
+      let acct = d.settings.accounts.find(a => a.id === id);
+      if (!acct) {
+        acct = { id, name: cat.name || id, rate: 0, creditTo: id,
+          divRate: 0, divEvery: 3, divTo: id };
+        d.settings.accounts.push(acct);
+      }
+      for (const k of Object.keys(yr.cells)) {
+        if (!k.startsWith(cat.id + '|')) continue;
+        const m = k.slice(cat.id.length + 1);
+        /* a balance already stated for that account wins — this is filling in
+           history, not overwriting it */
+        if (yr.overrides[`${id}|${m}`] === undefined)
+          yr.overrides[`${id}|${m}`] = { v: num(yr.cells[k].v) || 0 };
+        delete yr.cells[k];
+        if (fromHistory && m > (acct.until || '')) acct.until = m;
+      }
+    }
+    /* the rows go, so a second load can't convert them twice */
+    yr.categories = yr.categories.filter(c => !(c && c.isBalance));
+  }
+
   /* A bonus used to be stored twice: once on the comp year and once in the
      Bonuses-by-year map. Keeping two copies of one number in step by hand is
      not a thing anyone does, so the comp card was reading a bonus the table
@@ -1588,6 +1643,11 @@ function computeYear(st, yearKey, prior) {
       /* Started once, started for good: an account that has begun keeps its
          row for the rest of the year even in months where nothing moves. */
       const accounts = accountsOf(st).filter(a => {
+        /* An account that has been closed stops here. Without this, a bank you
+           left in 2022 keeps its last balance and rides forward into every
+           year after it, silently inflating Total — the live year carries the
+           prior December forward, and history is full of prior Decembers. */
+        if (a.until && m > a.until) return false;
         if (running[a.id]) return true;
         const from = accountBeginsAt(yr, a, hub && hub.id);
         if (from === null || m >= from) { running[a.id] = true; return true; }
@@ -1676,6 +1736,25 @@ function computeYear(st, yearKey, prior) {
       }
       balances[`total|${m}`] = round2(total);
       balanceKinds[`total|${m}`] = kindAt(m);
+    } else {
+      /* A pinned year STATES its balances — there is no chain to run and no
+         projection to run it from, only the figures you read off a statement
+         at the time. So an account shows up in a past year exactly where it
+         has one, and nowhere else: no interest, no carry-forward, no month
+         invented for an account that didn't exist yet. */
+      let total = 0, any = false;
+      for (const a of accountsOf(st)) {
+        const ov = yr.overrides[`${a.id}|${m}`];
+        if (!ov) continue;
+        balances[`${a.id}|${m}`] = round2(ov.v);
+        balanceKinds[`${a.id}|${m}`] = 'pinned';
+        total += ov.v;
+        any = true;
+      }
+      if (any) {
+        balances[`total|${m}`] = round2(total);
+        balanceKinds[`total|${m}`] = 'pinned';
+      }
     }
   }
 
@@ -2100,13 +2179,18 @@ function gridCard(y, yr) {
      beside the hub, so those would sit at $0 forever — hide them rather than
      show dead rows. They appear the moment anything feeds them. */
   const accounts = accountsOf(state);
+  const stated = (a) => Object.keys(yr.overrides).some(k => k.startsWith(a.id + '|'));
   const activeBal = (a) => a.hub
     || (yr.seeds[a.id] || 0) !== 0
-    || Object.keys(yr.overrides).some(k => k.startsWith(a.id + '|'))
+    || stated(a)
     || Object.keys(yr.balAdjust || {}).some(k => k.startsWith(a.id + '|'))
     || yr.categories.some(cat => normRole(cat).transferTo === a.id)
     || accounts.some(o => o.id !== a.id && o.creditTo === a.id);
-  const activeAccounts = accounts.filter(activeBal);
+  /* A PINNED year shows only the accounts it actually holds figures for. The
+     live year's rules don't apply to history: the hub wasn't necessarily the
+     hub in 2020, and an account that exists today didn't exist then — showing
+     it as an empty row would be inventing a past for it. */
+  const activeAccounts = accounts.filter(live ? activeBal : stated);
   /* The paychecks row is machinery for the per-check rule — clutter for a
      budget that doesn't use it. */
   const usesPaychecks = state.settings.paycheckRule
@@ -2116,7 +2200,7 @@ function gridCard(y, yr) {
     (a.rate || 0) ? `grows ${round2(a.rate * 100)}%/yr` : '',
     (a.rate || 0) && a.creditTo !== a.id ? `interest paid into ${accountName(state, a.creditTo)}` : '',
   ].filter(Boolean).join(' — ') + ' — click for name, rate & interest destination';
-  const liveBalRows = !live ? '' : secheadRow('Accounts')
+  const balRows = !activeAccounts.length ? '' : secheadRow('Accounts')
     + activeAccounts.map(a =>
     `<tr class="balance"><th class="lbl" scope="row" data-edit="account"
       data-bal="${esc(a.id)}" style="cursor:pointer"
@@ -2128,7 +2212,8 @@ function gridCard(y, yr) {
         if (v === undefined)
           return `<td class="cell ${m === thisM ? 'now' : ''}"
             data-bal="${esc(a.id)}" data-m="${m}"
-            title="Not tracked yet — click to start this account from ${esc(monthLabel(m))}">·</td>`;
+            title="${live ? `Not tracked yet — click to start this account from ${esc(monthLabel(m))}`
+              : `Nothing recorded — click to state what ${esc(a.name)} held in ${esc(monthLabel(m))}`}">·</td>`;
         const kind = c.balanceKinds[`${a.id}|${m}`];
         const ov = yr.overrides[`${a.id}|${m}`];
         return `<td class="cell c-${kind} ${m === thisM ? 'now' : ''}"
@@ -2141,9 +2226,10 @@ function gridCard(y, yr) {
        should be able to look like a fact while every account above it says
        otherwise. */
     + `<tr class="total"><th class="lbl" scope="row">Total</th>${
-        months.map(m => `<td class="c-${c.balanceKinds[`total|${m}`]} ${
+        months.map(m => `<td class="c-${c.balanceKinds[`total|${m}`] || 'missing'} ${
           m === thisM ? 'now' : ''}">${
-          fmtCell(c.balances[`total|${m}`] || 0)}</td>`).join('')}${rowTotalTd()}</tr>`
+          c.balances[`total|${m}`] === undefined ? '·'
+            : fmtCell(c.balances[`total|${m}`])}</td>`).join('')}${rowTotalTd()}</tr>`
     + (!usesPaychecks ? '' :
       /* The count the income row is actually multiplying by, not just the ones
          typed in: a year built ahead inherits last year's, and a row reading
@@ -2203,7 +2289,7 @@ function gridCard(y, yr) {
     ${monthControls}
     <div class="gridwrap"><table class="grid">
       <thead>${head}</thead>
-      <tbody>${catRows}${liveBalRows}${pinnedBalRows}</tbody>
+      <tbody>${catRows}${balRows}${pinnedBalRows}</tbody>
     </table></div>
     <div class="gridlegend">
       <span>Plain — actual</span>
@@ -3883,8 +3969,15 @@ const EDITORS = {
         ['transfer', `Moves ${hubAccount(state)?.name || 'cash'} into another account`],
         ['pass', `Never touches ${hubAccount(state)?.name || 'cash'} — another account pays it`],
       ]},
+      /* Closed accounts are left out: money can't move into a bank you no
+         longer have, and after a history import they would outnumber the
+         live ones in this list. One already pointed at a closed account
+         keeps it, so an old row still reads correctly. */
       { key: 'transferTo', label: 'The other account', type: 'select',
-        options: accountsOf(state).filter(a => !a.hub).map(a => [a.id, a.name]),
+        options: accountsOf(state)
+          .filter(a => !a.hub && (!a.until || a.id === (ds.id
+            && (state.years[ds.year].categories.find(c => c.id === ds.id) || {}).transferTo)))
+          .map(a => [a.id, a.name]),
         showIf: (v) => v.role !== 'normal' },
       { key: 'creditTiming', label: 'Counted against that account', type: 'select', options: [
         ['pre', 'Before its monthly interest'],
@@ -5035,13 +5128,21 @@ function openCellEditor(yearKey, type, id, m) {
           acct.divEvery || 3]} — ${paidOut ? fmtMoney(paidOut) : 'nothing'} this month${
         (acct.divTo || acct.id) !== acct.id ? `, into ${accountName(state, acct.divTo)}` : ''}.` : '',
     ].filter(Boolean).join(' ') || 'No growth or dividend rate set on this account.';
-    F('cellContext').textContent = (ov
-      ? 'This balance is stated (pinned), not computed. '
-      : cur === undefined
-        ? `${acct.name} isn't tracked this early yet. Save a number here and it starts from `
-          + `${monthLabel(m)}, carrying forward from what you type. `
-        : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held. `)
-      + rateLine;
+    /* A pinned year has no chain and no projection — every balance in it is a
+       figure read off a statement at the time. So there is nothing to say
+       about rates or what a month "should" have been: the number is the whole
+       story, and offering to correct interest that was never computed would
+       be inviting an edit that does nothing. */
+    F('cellContext').textContent = !live
+      ? (ov ? `What ${acct.name} held in ${monthLabel(m)}. Past years are stated outright — clear the box to drop the figure.`
+            : `Nothing recorded for ${acct.name} in ${monthLabel(m)}. Type what it held.`)
+      : (ov
+        ? 'This balance is stated (pinned), not computed. '
+        : cur === undefined
+          ? `${acct.name} isn't tracked this early yet. Save a number here and it starts from `
+            + `${monthLabel(m)}, carrying forward from what you type. `
+          : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held. `)
+        + rateLine;
     /* All three computed figures show as PLACEHOLDERS rather than values:
        typing one in is what makes it an override, so opening the dialog to
        correct the interest and saving can't also freeze the balance at the
@@ -5054,14 +5155,14 @@ function openCellEditor(yearKey, type, id, m) {
     F('cellValue').value = ov ? showMoney(ov.v) : '';
     F('cellValue').placeholder = cur === undefined ? '' : fmtMoney(round2(cur || 0));
     F('cellNote').value = ov?.note || '';
-    F('cellBalWrap').hidden = false;
+    F('cellBalWrap').hidden = !live;   // nothing to adjust where nothing is computed
     F('cellInterest').value = showMoney(typeof adj.interest === 'number' ? adj.interest : '');
     F('cellInterest').placeholder = fmtMoney(round2(earned || 0));
     F('cellDividend').value = showMoney(typeof adj.dividend === 'number' ? adj.dividend : '');
     F('cellDividend').placeholder = fmtMoney(round2(paidOut || 0));
     kindWrap.hidden = true;
-    revertBtn.hidden = !(ov || adj.interest !== undefined || adj.dividend !== undefined);
-    clearBtn.hidden = true;
+    revertBtn.hidden = !live || !(ov || adj.interest !== undefined || adj.dividend !== undefined);
+    clearBtn.hidden = !(!live && ov);   // a past year's figure is cleared, not reverted
   } else {   // paychecks count
     F('cellRowBtn').hidden = true;
     F('cellSplitBtn').hidden = true;
@@ -5211,6 +5312,10 @@ F('cellClearBtn').onclick = () => {
   const yr = state.years[yearKey];
   if (type === 'cat') delete yr.cells[`${id}|${m}`];
   else if (type === 'pay') delete yr.paychecks[m];
+  /* Only offered on a pinned year, where the stated figure IS the balance —
+     in a live year the same button would look like it clears a computed
+     number it can't touch, so Revert is what's shown there instead. */
+  else if (type === 'bal') delete yr.overrides[`${id}|${m}`];
   cellDialog.close();
   save(); render();
   toast('Cleared');

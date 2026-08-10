@@ -179,8 +179,24 @@ numbers only. If a change needs a realistic payload, invent one.
   month if that year computed one, else the year's own seed. That ordering is
   what keeps a year built early tracking the current year's projection instead
   of freezing at whatever it was seeded with.
-- Prior years: `model: 'pinned'` grids (every cell an actual, no balance
-  model) and `kind: 'summary'` years. The live year is always the newest grid
+- Prior years: `model: 'pinned'` grids and `kind: 'summary'` years. A pinned
+  grid has **no balance chain** — it STATES its balances, straight out of
+  `yr.overrides`, kind `pinned`, no interest and no carry-forward, and it draws
+  only the accounts that actually have a figure in it (the live year's
+  `activeBal` rules don't apply to history: the hub wasn't necessarily the hub
+  in 2020). Those balances used to be budget ROWS flagged `isBalance`, editable
+  as budget lines and invisible to everything that reads accounts; `coerceShape`
+  converts them once — one account per distinct row NAME, folding into an
+  existing account where the slug already matches, cells moved to `overrides`,
+  rows deleted so it can't run twice.
+- **`until` closes an account**, the mirror of `since`. Set only on accounts
+  built out of history, to the last month ANY year states for that name. Without
+  it a bank you left in 2021 keeps its closing balance and rides forward for
+  ever, because a live year opens each account on the prior December and history
+  is all prior Decembers — it silently inflated Total, which is exactly what the
+  real-data cross-check caught. Like `since` it is a fact about the data and has
+  no editor field. Closed accounts are also left out of the transfer-target
+  dropdown (a row already pointing at one keeps it). The live year is always the newest grid
   that has begun.
   `gridToSummary()` folds a pinned grid into totals — flows sum, balance rows
   keep DECEMBER (a sum of monthly balances is meaningless). It is permanent,

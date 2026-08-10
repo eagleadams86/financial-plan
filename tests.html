@@ -874,6 +874,80 @@ t('other-money balances become accounts stated in the month they joined', () => 
   eq(stated[1].v, 40);
 });
 
+group('Past-year balance rows become accounts');
+function historyState() {
+  const bal = (id, name) => ({ id, name, role: 'normal', rule: 'none', isBalance: true });
+  const yr = (start, cats, cells) => ({ kind: 'grid', model: 'pinned',
+    startMonth: `${start}-01`, monthCount: 12, categories: cats, cells,
+    paychecks: {}, seeds: {}, overrides: {} });
+  return { settings: { accounts: [{ id: 'cash', name: 'Cash (SPAXX)', rate: 0, hub: true }] },
+    years: {
+      '2020': yr(2020, [bal('checking', 'Checking'), bal('brokerage', 'Brokerage')],
+        { 'checking|2020-01': { v: 1000, kind: 'actual' },
+          'checking|2020-02': { v: 1100, kind: 'actual' },
+          'brokerage|2020-12': { v: 5000, kind: 'actual' } }),
+      /* the same name a year later — one account, not two */
+      '2021': yr(2021, [bal('checking', 'Checking')],
+        { 'checking|2021-06': { v: 1200, kind: 'actual' } }),
+      /* a row named for an account that already exists folds into it */
+      '2022': yr(2022, [bal('cash', 'Cash')],
+        { 'cash|2022-03': { v: 2500, kind: 'actual' } }),
+    } };
+}
+t('a balance row becomes an account holding stated balances', () => {
+  const d = H.coerceShape(historyState());
+  eq(d.years['2020'].categories, [], 'the rows are gone');
+  eq(d.years['2020'].cells, {}, 'and so are their cells');
+  eq(d.years['2020'].overrides['checking|2020-01'], { v: 1000 });
+  eq(d.years['2020'].overrides['brokerage|2020-12'], { v: 5000 });
+  ok(d.settings.accounts.some(a => a.id === 'checking' && a.name === 'Checking'));
+});
+t('one account per name, however many years it spans', () => {
+  const d = H.coerceShape(historyState());
+  eq(d.settings.accounts.filter(a => a.id === 'checking').length, 1);
+  eq(d.years['2021'].overrides['checking|2021-06'], { v: 1200 },
+    'the later year states the same account');
+});
+t('a row named for an account you still have folds into it', () => {
+  const d = H.coerceShape(historyState());
+  eq(d.settings.accounts.filter(a => a.id === 'cash').length, 1);
+  eq(d.years['2022'].overrides['cash|2022-03'], { v: 2500 });
+  eq(d.settings.accounts.find(a => a.id === 'cash').until, undefined,
+    'and it stays open, because it is an account you still hold');
+});
+t('an account built from history is closed at its last figure', () => {
+  /* Otherwise its closing balance rides forward for ever: a live year opens
+     each account on the prior December, and history is all prior Decembers. */
+  const d = H.coerceShape(historyState());
+  const by = (id) => d.settings.accounts.find(a => a.id === id);
+  eq(by('checking').until, '2021-06', 'the last month ANY year states, not the first year’s');
+  eq(by('brokerage').until, '2020-12');
+});
+t('a closed account is left out of a later year entirely', () => {
+  const s = H.coerceShape(historyState());
+  s.years['2023'] = { kind: 'grid', model: 'live', startMonth: '2023-01', monthCount: 12,
+    enteredThrough: '2022-12', categories: [], cells: {}, paychecks: {},
+    seeds: {}, overrides: { 'cash|2023-01': { v: 9000 } } };
+  const c = H.computeAll(s, '2023-06-15')['2023'];
+  eq(c.balances['checking|2023-01'], undefined, 'a bank you left in 2021 is not in 2023');
+  eq(c.balances['brokerage|2023-01'], undefined);
+  approx(c.balances['total|2023-01'], 9000, 'and Total is only what you actually hold');
+});
+t('a pinned year states its balances rather than chaining them', () => {
+  const c = H.computeAll(H.coerceShape(historyState()), '2026-08-10')['2020'];
+  approx(c.balances['checking|2020-01'], 1000);
+  eq(c.balanceKinds['checking|2020-01'], 'pinned');
+  eq(c.balances['checking|2020-03'], undefined,
+    'no carry-forward — a past year holds only what it states');
+  approx(c.balances['total|2020-01'], 1000, 'Total adds up the month’s stated figures');
+  approx(c.balances['total|2020-12'], 5000, 'December: only the brokerage has one');
+});
+t('converting twice changes nothing', () => {
+  const once = H.coerceShape(historyState());
+  const twice = H.coerceShape(JSON.parse(JSON.stringify(once)));
+  eq(JSON.stringify(twice), JSON.stringify(once));
+});
+
 t('a bonus stored on a comp year moves into Bonuses by year, once', () => {
   const d = H.coerceShape({ side: {
     comp: { '2025': { salary: 100000, raisePct: 0.03, bonus: 9000 } },
