@@ -523,27 +523,58 @@ t('an interest override and a dividend adjust one month only', () => {
   approx(c.interest['long|2030-02'], 0, 'the override is what the editor shows');
   approx(c.dividend['long|2030-02'], 100, 'and so is the dividend one');
 });
-t('an account with a start month is blank and out of Total before it', () => {
+t('an account starts at the first month it has a figure, not before', () => {
   const s = H.coerceShape(fixtureState());
-  s.settings.accounts.push({ id: 'venmo', name: 'Venmo', rate: 0, creditTo: 'venmo',
-    since: '2030-04' });
-  s.years['2030'].seeds.venmo = 250;
+  s.settings.accounts.push({ id: 'venmo', name: 'Venmo', rate: 0, creditTo: 'venmo' });
+  /* stated in April, the way typing into that cell states it */
+  s.years['2030'].overrides['venmo|2030-04'] = { v: 250 };
   const c = H.computeAll(s, TODAY_FIX)['2030'];
-  eq(c.balances['venmo|2030-03'], undefined, 'nothing before the start month');
-  approx(c.balances['venmo|2030-04'], 250, 'starts from its seed');
+  eq(c.balances['venmo|2030-03'], undefined, 'blank before — not tracked, not zero');
+  approx(c.balances['venmo|2030-04'], 250, 'starts from what you stated');
+  approx(c.balances['venmo|2030-05'], 250, 'and carries forward');
   const bare = H.computeAll(H.coerceShape(fixtureState()), TODAY_FIX)['2030'];
   approx(c.balances['total|2030-03'], bare.balances['total|2030-03'], 'Total unchanged before');
   approx(c.balances['total|2030-04'] - bare.balances['total|2030-04'], 250, 'and counts after');
 });
-t('other-money balances become accounts that start this month', () => {
+t('stating an earlier month moves the start back to it', () => {
+  const s = H.coerceShape(fixtureState());
+  s.settings.accounts.push({ id: 'venmo', name: 'Venmo', rate: 0, creditTo: 'venmo' });
+  s.years['2030'].overrides['venmo|2030-04'] = { v: 250 };
+  s.years['2030'].overrides['venmo|2030-02'] = { v: 90 };   // backfilled by hand
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(c.balances['venmo|2030-01'], undefined, 'January still predates it');
+  approx(c.balances['venmo|2030-02'], 90, 'starts here now');
+  approx(c.balances['venmo|2030-03'], 90, 'carries forward');
+  approx(c.balances['venmo|2030-04'], 250, 'and the later figure still stands');
+});
+t('the old since+seed shape converts to a stated first month', () => {
+  const raw = fixtureState();
+  raw.settings.accounts = [
+    { id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true },
+    { id: 'venmo', name: 'Venmo', rate: 0, creditTo: 'venmo', since: '2030-04' }];
+  raw.years['2030'].seeds.venmo = 250;
+  const s = H.coerceShape(raw);
+  eq(s.settings.accounts[1].since, undefined, 'the setting is gone');
+  eq(s.years['2030'].seeds.venmo, undefined, 'and so is the seed that leaked backwards');
+  eq(s.years['2030'].overrides['venmo|2030-04'].v, 250, 'stated in its first month instead');
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(c.balances['venmo|2030-03'], undefined);
+  approx(c.balances['venmo|2030-04'], 250);
+});
+t('other-money balances become accounts stated in the month they joined', () => {
   const d = H.coerceShape({ years: { '2030': { kind: 'grid', model: 'live',
       startMonth: '2030-01', monthCount: 12, enteredThrough: '2030-01',
       categories: [], cells: {}, paychecks: {}, seeds: {}, overrides: {} } },
     side: { otherMoney: [{ name: 'Venmo', balance: 40 }, { name: 'Apple', balance: 5 }] } });
   eq(d.side.otherMoney.length, 0, 'source emptied so a delete cannot resurrect it');
   const venmo = d.settings.accounts.find(a => a.name === 'Venmo');
-  ok(venmo && venmo.since, 'became an account with a start month');
-  eq(d.years['2030'].seeds[venmo.id], 40, 'seeded from the balance it held');
+  ok(venmo, 'became an account');
+  eq(venmo.since, undefined, 'with no start-month setting to go stale');
+  eq(d.years['2030'].seeds[venmo.id], undefined, 'and no seed to leak backwards');
+  const stated = Object.entries(d.years['2030'].overrides)
+    .find(([k]) => k.startsWith(venmo.id + '|'));
+  ok(stated, 'its balance is stated in the month it joined');
+  eq(stated[1].v, 40);
 });
 
 t('the folded Venmo and purchase notes are cleared out', () => {
@@ -757,10 +788,13 @@ t('engine matches the spreadsheet where the import files exist', () => {
      their start month. The sheet's own SUM covers the original four accounts
      only, so from that month on the two totals are measuring different things
      — deliberately. Every individual account is still pinned. */
-  const firstSince = st.settings.accounts.map(a => a.since).filter(Boolean).sort()[0];
+  const core = new Set(['cash', 'mid', 'long', 'bank']);
+  const joined = Object.keys(st.years[liveKey].overrides || {})
+    .filter(k => !core.has(k.split('|')[0]))
+    .map(k => k.split('|')[1]).sort()[0];
   const skip = (key) => {
     const [id, m] = key.split('|');
-    return id === 'total' && firstSince && m >= firstSince;
+    return id === 'total' && joined && m >= joined;
   };
   for (const [key, exp] of Object.entries(expected.cells)) {
     if (!ownYear(key)) continue;

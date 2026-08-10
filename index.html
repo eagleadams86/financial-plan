@@ -842,9 +842,22 @@ const accountsOf = (st) => (st.settings.accounts || []);
 const accountById = (st, id) => accountsOf(st).find(a => a.id === id);
 const accountName = (st, id) => accountById(st, id)?.name || id;
 const hubAccount = (st) => accountsOf(st).find(a => a.hub) || accountsOf(st)[0];
-/* An account with a start month didn't exist before it — its earlier months
-   stay blank rather than showing a balance that was never tracked. */
-const accountLive = (a, m) => !a.since || m >= a.since;
+/* When an account starts being tracked is derived, never stored: it's the
+   first month that has anything to say about it — a seed, a stated balance, an
+   interest adjustment, or money moving into it. Months before that are blank
+   rather than zero, because "not tracked" and "held nothing" are different
+   claims, and typing a figure into an earlier month simply moves the start. */
+function accountBeginsAt(yr, a, hubId) {
+  if (a.id === hubId) return null;                       // the hub is always running
+  if ((yr.seeds || {})[a.id] !== undefined) return null;  // seeded: from month one
+  let first = null;
+  for (const map of [yr.overrides || {}, yr.balAdjust || {}])
+    for (const k of Object.keys(map)) {
+      const [bid, m] = k.split('|');
+      if (bid === a.id && (!first || m < first)) first = m;
+    }
+  return first;   // null means "from the first month"; a month means "from then"
+}
 
 /* The accounts a fresh budget starts with. Any number of accounts is allowed
    (see DEFAULT_ACCOUNTS' shape below) but these four ids are the ones the
@@ -1068,11 +1081,40 @@ function coerceShape(data) {
       while (acctIds.has(id)) id = `${slugJs(o.name || 'account')}-${n++}`;
       acctIds.add(id);
       d.settings.accounts.push({ id, name: o.name || id, rate: 0,
-        creditTo: id, since: start });
-      if (live) live.seeds[id] = o.balance || 0;
+        creditTo: id, divRate: 0, divTo: id, divEvery: 3 });
+      /* Stated in the month tracking begins, not seeded. A seed is the fallback
+         for every month with nothing before it, so it would put this balance in
+         January too — months that predate the account entirely. */
+      if (live) {
+        live.overrides = obj(live.overrides);
+        live.overrides[`${id}|${start}`] = { v: o.balance || 0 };
+      }
     }
     s.otherMoney = [];
   }
+  /* An account that began partway through used to carry `since` plus a seed,
+     and the seed leaked backwards: a seed is what ANY month falls back on when
+     nothing earlier exists, so today's balance appeared in January. It's a
+     stated balance in its first month now — the same thing you'd get by typing
+     it into that cell — which reaches forward and not back. When tracking
+     starts is then simply the first month with a figure in it. */
+  for (const a of d.settings.accounts) {
+    if (!a.since) continue;
+    for (const y of Object.keys(obj(d.years))) {
+      const yr = obj(d.years[y]);
+      d.years[y] = yr;
+      if (yr.kind !== 'grid') continue;
+      yr.seeds = obj(yr.seeds);
+      const seed = yr.seeds[a.id];
+      if (seed === undefined) continue;
+      yr.overrides = obj(yr.overrides);
+      if (yr.overrides[`${a.id}|${a.since}`] === undefined)
+        yr.overrides[`${a.id}|${a.since}`] = { v: seed };
+      delete yr.seeds[a.id];
+    }
+    delete a.since;
+  }
+
   /* The Venmo ledger and the large-purchase list were annexes under the
      budget that nothing in the engine ever read. They're gone, and so are
      their entries — a note on the cell is where that kind of detail belongs
@@ -1335,6 +1377,7 @@ function computeYear(st, yearKey, prior, today) {
 
   const ctx = { st, yr, months, resolved, balances, prior };
   const live = yr.model === 'live';
+  const running = {};   // account id -> tracking has begun
 
   for (const m of months) {
     /* 1 · categories */
@@ -1357,8 +1400,15 @@ function computeYear(st, yearKey, prior, today) {
 
     /* 2 · balances (live model only — the account chain from the sheet) */
     if (live) {
-      const accounts = accountsOf(st).filter(a => accountLive(a, m));
       const hub = hubAccount(st);
+      /* Started once, started for good: an account that has begun keeps its
+         row for the rest of the year even in months where nothing moves. */
+      const accounts = accountsOf(st).filter(a => {
+        if (running[a.id]) return true;
+        const from = accountBeginsAt(yr, a, hub && hub.id);
+        if (from === null || m >= from) { running[a.id] = true; return true; }
+        return false;
+      });
       /* transfersOut: hub money that also moves a far account (the far side is
          −v, because a transfer of −200 takes 200 out of the hub).
          preIn / postIn: pass-through money that skips the hub, landing either
@@ -1419,7 +1469,7 @@ function computeYear(st, yearKey, prior, today) {
       const creditedTo = {};
       const payInto = (want, from) => {
         const dest = accountById(st, want);
-        return dest && accountLive(dest, m) ? want : from;
+        return dest && running[dest.id] ? want : from;
       };
       for (const a of accounts) {
         const iTo = payInto(a.creditTo, a.id);
@@ -1847,7 +1897,6 @@ function gridCard(y, yr) {
   const accounts = accountsOf(state);
   const activeBal = (a) => a.hub
     || (yr.seeds[a.id] || 0) !== 0
-    || !!a.since
     || Object.keys(yr.overrides).some(k => k.startsWith(a.id + '|'))
     || Object.keys(yr.balAdjust || {}).some(k => k.startsWith(a.id + '|'))
     || yr.categories.some(cat => normRole(cat).transferTo === a.id)
@@ -1861,7 +1910,6 @@ function gridCard(y, yr) {
     a.name,
     (a.rate || 0) ? `grows ${round2(a.rate * 100)}%/yr` : '',
     (a.rate || 0) && a.creditTo !== a.id ? `interest paid into ${accountName(state, a.creditTo)}` : '',
-    a.since ? `tracked from ${monthLabel(a.since)}` : '',
   ].filter(Boolean).join(' — ') + ' — click for name, rate & interest destination';
   const liveBalRows = !live ? '' : secheadRow('Accounts')
     + activeAccounts.map(a =>
@@ -1869,10 +1917,13 @@ function gridCard(y, yr) {
       data-bal="${esc(a.id)}" style="cursor:pointer"
       title="${esc(acctTitle(a))}">${esc(a.name)}</th>${
       months.map(m => {
-        if (!accountLive(a, m))
-          return `<td class="${m === thisM ? 'now' : ''}"
-            title="Not tracked until ${esc(monthLabel(a.since))}">·</td>`;
         const v = c.balances[`${a.id}|${m}`];
+        /* Before tracking begins the cell is blank but still yours to click:
+           typing a balance in is what starts the account from that month. */
+        if (v === undefined)
+          return `<td class="cell ${m === thisM ? 'now' : ''}"
+            data-bal="${esc(a.id)}" data-m="${m}"
+            title="Not tracked yet — click to start this account from ${esc(monthLabel(m))}">·</td>`;
         const kind = c.balanceKinds[`${a.id}|${m}`];
         const ov = yr.overrides[`${a.id}|${m}`];
         return `<td class="cell c-${kind} ${m === thisM ? 'now' : ''}"
@@ -3268,7 +3319,9 @@ function buildFields(fields, values) {
       input.type = { number: 'number', percent: 'number',
                      date: 'date', month: 'month' }[f.type] || 'text';
       if (f.type === 'money') asMoneyInput(input);
-      if (f.type === 'percent') { input.step = '0.1'; input.inputMode = 'decimal'; }
+      /* `any`, not a tenth: a sweep account can pay 0.01%, and a step of 0.1
+         makes the browser reject anything finer as invalid. */
+      if (f.type === 'percent') { input.step = 'any'; input.inputMode = 'decimal'; }
       if (f.type === 'number') { input.step = f.step || 'any'; input.inputMode = 'decimal'; }
       const v = values[f.key];
       input.value = v === undefined || v === null ? ''
@@ -3328,7 +3381,7 @@ function readFields(fields) {
     if (f.type === 'number' || f.type === 'percent') {
       const n = raw === '' ? null : parseFloat(raw);
       out[f.key] = (n === null || Number.isNaN(n)) ? null
-        : f.type === 'percent' ? round2(n) / 100 : n;
+        : f.type === 'percent' ? round2(n) / 100 : n;   // 2dp of a percent = 0.01%
     } else out[f.key] = raw;
   }
   return out;
@@ -3579,8 +3632,9 @@ const EDITORS = {
     title: (ds, isNew) => isNew ? 'Add an account' : 'Account settings',
     cols: 2,
     sub: (ds, isNew) => isNew
-      ? 'A new account is tracked from this month on. Earlier months stay blank and out of '
-        + 'Total rather than inventing a history it never had.'
+      ? 'A new account starts from this month. Earlier months stay blank and out of Total '
+        + 'rather than inventing a history it never had — type a balance into one of them '
+        + 'later and it starts from there instead.'
       : 'How this account behaves in the budget grid.',
     fields: (ds) => [
       { key: 'name', label: 'Account name', type: 'text', wide: true },
@@ -3636,10 +3690,15 @@ const EDITORS = {
       state.settings.accounts.push({ id, name: v.name, rate: v.rate ?? 0,
         divRate: v.divRate ?? 0, divEvery: +v.divEvery || 3,
         creditTo: accountById(state, v.creditTo) ? v.creditTo : id,
-        divTo: accountById(state, v.divTo) ? v.divTo : id,
-        since: thisMonth() });
+        divTo: accountById(state, v.divTo) ? v.divTo : id });
+      /* Stated in this month, not seeded: a seed is what every earlier month
+         falls back on, which would put today's balance in January. */
       const live = latestGridYear();
-      if (live && v.seed) state.years[live].seeds[id] = v.seed;
+      const yr = live && state.years[live];
+      if (yr && v.seed !== null && v.seed !== undefined) {
+        const m = thisMonth() < yr.startMonth ? yr.startMonth : thisMonth();
+        yr.overrides[`${id}|${m}`] = { v: v.seed };
+      }
     },
     /* Deleting an account that money still flows into would silently swallow
        that money, so the rows have to be pointed elsewhere first. */
@@ -4402,10 +4461,14 @@ function openCellEditor(yearKey, type, id, m) {
     ].filter(Boolean).join(' ') || 'No growth or dividend rate set on this account.';
     F('cellContext').textContent = (ov
       ? 'This balance is stated (pinned), not computed. '
-      : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held. `)
+      : cur === undefined
+        ? `${acct.name} isn't tracked this early yet. Save a number here and it starts from `
+          + `${monthLabel(m)}, carrying forward from what you type. `
+        : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held. `)
       + rateLine;
     F('cellValue').dataset.money = 'on';
     F('cellValue').value = showMoney(ov ? ov.v : (cur ?? ''));
+    F('cellValue').dataset.money = 'on';
     F('cellNote').value = ov?.note || '';
     /* The computed figures show as placeholders rather than values: typing one
        in is what makes it an override, so simply opening the dialog and saving

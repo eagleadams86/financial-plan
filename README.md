@@ -29,8 +29,9 @@ must never show them.
   money, a transfer with another account, or a pass-through that never touches
   the main account. **Accounts are a list you own** — add as many as you like,
   each with its own name, growth rate, a choice of which account that interest
-  is paid into, and optionally a month it starts being tracked (earlier months
-  stay blank and out of Total). The current year is live: past months are
+  is paid into, and a start that follows your data: an account is tracked from the first month
+  you put a figure in, earlier months stay blank rather than zero, and typing
+  into one of them moves the start back. The current year is live: past months are
   actuals, future months are estimates that recompute the way the spreadsheet's
   formulas did. Click any cell to edit — or **split a month into several
   amounts**, each actual or estimated on its own, totalled on save. A month's
