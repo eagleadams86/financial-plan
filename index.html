@@ -372,15 +372,24 @@ details.section table th, details.section table td { padding: 4px 6px; }
    many lines each trip's table runs to. */
 .triprow { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 6px;
   align-items: stretch; }
-/* Wide enough for the five-column trip table (Item / Paid / Credits / Due /
-   Total) at the tighter padding below, so a card never scrolls inside itself —
-   the row scrolls, the card doesn't. */
-.triprow > .card.trip { flex: 0 0 470px; max-width: 470px; margin: 0; }
+/* Each card takes the width its own table needs — a trip without a Credits
+   column is narrower than one with it. `flex: 0 0 auto` is what makes that
+   work AND keeps the promise that a card never scrolls inside itself: the
+   cards refuse to shrink, so a crowded year scrolls the row instead. The
+   bounds stop a sparse trip becoming a sliver or a wordy one running away. */
+.triprow > .card.trip { flex: 0 0 auto; min-width: 300px; max-width: 560px; margin: 0; }
 .triprow > .card.trip .tablewrap { overflow-x: visible; }
-.triprow > .card.trip table { width: 100%; font-size: 12.5px; }
-.triprow > .card.trip table th, .triprow > .card.trip table td { padding: 5px 6px; }
+.triprow > .card.trip table { width: 100%; font-size: 13px; }
+.triprow > .card.trip table th, .triprow > .card.trip table td {
+  padding: 6px 10px; white-space: nowrap; }
+/* the item names are the one column allowed to wrap rather than widen the card */
+.triprow > .card.trip table tbody th { white-space: normal; }
 @media (max-width: 700px) {
-  .triprow > .card.trip { flex-basis: 88vw; max-width: 88vw; }
+  /* No narrower cap on a phone: a five-column money table can't be squeezed
+     under 88vw and stay readable, and squeezing it is what would put a
+     scrollbar back INSIDE the card. The row scrolls sideways instead — it
+     already does — so the card keeps the width its own figures need. */
+  .triprow > .card.trip { min-width: min(88vw, 300px); }
   /* On a phone, a pinned label column AND a pinned total column leave barely a
      sliver of month between them. The labels keep their pin (you need to know
      which row you're reading); the year total unpins and waits at the end of
@@ -2457,22 +2466,38 @@ function renderVacations() {
     const due = round2(t.items.reduce((s, i) => s + (i.due || 0), 0));
     const total = round2(paid + credits + due);
     const perNight = t.nights ? round2(total / t.nights) : null;
+    /* A column of nothing is noise. Paid and Due each appear only if some line
+       has one, the way Credits already did — so a settled trip loses Due, and
+       one still being planned loses Paid. A trip with nothing entered yet keeps
+       both, because that's the one you're about to fill in.
+       Total then earns its place only when there's more than one column to add
+       up; with a single money column it would just repeat it, and the footer
+       still carries the sum. */
+    const hasPaid = t.items.some(i => i.paid) || !total;
+    const hasDue = t.items.some(i => i.due) || !total;
+    const cols = [hasPaid, hasCredits, hasDue].filter(Boolean).length;
+    const hasTotal = cols > 1;
     return `<div class="card trip">
       <h2>${esc(t.name)} <button class="h-edit" data-edit="trip" data-id="${esc(t.id)}"
         title="Rename the trip, change nights, or delete it">✎ Edit</button></h2>
       <p class="sub">${t.nights ? `${t.nights} nights` : ''}${perNight ? ` · ${fmtMoney0(perNight)}/night` : ''}${due ? ` · <strong>${fmtMoney(due)} still due</strong>`
         : total ? ' · fully paid' : ' · nothing entered yet'}</p>
       <div class="tablewrap"><table>
-        <thead><tr><th style="text-align:left">Item</th><th>Paid</th>${hasCredits ? '<th>Credits</th>' : ''}<th>Due</th><th>Total</th></tr></thead>
+        <thead><tr><th style="text-align:left">Item</th>${hasPaid ? '<th>Paid</th>' : ''}${
+          hasCredits ? '<th>Credits</th>' : ''}${hasDue ? '<th>Due</th>' : ''}${
+          hasTotal ? '<th>Total</th>' : ''}</tr></thead>
         <tbody>${t.items.map((i, idx) => `<tr class="editrow" data-edit="tripItem"
           data-id="${esc(t.id)}" data-idx="${idx}">
           <th scope="row">${esc(i.label)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
-          <td>${i.paid ? fmtMoney(i.paid) : ''}</td>
+          ${hasPaid ? `<td>${i.paid ? fmtMoney(i.paid) : ''}</td>` : ''}
           ${hasCredits ? `<td>${i.credits ? fmtMoney(i.credits) : ''}</td>` : ''}
-          <td>${i.due ? fmtMoney(i.due) : ''}</td>
-          <td>${fmtMoney(round2((i.paid || 0) + (i.credits || 0) + (i.due || 0)))}</td></tr>`).join('')}</tbody>
-        <tfoot><tr><th>Total</th><td>${fmtMoney(paid)}</td>${hasCredits ? `<td>${fmtMoney(credits)}</td>` : ''}
-          <td>${fmtMoney(due)}</td><td>${fmtMoney(total)}</td></tr></tfoot>
+          ${hasDue ? `<td>${i.due ? fmtMoney(i.due) : ''}</td>` : ''}
+          ${hasTotal ? `<td>${fmtMoney(round2((i.paid || 0) + (i.credits || 0)
+            + (i.due || 0)))}</td>` : ''}</tr>`).join('')}</tbody>
+        <tfoot><tr><th>Total</th>${hasPaid ? `<td>${fmtMoney(paid)}</td>` : ''}${
+          hasCredits ? `<td>${fmtMoney(credits)}</td>` : ''}${
+          hasDue ? `<td>${fmtMoney(due)}</td>` : ''}${
+          hasTotal ? `<td>${fmtMoney(total)}</td>` : ''}</tr></tfoot>
       </table></div>
       <div class="addbar"><button class="btn small" data-add="tripItem"
         data-id="${esc(t.id)}">＋ Add line</button></div>
