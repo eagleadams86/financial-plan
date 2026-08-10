@@ -73,8 +73,9 @@ must never show them.
 - **Compensation** — where comp stands, raises over time (the raise in dollars
   and how the salary actually moved since last year, which differ whenever
   something lands mid-year), and bonuses by year — one figure per year, editable
-  from the comp year or from the bonus table, whichever you happen to have open.
-  A year takes the raise either
+  from the comp year or from the bonus table, whichever you happen to have open,
+  and shown both in dollars and as **a percentage of that year's salary**, which
+  you can type either way round. A year takes the raise either
   way round: **type the percentage and the salary it comes to fills itself in,
   or type the new salary and the percentage does** — whichever your letter
   happened to give you.

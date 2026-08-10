@@ -757,6 +757,18 @@ const roundTo = (v, dp) => {
    that same cent, that shorter one is what was meant. Only a pay rise that
    genuinely isn't a round percentage (a flat "you're on $103,333 now") falls
    through to the long form, and then the decimals are the honest answer. */
+/* What a year's salary came to once its raise landed. One helper because it
+   was written out in seven places, and because it is the base for two other
+   figures — Total comp, and now the bonus percentage — which would be their
+   own small bug if they ever disagreed about it. */
+const afterRaise = (c) => round2(((c && c.salary) || 0) * (1 + ((c && c.raisePct) || 0)));
+
+/* A bonus as a share of the salary it was earned against. Null when there is
+   nothing to measure it against: Bonuses by year runs to years that have no
+   comp record, and a percentage of an unknown salary is not a figure. */
+const bonusShare = (bonus, base) =>
+  (!base || bonus === null || bonus === undefined) ? null : bonus / base;
+
 /* Whether a year's salary picked up where the year before it left off.
 
    It is NOT a year-on-year comparison of what you earn — that is the raise
@@ -2556,7 +2568,7 @@ function limitsFor(year) {
   const comp = (state.side.comp || {})[year];
   /* First open borrows from the comp figures rather than opening blank. */
   return {
-    salary: stored.salary ?? (comp ? round2((comp.salary || 0) * (1 + (comp.raisePct || 0))) : 0),
+    salary: stored.salary ?? (comp ? afterRaise(comp) : 0),
     /* Bonuses by year covers years with no comp record, so the calculator can
        borrow one either way. */
     bonus: stored.bonus ?? ((state.side.bonuses || {})[year] || 0),
@@ -2682,8 +2694,7 @@ function renderComp() {
   const bonuses = s.bonuses || {};
   /* One bonus, read from one place — the same figure the table below shows. */
   const bonusFor = (y) => bonuses[y] || 0;
-  const totalComp = (y) => round2((comp[y].salary || 0) * (1 + (comp[y].raisePct || 0))
-    + bonusFor(y));
+  const totalComp = (y) => round2(afterRaise(comp[y]) + bonusFor(y));
 
   const currentCard = `<div class="card">
     <h2>Where comp stands${latest ? ` — ${esc(latest)}` : ''}</h2>
@@ -2692,7 +2703,7 @@ function renderComp() {
       <tr><th scope="row">Salary</th><td>${fmtMoney(cur.salary || 0)}</td></tr>
       <tr><th scope="row">Raise</th><td>${((cur.raisePct || 0) * 100).toFixed(2)}%</td></tr>
       <tr><th scope="row">Salary after the raise</th>
-        <td>${fmtMoney(round2((cur.salary || 0) * (1 + (cur.raisePct || 0))))}</td></tr>
+        <td>${fmtMoney(afterRaise(cur))}</td></tr>
       <tr><th scope="row">Bonus</th><td>${fmtMoney(bonusFor(latest))}</td></tr>
       <tr><th scope="row">Total comp</th><td>${fmtMoney(totalComp(latest))}</td></tr>
     </tbody></table></div>` : '<p class="sub">Nothing recorded yet.</p>'}
@@ -2711,7 +2722,7 @@ function renderComp() {
     const raiseAmt = round2((c.salary || 0) * (c.raisePct || 0));
     const prevY = i ? years[i - 1] : null;
     const prev = prevY ? comp[prevY] : null;
-    const prevAfter = prev ? round2((prev.salary || 0) * (1 + (prev.raisePct || 0))) : null;
+    const prevAfter = prev ? afterRaise(prev) : null;
     const s = sinceLastYear(y, prevY, c.salary || 0, prevAfter);
     const vs = s.against === null ? '' : ` vs ${s.against}`;
     const since = s.state === 'first' ? '<span class="muted">first year</span>'
@@ -2732,7 +2743,7 @@ function renderComp() {
       <td>${((c.raisePct || 0) * 100).toFixed(2)}%</td>
       <td>${raiseAmt ? '+' + fmtMoney(raiseAmt) : '—'}</td>
       <td title="${esc(sinceTitle)}">${since}</td>
-      <td>${fmtMoney(round2((c.salary || 0) * (1 + (c.raisePct || 0))))}</td></tr>`;
+      <td>${fmtMoney(afterRaise(c))}</td></tr>`;
   }).join('');
 
   const historyCard = `<div class="card">
@@ -2757,12 +2768,20 @@ function renderComp() {
     <h2>Bonuses by year</h2>
     <p class="sub">What actually landed, whatever the comp plan said.</p>
     ${bonusYears.length ? `<div class="tablewrap"><table>
-      <thead><tr><th style="text-align:left">Year</th><th>Bonus</th></tr></thead>
-      <tbody>${bonusYears.map(y =>
-        `<tr class="editrow" data-edit="yearAmount" data-map="bonuses" data-key="${esc(y)}">
-          <th scope="row">${esc(y)}</th><td>${fmtMoney(bonuses[y])}</td></tr>`).join('')}</tbody>
+      <thead><tr><th style="text-align:left">Year</th><th>Bonus</th>
+        <th title="The bonus as a share of what that year's salary came to after its raise — the same figure Total comp is built from">% of salary</th></tr></thead>
+      <tbody>${bonusYears.map(y => {
+        /* A year with no comp record has a bonus but no salary to measure it
+           against, and inventing one would be worse than the dash. */
+        const share = bonusShare(bonuses[y], afterRaise(comp[y]));
+        return `<tr class="editrow" data-edit="yearAmount" data-map="bonuses" data-key="${esc(y)}">
+          <th scope="row">${esc(y)}</th><td>${fmtMoney(bonuses[y])}</td>
+          <td${share === null ? ' class="muted" title="No salary recorded for this year"' : ''}>${
+            share === null ? '—' : (share * 100).toFixed(2) + '%'}</td></tr>`;
+      }).join('')}</tbody>
       <tfoot><tr><th>Total</th><td>${fmtMoney(round2(bonusYears
-        .reduce((t, y) => t + (bonuses[y] || 0), 0)))}</td></tr></tfoot>
+        .reduce((t, y) => t + (bonuses[y] || 0), 0)))}</td>
+        <td class="muted" title="Percentages of different salaries don't add up">—</td></tr></tfoot>
     </table></div>` : '<p class="sub">Nothing recorded.</p>'}
     <div class="addbar"><button class="btn small" data-add="yearAmount"
       data-map="bonuses">＋ Add a bonus year</button></div>
@@ -3620,6 +3639,31 @@ function buildFields(fields, values, link) {
   applyFieldVisibility(fields);
 }
 
+/* The bonus and its percentage, kept in step in whichever dialog is open —
+   the comp year has them as `bonus`, a bonus row as `amount`.
+
+   `which` is what the reader just touched: 'pct' (the share is the fact, so
+   work out the dollars), 'money' (the dollars are, so work out the share), or
+   'base' — the salary underneath moved, and since the dollars are what was
+   actually paid they stand while the share re-derives.
+
+   With no salary recorded for the year there is nothing to be a percentage of,
+   so the box says so instead of sitting on a figure that means nothing. */
+function linkBonusPct(which, base, moneyKey) {
+  const moneyBox = F(`rf-${moneyKey || 'bonus'}`), pctBox = F('rf-bonusPct');
+  if (!moneyBox || !pctBox) return;
+  pctBox.disabled = !base;
+  if (!base) { pctBox.value = ''; pctBox.placeholder = 'no salary for this year'; return; }
+  pctBox.placeholder = '';
+  const bonus = parseMoney(moneyBox.value);
+  const raw = pctBox.value.trim();
+  const pct = raw === '' || Number.isNaN(parseFloat(raw)) ? null : parseFloat(raw);
+  if (which === 'pct')
+    moneyBox.value = pct === null ? '' : fmtMoney(round2(base * pct / 100));
+  else
+    pctBox.value = bonus === null ? '' : roundTo(bonus / base * 100, 4);
+}
+
 /* Show/hide the fields whose spec carries showIf, reading the form's current
    values rather than the saved ones — the dialog reacts as you change it. */
 function applyFieldVisibility(fields) {
@@ -3671,7 +3715,12 @@ function openRowEditor(section, ds, isNew) {
   F('rowDialogSub').textContent =
     (typeof ed.sub === 'function' ? ed.sub(ds, isNew) : ed.sub) || '';
   F('rowFields').classList.toggle('cols2', ed.cols === 2);
-  buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds), ed.link);
+  const link = ed.link && ((key) => ed.link(key, ds));
+  buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds), link);
+  /* Prime the linked boxes once, so a derived field arrives in the state the
+     data puts it in — filled, or disabled because there is nothing to derive
+     it from — rather than waiting for the first keystroke to find out. */
+  if (link) link('');
   F('rowDeleteBtn').hidden = isNew || !ed.del;
   /* Reordering a list the grid is sorting alphabetically would look broken —
      the row wouldn't move. Preferences is where that switches back. */
@@ -4311,11 +4360,26 @@ const EDITORS = {
   /* Year → amount maps: Roth contributions, bonuses (ds.map picks which) */
   yearAmount: {
     title: (ds, isNew) => isNew ? 'Add a year' : `${ds.key}`,
-    fields: [
+    fields: (ds) => [
       { key: 'year', label: 'Year', type: 'number', step: 1 },
       { key: 'amount', label: 'Amount', type: 'money' },
+      /* Only a bonus has a salary to be a share of; the other maps this editor
+         serves have nothing to measure against. */
+      ...(ds.map === 'bonuses' ? [{ key: 'bonusPct', label: 'Bonus %',
+        type: 'percent', dp: 4,
+        hint: "A share of that year's salary after its raise — type either box." }] : []),
     ],
-    get: (ds) => ({ year: +ds.key, amount: state.side[ds.map][ds.key] }),
+    get: (ds) => ({ year: +ds.key, amount: state.side[ds.map][ds.key],
+      bonusPct: ds.map !== 'bonuses' ? undefined
+        : bonusShare(state.side[ds.map][ds.key], afterRaise(state.side.comp[ds.key])) }),
+    /* Changing the YEAR here changes which salary the percentage is measured
+       against, so the base is read from the box rather than from ds.key. */
+    link(changed, ds) {
+      if (ds.map !== 'bonuses') return;
+      const base = afterRaise((state.side.comp || {})[F('rf-year').value.trim()]);
+      linkBonusPct(changed === 'bonusPct' ? 'pct' : changed === 'amount' ? 'money' : 'base',
+        base, 'amount');
+    },
     save(ds, v) {
       if (!v.year) return;
       if (ds.key !== undefined && String(v.year) !== ds.key)
@@ -4345,13 +4409,19 @@ const EDITORS = {
       { key: 'after', label: 'Salary after the raise', type: 'money',
         hint: 'Fill in whichever the letter gave you — the other one follows.' },
       { key: 'bonus', label: 'Bonus', type: 'money' },
+      { key: 'bonusPct', label: 'Bonus %', type: 'percent', dp: 4,
+        hint: 'A share of the salary after the raise — type either box.' },
     ],
     /* The two raise boxes are one fact written two ways, so typing in either
        fills the other. Whichever box you are in is the one that's right.
        Changing the SALARY moves whichever of the two followed from it: the
        raise you were given is the fact, so the new salary is what re-derives —
        unless there is no raise yet, in which case the salary and the figure you
-       were quoted are what give it. */
+       were quoted are what give it.
+
+       The bonus pair works the same way against the after-raise figure, with
+       one ordering rule: when the BASE moves, the dollar bonus is what was
+       actually paid, so it stays put and the percentage re-derives. */
     link(changed) {
       const box = (k) => F(`rf-${k}`);
       const salary = parseMoney(box('salary').value);
@@ -4371,12 +4441,15 @@ const EDITORS = {
         if (pct !== null) setAfter(applied());
         else if (after !== null && salary) setPct(raiseFor(salary, after));
       }
+      linkBonusPct(changed === 'bonusPct' ? 'pct' : changed === 'bonus' ? 'money' : 'base',
+        parseMoney(box('after').value));
     },
     get(ds) {
       const c = state.side.comp[ds.key] || {};
       return { year: +ds.key, ...c,
         bonus: state.side.bonuses[ds.key],   // the one the table shows
-        after: round2((c.salary || 0) * (1 + (c.raisePct || 0))) };
+        bonusPct: bonusShare(state.side.bonuses[ds.key], afterRaise(c)),
+        after: afterRaise(c) };
     },
     /* Carry the previous year forward: next year, opening on the salary that
        year ended at. Guessing the raise or the bonus would be inventing
@@ -4387,7 +4460,7 @@ const EDITORS = {
       if (!last) return { year: new Date().getFullYear() };
       const prev = state.side.comp[last] || {};
       return { year: +last + 1,
-        salary: round2((prev.salary || 0) * (1 + (prev.raisePct || 0))) };
+        salary: afterRaise(prev) };
     },
     save(ds, v) {
       if (!v.year) return;
@@ -5323,6 +5396,7 @@ render();
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
+  afterRaise, bonusShare,
   fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,

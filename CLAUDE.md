@@ -268,6 +268,19 @@ projected-year "dashed edge" on the flow bars is drawn by the `dashedBarEdge`
 plugin, and those bars' solid border is turned off (a dash over a same-colour
 solid reads as solid). The signal must never be colour alone — Charlie is
 red-green colourblind.
+- **`afterRaise(c)` is the one place a year's ending salary is worked out** —
+  it was written out in seven, and Total comp, the "since last year" join and
+  the bonus percentage are all built on it, so a second copy that drifted would
+  be its own quiet bug.
+- **Bonus % is derived, never stored** — `bonusShare(bonus, afterRaise(c))`,
+  measured against the after-raise figure because that is the same base Total
+  comp uses. It appears as a column in Bonuses by year and as a linked box in
+  BOTH dialogs (the comp year's `bonus`, a bonus row's `amount`) via the shared
+  `linkBonusPct(which, base, moneyKey)`. Ordering rule: type the percentage and
+  the dollars follow; type the dollars, or move the salary underneath, and the
+  dollars stand while the percentage re-derives — a bonus is what was actually
+  paid. A year with no comp record has no base, so the box disables itself and
+  says why rather than showing a stale figure, and the grid shows an em dash.
 - **One bonus, one place: `side.bonuses[year]`.** It used to be stored twice —
   there and again as `comp[year].bonus` — and nobody keeps two copies of a
   number in step by hand, so "Where comp stands" reported a $0 bonus and a
