@@ -3192,13 +3192,29 @@ function pricesAsOf() {
 }
 
 let refreshingPrices = false;
+/* Tickers the automatic (quiet) refresh has already attempted this page load.
+   A lookup that can't return a price — a mutual fund on the free tier, a wrong
+   key, the daily limit, or simply being offline — leaves its ticker "stale"
+   forever, and refreshPrices() ends in render(), which re-runs wireInvestments()
+   and its quiet auto-refresh. Without remembering what was already tried, that
+   is a tight request loop. The manual Refresh button ignores this set, so it
+   always retries. */
+const priceAutoTried = new Set();
 async function refreshPrices(quiet) {
   if (refreshingPrices) return;
   const key = priceKey();
-  const want = stalePrices();
+  let want = stalePrices();
+  /* A quiet auto-refresh skips anything it has already had a go at, so a ticker
+     that can never be freshened can't drive the render→refresh loop. */
+  if (quiet) want = want.filter(t => !priceAutoTried.has(t));
   if (!key) { if (!quiet) toast('Add an Alpha Vantage API key in ⚙ Preferences first'); return; }
   if (!want.length) { if (!quiet) toast('Every price is already less than six hours old'); return; }
   refreshingPrices = true;
+  /* Mark the whole batch tried up front, not per ticker: the loop below breaks
+     out on a rate-limit or network failure, and the tickers it never reached
+     must still count as attempted or the next quiet pass would retry them and
+     loop. */
+  want.forEach(t => priceAutoTried.add(t));
   const cache = quoteCache();
   /* Kept per ticker, not as a count: "updated 1 price" out of four leaves you
      guessing which three didn't, and the reasons differ — Alpha Vantage's free
