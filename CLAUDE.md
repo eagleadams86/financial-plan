@@ -189,6 +189,23 @@ numbers only. If a change needs a realistic payload, invent one.
   converts them once — one account per distinct row NAME, folding into an
   existing account where the slug already matches, cells moved to `overrides`,
   rows deleted so it can't run twice.
+- **A summary year's rows are classified once, by `migrate`, not `coerceShape`.**
+  The old bi-weekly sheets imported with almost every row flagged `isBalance`,
+  because the importer decides that by "the row's total isn't the sum of its
+  months" — impossible on a sheet whose columns were never months. Nine years
+  drew NO bars at all on money in vs out, and every row sat under "Balances &
+  derived rows". `summaryRowIsFlow(items)` reads the shape those sheets have: a
+  closing block of balances and derived totals at the END, with an income line
+  allowed to sit inside it without ending it; each balance label may be claimed
+  ONCE, so a second "Savings" reading backwards is money moved into savings and
+  ends the block; anything called "Total …" is a closing figure (prefix, not an
+  exact name — renaming "Monthly" to "Total Cash" otherwise doubled the year);
+  a derived total is never a flow wherever it sits. Validated against the
+  sheets' own arithmetic: 2011's flows net to its stated end-of-year figure to
+  the cent, 2012's to its closing Checking. It lives in **`migrate` under a
+  schema gate (schema 3)** — not coerceShape — precisely because it overwrites
+  a flag you can set by hand in the row editor, and re-running it every load
+  would undo your corrections.
 - **Money in vs money out counts what the accounts EARNED**, not just what the
   budget rows moved. `yearFlows(yr, computed, y)` adds `computed.interest` and
   `computed.dividend` to money in (a negative one counts as money out, same as

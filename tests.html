@@ -874,6 +874,75 @@ t('other-money balances become accounts stated in the month they joined', () => 
   eq(stated[1].v, 40);
 });
 
+group('Which summary rows are money that moved');
+/* The shape the old bi-weekly sheets have: detail rows, then a closing block
+   of balances and derived totals, with the income line often sitting inside
+   that block. Invented figures, real row names. */
+const namesOf = (items, flow, want) =>
+  items.filter((_, i) => flow[i] === want).map(i => i.name);
+t('the closing block of balances is not money that moved', () => {
+  const items = [{ name: 'Mortgage', total: -9000 }, { name: 'NYSEG', total: -600 },
+    { name: 'Income', total: 30000 }, { name: 'Checking', total: 500 },
+    { name: 'Savings', total: 1200 }, { name: 'All Accounts', total: 1700 }];
+  const flow = H.summaryRowIsFlow(items);
+  eq(namesOf(items, flow, true), ['Mortgage', 'NYSEG', 'Income'],
+    'the income line counts — it is the year’s money in');
+  eq(namesOf(items, flow, false), ['Checking', 'Savings', 'All Accounts']);
+});
+t('an income line inside the block does not end it', () => {
+  /* 2013's shape: the balances come first, then Expenses, then Income. */
+  const items = [{ name: 'Mortgage', total: -9000 }, { name: 'Other', total: 400 },
+    { name: 'Checking', total: 340 }, { name: 'Total', total: 665 },
+    { name: 'Expenses', total: -30000 }, { name: 'Income', total: 30500 }];
+  const flow = H.summaryRowIsFlow(items);
+  eq(namesOf(items, flow, true), ['Mortgage', 'Other', 'Income']);
+  eq(namesOf(items, flow, false), ['Checking', 'Total', 'Expenses']);
+});
+t('a derived total never counts, wherever it sits', () => {
+  /* It restates rows already counted — including it would double the year. */
+  const items = [{ name: 'NYSEG', total: -600 }, { name: 'Fixed Expenses', total: -600 },
+    { name: 'Net Income', total: 700 }, { name: 'Monthly', total: 100 }];
+  const flow = H.summaryRowIsFlow(items);
+  eq(namesOf(items, flow, true), ['NYSEG', 'Net Income']);
+});
+t('a detail row sharing a balance’s name still counts', () => {
+  /* "Savings" and "Cash" appear twice in a year — once as money moved into
+     them, once as what they closed at. Only the closing one is the balance. */
+  const items = [{ name: 'Cash', total: -700 }, { name: 'Savings', total: 1650 },
+    { name: 'Income', total: 31000 }, { name: 'Checking', total: 900 },
+    { name: 'Savings', total: 1950 }];
+  const flow = H.summaryRowIsFlow(items);
+  eq(namesOf(items, flow, true), ['Cash', 'Savings', 'Income']);
+  eq(flow[4], false, 'the last Savings is the closing balance');
+});
+t('any "Total …" row is a closing figure, whatever it was renamed to', () => {
+  /* Matching a list of exact names meant renaming "Monthly" to "Total Cash"
+     turned it back into a flow and added it to the year's income. */
+  for (const name of ['Total', 'Total savings', 'Total online', 'Total Cash',
+                      'Total +/- 1 Month']) {
+    const items = [{ name: 'Rent', total: -800 }, { name: name, total: 90 }];
+    eq(H.summaryRowIsFlow(items), [true, false], name);
+  }
+});
+t('a year with no closing block keeps every row', () => {
+  const items = [{ name: 'Rent', total: -1000 }, { name: 'Paycheck', total: 4000 }];
+  eq(H.summaryRowIsFlow(items), [true, true]);
+});
+t('the reclassification runs once and then leaves you alone', () => {
+  const year = () => ({ kind: 'summary', categoryTotals: [
+    { name: 'Mortgage', total: -9000, isBalance: true },
+    { name: 'Checking', total: 500, isBalance: true }] });
+  const first = H.migrate(H.coerceShape({ schema: 1, years: { '2015': year() } }));
+  eq(first.years['2015'].categoryTotals[0].isBalance, undefined, 'Mortgage is a flow now');
+  eq(first.years['2015'].categoryTotals[1].isBalance, true);
+  eq(first.schema, 3);
+  /* now flip one by hand, as the row editor would, and load again */
+  first.years['2015'].categoryTotals[0].isBalance = true;
+  const second = H.migrate(H.coerceShape(JSON.parse(JSON.stringify(first))));
+  eq(second.years['2015'].categoryTotals[0].isBalance, true,
+    'your own correction survives the next load');
+});
+
 group('Money in vs money out');
 t('interest an account earned counts as money in', () => {
   /* It lands in the account exactly like any other money, and it is why total

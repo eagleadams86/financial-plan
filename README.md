@@ -92,9 +92,11 @@ must never show them.
   need (airfare, stay, transport, excursions, food, tips, spa) or from nothing,
   your choice. Plus the holidays & PTO planner, with from/to dates.
 - **Giving** — the Fidelity Charitable fund and the donations log.
-- **History** — total liquidity 2011→now, and money in vs out per year with the
-  interest your accounts earned counted as money in, so the two charts tell the
-  same story.
+- **History** — total liquidity 2011→now, and money in vs out for every one of
+  those years, with the interest your accounts earned counted as money in so the
+  two charts tell the same story. The oldest years come from bi-weekly sheets
+  whose rows the importer couldn't tell apart; they're sorted out on load, and
+  any row it reads wrong is one click to fix.
 - **Year rollover** — "Build ⟨next year⟩" duplicates the live grid the way
   Charlie used to duplicate the sheet. Build it as early as you like to see
   where the plan is heading: a year that hasn't arrived shows nothing but
