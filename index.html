@@ -4252,6 +4252,7 @@ function wireBudget() {
     else if (td.dataset.bal) openCellEditor(y, 'bal', td.dataset.bal, td.dataset.m);
     else if (td.dataset.pay) openCellEditor(y, 'pay', 'paychecks', td.dataset.pay);
   });
+  if (grid) wireGridKeys(grid);
   const closeBtn = F('closeMonthBtn');
   if (closeBtn) closeBtn.onclick = markMonthEntered;
   const reopenBtn = F('reopenMonthBtn');
@@ -4275,6 +4276,47 @@ function wireBudget() {
                   : `${created} is ready — check the seeded balances`);
     }
   };
+}
+
+/* The grid is a wall of clickable <td>s; without this a keyboard user can't
+   reach a cell at all — the one island in the app that isn't keyboard-operable.
+   Roving tabindex (one tab stop for the whole grid), arrow keys to move between
+   cells, Enter or Space to open the editor: the ARIA grid-navigation pattern,
+   minus the role juggling that would strip the table's own row/column headers.
+   Re-run on every render — the grid element is rebuilt each time, so nothing
+   stacks. */
+function wireGridKeys(grid) {
+  const cells = [...grid.querySelectorAll('td.cell')];
+  cells.forEach((c, i) => { c.tabIndex = i === 0 ? 0 : -1; });
+  const rove = (to) => {
+    if (!to) return;
+    grid.querySelectorAll('td.cell[tabindex="0"]').forEach(c => { c.tabIndex = -1; });
+    to.tabIndex = 0;
+    to.focus();
+  };
+  grid.addEventListener('keydown', (e) => {
+    const td = e.target.closest('td.cell');
+    if (!td) return;
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); td.click(); return; }
+    const step = { ArrowRight: [0, 1], ArrowLeft: [0, -1],
+                   ArrowUp: [-1, 0], ArrowDown: [1, 0] }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    if (step[0] === 0) {                     // along the row, cell to cell
+      let c = td;
+      do { c = step[1] > 0 ? c.nextElementSibling : c.previousElementSibling; }
+      while (c && !c.classList.contains('cell'));
+      rove(c);
+    } else {                                 // up/down the same column
+      const rows = [...grid.querySelectorAll('tbody tr')];
+      const ci = td.cellIndex;
+      for (let r = rows.indexOf(td.parentElement) + step[0];
+           r >= 0 && r < rows.length; r += step[0]) {
+        const cand = rows[r].children[ci];
+        if (cand && cand.classList.contains('cell')) { rove(cand); break; }
+      }
+    }
+  });
 }
 
 /* ── Splitting a month into several amounts ─────────────────────────────────

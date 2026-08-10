@@ -46,7 +46,9 @@ must never show them.
   delete it; every table has a ＋ Add button, rows reorder with ↑↓, and each
   editor shows only the settings the current choice actually uses. Clicking
   outside any dialog closes it without saving, and a small ⓘ beside a figure
-  explains the arithmetic behind it.
+  explains the arithmetic behind it. The budget grid is keyboard-operable too:
+  Tab into it, move between cells with the arrow keys, and press Enter to edit
+  the one you're on.
 - **Goals** — savings goals that add up whichever accounts you tick, so
   splitting an account is a matter of ticking the new ones. Each goal counts
   its accounts up to the target, in full, or only what another goal hasn't

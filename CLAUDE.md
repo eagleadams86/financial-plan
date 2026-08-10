@@ -138,6 +138,10 @@ keys the section needs — `data-year`, `data-idx`, `data-id`, `data-map`,
 handlers. New sections: register in EDITORS, stamp the attributes in the
 renderer, done. Budget grid *cells* are the exception — they keep their own
 `#cellDialog` (kind/note/revert semantics the generic editor doesn't have).
+The grid is keyboard-operable via `wireGridKeys()`: roving tabindex (one tab
+stop for the whole grid), arrow keys between cells, Enter/Space to open the cell
+editor — the table keeps its own row/column header semantics, so no ARIA grid
+roles are layered on.
 Free-form rows (`side.retirement`/`side.rothLimit`) are loose value arrays;
 an empty array is a spacer line, and `fmtLoose()` guesses display format.
 Deleting a budget category also deletes its orphaned cells — keep that.
