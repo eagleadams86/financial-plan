@@ -109,6 +109,11 @@ python3 migrate_local_data.py financial-plan-data.json
 
 ## Architecture
 
+The icon is drawn by `make_favicon.py` (Pillow): the inline SVG in the page is
+what browsers use, `favicon.ico` is the fallback a browser fetches on its own,
+and the script keeps the two the same picture rather than leaving a binary
+nobody can review in a diff.
+
 One file — `index.html` — no build step, alongside `theme.css` (byte-copy
 from the private claude-theme-pack, the palette source of truth for all apps)
 and a vendored `chart.min.js`. Served by GitHub Pages from `main`. State
