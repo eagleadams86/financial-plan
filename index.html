@@ -2460,7 +2460,8 @@ function renderVacations() {
     return `<div class="card trip">
       <h2>${esc(t.name)} <button class="h-edit" data-edit="trip" data-id="${esc(t.id)}"
         title="Rename the trip, change nights, or delete it">✎ Edit</button></h2>
-      <p class="sub">${t.nights ? `${t.nights} nights` : ''}${perNight ? ` · ${fmtMoney0(perNight)}/night` : ''}${due ? ` · <strong>${fmtMoney(due)} still due</strong>` : ' · fully paid'}</p>
+      <p class="sub">${t.nights ? `${t.nights} nights` : ''}${perNight ? ` · ${fmtMoney0(perNight)}/night` : ''}${due ? ` · <strong>${fmtMoney(due)} still due</strong>`
+        : total ? ' · fully paid' : ' · nothing entered yet'}</p>
       <div class="tablewrap"><table>
         <thead><tr><th style="text-align:left">Item</th><th>Paid</th>${hasCredits ? '<th>Credits</th>' : ''}<th>Due</th><th>Total</th></tr></thead>
         <tbody>${t.items.map((i, idx) => `<tr class="editrow" data-edit="tripItem"
@@ -3109,7 +3110,7 @@ function readFields(fields) {
 function openRowEditor(section, ds, isNew) {
   const ed = EDITORS[section];
   if (!ed) return;
-  const spec = typeof ed.fields === 'function' ? ed.fields(ds) : ed.fields;
+  const spec = typeof ed.fields === 'function' ? ed.fields(ds, isNew) : ed.fields;
   rowCtx = { section, ds, spec };
   F('rowDialogTitle').textContent =
     (typeof ed.title === 'function' ? ed.title(ds, isNew) : ed.title) || 'Edit';
@@ -3158,6 +3159,11 @@ function yearBucket(map, y) {
   return map[y];
 }
 const noteField = { key: 'note', label: 'Note', type: 'note' };
+
+/* The lines nearly every trip turns out to need. A new trip starts from these
+   so the list isn't retyped each time; the amounts stay empty, because what
+   carries between trips is their shape, not last trip's prices. */
+const TRIP_TEMPLATE = ['Airfare', 'Stay', 'Transport', 'Excursions', 'Food', 'Tips', 'Spa'];
 
 /* ── The registry ─────────────────────────────────────────────────────────── */
 const EDITORS = {
@@ -3720,10 +3726,17 @@ const EDITORS = {
   /* Vacations: the trip itself, and its line items */
   trip: {
     title: (ds, isNew) => isNew ? 'Add a trip' : 'Trip',
-    fields: [
+    sub: (ds, isNew) => isNew
+      ? 'A new trip can start with the lines most trips end up having, so you fill in '
+        + 'amounts instead of typing the same list out again.' : '',
+    fields: (ds, isNew) => [
       { key: 'name', label: 'Trip name (e.g. "2027 Lisbon")', type: 'text', wide: true },
       { key: 'year', label: 'Year', type: 'number', step: 1 },
       { key: 'nights', label: 'Nights', type: 'number' },
+      ...(isNew ? [{ key: 'template', label: 'Start with', type: 'select', options: [
+        ['standard', `The usual lines — ${TRIP_TEMPLATE.join(', ')}`],
+        ['blank', "Nothing, I'll add my own"],
+      ]}] : []),
     ],
     get(ds) {
       const t = state.vacations.trips.find(t => t.id === ds.id);
@@ -3739,8 +3752,10 @@ const EDITORS = {
         let id = slugJs(v.name || 'trip'), n = 2;
         while (state.vacations.trips.some(t => t.id === id))
           id = `${slugJs(v.name || 'trip')}-${n++}`;
+        const items = v.template === 'blank' ? []
+          : TRIP_TEMPLATE.map(label => ({ label, paid: 0, due: 0 }));
         state.vacations.trips.push({ id, name: v.name || 'New trip',
-          year: v.year || new Date().getFullYear(), nights: v.nights, items: [] });
+          year: v.year || new Date().getFullYear(), nights: v.nights, items });
       }
     },
     del(ds) {

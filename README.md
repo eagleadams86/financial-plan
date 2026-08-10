@@ -63,7 +63,9 @@ must never show them.
   key kept on the device, cached six hours, and every price still editable by
   hand).
 - **Vacations** — per-trip cost tables grouped into one row per year, newest
-  first, reorderable within a year, and the holidays & PTO planner.
+  first, reorderable within a year. A new trip starts from the lines most trips
+  need (airfare, stay, transport, excursions, food, tips, spa) or from nothing,
+  your choice. Plus the holidays & PTO planner, with from/to dates.
 - **Giving** — the Fidelity Charitable fund and the donations log.
 - **History** — total liquidity 2011→now and money in vs out per year.
 - **Year rollover** — "Build ⟨next year⟩" duplicates the live grid the way
