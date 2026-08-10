@@ -267,8 +267,17 @@ The grid is keyboard-operable via `wireGridKeys()`: roving tabindex (one tab
 stop for the whole grid), arrow keys between cells, Enter/Space to open the cell
 editor — the table keeps its own row/column header semantics, so no ARIA grid
 roles are layered on.
-Free-form rows (`side.retirement`/`side.rothLimit`) are loose value arrays;
-an empty array is a spacer line, and `fmtLoose()` guesses display format.
+`side.retirement`/`side.rothLimit` are GONE — the spreadsheet's free-form
+"Imported spreadsheet rows" panel and its loose value arrays, which nothing
+computed from. `coerceShape` deletes both keys on load so they stop riding
+along in every backup; don't reintroduce them. (`side.retirementAccounts` is
+the real retirement list and is unrelated despite the near-identical name.)
+A field spec may carry an **`action`** — a small button beside its box for a
+move you'd otherwise make by hand across two fields, like the trip line's
+"✓ Paid" folding Still due into Paid. It edits the FORM, like `link` does, so
+nothing commits until Save; `type="button"` keeps it from submitting. The CSS
+puts it UNDER its input, because alongside it shortens that one box and leaves
+the row ragged against its neighbours.
 Deleting a budget category also deletes its orphaned cells — keep that.
 
 Budget rows carry `section` (income/expense/transfer — display grouping,

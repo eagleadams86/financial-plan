@@ -217,6 +217,14 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
 .grid-fields > div > label.field { min-height: 2.5em; margin-bottom: 0; }
 .grid-fields > div > input, .grid-fields > div > select { width: 100%; height: 40px; }
 .grid-fields > div.wide { grid-column: 1 / -1; }
+/* A field with an action button. The button sits UNDER its box rather than
+   beside it: alongside, it would eat into that one column and leave its input
+   visibly shorter than the boxes either side, which is the raggedness this
+   layout is trying to be rid of. */
+.grid-fields > div > .field-row { display: flex; flex-direction: column;
+  gap: 6px; align-items: flex-start; }
+.grid-fields > div > .field-row > input { width: 100%; height: 40px; }
+.grid-fields > div > .field-row > .btn { flex: none; white-space: nowrap; }
 /* Two columns exactly, for a dialog whose fields come in pairs — a rate beside
    the account it's paid into — rather than however many auto-fit chooses. */
 .grid-fields.cols2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1001,7 +1009,7 @@ function blankState() {
     goals: [],
     side: {
       portfolios: [], taxable: [], rothContribs: {}, k401: {}, hsa: [],
-      comp: {}, bonuses: {}, retirement: {}, rothLimit: {}, daf: [],
+      comp: {}, bonuses: {}, daf: [],
       donations: {}, limits: {}, retirementAccounts: []
     },
     vacations: { trips: [], pto: {} },
@@ -1250,8 +1258,15 @@ function coerceShape(data) {
   for (const yr of Object.values(d.years))
     if (Array.isArray(yr.extraNotes))
       yr.extraNotes = yr.extraNotes.filter(n => !FOLDED.test(String((n && n.where) || '')));
-  for (const k of ['rothContribs', 'k401', 'comp', 'bonuses', 'retirement',
-                   'rothLimit', 'donations', 'limits']) s[k] = obj(s[k]);
+  for (const k of ['rothContribs', 'k401', 'comp', 'bonuses',
+                   'donations', 'limits']) s[k] = obj(s[k]);
+  /* `retirement` and `rothLimit` held the spreadsheet's original free-form
+     lines — a label and up to four values, shown in an "Imported spreadsheet
+     rows" panel that nothing computed from. The panel is gone, so the rows go
+     with it rather than riding along in every backup for ever. Dropped on
+     load, which is what keeps the next export clean. */
+  delete s.retirement;
+  delete s.rothLimit;
   /* A past year's account balances used to be ordinary budget ROWS flagged
      `isBalance` — a row called "Checking" carrying twelve monthly figures,
      sitting under an Accounts heading but editable as a budget line and
@@ -2650,32 +2665,6 @@ function holdingsTable(rows, list) {
 
 /* The imported free-form tables (contribution percentages, MAGI check) come
    through as raw rows; format each value by what it looks like. */
-function fmtLoose(v) {
-  if (v === null || v === undefined) return '';
-  const n = parseFloat(v);
-  if (Number.isNaN(n)) return esc(String(v));
-  if (Math.abs(n) < 1 && n !== 0) return (n * 100).toFixed(1) + '%';
-  if (Number.isInteger(n) && n > 1900 && n < 2100) return String(n);
-  return fmtMoney(round2(n));
-}
-
-function looseTable(map, year) {
-  const rows = (state.side[map] || {})[year] || [];
-  const ncols = Math.max(2, ...rows.map(r => r.length));
-  const body = rows.map((r, idx) => {
-    const empty = !r.length || r.every(v => v === null || v === '');
-    if (empty) return `<tr class="spacer editrow" data-edit="loose" data-map="${esc(map)}"
-      data-year="${esc(year)}" data-idx="${idx}"><td colspan="${ncols}"></td></tr>`;
-    return `<tr class="editrow" data-edit="loose" data-map="${esc(map)}"
-      data-year="${esc(year)}" data-idx="${idx}">
-      <th scope="row" style="text-align:left">${esc(String(r[0] ?? ''))}</th>${
-      Array.from({ length: ncols - 1 }, (_, i) =>
-        `<td>${fmtLoose(r[i + 1])}</td>`).join('')}</tr>`;
-  }).join('');
-  return `${rows.length ? `<div class="tablewrap"><table><tbody>${body}</tbody></table></div>` : ''}
-    <div class="addbar"><button class="btn small" data-add="loose"
-      data-map="${esc(map)}" data-year="${esc(year)}">＋ Add line</button></div>`;
-}
 
 /* Retirement accounts carry a tax treatment (which the Traditional/Roth split
    reads) and a type (which is what "how much can I still put in?" turns on).
@@ -2870,21 +2859,9 @@ function magiCard(year) {
     esc(verdict[2])}</span>
     ${magi < L.magiLimit ? ` · ${fmtMoney(L.magiLimit - magi)} of headroom` : ''}</p>
   <div class="addbar"><button class="btn small" data-edit="limits"
-    data-year="${esc(year)}">✎ Edit the figures</button></div>
-  ${looseArchive(year)}`;
+    data-year="${esc(year)}">✎ Edit the figures</button></div>`;
 }
 
-/* The spreadsheet's original free-form lines. Nothing computes from them any
-   more, but they're the record of how past years were worked out, so they stay
-   readable (and editable) rather than being thrown away. */
-function looseArchive(year) {
-  const years = new Set([...Object.keys(state.side.retirement || {}),
-                         ...Object.keys(state.side.rothLimit || {})]);
-  if (!years.size) return '';
-  return `<details class="section" data-keep="imported"><summary>Imported spreadsheet rows</summary>
-    ${[...years].sort().reverse().map(y => `<h2 style="margin:12px 0 6px;font-size:14px">${esc(y)}</h2>
-      ${looseTable('retirement', y)}${looseTable('rothLimit', y)}`).join('')}</details>`;
-}
 
 function buildRetirementChart() {
   const accts = state.side.retirementAccounts || [];
@@ -3873,7 +3850,29 @@ function buildFields(fields, values, link) {
        setting .value doesn't re-fire input, so there is no loop. */
     if (link && input.tagName === 'INPUT' && input.type !== 'checkbox')
       input.addEventListener('input', () => link(f.key));
-    cell.appendChild(input);
+    /* A field may carry an `action`: a small button beside the box for a move
+       you would otherwise make by hand in two fields at once. It works on the
+       FORM, like `link` does, so nothing is committed until Save and the
+       arithmetic is visible before you commit it. `val`/`set` read and write
+       money boxes, which is what every action so far needs. */
+    if (f.action) {
+      const row = document.createElement('div');
+      row.className = 'field-row';
+      row.appendChild(input);
+      const btn = document.createElement('button');
+      btn.type = 'button';                    // never submits the dialog
+      btn.className = 'btn small';
+      btn.textContent = f.action.label;
+      btn.title = f.action.title || '';
+      btn.onclick = () => {
+        const val = (k) => parseMoney(F(`rf-${k}`).value) || 0;
+        const set = (k, n) => { F(`rf-${k}`).value = n === null ? '' : fmtMoney(round2(n)); };
+        f.action.run(val, set);
+        if (link) link(f.key);
+      };
+      row.appendChild(btn);
+      cell.appendChild(row);
+    } else cell.appendChild(input);
     /* A line under the input, for a field whose label can't carry the whole
        story — easier to read than one paragraph at the top explaining five
        fields at once. */
@@ -4753,34 +4752,6 @@ const EDITORS = {
     del: (ds) => { delete state.side.comp[ds.key]; },
   },
 
-  /* Free-form tables (contributions & limits, MAGI check): rows are loose
-     value lists — label + up to four figures. A row with nothing in it is a
-     spacer line. */
-  loose: {
-    title: (ds, isNew) => isNew ? 'Add a line' : 'Table line',
-    sub: () => 'Free-form: a label plus up to four values (money, %, plain text — anything). Leave everything empty for a spacer line.',
-    fields: [
-      { key: 'c0', label: 'Label', type: 'text' },
-      { key: 'c1', label: 'Value 1', type: 'text' },
-      { key: 'c2', label: 'Value 2', type: 'text' },
-      { key: 'c3', label: 'Value 3', type: 'text' },
-      { key: 'c4', label: 'Value 4', type: 'text' },
-    ],
-    get(ds) {
-      const row = state.side[ds.map][ds.year][+ds.idx] || [];
-      return { c0: row[0] ?? '', c1: row[1] ?? '', c2: row[2] ?? '',
-               c3: row[3] ?? '', c4: row[4] ?? '' };
-    },
-    save(ds, v) {
-      const rows = yearBucket(state.side[ds.map], ds.year);
-      const vals = [v.c0, v.c1, v.c2, v.c3, v.c4].map(x => x === '' ? null : x);
-      while (vals.length && vals[vals.length - 1] === null) vals.pop();
-      if (ds.idx !== undefined) rows[+ds.idx] = vals; else rows.push(vals);
-    },
-    del: (ds) => state.side[ds.map][ds.year].splice(+ds.idx, 1),
-    move: (ds, dir) => listSwap(state.side[ds.map][ds.year], +ds.idx, dir),
-  },
-
   /* Donations */
   donation: {
     title: (ds, isNew) => isNew ? 'Add a donation' : 'Donation',
@@ -4869,11 +4840,19 @@ const EDITORS = {
   tripItem: {
     title: (ds, isNew) => isNew ? 'Add a line' : 'Trip line',
     sub: () => 'Leave the label blank for a continuation line, or everything blank for a spacer.',
+    /* The item's name is a name, not a figure — it takes the full width, which
+       also puts the three money boxes together on one line where they can be
+       read against each other, instead of leaving one stranded on a row of its
+       own below the other two. */
     fields: [
-      { key: 'label', label: 'Item', type: 'text' },
+      { key: 'label', label: 'Item', type: 'text', wide: true },
       { key: 'paid', label: 'Paid', type: 'money' },
       { key: 'credits', label: 'Credits', type: 'money' },
-      { key: 'due', label: 'Still due', type: 'money' },
+      { key: 'due', label: 'Still due', type: 'money',
+        /* Settling a line means the same two edits every time: add what's due
+           to what's paid, then zero it. */
+        action: { label: '✓ Paid', title: 'Move what is still due into Paid',
+          run: (val, set) => { set('paid', val('paid') + val('due')); set('due', 0); } } },
       noteField,
     ],
     get: (ds) => state.vacations.trips.find(t => t.id === ds.id).items[+ds.idx],

@@ -94,7 +94,9 @@ must never show them.
 - **Vacations** — per-trip cost tables grouped into one row per year, newest
   first, reorderable within a year. A new trip starts from the lines most trips
   need (airfare, stay, transport, excursions, food, tips, spa) or from nothing,
-  your choice. Plus the holidays & PTO planner, with from/to dates.
+  your choice. Each line tracks what's paid, what's credited and what's still
+  due, with a **✓ Paid** button that settles the rest in one click. Plus the
+  holidays & PTO planner, with from/to dates.
 - **Giving** — the Fidelity Charitable fund and the donations log.
 - **History** — total liquidity 2011→now, and money in vs out for every one of
   those years, with the interest your accounts earned counted as money in so the
