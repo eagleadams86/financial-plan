@@ -523,6 +523,40 @@ t('an interest override and a dividend adjust one month only', () => {
   approx(c.interest['long|2030-02'], 0, 'the override is what the editor shows');
   approx(c.dividend['long|2030-02'], 100, 'and so is the dividend one');
 });
+t('a corrected interest or dividend lands in the account it is paid into', () => {
+  /* What a correction is FOR: the money moves, so the balance it moves into
+     has to move with it — on the account itself when it keeps its earnings,
+     and on the far account when they are swept there. Nothing may pin the
+     month in place; a pinned balance would swallow the correction whole. */
+  const sweep = () => {
+    const s = H.coerceShape(fixtureState());
+    const long = s.settings.accounts.find(a => a.id === 'long');
+    long.creditTo = 'bank'; long.divRate = 0.04; long.divTo = 'bank'; long.divEvery = 1;
+    return s;
+  };
+  const bare = H.computeAll(sweep(), TODAY_FIX)['2030'];
+  const s = sweep();
+  s.years['2030'].balAdjust['long|2030-02'] = { interest: 500, dividend: 900 };
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const extra = (500 - bare.interest['long|2030-02']) + (900 - bare.dividend['long|2030-02']);
+  approx(c.balances['bank|2030-02'] - bare.balances['bank|2030-02'], extra,
+    'the far account gains exactly what the correction added', 0.02);
+  approx(c.balances['bank|2030-03'] - bare.balances['bank|2030-03'], extra,
+    'and every later month carries it', 0.02);
+  approx(c.balances['long|2030-02'], bare.balances['long|2030-02'],
+    'the paying account is untouched — it earned it, it just did not keep it', 0.02);
+  /* the same correction, kept at home */
+  const home = H.coerceShape(fixtureState());
+  home.settings.accounts.find(a => a.id === 'mid').rate = 0.12;
+  const grown = H.computeAll(home, TODAY_FIX)['2030'];
+  home.years['2030'].balAdjust['mid|2030-02'] = { interest: 40 };
+  const fixed = H.computeAll(home, TODAY_FIX)['2030'];
+  approx(fixed.balances['mid|2030-02'],
+    H.round2(grown.balances['mid|2030-02'] - grown.interest['mid|2030-02'] + 40),
+    'an account that keeps its interest shows the corrected figure', 0.02);
+  ok(fixed.balances['mid|2030-02'] !== grown.balances['mid|2030-02'],
+    'and not the rate the correction replaced');
+});
 t('an account starts at the first month it has a figure, not before', () => {
   const s = H.coerceShape(fixtureState());
   s.settings.accounts.push({ id: 'venmo', name: 'Venmo', rate: 0, creditTo: 'venmo' });

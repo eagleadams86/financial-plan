@@ -138,6 +138,13 @@ keys the section needs — `data-year`, `data-idx`, `data-id`, `data-map`,
 handlers. New sections: register in EDITORS, stamp the attributes in the
 renderer, done. Budget grid *cells* are the exception — they keep their own
 `#cellDialog` (kind/note/revert semantics the generic editor doesn't have).
+In its balance branch **every computed figure is a placeholder, never a value**
+— the balance as much as the interest and dividend boxes. Filling the balance
+box in would make each visit to the dialog pin the month: correcting the
+interest would freeze the balance at what it was a moment before, killing the
+recalculation the correction was made for, in that account and every later
+month chaining off it. A *stated* balance is a real value, because that one is
+the stored number.
 The grid is keyboard-operable via `wireGridKeys()`: roving tabindex (one tab
 stop for the whole grid), arrow keys between cells, Enter/Space to open the cell
 editor — the table keeps its own row/column header semantics, so no ARIA grid

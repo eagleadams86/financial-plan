@@ -36,7 +36,9 @@ must never show them.
   formulas did. Click any cell to edit — or **split a month into several
   amounts**, each actual or estimated on its own, totalled on save. A month's
   balance cell shows what the account earned that month and lets you override
-  the interest or add a dividend. Mark a month "entered" to freeze its
+  the interest or add a dividend — correct either and the balance recomputes
+  around it, in whichever account the money is paid into, for that month and
+  every month after. Mark a month "entered" to freeze its
   estimates into numbers, like overtyping formulas in Numbers. A finished year
   can be **converted to a yearly summary** (permanent — the History charts
   carry on unchanged), or deleted outright.
