@@ -379,10 +379,23 @@ details.section { border: 1px solid var(--border); border-radius: var(--radius-s
 details.section > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; }
 
-/* A year's notes, gathered. ONE per line, not columns: a note is written in a
-   textarea over several lines and has to read back the way it was typed, and
-   two notes side by side at the same height read as one. */
-.notelist { margin: 10px 0 0; padding-left: 18px; font-size: 13px; }
+/* A year's notes, gathered and grouped by month. The GROUPS flow into columns
+   so a year of them fills the card instead of running down one narrow strip —
+   `break-inside: avoid` keeps a month whole, which is what stops two notes
+   reading as one the way a plain two-column list of them did. */
+.notegroups { columns: 2 290px; column-gap: 32px; margin-top: 10px; }
+.notegroup { break-inside: avoid; margin: 0 0 16px; }
+.notegroup > h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-secondary); font-weight: 700; margin: 0 0 4px;
+  padding-bottom: 3px; border-bottom: 1px solid var(--border); }
+/* A year with no months to group by — a summary year — is one group with no
+   heading, and `break-inside: avoid` would park the whole thing in column one
+   and leave the next empty. There the columns belong on the LIST, breaking
+   between notes instead of between months. */
+.notegroups.flat { columns: auto; }
+.notegroups.flat .notelist { columns: 2 290px; column-gap: 32px; }
+.notegroups.flat .notelist > li { break-inside: avoid; }
+.notelist { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
 .notelist li { margin-bottom: 8px; line-height: 1.5; }
 /* `pre-wrap`, so the line breaks you typed in the note survive — the summary
    should show what the editor shows, not one run-on paragraph. Long lines
@@ -2439,29 +2452,31 @@ function gridCard(y, yr) {
 function notesOfYear(st, y) {
   const yr = st.years[y] || {};
   const items = [];
-  const at = (m) => m && m.startsWith(y) ? monthLabel(m) : m;
+  /* `where` is the row or account, `extra` the split amount where there is
+     one, `m` the month — kept apart rather than pre-joined into one label, so
+     the renderer can group by month and drop it from every line beneath the
+     heading that already says it. */
   if (yr.kind === 'summary') {
     for (const row of yr.categoryTotals || [])
       if (row.note) items.push({ where: row.name, note: row.note });
   } else {
     const named = (id) => (yr.categories.find(c => c.id === id) || {}).name || id;
     const acct = (id) => ((st.settings.accounts || []).find(a => a.id === id) || {}).name || id;
-    /* A row's own note explains the row, not a month, so it leads. */
+    /* A row's own note explains the row, not a month, so it belongs to no
+       month and leads. */
     for (const cat of yr.categories)
       if (cat.note) items.push({ where: cat.name, note: cat.note, edit: 'row', id: cat.id });
     for (const [key, cell] of Object.entries(yr.cells)) {
       const [id, m] = key.split('|');
-      if (cell.note) items.push({ where: `${named(id)} · ${at(m)}`, note: cell.note,
-        m, edit: 'cat', id });
+      if (cell.note) items.push({ where: named(id), note: cell.note, m, edit: 'cat', id });
       /* a split month can carry a note per part — each is its own line */
       for (const p of cell.parts || [])
-        if (p.note) items.push({ where: `${named(id)} · ${at(m)} · ${fmtMoney(p.v || 0)}`,
+        if (p.note) items.push({ where: named(id), extra: fmtMoney(p.v || 0),
           note: p.note, m, edit: 'cat', id });
     }
     for (const [key, ov] of Object.entries(yr.overrides || {})) {
       const [id, m] = key.split('|');
-      if (ov.note) items.push({ where: `${acct(id)} · ${at(m)}`,
-        note: ov.note, m, edit: 'bal', id });
+      if (ov.note) items.push({ where: acct(id), note: ov.note, m, edit: 'bal', id });
     }
   }
   /* Whatever came in with the imported spreadsheet. Its `where` carries the
@@ -2484,14 +2499,30 @@ function yearNotes(y) {
      length of the list to no purpose. */
   const line = (n) => {
     const multi = /\n/.test(n.note || '');
+    const label = n.where + (n.extra ? ` · ${n.extra}` : '');
     return `<li class="${multi ? 'multiline' : ''}"${
       n.edit ? ` data-note="${esc(n.edit)}" data-id="${esc(n.id)}"${
         n.m ? ` data-m="${esc(n.m)}"` : ''} style="cursor:pointer" title="Click to open it"` : ''
-      }><span class="muted">${esc(n.where)}</span>${multi ? '' : ' — '
+      }><span class="muted">${esc(label)}</span>${multi ? '' : ' — '
       }<span class="note-text">${esc(n.note)}</span></li>`;
   };
+  /* Grouped by month, because a year of them is a wall otherwise and the month
+     was being repeated on every single line to say what one heading can. The
+     groups then flow into as many columns as the card is wide — a whole month
+     stays together, so nothing reads as belonging to the group beside it. */
+  const byMonth = new Map();
+  for (const n of items) {
+    const k = n.m || '';
+    if (!byMonth.has(k)) byMonth.set(k, []);
+    byMonth.get(k).push(n);
+  }
+  const keys = [...byMonth.keys()].sort();   // '' first: notes tied to no month
+  const headed = keys.some(k => k);          // a summary year has no months at all
+  const groups = keys.map(k => `<section class="notegroup">${
+    !headed ? '' : `<h3>${k ? esc(monthLabel(k)) : 'Not tied to a month'}</h3>`
+    }<ul class="notelist">${byMonth.get(k).map(line).join('')}</ul></section>`).join('');
   return `<details class="section" data-keep="notes"><summary>Notes for ${esc(y)} (${items.length})</summary>
-    <ul class="notelist">${items.map(line).join('')}</ul></details>`;
+    <div class="notegroups${headed ? '' : ' flat'}">${groups}</div></details>`;
 }
 
 const KIND_LABEL = { actual: 'actual', manual: 'your estimate',

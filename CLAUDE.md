@@ -425,8 +425,17 @@ twelve-by-forty grid. The collector is pure over state so it can be tested;
 `yearNotes(y)` renders it, and returns '' when there are none so the section
 isn't drawn at all rather than sitting empty. Each line carries the cell it
 came from and opens it on click — wired in `wireBudget`, because the list sits
-outside `.grid` and the grid's own listener can't reach it. The list is ONE
-per line, never columns, and the note text is `white-space: pre-wrap` — a note
+outside `.grid` and the grid's own listener can't reach it. The list is GROUPED BY MONTH
+(`<h3>` per month, "Not tied to a month" for row and imported notes, and no
+headings at all in a summary year, which has none) and the GROUPS flow into
+columns so a year of them fills the card. `break-inside: avoid` keeps a month
+whole, which is what makes columns safe here — a plain two-column list of notes
+read as one line, which is why it isn't that. A summary year is one unheaded
+group, so `.notegroups.flat` moves the columns down onto the LIST; leaving them
+on the group would park the whole thing in column one. The month lives in the
+heading only — `notesOfYear` hands back `where`/`extra`/`m` separately rather
+than one pre-joined label, so it isn't repeated on every line. The note text is
+`white-space: pre-wrap` — a note
 is typed into a textarea over several lines and has to read back the way it was
 written, which collapsing it to a paragraph destroyed. A multi-line note puts
 its label on a line of its own (`li.multiline`); a one-liner keeps the label
