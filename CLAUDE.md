@@ -268,6 +268,13 @@ projected-year "dashed edge" on the flow bars is drawn by the `dashedBarEdge`
 plugin, and those bars' solid border is turned off (a dash over a same-colour
 solid reads as solid). The signal must never be colour alone — Charlie is
 red-green colourblind.
+**Figures show cents — `fmtMoney`, everywhere a number is a value.** The
+whole-dollar `fmtMoney0` survives for exactly one job: CHART AXIS TICKS, where
+`$137,000.00` on every gridline is clutter on a scale rather than precision. If
+you add a table, card or chart tooltip, use `fmtMoney`. Rounding a salary to
+the dollar was hiding the cents that "salary after the raise" turns on.
+Percentages on the Comp tab are `.toFixed(2)`; the progress-bar `width:` styles
+keep `.toFixed(1)` because they are layout, not figures.
 Money fields are TEXT inputs, not number ones: a number input can render
 neither `$` nor a thousands separator. `asMoneyInput()` formats on blur and
 `parseMoney()` reads leniently — symbol, commas and spaces all fall away, and
