@@ -746,6 +746,25 @@ const thisMonth = () => todayISO().slice(0, 7);
    engine step — the spreadsheet itself stores floats, so matching its cached
    values is an epsilon comparison either way (pinned in tests.html). */
 const round2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
+const roundTo = (v, dp) => {
+  const f = 10 ** dp;
+  return Math.round((v + Number.EPSILON) * f) / f;
+};
+
+/* The percentage that turns `salary` into `after`, written as round a number
+   as will do the job. A raise letter says 2.5%, not 2.500004% — and it only
+   ever gives the new salary to the cent, so if a shorter percentage lands on
+   that same cent, that shorter one is what was meant. Only a pay rise that
+   genuinely isn't a round percentage (a flat "you're on $103,333 now") falls
+   through to the long form, and then the decimals are the honest answer. */
+function raiseFor(salary, after) {
+  const exact = (after / salary - 1) * 100;
+  for (const dp of [1, 2, 3, 4]) {
+    const p = roundTo(exact, dp);
+    if (round2(salary * (1 + p / 100)) === round2(after)) return p;
+  }
+  return roundTo(exact, 6);
+}
 
 /* Currency comes from settings (Preferences dialog) and defaults to USD; the
    formatters rebuild whenever it changes. An unknown code falls back rather
@@ -3450,7 +3469,7 @@ let rowCtx = null;   // { section, ds (the row's dataset), spec }
 
 /* Field types: text · money · number · percent (shown ×100) · date · month ·
    check · select (options: [[value, label]]) · note (full-width textarea) */
-function buildFields(fields, values) {
+function buildFields(fields, values, link) {
   const wrap = F('rowFields');
   wrap.innerHTML = '';
   for (const f of fields) {
@@ -3512,7 +3531,7 @@ function buildFields(fields, values) {
       if (f.type === 'number') { input.step = f.step || 'any'; input.inputMode = 'decimal'; }
       const v = values[f.key];
       input.value = v === undefined || v === null ? ''
-        : f.type === 'percent' ? round2(v * 100)
+        : f.type === 'percent' ? roundTo(v * 100, f.dp ?? 2)
         : f.type === 'money' ? fmtMoney(v) : v;
     }
     input.id = `rf-${f.key}`;
@@ -3520,6 +3539,12 @@ function buildFields(fields, values) {
        select moves, so picking a rule reveals exactly that rule's setting. */
     if (input.tagName === 'SELECT')
       input.addEventListener('change', () => applyFieldVisibility(fields));
+    /* A section may carry `link(key)`: one box filling in another as you type,
+       for fields that are two ways of saying the same thing. It reads and
+       writes the FORM, never the state — nothing is committed until Save, and
+       setting .value doesn't re-fire input, so there is no loop. */
+    if (link && input.tagName === 'INPUT' && input.type !== 'checkbox')
+      input.addEventListener('input', () => link(f.key));
     cell.appendChild(input);
     /* A line under the input, for a field whose label can't carry the whole
        story — easier to read than one paragraph at the top explaining five
@@ -3567,8 +3592,12 @@ function readFields(fields) {
     if (f.type === 'money') { out[f.key] = parseMoney(raw); continue; }
     if (f.type === 'number' || f.type === 'percent') {
       const n = raw === '' ? null : parseFloat(raw);
+      /* 2dp of a percent (0.01%) is plenty for a rate you type. A field can ask
+         for more with `dp` — the comp raise does, because it may be derived
+         from a new salary rather than typed, and has to land on that exact
+         cent when it is applied back. */
       out[f.key] = (n === null || Number.isNaN(n)) ? null
-        : f.type === 'percent' ? round2(n) / 100 : n;   // 2dp of a percent = 0.01%
+        : f.type === 'percent' ? roundTo(n, f.dp ?? 2) / 100 : n;
     } else out[f.key] = raw;
   }
   return out;
@@ -3584,7 +3613,7 @@ function openRowEditor(section, ds, isNew) {
   F('rowDialogSub').textContent =
     (typeof ed.sub === 'function' ? ed.sub(ds, isNew) : ed.sub) || '';
   F('rowFields').classList.toggle('cols2', ed.cols === 2);
-  buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds));
+  buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds), ed.link);
   F('rowDeleteBtn').hidden = isNew || !ed.del;
   /* Reordering a list the grid is sorting alphabetically would look broken —
      the row wouldn't move. Preferences is where that switches back. */
@@ -4244,13 +4273,52 @@ const EDITORS = {
       ? 'A new year opens on what last year came to after its raise — the number you were '
         + 'actually being paid at the end of it. Change it if something else landed.'
       : 'Salary is what the year starts on; the raise applies to it.',
+    /* Two columns so the raise and the salary it lands on sit side by side —
+       they are one fact written two ways, and reading one under the other on
+       different rows hides that. */
+    cols: 2,
     fields: [
       { key: 'year', label: 'Year', type: 'number', step: 1 },
       { key: 'salary', label: 'Salary', type: 'money' },
-      { key: 'raisePct', label: 'Raise %', type: 'percent' },
+      /* More than the usual 2dp: this one may be worked out FROM a new salary
+         rather than typed, and applying it back has to land on that same cent
+         (raiseFor keeps it a round number wherever a round one will do). */
+      { key: 'raisePct', label: 'Raise %', type: 'percent', dp: 6 },
+      { key: 'after', label: 'Salary after the raise', type: 'money',
+        hint: 'Fill in whichever the letter gave you — the other one follows.' },
       { key: 'bonus', label: 'Bonus', type: 'money' },
     ],
-    get: (ds) => Object.assign({ year: +ds.key }, state.side.comp[ds.key]),
+    /* The two raise boxes are one fact written two ways, so typing in either
+       fills the other. Whichever box you are in is the one that's right.
+       Changing the SALARY moves whichever of the two followed from it: the
+       raise you were given is the fact, so the new salary is what re-derives —
+       unless there is no raise yet, in which case the salary and the figure you
+       were quoted are what give it. */
+    link(changed) {
+      const box = (k) => F(`rf-${k}`);
+      const salary = parseMoney(box('salary').value);
+      const after = parseMoney(box('after').value);
+      const raw = box('raisePct').value.trim();
+      const pct = raw === '' || Number.isNaN(parseFloat(raw)) ? null : parseFloat(raw);
+      const setAfter = (v) => { box('after').value = v === null ? '' : fmtMoney(v); };
+      const setPct = (v) => { box('raisePct').value = v === null ? '' : v; };
+      const applied = () => round2(salary * (1 + pct / 100));
+      if (changed === 'after') {
+        if (after === null) setPct(null);
+        else if (salary) setPct(raiseFor(salary, after));
+      } else if (changed === 'raisePct') {
+        if (pct === null) setAfter(null);
+        else if (salary !== null) setAfter(applied());
+      } else if (changed === 'salary' && salary !== null) {
+        if (pct !== null) setAfter(applied());
+        else if (after !== null && salary) setPct(raiseFor(salary, after));
+      }
+    },
+    get(ds) {
+      const c = state.side.comp[ds.key] || {};
+      return { year: +ds.key, ...c,
+        after: round2((c.salary || 0) * (1 + (c.raisePct || 0))) };
+    },
     /* Carry the previous year forward: next year, opening on the salary that
        year ended at. Guessing the raise or the bonus would be inventing
        numbers, so those stay empty. */
@@ -4266,8 +4334,14 @@ const EDITORS = {
       if (!v.year) return;
       if (ds.key !== undefined && String(v.year) !== ds.key)
         delete state.side.comp[ds.key];
-      state.side.comp[String(v.year)] = { salary: v.salary ?? 0,
-        raisePct: v.raisePct ?? 0, bonus: v.bonus ?? 0 };
+      const salary = v.salary ?? 0;
+      /* `after` is never stored — it is salary × the raise, and the Comp tab
+         works it out the same way. The two boxes are kept in step as you type,
+         so raisePct is normally already right; this is the belt and braces for
+         a path that fires no input event, a paste or an autofill. */
+      const raisePct = v.raisePct
+        ?? (salary && v.after ? raiseFor(salary, v.after) / 100 : 0);
+      state.side.comp[String(v.year)] = { salary, raisePct, bonus: v.bonus ?? 0 };
     },
     del: (ds) => { delete state.side.comp[ds.key]; },
   },
@@ -5173,7 +5247,7 @@ render();
 
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
-window.__finTestHooks = { round2, fmtMoney, monthAdd, monthDiff, monthLabel,
+window.__finTestHooks = { round2, roundTo, raiseFor, fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
   normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,

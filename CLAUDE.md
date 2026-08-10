@@ -284,6 +284,21 @@ carry the whole story. Retirement accounts are a generic list
 the old fixed `k401` fields and the separate `rothContribs` map migrate once
 in `coerceShape` and the sources are emptied so deletions can't resurrect
 them. Nothing about Roth IRAs is special-cased in code.
+A section may carry **`link(key)`**, called on every keystroke in any input: one
+box filling in another as you type. It reads and writes the FORM, never the
+state — nothing is committed until Save, and setting `.value` fires no `input`
+event, so there is no loop. The comp editor is the user: **Raise % and Salary
+after the raise are one fact written two ways**, so typing either fills the
+other, and changing the Salary moves whichever of the two followed from it (the
+raise you were given is the fact, so the new salary re-derives — unless there is
+no raise yet, in which case salary + the quoted figure are what give it).
+`after` is NEVER stored; it is `salary × (1 + raisePct)`, exactly as the Comp
+tab has always computed it. Going the other way, `raiseFor(salary, after)`
+returns the ROUNDEST percentage that still reproduces `after` to the cent — a
+letter says 2.5%, not the 2.500004% the rounded cents imply — falling through to
+6dp only for a genuinely flat new salary. That is why `raisePct`'s field spec
+sets `dp: 6`: `percent` fields default to 2dp (0.01%), which is plenty for a
+rate you type but loses dollars on one derived from a salary.
 `EDITORS[x].fields` is called with `(ds, isNew)`, which is how a section can
 offer something only while adding — the trip editor's template picker is the
 one that uses it. PTO entries carry `from`/`to` ISO days rather than a free-text range; the old

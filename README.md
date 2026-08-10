@@ -72,7 +72,10 @@ must never show them.
   Contributions are rows you click to edit, one per year and account.
 - **Compensation** — where comp stands, raises over time (the raise in dollars
   and how the salary actually moved since last year, which differ whenever
-  something lands mid-year), and bonuses by year.
+  something lands mid-year), and bonuses by year. A year takes the raise either
+  way round: **type the percentage and the salary it comes to fills itself in,
+  or type the new salary and the percentage does** — whichever your letter
+  happened to give you.
 - **Investments** — one pane per place you hold investments (add, rename and
   reorder them), with optional **automatic price lookups** (Alpha Vantage; free
   key kept on the device, cached six hours, and every price still editable by
