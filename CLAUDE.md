@@ -61,8 +61,11 @@ numbers only. If a change needs a realistic payload, invent one.
   `{id, name, rate, creditTo, hub?, since?}`. The ids `cash/mid/long/bank`
   stay reserved (seeds, `overrides`, goal sources and the dividends rule key
   off them). `hub` is the one account ordinary money flows through — do not
-  generalize that. `creditTo` sends an account's interest somewhere else (a
-  brokerage sweep); `since` starts an account partway through, seeded from
+  generalize that. An account earns twice over: `rate` compounds into
+  `creditTo` (usually itself), and `divRate` is earned the same way but paid
+  into `divTo` — the brokerage sweep. Both are earnings, so both raise Total
+  wherever they land; a per-month `balAdjust.interest`/`.dividend` replaces
+  either with what really arrived. `since` starts an account partway through, seeded from
   `yr.seeds`, blank and out of Total before it. It is set once — at migration,
   or to the current month when an account is added — and deliberately has NO
   editor field: when tracking began is a fact about the data, and editing it

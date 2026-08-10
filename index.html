@@ -196,14 +196,22 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
 .checkline { display: flex; gap: 8px; align-items: center; font-size: 14px;
   min-height: 24px; }
 .checkline input { flex: none; }
-/* Fields line up on their boxes, not their labels (family rule): each cell is
-   a full-height column with the control pushed to the bottom. */
+/* Fields line up on their boxes, not their labels (family rule). Bottom-
+   aligning the control used to do that, but a field can carry a hint under its
+   box now and those run to different lengths, which pushed the boxes out of
+   line with each other. So the label gets a fixed two-line allowance instead
+   and the boxes start at the same height — hints take up whatever slack is
+   left, at the bottom where nothing lines up against them. */
 .grid-fields { display: grid; gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .grid-fields > div { display: flex; flex-direction: column; }
-.grid-fields > div > input, .grid-fields > div > select { width: 100%;
-  margin-top: auto; height: 40px; }
+.grid-fields > div > label.field { min-height: 2.5em; margin-bottom: 0; }
+.grid-fields > div > input, .grid-fields > div > select { width: 100%; height: 40px; }
 .grid-fields > div.wide { grid-column: 1 / -1; }
+/* Two columns exactly, for a dialog whose fields come in pairs — a rate beside
+   the account it's paid into — rather than however many auto-fit chooses. */
+.grid-fields.cols2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 560px) { .grid-fields.cols2 { grid-template-columns: 1fr; } }
 /* An editable row shows a hand, and its row-name cell carries the pencil
    affordance — hover alone isn't discoverable on touch. */
 tr.editrow { cursor: pointer; }
@@ -337,7 +345,7 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
 th .tile-help, td .tile-help { vertical-align: 1px; }
 td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 #helpDialog { max-width: 46ch; }
-.field-hint { margin: 4px 0 0; font-size: 12px; line-height: 1.45;
+.field-hint { margin: 6px 0 0; font-size: 12px; line-height: 1.45;
   color: var(--text-muted); }
 
 /* Summary-year card list */
@@ -871,11 +879,15 @@ function coerceShape(data) {
     /* An account whose creditTo points at something deleted would silently
        drop its interest — fall back to itself. */
     if (!a.creditTo) a.creditTo = a.id;
+    a.divRate = typeof a.divRate === 'number' ? a.divRate : 0;
+    if (!a.divTo) a.divTo = a.id;
     if (!/^\d{4}-\d{2}$/.test(a.since || '')) delete a.since;
     acctIds.add(a.id);
   }
-  for (const a of d.settings.accounts)
+  for (const a of d.settings.accounts) {
     if (!acctIds.has(a.creditTo)) a.creditTo = a.id;
+    if (!acctIds.has(a.divTo)) a.divTo = a.id;
+  }
   if (!d.settings.accounts.some(a => a.hub) && d.settings.accounts.length)
     d.settings.accounts[0].hub = true;
   d.years = obj(d.years);
@@ -1247,10 +1259,12 @@ function computeYear(st, yearKey, prior, today) {
   const balances = {};   // 'bid|m'   -> dollars
   const balanceKinds = {};
   const interest = {};   // 'bid|m'   -> the growth that month, shown in the editor
+  const dividend = {};   // 'bid|m'   -> what it paid out that month
   const thisM = today.slice(0, 7);
 
   if (yr.kind !== 'grid')
-    return { months: [], cells: {}, balances: {}, balanceKinds: {}, interest: {} };
+    return { months: [], cells: {}, balances: {}, balanceKinds: {},
+             interest: {}, dividend: {} };
 
   const ctx = { st, yr, months, resolved, balances, prior };
   const live = yr.model === 'live';
@@ -1314,20 +1328,30 @@ function computeYear(st, yearKey, prior, today) {
          math at the defaults, which the real-data cross-check pins. The
          interest itself can be overridden, and can be paid into a DIFFERENT
          account (creditTo) the way a brokerage sweeps dividends to cash. */
-      const base = {}, earned = {};
+      const base = {}, earnedInt = {}, earnedDiv = {};
       for (const a of accounts) {
         base[a.id] = priorOf(a.id) - (transfersOut[a.id] || 0) + (preIn[a.id] || 0);
         const adj = (yr.balAdjust || {})[`${a.id}|${m}`] || {};
-        const earnedInterest = typeof adj.interest === 'number'
+        /* Two earnings, because they behave differently: growth usually stays
+           in the account, dividends are usually swept somewhere spendable.
+           Either can be overridden for one month with what really arrived. */
+        earnedInt[a.id] = typeof adj.interest === 'number'
           ? adj.interest : base[a.id] * (a.rate || 0) / 12;
-        interest[`${a.id}|${m}`] = round2(earnedInterest);
-        earned[a.id] = earnedInterest + (adj.dividend || 0);
+        earnedDiv[a.id] = typeof adj.dividend === 'number'
+          ? adj.dividend : base[a.id] * (a.divRate || 0) / 12;
+        interest[`${a.id}|${m}`] = round2(earnedInt[a.id]);
+        dividend[`${a.id}|${m}`] = round2(earnedDiv[a.id]);
       }
       const creditedTo = {};
+      const payInto = (want, from) => {
+        const dest = accountById(st, want);
+        return dest && accountLive(dest, m) ? want : from;
+      };
       for (const a of accounts) {
-        const dest = accountById(st, a.creditTo) && accountLive(accountById(st, a.creditTo), m)
-          ? a.creditTo : a.id;
-        creditedTo[dest] = (creditedTo[dest] || 0) + earned[a.id];
+        const iTo = payInto(a.creditTo, a.id);
+        creditedTo[iTo] = (creditedTo[iTo] || 0) + earnedInt[a.id];
+        const dTo = payInto(a.divTo || a.id, a.id);
+        creditedTo[dTo] = (creditedTo[dTo] || 0) + earnedDiv[a.id];
       }
       let total = 0;
       for (const a of accounts) {
@@ -1345,7 +1369,7 @@ function computeYear(st, yearKey, prior, today) {
     }
   }
 
-  return { months, cells: resolved, balances, balanceKinds, interest };
+  return { months, cells: resolved, balances, balanceKinds, interest, dividend };
 }
 
 /* Every grid year, oldest first, each handed the previous one for the
@@ -1768,6 +1792,7 @@ function gridCard(y, yr) {
           data-bal="${esc(a.id)}" data-m="${m}"
           title="${esc(fmtMoney(v || 0))}${ov ? ' · stated balance' : ''}">${fmtCell(v || 0)}</td>`;
       }).join('')}${rowTotalTd()}</tr>`).join('')
+    + secheadRow('')   // the same band that opens the block, closing it off
     + `<tr class="total"><th class="lbl" scope="row">Total</th>${
         months.map(m => `<td class="${m === thisM ? 'now' : ''}">${
           fmtCell(c.balances[`total|${m}`] || 0)}</td>`).join('')}${rowTotalTd()}</tr>`
@@ -3156,6 +3181,7 @@ function openRowEditor(section, ds, isNew) {
     (typeof ed.title === 'function' ? ed.title(ds, isNew) : ed.title) || 'Edit';
   F('rowDialogSub').textContent =
     (typeof ed.sub === 'function' ? ed.sub(ds, isNew) : ed.sub) || '';
+  F('rowFields').classList.toggle('cols2', ed.cols === 2);
   buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds));
   F('rowDeleteBtn').hidden = isNew || !ed.del;
   /* Reordering a list the grid is sorting alphabetically would look broken —
@@ -3389,27 +3415,37 @@ const EDITORS = {
      (optionally) the month it starts being tracked. Click an account row. */
   account: {
     title: (ds, isNew) => isNew ? 'Add an account' : 'Account settings',
+    cols: 2,
     sub: (ds, isNew) => isNew
       ? 'A new account is tracked from this month on. Earlier months stay blank and out of '
         + 'Total rather than inventing a history it never had.'
       : 'How this account behaves in the budget grid.',
     fields: (ds) => [
-      { key: 'name', label: 'Account name', type: 'text' },
+      { key: 'name', label: 'Account name', type: 'text', wide: true },
       { key: 'rate', label: 'Interest / growth %/yr', type: 'percent',
         hint: 'Compounds monthly on the balance, in future months only. 0 for an account '
           + 'that just holds money.' },
       { key: 'creditTo', label: 'Interest is paid into', type: 'select',
         options: accountsOf(state).map(a => [a.id, a.name]),
-        hint: 'Usually itself. Point it at another account if the interest is swept out, '
-          + 'the way a brokerage pays dividends into cash.' },
+        hint: 'Usually itself — growth that stays where it grew.' },
+      { key: 'divRate', label: 'Dividends %/yr', type: 'percent',
+        hint: 'Earned on the balance each month like interest, but paid out to wherever '
+          + 'you send it below instead of compounding here. 0 for an account that pays '
+          + 'none.' },
+      { key: 'divTo', label: 'Dividends are paid into', type: 'select',
+        options: accountsOf(state).map(a => [a.id, a.name]),
+        hint: 'Often somewhere spendable: a brokerage usually sweeps its dividends into '
+          + 'cash rather than reinvesting them here.' },
       ...(ds.bal ? [] : [{ key: 'seed', label: 'Balance right now', type: 'money',
         hint: 'What the account holds today — the figure every later month builds on.' }]),
     ],
     get: (ds) => {
       const a = accountById(state, ds.bal) || {};
-      return { name: a.name, rate: a.rate || 0, creditTo: a.creditTo || a.id };
+      return { name: a.name, rate: a.rate || 0, creditTo: a.creditTo || a.id,
+               divRate: a.divRate || 0, divTo: a.divTo || a.id };
     },
-    blank: () => ({ rate: 0, creditTo: hubAccount(state)?.id }),
+    blank: () => ({ rate: 0, divRate: 0,
+                    creditTo: hubAccount(state)?.id, divTo: hubAccount(state)?.id }),
     save(ds, v) {
       if (!v.name) return;
       if (ds.bal) {
@@ -3419,14 +3455,17 @@ const EDITORS = {
            being tracked is a fact about the data, not a setting, and changing
            it would either blank months that have figures or invent months
            that never did. */
-        Object.assign(a, { name: v.name, rate: v.rate ?? 0,
-          creditTo: accountById(state, v.creditTo) ? v.creditTo : a.id });
+        Object.assign(a, { name: v.name, rate: v.rate ?? 0, divRate: v.divRate ?? 0,
+          creditTo: accountById(state, v.creditTo) ? v.creditTo : a.id,
+          divTo: accountById(state, v.divTo) ? v.divTo : a.id });
         return;
       }
       let id = slugJs(v.name), n = 2;
       while (accountById(state, id)) id = `${slugJs(v.name)}-${n++}`;
       state.settings.accounts.push({ id, name: v.name, rate: v.rate ?? 0,
+        divRate: v.divRate ?? 0,
         creditTo: accountById(state, v.creditTo) ? v.creditTo : id,
+        divTo: accountById(state, v.divTo) ? v.divTo : id,
         since: thisMonth() });
       const live = latestGridYear();
       if (live && v.seed) state.years[live].seeds[id] = v.seed;
@@ -4146,13 +4185,17 @@ function openCellEditor(yearKey, type, id, m) {
     const adj = (yr.balAdjust || {})[`${id}|${m}`] || {};
     const cur = C[yearKey]?.balances[`${id}|${m}`];
     const earned = C[yearKey]?.interest[`${id}|${m}`];
+    const paidOut = C[yearKey]?.dividend[`${id}|${m}`];
     F('cellDialogTitle').textContent = `${acct.name} — ${monthLabel(m)}`;
     /* Say where the number came from before asking to change it: the rate, what
        that rate earned this month, and where the interest was paid. */
-    const rateLine = (acct.rate || 0)
-      ? `Grows ${round2(acct.rate * 100)}%/yr — ${fmtMoney(earned || 0)} this month${
-          acct.creditTo !== acct.id ? `, paid into ${accountName(state, acct.creditTo)}` : ''}. `
-      : 'No growth rate set on this account. ';
+    const rateLine = [
+      (acct.rate || 0) ? `Grows ${round2(acct.rate * 100)}%/yr — ${fmtMoney(earned || 0)} this month${
+        acct.creditTo !== acct.id ? `, into ${accountName(state, acct.creditTo)}` : ''}.` : '',
+      (acct.divRate || 0) ? `Pays ${round2(acct.divRate * 100)}%/yr in dividends — ${
+        fmtMoney(paidOut || 0)} this month${
+        (acct.divTo || acct.id) !== acct.id ? `, into ${accountName(state, acct.divTo)}` : ''}.` : '',
+    ].filter(Boolean).join(' ') || 'No growth or dividend rate set on this account.';
     F('cellContext').textContent = (ov
       ? 'This balance is stated (pinned), not computed. '
       : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held. `)
@@ -4166,7 +4209,7 @@ function openCellEditor(yearKey, type, id, m) {
     F('cellInterest').value = typeof adj.interest === 'number' ? adj.interest : '';
     F('cellInterest').placeholder = round2(earned || 0);
     F('cellDividend').value = typeof adj.dividend === 'number' ? adj.dividend : '';
-    F('cellDividend').placeholder = '0.00';
+    F('cellDividend').placeholder = round2(paidOut || 0);
     kindWrap.hidden = true;
     revertBtn.hidden = !(ov || adj.interest !== undefined || adj.dividend !== undefined);
     clearBtn.hidden = true;
