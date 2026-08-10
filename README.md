@@ -45,7 +45,10 @@ must never show them.
   balance cell shows what the account earned that month and lets you override
   the interest or add a dividend — correct either and the balance recomputes
   around it, in whichever account the money is paid into, for that month and
-  every month after. Mark a month "entered" to freeze its
+  every month after. **Every note you've written anywhere in a year is gathered
+  into one collapsible list at the foot of it** — cells, split parts, balances
+  and rows — each one clickable to jump back to what it was about; the list
+  isn't there at all in a year you haven't annotated. Mark a month "entered" to freeze its
   estimates into numbers, like overtyping formulas in Numbers. A finished year
   can be **converted to a yearly summary** (permanent — the History charts
   carry on unchanged), or deleted outright. A finished year holds its account

@@ -371,6 +371,13 @@ details.section { border: 1px solid var(--border); border-radius: var(--radius-s
 details.section > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 details.section > .tablewrap, details.section > .gridlegend { margin-top: 10px; }
 
+/* A year's notes, gathered. Two columns where there's room — they are short
+   lines, and a long single column would push the rest of the page away. */
+.notelist { columns: 2 300px; column-gap: 28px; margin: 10px 0 0; padding-left: 18px;
+  font-size: 13px; }
+.notelist li { break-inside: avoid; margin-bottom: 6px; line-height: 1.45; }
+.notelist li[data-note]:hover > .muted { text-decoration: underline; }
+
 /* The archived spreadsheet rows are up to five columns of imported text in a
    half-width card. They're a record, not a working table, so they get the
    smaller type rather than a scrollbar. */
@@ -2130,7 +2137,7 @@ function summaryCard(y, yr) {
       <button class="btn small" id="deleteYearBtn"
         title="Remove ${esc(y)} from the app entirely">🗑 Delete ${esc(y)}</button>
     </div>
-    ${gridNotes(yr)}
+    ${yearNotes(y)}
   </div>`;
 }
 
@@ -2355,18 +2362,67 @@ function gridCard(y, yr) {
     ${usesPaychecks ? `<p class="sub muted" style="margin-top:10px">Paycheck rows estimate a
       future month as their per-check amount × that month's paycheck count (the Paychecks row —
       click a month to change it).${helpBtn('perCheck', 'the paycheck rule')}</p>` : ''}
+    ${yearNotes(y)}
   </div>`;
 }
 
-/* Loose notes that arrived with the imported data. Only the summary years show
-   them: a live grid says what it means in its own cells, and per-cell notes
-   are where anything else belongs. They stay in the data either way, so an
-   export still carries them. */
-function gridNotes(yr) {
-  const extras = (yr.extraNotes || []).map(n =>
-    `<li><span class="muted">${esc(n.where)}</span> — ${esc(n.note)}</li>`).join('');
-  return extras ? `<details class="section"><summary>Notes from the spreadsheet</summary>
-    <ul style="margin:10px 0 0;padding-left:18px;font-size:13px">${extras}</ul></details>` : '';
+/* Every note a year holds, gathered in one place.
+
+   A note is written on the cell it explains, which is the right place to write
+   it and the wrong place to find it again: it shows as a dot in one cell of a
+   twelve-by-forty grid, and the only way to reread last year's was to go
+   hunting. They are collected at the foot of the year instead, still living on
+   their own cells — this reads the same data the grid does.
+
+   Returns '' when the year has none, so the section simply isn't there rather
+   than sitting empty. */
+function notesOfYear(st, y) {
+  const yr = st.years[y] || {};
+  const items = [];
+  const at = (m) => m && m.startsWith(y) ? monthLabel(m) : m;
+  if (yr.kind === 'summary') {
+    for (const row of yr.categoryTotals || [])
+      if (row.note) items.push({ where: row.name, note: row.note });
+  } else {
+    const named = (id) => (yr.categories.find(c => c.id === id) || {}).name || id;
+    const acct = (id) => ((st.settings.accounts || []).find(a => a.id === id) || {}).name || id;
+    /* A row's own note explains the row, not a month, so it leads. */
+    for (const cat of yr.categories)
+      if (cat.note) items.push({ where: cat.name, note: cat.note, edit: 'row', id: cat.id });
+    for (const [key, cell] of Object.entries(yr.cells)) {
+      const [id, m] = key.split('|');
+      if (cell.note) items.push({ where: `${named(id)} · ${at(m)}`, note: cell.note,
+        m, edit: 'cat', id });
+      /* a split month can carry a note per part — each is its own line */
+      for (const p of cell.parts || [])
+        if (p.note) items.push({ where: `${named(id)} · ${at(m)} · ${fmtMoney(p.v || 0)}`,
+          note: p.note, m, edit: 'cat', id });
+    }
+    for (const [key, ov] of Object.entries(yr.overrides || {})) {
+      const [id, m] = key.split('|');
+      if (ov.note) items.push({ where: `${acct(id)} · ${at(m)}`,
+        note: ov.note, m, edit: 'bal', id });
+    }
+  }
+  /* Whatever came in with the imported spreadsheet. Its `where` carries the
+     sheet name ("2015!Mortgage"), which is repetition under a heading that
+     already says which year this is. */
+  for (const n of yr.extraNotes || [])
+    items.push({ where: String(n.where || '').replace(new RegExp(`^${y}!`), ''),
+      note: n.note });
+  /* Chronological where there is a month to go on; the rest keep their order. */
+  items.sort((a, b) => (a.m || '').localeCompare(b.m || ''));
+  return items;
+}
+
+function yearNotes(y) {
+  const items = notesOfYear(state, y);
+  if (!items.length) return '';
+  const line = (n) => `<li${n.edit ? ` data-note="${esc(n.edit)}" data-id="${esc(n.id)}"${
+    n.m ? ` data-m="${esc(n.m)}"` : ''} style="cursor:pointer" title="Click to open it"` : ''
+    }><span class="muted">${esc(n.where)}</span> — ${esc(n.note)}</li>`;
+  return `<details class="section"><summary>Notes for ${esc(y)} (${items.length})</summary>
+    <ul class="notelist">${items.map(line).join('')}</ul></details>`;
 }
 
 const KIND_LABEL = { actual: 'actual', manual: 'your estimate',
@@ -4902,6 +4958,16 @@ function wireBudget() {
     else if (td.dataset.pay) openCellEditor(y, 'pay', 'paychecks', td.dataset.pay);
   });
   if (grid) wireGridKeys(grid);
+  /* The gathered notes sit outside the table, so the grid's own listener can't
+     reach them — but a note you can't get back to the cell of is only half
+     useful. Row notes route through the ordinary #views editor listener. */
+  document.querySelectorAll('.notelist li[data-note]').forEach(li => {
+    li.onclick = () => {
+      const y = activeYearKey(), { note, id, m } = li.dataset;
+      if (note === 'row') openRowEditor('category', { year: y, id }, false);
+      else openCellEditor(y, note, id, m);
+    };
+  });
   const closeBtn = F('closeMonthBtn');
   if (closeBtn) closeBtn.onclick = markMonthEntered;
   const reopenBtn = F('reopenMonthBtn');
@@ -5573,7 +5639,7 @@ render();
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
-  afterRaise, bonusBase, bonusShare, yearFlows, summaryRowIsFlow,
+  afterRaise, bonusBase, bonusShare, yearFlows, summaryRowIsFlow, notesOfYear,
   fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,

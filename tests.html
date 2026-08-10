@@ -874,6 +874,66 @@ t('other-money balances become accounts stated in the month they joined', () => 
   eq(stated[1].v, 40);
 });
 
+group('A year’s notes, gathered');
+function notesState() {
+  return H.coerceShape({
+    settings: { accounts: [{ id: 'cash', name: 'Cash (SPAXX)', hub: true }] },
+    years: {
+      '2030': { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 12,
+        enteredThrough: '2030-12',
+        categories: [{ id: 'rent', name: 'Rent', note: 'renews in June' },
+                     { id: 'food', name: 'Food' }],
+        cells: {
+          'rent|2030-03': { v: -900, kind: 'actual', note: 'escrow shortage' },
+          'food|2030-02': { v: -300, kind: 'actual' },          // no note
+          'food|2030-05': { v: -250, kind: 'mixed', note: 'two shops',
+            parts: [{ v: -150, kind: 'actual', note: 'weekly' },
+                    { v: -100, kind: 'actual' }] },             // one part noted
+        },
+        paychecks: {}, seeds: {},
+        overrides: { 'cash|2030-01': { v: 500, note: 'off the statement' } } },
+      '2031': { kind: 'grid', model: 'live', startMonth: '2031-01', monthCount: 12,
+        categories: [{ id: 'rent', name: 'Rent' }], cells: { 'rent|2031-01': { v: -900 } },
+        paychecks: {}, seeds: {}, overrides: {} },
+      '2029': { kind: 'summary', categoryTotals: [
+        { name: 'Income', total: 30000, note: 'the raise landed late' },
+        { name: 'Rent', total: -9000 }],
+        extraNotes: [{ where: '2029!Rent', note: 'from the old sheet' }] },
+    } });
+}
+t('every kind of note is collected', () => {
+  const n = H.notesOfYear(notesState(), '2030');
+  eq(n.map(x => x.where), ['Rent', 'Cash (SPAXX) · Jan 30', 'Rent · Mar 30',
+    'Food · May 30', 'Food · May 30 · -$150.00'],
+    'row note first, then chronological; the account is named, not its id');
+  eq(n.map(x => x.note), ['renews in June', 'off the statement', 'escrow shortage',
+    'two shops', 'weekly']);
+});
+t('a cell or part without a note contributes nothing', () => {
+  const n = H.notesOfYear(notesState(), '2030');
+  ok(!n.some(x => x.where.includes('Feb 30')), 'the unnoted February cell is absent');
+  ok(!n.some(x => x.where.includes('-$100.00')), 'and so is the unnoted part');
+});
+t('a year with no notes gathers nothing, so the section is not drawn', () => {
+  eq(H.notesOfYear(notesState(), '2031'), []);
+});
+t('a summary year gathers its row notes and its imported ones', () => {
+  const n = H.notesOfYear(notesState(), '2029');
+  eq(n.map(x => x.where), ['Income', 'Rent'],
+    'and the sheet prefix is dropped — the heading already says the year');
+  eq(n.map(x => x.note), ['the raise landed late', 'from the old sheet']);
+});
+t('a note knows the cell it belongs to, so it can be opened', () => {
+  const n = H.notesOfYear(notesState(), '2030');
+  eq(n.find(x => x.note === 'escrow shortage').edit, 'cat');
+  eq(n.find(x => x.note === 'escrow shortage').id, 'rent');
+  eq(n.find(x => x.note === 'off the statement').edit, 'bal');
+  eq(n.find(x => x.note === 'renews in June').edit, 'row');
+  const imported = H.notesOfYear(notesState(), '2029')
+    .find(x => x.note === 'from the old sheet');
+  eq(imported.edit, undefined, 'an imported note has no cell to go back to');
+});
+
 group('Which summary rows are money that moved');
 /* The shape the old bi-weekly sheets have: detail rows, then a closing block
    of balances and derived totals, with the income line often sitting inside

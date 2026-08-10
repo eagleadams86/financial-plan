@@ -407,8 +407,16 @@ since Intl renders unknown codes literally rather than throwing — PTO
 default, row sort, the paycheck-rule toggle, the dividend fallback rate, the
 assumed retirement return, and the price-lookup key) live behind the header's
 ⚙ button; `buildMoneyFormats()` rebuilds the formatters on every render.
-`extraNotes` renders on summary years only — a live grid says what it means in
-its own cells. The Venmo and large-purchase ledgers are gone entirely, entries
+**Every note a year holds is gathered at its foot** by `notesOfYear(st, y)` —
+row notes, cell notes, the per-part notes of a split month, notes on a stated
+balance, and the `extraNotes` that arrived with the import (whose `where`
+carries a redundant "2015!" sheet prefix, stripped on the way out). A note is
+written where it belongs and then impossible to find again: one dot in a
+twelve-by-forty grid. The collector is pure over state so it can be tested;
+`yearNotes(y)` renders it, and returns '' when there are none so the section
+isn't drawn at all rather than sitting empty. Each line carries the cell it
+came from and opens it on click — wired in `wireBudget`, because the list sits
+outside `.grid` and the grid's own listener can't reach it. The Venmo and large-purchase ledgers are gone entirely, entries
 included; `coerceShape` also strips the copies an earlier version folded into
 `extraNotes`, matching on `where`, leaving the import's own notes alone.
 Investment panes are `side.portfolios` — `{id, name, rows}` each, add/rename/
