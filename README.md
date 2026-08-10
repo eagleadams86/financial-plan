@@ -35,7 +35,9 @@ must never show them.
   entered are actuals, everything after them is an estimate that recomputes the
   way the spreadsheet's formulas did — **the account balances included**, so the
   current month reads as the estimate it is until you mark it entered, rather
-  than looking like money already counted. Click any cell to edit — or **split a month into several
+  than looking like money already counted. Every figure says what it's made of,
+  subtotals and year totals too: plain for what happened, italic for a
+  projection, dashed for a total spanning both. Click any cell to edit — or **split a month into several
   amounts**, each actual or estimated on its own, totalled on save. A month's
   balance cell shows what the account earned that month and lets you override
   the interest or add a dividend — correct either and the balance recomputes

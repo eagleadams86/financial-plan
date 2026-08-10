@@ -42,8 +42,9 @@ numbers only. If a change needs a realistic payload, invent one.
 - Cell kinds mirror the spreadsheet's colour Key: `actual` (happened),
   `manual` (Charlie's estimate — beats auto), `auto` (rule-computed),
   `missing` (blank, counts as 0), `pinned` (balance stated outright), `mixed`
-  (a split month whose parts disagree). Each kind reads as a different LINE
-  STYLE in the grid, never a colour.
+  (a split month whose parts disagree, and now also a subtotal spanning both).
+  Each kind reads as a different LINE STYLE in the grid, never a colour, and
+  every figure in the grid carries one — cells, balances, subtotals, totals.
 - Estimate rules are table-driven in `RULES`: `carry` (Internet only — the
   sheet types Phone/Parking/Water into each month they apply, so a carry rule
   there would invent charges), `quarterly` (repeat on a cycle, `cat.every`
@@ -148,8 +149,19 @@ numbers only. If a change needs a realistic payload, invent one.
   is precisely when it stops being a guess. The Accounts **Total** row renders
   `c-${kind}` like the rows it adds up — it used to render no kind at all, so
   the headline figure looked like fact while every account above it said
-  otherwise. (Flow subtotals — Income/Expenses total — still render unmarked;
-  they sum cells of mixed kinds, so they'd need a mixed-kind rule.)
+  otherwise.
+- **Every added-up figure says what it is made of**, through one pure function,
+  `sumKind(kinds)`: the section subtotals across a month, their year totals, and
+  the year-total column down each row — the last being the one that really mixes
+  (months entered, then months projected), and the one that was silent about it.
+  `missing` is IGNORED, never counted: a blank must not drag a column of real
+  figures into looking part-estimated, and all-blank has nothing to describe.
+  Anything settled beside anything estimated is `mixed` (the dashed mark split
+  months already use, and a `mixed` cell carries its own actual up); `manual`
+  and `auto` together are just `auto` — they disagree about who guessed, not
+  about whether. `partsKind` is the same question one level down and stays
+  separate. All four marks are LINE STYLES already in the grid's legend, so
+  nothing here adds a colour.
 - A month's opening balance comes from last month, else the PRIOR YEAR's same
   month if that year computed one, else the year's own seed. That ordering is
   what keeps a year built early tracking the current year's projection instead

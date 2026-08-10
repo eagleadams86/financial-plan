@@ -1938,11 +1938,17 @@ function gridCard(y, yr) {
      would mean nothing — so this column sums THIS year's months only, which
      is also what the History charts count. */
   const ownMonths = months.filter(m => m.startsWith(y));
-  const rowTotalTd = (v, plain) => v === undefined
+  const rowTotalTd = (v, plain, kind) => v === undefined
     ? '<td class="rowtot"></td>'
-    : `<td class="rowtot">${plain ? esc(String(v)) : fmtCell(v)}</td>`;
+    : `<td class="rowtot ${kind ? `c-${kind}` : ''}"${
+        kind ? ` title="${esc(`${fmtMoney(v)} · ${KIND_LABEL[kind]}`)}"` : ''
+      }>${plain ? esc(String(v)) : fmtCell(v)}</td>`;
+  const cellOf = (id, m) => c.cells[`${id}|${m}`] || { v: 0, kind: 'missing' };
   const catTotal = (cat) => round2(ownMonths.reduce((s, m) =>
-    s + (c.cells[`${cat.id}|${m}`]?.v || 0), 0));
+    s + cellOf(cat.id, m).v, 0));
+  /* A year total spans entered months and projected ones, so it is the figure
+     most often part-and-part — and it was the one saying nothing about it. */
+  const catTotalKind = (cat) => sumKind(ownMonths.map(m => cellOf(cat.id, m).kind));
 
   const head = `<tr><th class="lbl">Category</th>${months.map(m =>
     `<th ${m === thisM ? 'class="now"' : ''}>${esc(monthLabel(m))}</th>`).join('')
@@ -1974,10 +1980,16 @@ function gridCard(y, yr) {
     months.map(m => `<td class="${m === thisM ? 'now' : ''}"></td>`).join('')}${rowTotalTd()}</tr>`;
   const subtotalRow = (label, cats) => `<tr class="subtotal">
     <th class="lbl" scope="row">${esc(label)}</th>${months.map(m => {
-      const sum = round2(cats.reduce((s, cat) =>
-        s + (c.cells[`${cat.id}|${m}`]?.v || 0), 0));
-      return `<td class="${m === thisM ? 'now' : ''}">${fmtCell(sum)}</td>`;
-    }).join('')}${rowTotalTd(round2(cats.reduce((s, cat) => s + catTotal(cat), 0)))}</tr>`;
+      const cells = cats.map(cat => cellOf(cat.id, m));
+      const sum = round2(cells.reduce((s, r) => s + r.v, 0));
+      /* A subtotal says what it is made of, like the rows above it: a month of
+         real figures reads plain, a month of estimates italic, and one holding
+         both reads as both. */
+      const kind = sumKind(cells.map(r => r.kind));
+      return `<td class="c-${kind} ${m === thisM ? 'now' : ''}" title="${
+        esc(`${fmtMoney(sum)} · ${KIND_LABEL[kind]}`)}">${fmtCell(sum)}</td>`;
+    }).join('')}${rowTotalTd(round2(cats.reduce((s, cat) => s + catTotal(cat), 0)), false,
+      sumKind(cats.flatMap(cat => ownMonths.map(m => cellOf(cat.id, m).kind))))}</tr>`;
 
   const catRows = ['income', 'expense', 'transfer'].map(sec => {
     let cats = yr.categories.filter(cat =>
@@ -1989,7 +2001,8 @@ function gridCard(y, yr) {
       cats = cats.slice().sort((a, b) => a.name.localeCompare(b.name));
     return secheadRow(SECTION_LABEL[sec])
       + cats.map(cat => `<tr>${catTh(cat)}${
-          months.map(m => cellTd(cat, m)).join('')}${rowTotalTd(catTotal(cat))}</tr>`).join('')
+          months.map(m => cellTd(cat, m)).join('')}${
+          rowTotalTd(catTotal(cat), false, catTotalKind(cat))}</tr>`).join('')
       /* One row is its own subtotal — repeating it just adds a line to read. */
       + (cats.length > 1 ? subtotalRow(`${SECTION_LABEL[sec]} total`, cats) : '');
   }).join('');
@@ -4641,6 +4654,22 @@ function partsKind(parts) {
   return kinds.size > 1 ? 'mixed' : [...kinds][0] || 'actual';
 }
 
+/* The same question one level up: what is a SUBTOTAL made of? Every added-up
+   figure in the grid runs through this — the section subtotals across a month,
+   and the year-total column down a row, which is the one that really mixes
+   (months you've entered, then months still projected).
+
+   A blank contributes nothing either way, so it can't drag a column of real
+   figures into looking part-estimated, and a line of nothing but blanks has
+   nothing to describe. Anything settled sitting beside anything estimated is
+   genuinely part-and-part — the dashed mark split months already use. Two
+   flavours of estimate, yours and the rule's, are still just an estimate. */
+function sumKind(kinds) {
+  const seen = new Set(kinds.filter(k => k !== 'missing'));
+  if (seen.size <= 1) return [...seen][0] || 'missing';
+  return seen.has('actual') || seen.has('mixed') ? 'mixed' : 'auto';
+}
+
 /* ── Pinning the month header ────────────────────────────────────────────────
    The header row should stop under the app header and stay there while the
    rest of the grid scrolls past. `position: sticky` can't do it: the grid
@@ -5114,7 +5143,7 @@ render();
 window.__finTestHooks = { round2, fmtMoney, monthAdd, monthDiff, monthLabel,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
-  normRole, gridToSummary, rulesNeedingYear, partsKind, limitsFor,
+  normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, limitsFor,
   yearStarted, startedGridYears,
   projectionYearsAfter, applyToRow, dropRow, swapRows, andList };
 
