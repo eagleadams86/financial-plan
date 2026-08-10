@@ -1184,6 +1184,20 @@ function coerceShape(data) {
       yr.extraNotes = yr.extraNotes.filter(n => !FOLDED.test(String((n && n.where) || '')));
   for (const k of ['rothContribs', 'k401', 'comp', 'bonuses', 'retirement',
                    'rothLimit', 'donations', 'limits']) s[k] = obj(s[k]);
+  /* A bonus used to be stored twice: once on the comp year and once in the
+     Bonuses-by-year map. Keeping two copies of one number in step by hand is
+     not a thing anyone does, so the comp card was reading a bonus the table
+     below it disagreed with — and understating Total comp by the whole bonus
+     for every year the comp dialog had never been opened on.
+     `bonuses` is the survivor: it is the one described as what actually
+     landed, and it covers years that have no comp record at all. A comp
+     year's own figure is carried over where the map has nothing; where both
+     exist the map wins. The source is deleted so it cannot come back. */
+  for (const [y, c] of Object.entries(s.comp)) {
+    if (!c || typeof c !== 'object') continue;
+    if (typeof c.bonus === 'number' && s.bonuses[y] === undefined) s.bonuses[y] = c.bonus;
+    delete c.bonus;
+  }
   /* The per-check machinery is worth its clutter only if you're actually paid
      that way, so it's off by default — but a budget already using the rule
      obviously wants it, and says so once. */
@@ -2543,7 +2557,9 @@ function limitsFor(year) {
   /* First open borrows from the comp figures rather than opening blank. */
   return {
     salary: stored.salary ?? (comp ? round2((comp.salary || 0) * (1 + (comp.raisePct || 0))) : 0),
-    bonus: stored.bonus ?? (comp ? comp.bonus || 0 : 0),
+    /* Bonuses by year covers years with no comp record, so the calculator can
+       borrow one either way. */
+    bonus: stored.bonus ?? ((state.side.bonuses || {})[year] || 0),
     pretaxPct: stored.pretaxPct ?? 0,
     bonusPct: stored.bonusPct ?? 0,
     hsaPretax: stored.hsaPretax ?? 0,
@@ -2664,7 +2680,10 @@ function renderComp() {
   const latest = years[years.length - 1];
   const cur = latest ? comp[latest] : null;
   const bonuses = s.bonuses || {};
-  const totalComp = (c) => round2((c.salary || 0) * (1 + (c.raisePct || 0)) + (c.bonus || 0));
+  /* One bonus, read from one place — the same figure the table below shows. */
+  const bonusFor = (y) => bonuses[y] || 0;
+  const totalComp = (y) => round2((comp[y].salary || 0) * (1 + (comp[y].raisePct || 0))
+    + bonusFor(y));
 
   const currentCard = `<div class="card">
     <h2>Where comp stands${latest ? ` — ${esc(latest)}` : ''}</h2>
@@ -2674,8 +2693,8 @@ function renderComp() {
       <tr><th scope="row">Raise</th><td>${((cur.raisePct || 0) * 100).toFixed(2)}%</td></tr>
       <tr><th scope="row">Salary after the raise</th>
         <td>${fmtMoney(round2((cur.salary || 0) * (1 + (cur.raisePct || 0))))}</td></tr>
-      <tr><th scope="row">Bonus</th><td>${fmtMoney(cur.bonus || 0)}</td></tr>
-      <tr><th scope="row">Total comp</th><td>${fmtMoney(totalComp(cur))}</td></tr>
+      <tr><th scope="row">Bonus</th><td>${fmtMoney(bonusFor(latest))}</td></tr>
+      <tr><th scope="row">Total comp</th><td>${fmtMoney(totalComp(latest))}</td></tr>
     </tbody></table></div>` : '<p class="sub">Nothing recorded yet.</p>'}
     <div class="addbar">
       ${latest ? `<button class="btn small" data-edit="comp" data-key="${esc(latest)}">✎ Edit ${esc(latest)}</button>` : ''}
@@ -4356,6 +4375,7 @@ const EDITORS = {
     get(ds) {
       const c = state.side.comp[ds.key] || {};
       return { year: +ds.key, ...c,
+        bonus: state.side.bonuses[ds.key],   // the one the table shows
         after: round2((c.salary || 0) * (1 + (c.raisePct || 0))) };
     },
     /* Carry the previous year forward: next year, opening on the salary that
@@ -4371,8 +4391,22 @@ const EDITORS = {
     },
     save(ds, v) {
       if (!v.year) return;
-      if (ds.key !== undefined && String(v.year) !== ds.key)
+      const key = String(v.year);
+      if (ds.key !== undefined && key !== ds.key) {
         delete state.side.comp[ds.key];
+        /* The year was renumbered — its bonus belongs to the new year, not to
+           the old one that no longer exists. */
+        if (state.side.bonuses[ds.key] !== undefined) {
+          state.side.bonuses[key] = state.side.bonuses[ds.key];
+          delete state.side.bonuses[ds.key];
+        }
+      }
+      /* The Bonus box edits the SAME figure as the Bonuses-by-year table —
+         one number, two places to reach it. An empty box means nothing
+         recorded, so the row goes rather than becoming a $0 one; a typed 0 is
+         a statement ("no bonus that year") and is kept. */
+      if (v.bonus === null || v.bonus === undefined) delete state.side.bonuses[key];
+      else state.side.bonuses[key] = v.bonus;
       const salary = v.salary ?? 0;
       /* `after` is never stored — it is salary × the raise, and the Comp tab
          works it out the same way. The two boxes are kept in step as you type,
@@ -4380,8 +4414,10 @@ const EDITORS = {
          a path that fires no input event, a paste or an autofill. */
       const raisePct = v.raisePct
         ?? (salary && v.after ? raiseFor(salary, v.after) / 100 : 0);
-      state.side.comp[String(v.year)] = { salary, raisePct, bonus: v.bonus ?? 0 };
+      state.side.comp[key] = { salary, raisePct };
     },
+    /* The bonus stays: what landed that year is still true whether or not the
+       salary record is, and Bonuses by year covers years with no comp row. */
     del: (ds) => { delete state.side.comp[ds.key]; },
   },
 

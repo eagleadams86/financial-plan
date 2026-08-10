@@ -874,6 +874,41 @@ t('other-money balances become accounts stated in the month they joined', () => 
   eq(stated[1].v, 40);
 });
 
+t('a bonus stored on a comp year moves into Bonuses by year, once', () => {
+  const d = H.coerceShape({ side: {
+    comp: { '2025': { salary: 100000, raisePct: 0.03, bonus: 9000 } },
+    bonuses: {} } });
+  eq(d.side.bonuses['2025'], 9000, 'carried over');
+  eq('bonus' in d.side.comp['2025'], false, 'and the source emptied so it cannot come back');
+  /* deleting it from the table must not resurrect it on the next load */
+  delete d.side.bonuses['2025'];
+  const again = H.coerceShape(JSON.parse(JSON.stringify(d)));
+  eq(again.side.bonuses['2025'], undefined);
+});
+t('where both copies exist the Bonuses table wins', () => {
+  /* It is the one described as what actually landed, and the comp field was
+     the copy nobody kept up to date. */
+  const d = H.coerceShape({ side: {
+    comp: { '2026': { salary: 100000, raisePct: 0.03, bonus: 9000 } },
+    bonuses: { '2026': 15000 } } });
+  eq(d.side.bonuses['2026'], 15000);
+  eq('bonus' in d.side.comp['2026'], false);
+});
+t('a bonus recorded for a year with no comp record is left alone', () => {
+  const d = H.coerceShape({ side: { comp: {}, bonuses: { '2020': 1000 } } });
+  eq(d.side.bonuses, { '2020': 1000 });
+});
+t('the total comp figure reads the bonus the table shows', () => {
+  /* The defect this closes: a comp year whose bonus only ever lived in the
+     table reported a $0 bonus and a total short by the whole of it. */
+  const d = H.coerceShape({ side: {
+    comp: { '2025': { salary: 128179.17, raisePct: 0.037775 } },
+    bonuses: { '2025': 15000 } } });
+  const after = H.round2(d.side.comp['2025'].salary * (1 + d.side.comp['2025'].raisePct));
+  eq(after, 133021.14);
+  eq(H.round2(after + (d.side.bonuses['2025'] || 0)), 148021.14);
+});
+
 t('the folded Venmo and purchase notes are cleared out', () => {
   const d = H.coerceShape({
     years: { '2026': { kind: 'summary', categoryTotals: [], extraNotes: [

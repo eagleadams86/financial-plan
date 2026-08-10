@@ -268,6 +268,19 @@ projected-year "dashed edge" on the flow bars is drawn by the `dashedBarEdge`
 plugin, and those bars' solid border is turned off (a dash over a same-colour
 solid reads as solid). The signal must never be colour alone — Charlie is
 red-green colourblind.
+- **One bonus, one place: `side.bonuses[year]`.** It used to be stored twice —
+  there and again as `comp[year].bonus` — and nobody keeps two copies of a
+  number in step by hand, so "Where comp stands" reported a $0 bonus and a
+  Total comp short by the whole of it for every year the comp dialog had never
+  been opened on. `coerceShape` carries a comp year's own figure into the map
+  where the map has nothing, the MAP WINS where both exist (it is the one
+  described as what actually landed, and it covers years with no comp record),
+  and the source field is deleted so a deletion can't resurrect it. The comp
+  editor's Bonus box and the Bonuses-by-year row are now two doors onto the
+  same figure; renumbering a comp year takes its bonus with it, deleting one
+  leaves it (what landed is still true), and an empty box removes the row
+  while a typed 0 is kept as a statement. `limitsFor()` reads the map too, so
+  the 401(k)/MAGI calculator can borrow a bonus for a year with no comp row.
 **"Since last year" on the Comp tab is not a year-on-year comparison** — that
 is the raise itself, one row up. `sinceLastYear()` checks the JOIN between two
 years: did this salary pick up where the year before ended? The ordinary answer
