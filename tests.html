@@ -10,7 +10,15 @@
      in a hidden same-origin iframe and calls its functions directly, so what's
      tested is exactly what ships — no copies, no build step. Serve over
      http://localhost (python3 -m http.server 8016); file:// iframes are blocked
-     in some browsers. Nothing here writes localStorage or calls save().
+     in some browsers. Nothing here writes localStorage or calls save() — but
+     GitHub Pages publishes this file next to the app, and on that origin merely
+     BOOTING the app in the iframe is a live session: if this browser has ever
+     signed in there, the sync module would start real Firestore traffic — or
+     raise a which-copy dialog nobody can see — inside an invisible frame. So
+     the gate at the foot of the script only creates the iframe on localhost,
+     and the iframe carries data-fin-tests, which index.html checks so the sync
+     module never initialises inside the harness (the family rule from Team
+     Dashboard and its siblings).
      Every fixture is SYNTHETIC — invented round numbers, never real data. The
      one exception is the local-only block at the end, which fetches the
      gitignored import JSONs when they exist on this machine and silently
@@ -42,7 +50,10 @@
   <div id="summary">Loading app…</div>
   <table><tbody id="out"></tbody></table>
 </div>
-<iframe id="app" src="index.html" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" title="app under test"></iframe>
+<!-- The app iframe is NOT in the markup: the localhost gate at the foot of the
+     script creates it, or refuses to. Booting the app is itself the first thing
+     that must not happen off localhost, so the gate has to come first — the
+     family rule from Team Dashboard; don't put the iframe back here. -->
 
 <script>
 'use strict';
@@ -1881,6 +1892,8 @@ t('engine matches the spreadsheet where the import files exist', () => {
 
 /* ── Runner ───────────────────────────────────────────────────────────────── */
 window.addEventListener('load', async () => {
+  /* No iframe means the localhost gate below refused; its message is showing. */
+  if (!document.getElementById('app')) return;
   /* The real-data files are gitignored; a 404 here is the normal state in CI
      and on the public site, and the cross-check test skips itself. */
   try {
@@ -1928,6 +1941,46 @@ function run() {
   s.textContent = fail === 0 ? `All ${pass} tests pass` : `${fail} of ${pass + fail} tests FAILED`;
   s.className = fail === 0 ? 'ok' : 'bad';
   document.title = (fail === 0 ? '✓ ' : '✕ ') + document.title;
+}
+
+/* ── The localhost gate ─────────────────────────────────────────────────────
+   The suite itself is read-only, but booting the app in the iframe is not
+   neutral off localhost: GitHub Pages serves this file at
+   /financial-plan/tests.html, and on that origin the invisible frame is a real
+   session — a signed-in browser would start Firestore sync traffic, or raise a
+   which-copy dialog nobody can see. So the iframe is created here or not at
+   all. '' covers file://, which has no host: the suite can't work there either
+   way (file:// iframes are blocked), so it gets the ordinary "serve it over
+   localhost" message. Ported from Team Dashboard's gate; same shape in Sprint
+   Velocity, PAPTrack and Golf Handicap. */
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]', ''];
+
+if (LOCAL_HOSTS.includes(location.hostname)) {
+  const frame = document.createElement('iframe');
+  frame.id = 'app';
+  /* index.html's sync module checks for this attribute and stays off — without
+     it, an origin that had ever signed in would start real sync traffic. */
+  frame.setAttribute('data-fin-tests', '');
+  frame.setAttribute('title', 'app under test');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;border:0;left:-9999px';
+  frame.src = 'index.html';           /* set before append: one load event, the real one */
+  document.body.appendChild(frame);
+} else {
+  const s = document.getElementById('summary');
+  s.className = 'bad';
+  s.textContent = 'Not run here — this page only works on localhost.';
+  document.getElementById('out').innerHTML =
+    '<tr><td class="msg" style="white-space:normal;font-family:inherit;font-size:13px">' +
+    'The suite boots the real app in a hidden frame, which on <strong>' +
+    location.hostname.replace(/[<&]/g, '') + '</strong> would start a live session — ' +
+    'including cloud sync, if this browser has signed in. It only runs on ' +
+    '<code>localhost</code>, against a copy served from the repo folder:<br><br>' +
+    '<code>cd ~/claude-financial-plan &amp;&amp; python3 -m http.server 8016</code><br>' +
+    'then open <code>http://localhost:8016/tests.html</code>.<br><br>' +
+    'Nothing has been changed by opening this page — ' +
+    '<a href="index.html">back to Money Map</a>.' +
+    '</td></tr>';
 }
 </script>
 </body>

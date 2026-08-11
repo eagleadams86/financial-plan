@@ -621,7 +621,14 @@ is what the tests diff the JS engine against.
 ## Tests
 
 `tests.html` (SV harness: hidden iframe onto the real `index.html`,
-`window.__finTestHooks` hands over the consts). Synthetic fixtures only. The
+`window.__finTestHooks` hands over the consts). Synthetic fixtures only.
+**It only runs on localhost, and enforces that itself** — the family rule from
+Team Dashboard: the iframe is created by the gate at the foot of the script
+(never in the markup — don't put it back), because on the published site the
+invisible frame is a live session and a signed-in browser would start real
+sync traffic. The iframe carries `data-fin-tests`, which the sync module in
+`index.html` checks so it never initialises inside the harness. CI reaches the
+page on `localhost:8016`, so the gate lets it through. The
 "Real data (local only)" group fetches the gitignored JSONs and SKIPS on 404
 — green in CI and on the public site by design. It compares the LIVE YEAR's
 own months only: the grid runs a year past that as a projection now, where the

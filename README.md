@@ -202,3 +202,11 @@ for the live year's own months. (Months beyond that are now a projection the
 app works out from the rules, where the spreadsheet had them typed in, so the
 two are not meant to agree.) CI
 (`.github/workflows/tests.yml`) runs the same page headless on every push.
+
+The page only runs on localhost, and enforces that itself: GitHub Pages
+publishes `tests.html` next to the app, and on that origin the hidden frame
+would be a live session — a signed-in browser would start real cloud sync
+inside a frame nobody can see. Anywhere but localhost it refuses, explains
+itself, and changes nothing. The frame is also marked `data-fin-tests`, which
+the app's sync module checks so it never initialises inside the harness —
+the same guard as the sibling apps.
