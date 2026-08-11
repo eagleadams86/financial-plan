@@ -589,7 +589,9 @@ sync-choice one closes it without saving.
 Optional Google sign-in + Firestore, the family pattern (ported from Sprint
 Velocity). Project **financialplan-60c6e**; one doc per user at
 `financialplan/{uid}` — the collection name must always match the published
-Firestore rules. `FIREBASE_CONFIG` (public client config, not a secret) and
+Firestore rules. `firestore.rules` in this repo is the audit-trail copy of
+what the console publishes (sibling convention); the console enforces, the
+file records — keep them in step. `FIREBASE_CONFIG` (public client config, not a secret) and
 `GOOGLE_CLIENT_ID` sit at the top of the sync module; the OAuth client's
 Authorized JavaScript origins list `https://eagleadams86.github.io` and
 `http://localhost:8016` — a new local port needs registering there or sign-in
