@@ -257,8 +257,10 @@ numbers only. If a change needs a realistic payload, invent one.
   dropdown (a row already pointing at one keeps it). The live year is always the newest grid
   that has begun.
   `gridToSummary()` folds a pinned grid into totals — every category is a flow
-  now that the old balance rows are accounts; stated balances don't fold in,
-  and `eoyCash` is what carries the year-end figure. It is permanent,
+  now that the old balance rows are accounts, and each account with a stated
+  balance keeps its LAST stated month as a balance row (December wherever
+  December was recorded), so a converted year shows the same end-of-year
+  balances the imported summaries always had. It is permanent,
   and it refuses quietly to be useful: `rulesNeedingYear()` warns when the
   next year has `samemonth`/`avglastyear` rows that read the year being
   converted. `migrate_local_data.py` only ever does the one-off strip of

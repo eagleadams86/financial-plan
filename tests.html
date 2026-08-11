@@ -1796,6 +1796,34 @@ t('converting a grid to a summary keeps the flows History charts read', () => {
   eq(summary.kind, 'summary');
   eq(flows(summary), before, 'money in and out are unchanged');
 });
+t('converting keeps each account\'s end-of-year balance as a balance row', () => {
+  const s = H.coerceShape({
+    settings: { accounts: [
+      { id: 'cash', name: 'Checking', hub: true },
+      { id: 'mid', name: 'Savings' },
+      { id: 'bank', name: 'Old bank' }] },
+    years: { '2020': { kind: 'grid', model: 'pinned', startMonth: '2020-01',
+      monthCount: 12,
+      categories: [{ id: 'rent', name: 'Rent', role: 'normal', rule: 'none' }],
+      cells: { 'rent|2020-03': { v: -900, kind: 'actual' } },
+      paychecks: {}, seeds: {}, balAdjust: {}, extraNotes: [],
+      overrides: {
+        'cash|2020-06': { v: 100 },
+        'cash|2020-12': { v: 450, note: 'off the December statement' },
+        'mid|2020-11': { v: 2000 },   // nothing stated for December
+        /* 'bank' states nothing at all this year */
+      } } } });
+  const summary = H.gridToSummary(s, '2020');
+  const bals = summary.categoryTotals.filter(r => r.isBalance);
+  eq(bals.map(r => [r.name, r.total]),
+    [['Checking', 450], ['Savings', 2000]],
+    'December where December was stated, else the last stated month');
+  eq(bals[0].note, 'off the December statement', 'the stated balance keeps its note');
+  ok(!bals.some(r => r.name === 'Old bank'),
+    'an account with nothing stated this year gets no row');
+  eq(summary.categoryTotals.find(r => r.name === 'Rent').total, -900,
+    'flows are untouched');
+});
 t('converting warns when next year looks back into this one', () => {
   const s = H.coerceShape(fixtureState());
   /* 2030 has a same-month-last-year row, which reads 2029 */

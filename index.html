@@ -3885,10 +3885,16 @@ function rolloverYear(st, computed, fromKey) {
 
 /* ═══════════════════════════ Year lifecycle ═══════════════════════════════ */
 
-/* Fold a finished year's months into one total per row. Every category is a
-   flow — coerceShape turned the old balance ROWS into accounts with stated
-   balances, and those don't fold into a summary; `eoyCash` is what carries
-   the year-end figure. Pure state-in, value-out so tests can pin it. */
+/* Fold a finished year's months into one total per row, and its accounts into
+   balance rows. Flows sum across the year; a balance can't be summed — twelve
+   monthly balances added up is meaningless — so each account keeps its LAST
+   stated month, December wherever December was recorded. Only stated months
+   count: a pinned year's balances ARE its overrides, and that is the only kind
+   of year the Convert button offers. An account with nothing stated this year
+   contributes no row, the same rule the pinned grid draws by — so a converted
+   year shows the same balances the grid did, just once instead of monthly
+   (what the imported 2011–2019 summaries always had). Pure state-in,
+   value-out so tests can pin it. */
 function gridToSummary(st, y) {
   const yr = st.years[y];
   const months = yearMonths(yr).filter(m => m.startsWith(y));
@@ -3898,6 +3904,16 @@ function gridToSummary(st, y) {
     if (cat.note) row.note = cat.note;
     return row;
   });
+  for (const a of accountsOf(st)) {
+    let last = null;
+    for (const m of months)
+      if ((yr.overrides || {})[`${a.id}|${m}`] !== undefined) last = m;
+    if (last === null) continue;
+    const ov = yr.overrides[`${a.id}|${last}`];
+    const row = { name: a.name, total: round2(ov.v || 0), isBalance: true };
+    if (ov.note) row.note = ov.note;
+    categoryTotals.push(row);
+  }
   return { kind: 'summary', convertedFrom: 'grid', categoryTotals,
     extraNotes: (yr.extraNotes || []).slice(),
     ...(yr.eoyCash !== undefined ? { eoyCash: yr.eoyCash } : {}) };
@@ -3924,8 +3940,9 @@ function convertYearToSummary(y) {
       + `Their estimates will go blank.`
     : '';
   if (!confirm(`Convert ${y} to a yearly summary? Its ${yearMonths(yr).length} months of `
-    + `figures are replaced by one total per row, and the months are gone for good — `
-    + `only restoring a backup brings them back. The History charts carry on unchanged.${warn}`))
+    + `figures are replaced by one total per row (each account keeps its end-of-year `
+    + `balance), and the months are gone for good — only restoring a backup brings them `
+    + `back. The History charts carry on unchanged.${warn}`))
     return;
   state.years[y] = gridToSummary(state, y);
   save(); render();

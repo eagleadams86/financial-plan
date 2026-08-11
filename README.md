@@ -54,7 +54,8 @@ must never show them.
   reads at a glance instead of running down one long strip. Mark a month "entered" to freeze its
   estimates into numbers, like overtyping formulas in Numbers. A finished year
   can be **converted to a yearly summary** (permanent — the History charts
-  carry on unchanged), or deleted outright. A finished year holds its account
+  carry on unchanged, and each account keeps its end-of-year balance as a
+  balance row), or deleted outright. A finished year holds its account
   balances as figures you stated at the time rather than a chain to recompute,
   and an account you've since closed stops at its last month instead of
   following you into later years.
