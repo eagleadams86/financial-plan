@@ -32,10 +32,19 @@ numbers only. If a change needs a realistic payload, invent one.
   panel-open set in `fin-open` is device-local; this isn't). Dragging uses
   POINTER events, not HTML5 drag-and-drop, which does nothing on a touchscreen;
   a tab is only picked up after 6px of travel measured with `Math.hypot` (the
-  bar WRAPS, so a drag between rows is mostly vertical), and the click that
-  follows a drag is swallowed so a plain tap still switches view. `touch-action:
-  pan-y` keeps the page scrolling under a finger. Alt+arrow moves the focused
-  tab, so reordering isn't pointer-only.
+  bar WRAPS, so a drag between rows is mostly vertical). `touch-action: pan-y`
+  keeps the page scrolling under a finger. Alt+arrow moves the focused tab, so
+  reordering isn't pointer-only. Three traps, all of which broke it in Chrome:
+  (1) **capture the pointer on the BAR, never on a tab** — reordering means
+  `insertBefore`, which detaches and reinserts the dragged tab, and a captured
+  element leaving the document loses its capture, so the drag died after one
+  hop; (2) **choose the tab on `pointerup`, not on `click`** — while the bar
+  holds the capture Chrome retargets the compatibility click to the bar too, so
+  a handler on the tab never hears it and tapping does nothing (`click` is kept
+  for keyboard activation only, identified by `detail === 0`); (3) **only
+  re-append the tabs when the order actually differs** — appending blurs the
+  element, and doing it every render threw focus away the moment a tab was
+  activated by keyboard, killing arrow navigation.
 - **`VIEWS` and `tabOrder()` sit near the top of the file, above `let state =
   load()`** — and `tabOrder` is a function DECLARATION. `coerceShape` calls it,
   `coerceShape` runs inside `load()`, and `load()` catches everything and

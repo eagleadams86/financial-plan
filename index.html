@@ -2129,12 +2129,18 @@ let C = {};   // computeAll() output, rebuilt on every render
 function render() {
   const view = VIEWS.includes(state.ui.activeTab) ? state.ui.activeTab : 'budget';
   /* Re-appending in order is the whole layout step — the buttons themselves
-     are static markup. */
+     are static markup. Only when the bar is actually out of order, though:
+     appending an element detaches and reinserts it, which BLURS it, and doing
+     that on every render meant activating a tab from the keyboard threw focus
+     away and the next arrow key went nowhere. */
   const bar = document.querySelector('.tabs');
-  for (const v of tabOrder(state.ui)) {
-    const t = bar.querySelector(`.tab[data-view="${v}"]`);
-    if (t) bar.appendChild(t);
-  }
+  const want = tabOrder(state.ui);
+  const have = [...bar.querySelectorAll('.tab')].map(t => t.dataset.view);
+  if (want.join() !== have.join())
+    for (const v of want) {
+      const t = bar.querySelector(`.tab[data-view="${v}"]`);
+      if (t) bar.appendChild(t);
+    }
   document.querySelectorAll('.tab').forEach(tab => {
     const sel = tab.dataset.view === view;
     tab.setAttribute('aria-selected', sel ? 'true' : 'false');
@@ -5841,48 +5847,74 @@ function saveTabOrder() {
 }
 
 /* Dragging with POINTER events, not HTML5 drag-and-drop: the latter does
-   nothing at all on a touchscreen, and this bar is used on a phone. A tab is
-   only picked up after the pointer has travelled a few pixels, so an ordinary
-   tap still just switches view — `moved` is what tells the click which it
-   was. `touch-action: pan-y` (CSS) leaves vertical scrolling alone while
+   nothing at all on a touchscreen, and this bar is used on a phone.
+
+   Everything hangs off the BAR, not off each tab, and the bar is what takes
+   the pointer capture. Capturing on the tab looks right and dies after one
+   move: reordering means `insertBefore`, which detaches and reinserts the
+   dragged tab, and a captured element that leaves the document loses its
+   capture — so the first nudge worked and the drag then went dead under the
+   cursor. The bar never moves, so its capture holds for the whole gesture.
+
+   A tab is only picked up once the pointer has travelled a few pixels, so an
+   ordinary tap still just switches view; `moved` is what tells the click which
+   it was. `touch-action: pan-y` (CSS) leaves vertical scrolling alone while
    letting a sideways drag through. */
+const tabBar = document.querySelector('.tabs');
 let dragging = null, moved = false, startX = 0, startY = 0;
+
+tabBar.addEventListener('pointerdown', (e) => {
+  const tab = e.target.closest('.tab');
+  if (!tab || e.button) return;                 // right/middle click is not a drag
+  dragging = tab; moved = false; startX = e.clientX; startY = e.clientY;
+  tabBar.setPointerCapture(e.pointerId);
+});
+
+tabBar.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  if (!moved) {
+    /* Distance, not sideways distance: the bar WRAPS, so dragging a tab from
+       the second row up to the first is mostly a vertical move. */
+    if (Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return;
+    moved = true;
+    dragging.classList.add('dragging');
+  }
+  /* The bar has the pointer, so ask the document what is under it. */
+  const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('.tab');
+  if (over && over !== dragging && over.parentElement === tabBar) {
+    const box = over.getBoundingClientRect();
+    tabBar.insertBefore(dragging,
+      e.clientX > box.left + box.width / 2 ? over.nextSibling : over);
+  }
+});
+
+const selectTab = (tab) => {
+  state.ui.activeTab = tab.dataset.view; save(); render();
+};
+const endTabDrag = () => {
+  if (!dragging) return;
+  dragging.classList.remove('dragging');
+  if (moved) saveTabOrder();
+  dragging = null;
+};
+/* Choosing a tab happens on POINTERUP, not on click: while the bar holds the
+   pointer capture, Chrome retargets the compatibility click to the bar as
+   well, so a handler on the tab itself never hears it and tapping a tab does
+   nothing at all. */
+tabBar.addEventListener('pointerup', (e) => {
+  const tab = dragging, wasDrag = moved;
+  endTabDrag();
+  if (!wasDrag && tab) selectTab(tab);
+});
+tabBar.addEventListener('pointercancel', () => { moved = false; endTabDrag(); });
+tabBar.addEventListener('lostpointercapture', endTabDrag);
+
 document.querySelectorAll('.tab').forEach(tab => {
-  tab.onpointerdown = (e) => {
-    if (e.button) return;                       // right/middle click is not a drag
-    dragging = tab; moved = false; startX = e.clientX; startY = e.clientY;
-    tab.setPointerCapture(e.pointerId);
-  };
-  tab.onpointermove = (e) => {
-    if (dragging !== tab) return;
-    if (!moved) {
-      /* Distance, not sideways distance: the bar WRAPS, so dragging a tab from
-         the second row up to the first is mostly a vertical move. */
-      if (Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return;
-      moved = true;
-      tab.classList.add('dragging');
-    }
-    /* The pointer is captured, so ask the document what is under it. */
-    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('.tab');
-    const bar = tab.parentElement;
-    if (over && over !== tab && over.parentElement === bar) {
-      const box = over.getBoundingClientRect();
-      bar.insertBefore(tab, e.clientX > box.left + box.width / 2 ? over.nextSibling : over);
-    }
-  };
-  const endDrag = () => {
-    if (dragging !== tab) return;
-    tab.classList.remove('dragging');
-    if (moved) saveTabOrder();
-    dragging = null;
-  };
-  tab.onpointerup = endDrag;
-  tab.onpointercancel = () => { moved = false; endDrag(); };
-  tab.onclick = () => {
-    /* The click that follows a drag is the end of the drag, not a choice. */
-    if (moved) { moved = false; return; }
-    state.ui.activeTab = tab.dataset.view; save(); render();
-  };
+  /* Only a KEYBOARD activation gets here — Enter or Space on a focused tab,
+     and the synthetic click the arrow keys fire. A real pointer click is dealt
+     with on pointerup above; `detail === 0` is how a keyboard one identifies
+     itself, and letting both through would switch view twice. */
+  tab.onclick = (e) => { if (!e.detail) selectTab(tab); };
   tab.onkeydown = (e) => {
     const step = { ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last' }[e.key];
     if (step === undefined) return;
