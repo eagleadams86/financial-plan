@@ -491,6 +491,17 @@ the calendar year rather than `yearIsProjected` — what matters there is that t
 DONATIONS are partial, not that the grid is. `dashedBarEdge` skips non-bar
 datasets: a line's points have no `base` or `width`, and `strokeRect` would be
 handed NaN on every frame.
+**A paragraph explaining a section is a `.note info`, never a `.card`.** A card
+promises figures underneath it; one holding nothing but prose leaves the reader
+waiting for a table that never comes, which is what the Donations intro was.
+The class is **lifted verbatim from Team Dashboard's `.note`** rather than
+invented here — the family already had the shape, and a second one would be
+exactly the drift the theme rules exist to stop. Only the `info` variant is
+carried across; if this app ever needs a status note, copy TD's `ok`/`err`
+variants across too rather than re-deriving them. Same reasoning put the giving
+tiles' info dot on the LABEL, which is where Sprint Velocity and Team Dashboard
+put one on a `.tile`: trailing the foot it landed wherever the sentence happened
+to wrap.
 **A donation carries an `event`** — the walk, ride or appeal it was given
 through — between the foundation and the cause, in the dialog and in the grid.
 It is a plain text field, escaped at the sink like `foundation` and `cause`, and
