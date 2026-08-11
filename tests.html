@@ -920,6 +920,37 @@ t('a corrupt setting leaves everything closed rather than throwing', () => {
   eq([...H.parseOpen(null)], []);
 });
 
+group('The order of the tabs');
+t('an arrangement is kept, and anything missing is added on the end', () => {
+  eq(H.tabOrder({ tabOrder: ['history', 'giving'] }).slice(0, 2), ['history', 'giving']);
+  eq(H.tabOrder({ tabOrder: ['history', 'giving'] }).length, H.VIEWS.length,
+    'a tab left out of a stored order still appears');
+  eq(new Set(H.tabOrder({ tabOrder: ['history'] })).size, H.VIEWS.length, 'each exactly once');
+});
+t('rubbish in a stored order is ignored rather than drawn', () => {
+  eq(H.tabOrder({ tabOrder: ['nope', 'budget', 'budget', 42, null] })[0], 'budget');
+  eq(H.tabOrder({ tabOrder: ['nope'] }), H.VIEWS, 'nothing usable falls back to the default');
+  eq(H.tabOrder({}), H.VIEWS);
+  eq(H.tabOrder(undefined), H.VIEWS);
+  eq(H.tabOrder({ tabOrder: 'budget,goals' }), H.VIEWS, 'a string is not an order');
+});
+t('normalising an order is settled in one pass', () => {
+  const once = H.tabOrder({ tabOrder: ['giving', 'nope', 'giving'] });
+  eq(H.tabOrder({ tabOrder: once }), once);
+});
+t('coerceShape survives a full payload without throwing', () => {
+  /* It runs inside `let state = load()`, whose catch turns ANY throw into a
+     blank state — the workbook silently comes up empty. A helper it calls that
+     is declared later in the file does exactly that, so this pins that the
+     whole pass completes. */
+  const d = H.coerceShape({ ui: { tabOrder: ['history'] },
+    years: { '2026': { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 12,
+      categories: [{ id: 'r', name: 'Rent' }], cells: { 'r|2026-01': { v: -100 } } } },
+    side: { donations: { '2026': [{ foundation: 'x', cash: -5 }] } } });
+  eq(Object.keys(d.years), ['2026'], 'the year is still there');
+  eq(d.ui.tabOrder[0], 'history', 'and the order came through');
+});
+
 group('Donations and the giving fund');
 t('an emptied year is not a year', () => {
   /* An emptied bucket drew a whole card with a $0 summary and no rows — what

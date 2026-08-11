@@ -149,6 +149,11 @@ select.ctl:hover { border-color: var(--text-muted); }
   color: var(--unit-active-txt); font-weight: 600;
 }
 .tab[aria-selected="true"]:hover { border-color: var(--unit-active-bg); }
+/* Tabs are draggable into whatever order suits. `pan-y` keeps the page
+   scrolling vertically under a finger while a sideways drag is read as a
+   drag — `none` would trap the scroll on the tab bar. */
+.tab { touch-action: pan-y; }
+.tab.dragging { opacity: .5; cursor: grabbing; }
 
 /* ── Cards, tiles ───────────────────────────────────────────────────────── */
 .card {
@@ -739,6 +744,23 @@ details.section table th, details.section table td { padding: 4px 6px; }
    dialog is also the one-time seed: import_xlsx.py converts the spreadsheet
    into the same JSON shape a backup uses.
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The tabs, and the order the reader has dragged them into. Both live up here
+   because `coerceShape` normalises the order and runs inside `let state =
+   load()` further down — a const declared after that point would still be in
+   its temporal dead zone, load() would catch the ReferenceError, and the whole
+   workbook would silently come up blank. */
+const VIEWS = ['budget', 'goals', 'retirement', 'comp', 'investments',
+  'vacations', 'giving', 'history'];
+
+/* Anything stored that is no longer a view is dropped and anything missing is
+   appended, so a tab added in a later version turns up on the end rather than
+   vanishing because an order saved before it existed doesn't mention it. */
+function tabOrder(ui) {
+  const stored = Array.isArray(ui && ui.tabOrder) ? ui.tabOrder : [];
+  const kept = stored.filter((v, i) => VIEWS.includes(v) && stored.indexOf(v) === i);
+  return kept.concat(VIEWS.filter(v => !kept.includes(v)));
+}
 
 const STORAGE_KEY = 'fin-state';
 const UPDATED_KEY = 'fin-updated';   // written by save(); the hook a future sync layer keys off
@@ -1431,6 +1453,7 @@ function coerceShape(data) {
     }
   }
   d.ui = obj(d.ui);
+  d.ui.tabOrder = tabOrder(d.ui);
   return d;
 }
 
@@ -2100,13 +2123,18 @@ function toast(msg) {
 
 /* ── Render skeleton ────────────────────────────────────────────────────── */
 
-const VIEWS = ['budget', 'goals', 'retirement', 'comp', 'investments',
-  'vacations', 'giving', 'history'];
 
 let C = {};   // computeAll() output, rebuilt on every render
 
 function render() {
   const view = VIEWS.includes(state.ui.activeTab) ? state.ui.activeTab : 'budget';
+  /* Re-appending in order is the whole layout step — the buttons themselves
+     are static markup. */
+  const bar = document.querySelector('.tabs');
+  for (const v of tabOrder(state.ui)) {
+    const t = bar.querySelector(`.tab[data-view="${v}"]`);
+    if (t) bar.appendChild(t);
+  }
   document.querySelectorAll('.tab').forEach(tab => {
     const sel = tab.dataset.view === view;
     tab.setAttribute('aria-selected', sel ? 'true' : 'false');
@@ -5801,16 +5829,74 @@ F('themeSel').onchange = (e) => {
 
 F('prefsBtn').onclick = () => openRowEditor('prefs', {}, false);
 
-/* Arrow keys move along the tabs and switch view as they go. */
+/* Arrow keys move along the tabs and switch view as they go; ALT+arrow drags
+   the focused tab along instead, which is the keyboard's way in to the same
+   reordering the pointer does. */
 const visibleTabs = () => [...document.querySelectorAll('.tab')].filter(t => !t.hidden);
+
+/* Remember wherever the bar has ended up. */
+function saveTabOrder() {
+  state.ui.tabOrder = [...document.querySelectorAll('.tabs .tab')].map(t => t.dataset.view);
+  save();
+}
+
+/* Dragging with POINTER events, not HTML5 drag-and-drop: the latter does
+   nothing at all on a touchscreen, and this bar is used on a phone. A tab is
+   only picked up after the pointer has travelled a few pixels, so an ordinary
+   tap still just switches view — `moved` is what tells the click which it
+   was. `touch-action: pan-y` (CSS) leaves vertical scrolling alone while
+   letting a sideways drag through. */
+let dragging = null, moved = false, startX = 0, startY = 0;
 document.querySelectorAll('.tab').forEach(tab => {
-  tab.onclick = () => { state.ui.activeTab = tab.dataset.view; save(); render(); };
+  tab.onpointerdown = (e) => {
+    if (e.button) return;                       // right/middle click is not a drag
+    dragging = tab; moved = false; startX = e.clientX; startY = e.clientY;
+    tab.setPointerCapture(e.pointerId);
+  };
+  tab.onpointermove = (e) => {
+    if (dragging !== tab) return;
+    if (!moved) {
+      /* Distance, not sideways distance: the bar WRAPS, so dragging a tab from
+         the second row up to the first is mostly a vertical move. */
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return;
+      moved = true;
+      tab.classList.add('dragging');
+    }
+    /* The pointer is captured, so ask the document what is under it. */
+    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('.tab');
+    const bar = tab.parentElement;
+    if (over && over !== tab && over.parentElement === bar) {
+      const box = over.getBoundingClientRect();
+      bar.insertBefore(tab, e.clientX > box.left + box.width / 2 ? over.nextSibling : over);
+    }
+  };
+  const endDrag = () => {
+    if (dragging !== tab) return;
+    tab.classList.remove('dragging');
+    if (moved) saveTabOrder();
+    dragging = null;
+  };
+  tab.onpointerup = endDrag;
+  tab.onpointercancel = () => { moved = false; endDrag(); };
+  tab.onclick = () => {
+    /* The click that follows a drag is the end of the drag, not a choice. */
+    if (moved) { moved = false; return; }
+    state.ui.activeTab = tab.dataset.view; save(); render();
+  };
   tab.onkeydown = (e) => {
     const step = { ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last' }[e.key];
     if (step === undefined) return;
     e.preventDefault();
     const list = visibleTabs();
     const i = list.indexOf(tab);
+    if (e.altKey && typeof step === 'number') {
+      const swap = list[i + step];
+      if (!swap) return;
+      tab.parentElement.insertBefore(step < 0 ? tab : swap, step < 0 ? swap : tab);
+      saveTabOrder();
+      tab.focus();
+      return;
+    }
     const next = step === 'first' ? list[0]
       : step === 'last' ? list[list.length - 1]
       : list[(i + step + list.length) % list.length];
@@ -5834,7 +5920,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,
   yearStarted, startedGridYears,
-  projectionYearsAfter, applyToRow, dropRow, swapRows, andList };
+  projectionYearsAfter, applyToRow, dropRow, swapRows, andList, tabOrder, VIEWS };
 
 /* ── Hooks the sync module calls ──────────────────────────────────────────
    The module is a separate <script type="module"> and can't see this scope. */

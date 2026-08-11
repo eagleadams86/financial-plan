@@ -27,6 +27,24 @@ numbers only. If a change needs a realistic payload, invent one.
   default, anti-flash boot script, Back up dialog, privacy footer, Recent
   changes box) is the family pattern from Sprint Velocity — if a chrome rule
   changes in the family, mirror it here.
+- **The tab bar is draggable**, and its order lives in `state.ui.tabOrder` —
+  synced and backed up, because a deliberate arrangement should follow you (the
+  panel-open set in `fin-open` is device-local; this isn't). Dragging uses
+  POINTER events, not HTML5 drag-and-drop, which does nothing on a touchscreen;
+  a tab is only picked up after 6px of travel measured with `Math.hypot` (the
+  bar WRAPS, so a drag between rows is mostly vertical), and the click that
+  follows a drag is swallowed so a plain tap still switches view. `touch-action:
+  pan-y` keeps the page scrolling under a finger. Alt+arrow moves the focused
+  tab, so reordering isn't pointer-only.
+- **`VIEWS` and `tabOrder()` sit near the top of the file, above `let state =
+  load()`** — and `tabOrder` is a function DECLARATION. `coerceShape` calls it,
+  `coerceShape` runs inside `load()`, and `load()` catches everything and
+  returns a blank state: a const declared further down is in its temporal dead
+  zone at that moment, so the ReferenceError is swallowed and THE WHOLE
+  WORKBOOK COMES UP EMPTY. Nothing is lost from localStorage, but the screen
+  says otherwise. Anything else coerceShape reaches for has to obey the same
+  rule. It's a `console.warn`, not an error, so a console check filtered to
+  errors will not show it.
 - localStorage keys: `fin-state`, `fin-theme`, `fin-updated`, `fin-open`. `save()` is the
   single write chokepoint (and where a future sync layer would hook in, SV
   style). `blankState()`/`coerceShape()`/`migrate()` guard every entry point;

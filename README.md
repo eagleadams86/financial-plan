@@ -58,6 +58,9 @@ must never show them.
   balances as figures you stated at the time rather than a chain to recompute,
   and an account you've since closed stops at its last month instead of
   following you into later years.
+- **The tabs are yours to arrange** — drag one anywhere along the bar (with a
+  mouse or a finger), or hold Alt and use the arrow keys. The order is saved and
+  follows you to your other devices.
 - **Everything is editable, everywhere** — click any row (budget categories,
   accounts, goals, holdings, retirement accounts, trips and their line items,
   PTO entries, donations, the old yearly summaries) to change, annotate, or
