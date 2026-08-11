@@ -1071,6 +1071,16 @@ t('a summary year gathers its row notes and its imported ones', () => {
     'and the sheet prefix is dropped — the heading already says the year');
   eq(n.map(x => x.note), ['the raise landed late', 'from the old sheet']);
 });
+t('a year key holding regex metacharacters still gathers notes', () => {
+  /* Year keys come out of a restored file and are kept verbatim. The sheet
+     prefix on an imported note used to be stripped with a RegExp built from
+     the key, so a key like "(" threw mid-render and blanked the Budget tab. */
+  const s = H.coerceShape({ years: { '(': { kind: 'summary',
+    categoryTotals: [], extraNotes: [{ where: '(!Rent', note: 'kept' },
+                                     { where: 'Other', note: 'also kept' }] } } });
+  eq(H.notesOfYear(s, '(').map(x => x.where), ['Rent', 'Other'],
+    'the prefix is stripped and nothing throws');
+});
 t('a note knows the cell it belongs to, so it can be opened', () => {
   const n = H.notesOfYear(notesState(), '2030');
   eq(n.find(x => x.note === 'escrow shortage').edit, 'cat');
@@ -1368,6 +1378,28 @@ t('numeric fields that render unescaped are coerced to numbers', () => {
   eq(bucket.entries[0].nights, 0);
   eq(bucket.entries[0].ptoDays, 0);
 });
+t('money maps from a hand-edited backup become numbers, not $NaN', () => {
+  /* These all render through fmtMoney/toFixed, so a string is never markup —
+     but NaN poisons every total it reaches. Coerced like the unescaped
+     fields; an entry that isn't a figure at all is dropped, since absence
+     already means "nothing recorded" and the limits have defaults. */
+  const d = H.coerceShape({ side: {
+    comp: { '2030': { salary: '90000', raisePct: 'x' } },
+    bonuses: { '2030': '5000', '2031': '' },
+    limits: { '2030': { salary: '90000', k401Limit: '' } },
+    retirementAccounts: [{ name: 'R', type: '401k', amount: '12000',
+      contribs: { '2030': '1000' } }],
+    donations: { '2030': [{ foundation: 'F', funding: '250' }] } } });
+  eq(d.side.comp['2030'].salary, 90000);
+  eq(d.side.comp['2030'].raisePct, 0, 'not a figure at all → 0');
+  eq(d.side.bonuses['2030'], 5000);
+  eq(d.side.bonuses['2031'], undefined, 'an empty bonus is dropped, not $0');
+  eq(d.side.limits['2030'].salary, 90000);
+  eq(d.side.limits['2030'].k401Limit, undefined, 'an empty limit falls back to the default');
+  eq(d.side.retirementAccounts[0].amount, 12000);
+  eq(d.side.retirementAccounts[0].contribs['2030'], 1000);
+  eq(d.side.donations['2030'][0].funding, 250);
+});
 t('markup in a year key survives coerceShape as data, not as markup', () => {
   const evil = '<img src=x onerror=alert(1)>';
   const d = H.coerceShape({ years: { [evil]: { kind: 'summary', categoryTotals: [] } } });
@@ -1651,17 +1683,6 @@ t('converting a grid to a summary keeps the flows History charts read', () => {
   const summary = H.gridToSummary(s, '2030');
   eq(summary.kind, 'summary');
   eq(flows(summary), before, 'money in and out are unchanged');
-});
-t('a balance row in a converted year keeps December, not a sum of months', () => {
-  const s = H.coerceShape(fixtureState());
-  s.years['2029'].categories.push({ id: 'bal', name: 'Cash', isBalance: true,
-    role: 'normal', rule: 'none' });
-  s.years['2029'].cells['bal|2029-11'] = { v: 500, kind: 'actual' };
-  s.years['2029'].cells['bal|2029-12'] = { v: 900, kind: 'actual' };
-  const summary = H.gridToSummary(s, '2029');
-  const row = summary.categoryTotals.find(r => r.name === 'Cash');
-  eq(row.total, 900, 'the end-of-year figure');
-  eq(row.isBalance, true);
 });
 t('converting warns when next year looks back into this one', () => {
   const s = H.coerceShape(fixtureState());

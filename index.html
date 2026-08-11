@@ -861,12 +861,6 @@ const roundTo = (v, dp) => {
   return Math.round((v + Number.EPSILON) * f) / f;
 };
 
-/* The percentage that turns `salary` into `after`, written as round a number
-   as will do the job. A raise letter says 2.5%, not 2.500004% — and it only
-   ever gives the new salary to the cent, so if a shorter percentage lands on
-   that same cent, that shorter one is what was meant. Only a pay rise that
-   genuinely isn't a round percentage (a flat "you're on $103,333 now") falls
-   through to the long form, and then the decimals are the honest answer. */
 /* What a year's salary came to once its raise landed. One helper because it
    was written out in seven places, and because it is the base for two other
    figures — Total comp, and now the bonus percentage — which would be their
@@ -912,6 +906,12 @@ function sinceLastYear(y, prevY, salary, prevAfter) {
   };
 }
 
+/* The percentage that turns `salary` into `after`, written as round a number
+   as will do the job. A raise letter says 2.5%, not 2.500004% — and it only
+   ever gives the new salary to the cent, so if a shorter percentage lands on
+   that same cent, that shorter one is what was meant. Only a pay rise that
+   genuinely isn't a round percentage (a flat "you're on $103,333 now") falls
+   through to the long form, and then the decimals are the honest answer. */
 function raiseFor(salary, after) {
   const exact = (after / salary - 1) * 100;
   for (const dp of [1, 2, 3, 4]) {
@@ -1256,6 +1256,14 @@ function coerceShape(data) {
       if (target.contribs[y] === undefined) target.contribs[y] = v;
     s.rothContribs = {};
   }
+  /* Balances and contributions render through fmtMoney and feed totals — a
+     string from a hand-edited backup is only ever $NaN on screen, never
+     markup, but NaN poisons every sum it reaches. Same class fix as the
+     unescaped fields above: coerce on the way in. */
+  for (const a of s.retirementAccounts) {
+    a.amount = num(a.amount);
+    for (const y of Object.keys(a.contribs || {})) a.contribs[y] = num(a.contribs[y]);
+  }
 
   /* "Other money" used to be a standalone list of balances on the Retirement
      tab — money that existed but sat outside the plan's arithmetic. Each one
@@ -1319,6 +1327,28 @@ function coerceShape(data) {
       yr.extraNotes = yr.extraNotes.filter(n => !FOLDED.test(String((n && n.where) || '')));
   for (const k of ['rothContribs', 'k401', 'comp', 'bonuses',
                    'donations', 'limits']) s[k] = obj(s[k]);
+  /* The rest of the money maps, num()'d for the same reason as the retirement
+     rows above. A bonus or a limit that isn't a figure at all is dropped
+     rather than kept as 0 — absence already means "nothing recorded" in both,
+     and the limits fall back to their defaults. */
+  for (const c of Object.values(s.comp)) {
+    if (!c || typeof c !== 'object') continue;
+    c.salary = num(c.salary);
+    c.raisePct = num(c.raisePct);
+    if (c.bonus !== undefined) c.bonus = num(c.bonus);
+  }
+  for (const y of Object.keys(s.bonuses)) {
+    s.bonuses[y] = num(s.bonuses[y]);
+    if (typeof s.bonuses[y] !== 'number') delete s.bonuses[y];
+  }
+  for (const y of Object.keys(s.limits)) {
+    const L = obj(s.limits[y]);
+    s.limits[y] = L;
+    for (const k of Object.keys(L)) {
+      L[k] = num(L[k]);
+      if (typeof L[k] !== 'number') delete L[k];
+    }
+  }
   /* A year with nothing in it is not a year: it draws a whole card with a $0
      summary and an empty table, which is what an emptied bucket leaves behind
      when its last donation moves to the year its date actually falls in. The
@@ -1326,6 +1356,10 @@ function coerceShape(data) {
      can't make the renderer throw. */
   for (const y of Object.keys(s.donations)) {
     s.donations[y] = arr(s.donations[y]);
+    /* same num() guard as the other money maps */
+    for (const r of s.donations[y]) {
+      r.funding = num(r.funding); r.grant = num(r.grant); r.cash = num(r.cash);
+    }
     if (!s.donations[y].length) delete s.donations[y];
   }
   /* `retirement` and `rothLimit` held the spreadsheet's original free-form
@@ -2225,8 +2259,9 @@ function startFresh() {
 
 /* ═══════════════════════════ Budget view ══════════════════════════════════ */
 
-/* Money in the grid: full cents, matching the spreadsheet. A '·' marks an
-   empty cell so a true zero is distinguishable from nothing recorded. */
+/* Money in the grid: full cents, matching the spreadsheet. Any zero renders
+   as '·' whatever its kind — a typed $0 and an empty cell share the glyph,
+   and it's the kind styling and the tooltip that tell them apart. */
 const fmtCell = (v) => (v === 0 ? '·' : fmtMoney(v));
 
 function yearPickerHtml(active) {
@@ -2290,8 +2325,7 @@ function gridCard(y, yr) {
   /* A row with no rule can't project anything, so a year made entirely of
      projections is quietly missing it. Worth saying out loud rather than
      leaving a total that looks wrong for no visible reason. */
-  const ruleless = yr.categories.filter(cat =>
-    !cat.isBalance && (cat.rule || 'none') === 'none');
+  const ruleless = yr.categories.filter(cat => (cat.rule || 'none') === 'none');
 
   /* A year-total column pinned to the right end. A live grid can run past its
      own December (the projection tail), and a total mixing two calendar years
@@ -2355,8 +2389,7 @@ function gridCard(y, yr) {
       sumKind(cats.flatMap(cat => ownMonths.map(m => cellOf(cat.id, m).kind))))}</tr>`;
 
   const catRows = ['income', 'expense', 'transfer'].map(sec => {
-    let cats = yr.categories.filter(cat =>
-      !cat.isBalance && (cat.section || 'expense') === sec);
+    let cats = yr.categories.filter(cat => (cat.section || 'expense') === sec);
     if (!cats.length) return '';
     /* Alphabetical is a display choice — the stored order is left alone, so
        switching back to manual restores the order you arranged. */
@@ -2369,13 +2402,6 @@ function gridCard(y, yr) {
       /* One row is its own subtotal — repeating it just adds a line to read. */
       + (cats.length > 1 ? subtotalRow(`${SECTION_LABEL[sec]} total`, cats) : '');
   }).join('');
-
-  /* pinned history grids keep their balance-ish rows in a block below */
-  const pinnedBals = yr.categories.filter(cat => cat.isBalance);
-  const pinnedBalRows = !pinnedBals.length ? '' : secheadRow('Accounts')
-    + pinnedBals.map(cat =>
-      `<tr class="balance">${catTh(cat)}${
-        months.map(m => cellTd(cat, m)).join('')}${rowTotalTd()}</tr>`).join('');
 
   /* the live year's account balances + total are computed, not rows. A basic
      budget (Start fresh) has no transfer rows, seeds or pins for the accounts
@@ -2496,7 +2522,7 @@ function gridCard(y, yr) {
     ${monthControls}
     <div class="gridwrap"><table class="grid">
       <thead>${head}</thead>
-      <tbody>${catRows}${balRows}${pinnedBalRows}</tbody>
+      <tbody>${catRows}${balRows}</tbody>
     </table></div>
     <div class="gridlegend">
       <span>Plain — actual</span>
@@ -2555,10 +2581,15 @@ function notesOfYear(st, y) {
   }
   /* Whatever came in with the imported spreadsheet. Its `where` carries the
      sheet name ("2015!Mortgage"), which is repetition under a heading that
-     already says which year this is. */
-  for (const n of yr.extraNotes || [])
-    items.push({ where: String(n.where || '').replace(new RegExp(`^${y}!`), ''),
+     already says which year this is. Stripped with startsWith, never a RegExp
+     built from the key: year keys come out of a restored file, and one holding
+     a regex metacharacter would throw mid-render and blank the whole tab. */
+  const sheetPrefix = `${y}!`;
+  for (const n of yr.extraNotes || []) {
+    const w = String(n.where || '');
+    items.push({ where: w.startsWith(sheetPrefix) ? w.slice(sheetPrefix.length) : w,
       note: n.note });
+  }
   /* Chronological where there is a month to go on; the rest keep their order. */
   items.sort((a, b) => (a.m || '').localeCompare(b.m || ''));
   return items;
@@ -3606,22 +3637,16 @@ function rolloverYear(st, computed, fromKey) {
 
 /* ═══════════════════════════ Year lifecycle ═══════════════════════════════ */
 
-/* Fold a finished year's months into one total per row. Flow rows sum across
-   the year; balance rows can't be summed — twelve monthly balances added up
-   is meaningless — so they keep December's figure, what the account actually
-   held at the end. Pure state-in, value-out so tests can pin it. */
+/* Fold a finished year's months into one total per row. Every category is a
+   flow — coerceShape turned the old balance ROWS into accounts with stated
+   balances, and those don't fold into a summary; `eoyCash` is what carries
+   the year-end figure. Pure state-in, value-out so tests can pin it. */
 function gridToSummary(st, y) {
   const yr = st.years[y];
   const months = yearMonths(yr).filter(m => m.startsWith(y));
-  const last = months[months.length - 1];
   const categoryTotals = yr.categories.map(cat => {
-    const row = { name: cat.name };
-    if (cat.isBalance) {
-      row.total = round2(yr.cells[`${cat.id}|${last}`]?.v || 0);
-      row.isBalance = true;
-    } else {
-      row.total = round2(months.reduce((s, m) => s + (yr.cells[`${cat.id}|${m}`]?.v || 0), 0));
-    }
+    const row = { name: cat.name,
+      total: round2(months.reduce((s, m) => s + (yr.cells[`${cat.id}|${m}`]?.v || 0), 0)) };
     if (cat.note) row.note = cat.note;
     return row;
   });
@@ -5612,8 +5637,10 @@ F('cellAddPartBtn').onclick = () => {
   const yr = state.years[yearKey];
   const future = yr.model === 'live' && m > yr.enteredThrough;
   setParts([...(cellParts || []), { v: 0, kind: future ? 'manual' : 'actual' }], future);
-  /* focus the amount that just appeared, so a second entry is one keystroke away */
-  const inputs = F('cellPartsList').querySelectorAll('input[type=number]');
+  /* Focus the amount that just appeared, so a second entry is one keystroke
+     away. Money boxes are type=text (asMoneyInput), so it's the inputmode that
+     picks the amount boxes out from the label boxes beside them. */
+  const inputs = F('cellPartsList').querySelectorAll('input[inputmode=decimal]');
   inputs[inputs.length - 1]?.focus();
 };
 F('cellSplitBtn').onclick = () => {

@@ -256,8 +256,9 @@ numbers only. If a change needs a realistic payload, invent one.
   no editor field. Closed accounts are also left out of the transfer-target
   dropdown (a row already pointing at one keeps it). The live year is always the newest grid
   that has begun.
-  `gridToSummary()` folds a pinned grid into totals — flows sum, balance rows
-  keep DECEMBER (a sum of monthly balances is meaningless). It is permanent,
+  `gridToSummary()` folds a pinned grid into totals — every category is a flow
+  now that the old balance rows are accounts; stated balances don't fold in,
+  and `eoyCash` is what carries the year-end figure. It is permanent,
   and it refuses quietly to be useful: `rulesNeedingYear()` warns when the
   next year has `samemonth`/`avglastyear` rows that read the year being
   converted. `migrate_local_data.py` only ever does the one-off strip of
@@ -332,7 +333,9 @@ Numeric fields that reach the page WITHOUT `esc()` (holding shares, trip/PTO
 nights, PTO days, allowances) are forced to numbers in `coerceShape` (`num()`) —
 several renderers interpolate them raw, so a string of markup in a hand-edited
 or corrupted backup would otherwise execute. Coerce the field, don't just esc
-the one sink: it closes the whole class.
+the one sink: it closes the whole class. The money maps (comp, bonuses, limits,
+donations, retirement amounts/contribs) are num()'d too — a string there is
+only ever $NaN on screen, never markup, but NaN poisons every total it reaches.
 The price lookup records its result per ticker (`fin-quote-run`) and the
 Investments tab reports it: a count alone can't say WHICH ticker failed, and
 the reasons differ — Alpha Vantage's free tier quotes shares and ETFs but not
