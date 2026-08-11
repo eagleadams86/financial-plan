@@ -992,6 +992,118 @@ t('a choice already made is never overruled', () => {
   eq(on.settings.givingFund, true, 'turned on before there is anything in it');
 });
 
+group('Giving as a share of income');
+t('a grant out of the fund is not counted a second time', () => {
+  /* The dollar was given the day it went INTO the fund. Adding the grant that
+     later takes it out to a cause would double every percentage on the tab. */
+  eq(H.givenOutOfPocket([
+    { foundation: 'Fidelity Charitable', funding: 5000 },
+    { foundation: 'Cradle Beach', grant: -1000 },
+    { foundation: 'Pets Alive', grant: -2000 },
+  ]), 5000);
+});
+t('a cash gift counts whichever sign it was typed with', () => {
+  /* Real backups hold both: +1000 one year, −1000 the next. */
+  eq(H.givenOutOfPocket([{ cash: 1000 }, { cash: -500 }]), 1500);
+});
+t('a donation you have only planned is not money given', () => {
+  eq(H.givenOutOfPocket([
+    { cash: -100 }, { cash: -900, pending: true }]), 100);
+});
+t('gross income is the salary after the raise plus the bonus', () => {
+  const st = { side: { comp: { '2026': { salary: 100000, raisePct: 0.03 } },
+    bonuses: { '2026': 10000 } }, years: {} };
+  eq(H.grossIncome(st, '2026'), 113000);
+  eq(H.grossIncome(st, '2025'), null, 'no comp record, no denominator');
+});
+t('a year with a bonus but no salary has no gross to measure against', () => {
+  /* The bonus alone would be a nonsense denominator and would report giving
+     as a preposterous share of income. A dash says more. */
+  const st = { side: { comp: {}, bonuses: { '2026': 10000 } }, years: {} };
+  eq(H.grossIncome(st, '2026'), null);
+});
+t('take-home is the pay rows only', () => {
+  /* A tax refund and a dividend are money in, but they are not pay — folding
+     them in would understate every percentage measured against them. */
+  const st = { side: {}, years: { '2026': { kind: 'grid', categories: [
+    { id: 'paycheck', name: 'Paycheck', rule: 'paycheck', section: 'income' },
+    { id: 'tax-return', name: 'Tax Return', rule: 'none', section: 'income' },
+    { id: 'dividends', name: 'Dividends', rule: 'none', section: 'income' },
+  ], cells: {
+    'paycheck|2026-01': { v: 3000 }, 'paycheck|2026-02': { v: 3000 },
+    'tax-return|2026-04': { v: 2000 }, 'dividends|2026-03': { v: 50 },
+  } } } };
+  eq(H.takeHomePay(st, null, '2026'), 6000);
+});
+t('a row named like pay qualifies without carrying the paycheck rule', () => {
+  /* Every history year's rows have rule "none" — the name is all there is. */
+  const st = { side: {}, years: { '2025': { kind: 'grid', categories: [
+    { id: 'paycheck', name: 'Paycheck', rule: 'none', section: 'income' },
+  ], cells: { 'paycheck|2025-01': { v: 4000 } } } } };
+  eq(H.takeHomePay(st, null, '2025'), 4000);
+});
+t('a year with nothing that looks like pay says so rather than reading zero', () => {
+  const st = { side: {}, years: { '2026': { kind: 'grid',
+    categories: [{ id: 'other', name: 'Other', rule: 'none', section: 'income' }],
+    cells: { 'other|2026-01': { v: 900 } } } } };
+  eq(H.takeHomePay(st, null, '2026'), null);
+});
+t('take-home reads the COMPUTED cells, so a year still running counts its projection', () => {
+  /* Reading only what is typed in would divide a year of giving by two months
+     of pay, and report a share of income several times the truth. */
+  const st = { side: {}, years: { '2026': { kind: 'grid', categories: [
+    { id: 'paycheck', name: 'Paycheck', rule: 'paycheck', section: 'income' },
+  ], cells: { 'paycheck|2026-01': { v: 3000 } } } } };
+  const computed = { cells: {
+    'paycheck|2026-01': { v: 3000 }, 'paycheck|2026-02': { v: 3000 },
+    'paycheck|2026-03': { v: 3000 } } };
+  eq(H.takeHomePay(st, computed, '2026'), 9000);
+});
+t('a summary year adds up its pay rows, balances left out', () => {
+  const st = { side: {}, years: { '2019': { kind: 'summary', categoryTotals: [
+    { name: 'Paycheck', total: 48000 },
+    { name: 'Giving', total: -500 },
+    { name: 'Savings', total: 1000, isBalance: true },
+  ] } } };
+  eq(H.takeHomePay(st, null, '2019'), 48000);
+});
+t('the two percentages, and a dash where there is nothing to divide by', () => {
+  const st = {
+    side: {
+      comp: { '2026': { salary: 100000, raisePct: 0 } },
+      bonuses: {},
+      donations: {
+        '2025': [{ foundation: 'a', cash: -1000 }],
+        '2026': [{ foundation: 'b', cash: -2000 }],
+      },
+    },
+    years: { '2026': { kind: 'grid', categories: [
+      { id: 'paycheck', name: 'Paycheck', rule: 'paycheck', section: 'income' },
+    ], cells: { 'paycheck|2026-01': { v: 50000 } } } },
+  };
+  const stats = H.givingStats(st, {});
+  eq(stats.map(s => s.y), ['2025', '2026'], 'oldest first');
+  eq(stats[0].grossPct, null, '2025 has no comp record');
+  eq(stats[0].takePct, null, 'and no year in the workbook at all');
+  eq(stats[1].given, 2000);
+  eq(stats[1].grossPct, 0.02);
+  eq(stats[1].takePct, 0.04);
+});
+t('a year with no donations in it is not on the chart', () => {
+  const st = { side: { comp: {}, bonuses: {},
+    donations: { '2025': [{ cash: -100 }], '2026': [] } }, years: {} };
+  eq(H.givingStats(st, {}).map(s => s.y), ['2025']);
+});
+t('every meter is drawn against one ceiling', () => {
+  /* Otherwise each year's bar is full and no two of them compare. */
+  eq(H.givingCeiling([{ grossPct: 0.021, takePct: 0.044 },
+    { grossPct: 0.031, takePct: 0.067 }]), 0.07, 'rounded up to a whole percent');
+  eq(H.givingCeiling([{ grossPct: 0.004, takePct: 0.009 }]), 0.05,
+    'and never so small that modest giving fills the bar');
+  eq(H.givingCeiling([{ grossPct: null, takePct: null }]), 0.05,
+    'nothing to scale to');
+});
+
 group('A month with a note is marked as one');
 t('a note on a split amount earns the dot, same as a note on the cell', () => {
   /* The reported bug: annotating one of the amounts and nothing else left the

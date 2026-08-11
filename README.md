@@ -107,8 +107,16 @@ must never show them.
   appears when it has something in it and goes when it doesn't. Plus a
   donor-advised fund's holdings, for those who have one — a Preferences switch,
   since plenty of people don't, and donations are tracked either way. Each
-  donation is either done or **planned**: a planned one reads in italics, stays
+  donation carries the **event** it was given through — a walk, a ride, an
+  appeal — beside the foundation receiving it, and is either done or
+  **planned**: a planned one reads in italics, stays
   out of the year's totals, and is counted up separately as what's still to go.
+  Every year shows what its giving **came to as a share of income** — of gross
+  comp, and of take-home pay — on meters drawn against one shared scale, so the
+  years compare with each other at a glance. Once a second year has something in
+  it, a chart appears above them: dollars given as bars, both percentages as
+  lines over the top. Given counts what left your own accounts (fund deposits
+  and cash gifts); a grant out of the fund isn't counted twice.
 - **History** — total liquidity 2011→now, and money in vs out for every one of
   those years, with the interest your accounts earned counted as money in so the
   two charts tell the same story. The oldest years come from bi-weekly sheets

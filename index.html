@@ -2129,6 +2129,18 @@ const HELP = {
       + 'is not a year-on-year comparison of what you earn — that is the raise itself, one '
       + 'row up. Where a year is missing from the table the column says which year it did '
       + 'read, since the one before is not always last year.' },
+  givingShare: { title: 'Giving as a Share of Income',
+    body: 'Given is what left your own accounts: deposits into the giving fund plus cash '
+      + 'gifts. A grant out of the fund is not added — that money was already counted the '
+      + 'day it went in, and counting it again on the way out would double every figure '
+      + 'here. Anything still only planned waits until you mark it done. Gross income is '
+      + 'the Comp tab\'s total comp: the salary after this year\'s raise, plus the bonus. '
+      + 'Take-home pay is the pay rows of that year\'s budget added up — what actually '
+      + 'reached the bank, after tax and every deduction — so a tax refund, a dividend or '
+      + 'a reimbursement is not counted as pay. A percentage is left as a dash where the '
+      + 'year has no salary recorded or no pay row to measure against, rather than being '
+      + 'guessed at. The current year measures what you have given so far against the '
+      + 'whole year\'s income, so it reads low until December.' },
   priceLookup: { title: 'Looking up Prices',
     body: 'Prices come from Alpha Vantage, which needs a free API key (Preferences). Only '
       + 'the ticker is sent. A fetched price is cached for six hours, so opening this tab '
@@ -3334,6 +3346,96 @@ function renderVacations() {
 
 /* ═══════════════════════════ Giving view ══════════════════════════════════ */
 
+/* What a year's giving COST YOU: a deposit into the giving fund, and a cash
+   gift. A GRANT out of the fund is deliberately not counted — that money was
+   already given (and already counted here) the day it went into the fund, so
+   adding it would count the same dollar twice and inflate every percentage on
+   this tab. Signs are inconsistent in real data — a cash gift is typed +1000
+   one year and −1000 the next — so each amount is taken as its magnitude, the
+   same way the deductible line above already reads them. Planned donations
+   stay out: money you haven't given yet is not a share of your income. */
+function givenOutOfPocket(items) {
+  return round2((items || []).filter(i => !i.pending)
+    .reduce((t, i) => t + Math.abs(i.funding || 0) + Math.abs(i.cash || 0), 0));
+}
+
+/* Gross income is the Comp tab's total comp: the salary this year's raise
+   landed on, plus the bonus. Read through afterRaise() like every other
+   consumer, never written out again. A year with no comp record has no gross —
+   the bonus alone would be a nonsense denominator, so it returns null and the
+   tile says why rather than showing a share of nothing. */
+function grossIncome(st, y) {
+  const c = (st.side.comp || {})[y];
+  if (!c || !c.salary) return null;
+  return round2(afterRaise(c) + ((st.side.bonuses || {})[y] || 0));
+}
+
+/* A budget row that PAYS you. Take-home is what actually reached the bank, so
+   it is the pay rows only — a tax refund, a dividend, a reimbursement or cash
+   back is money in, but it is not pay, and folding it in would understate
+   every percentage measured against it. A row qualifies by being on the
+   paycheck rule or by being NAMED like pay, which is what makes a history year
+   (whose rows carry no rule) work too. */
+const PAY_SLUGS = new Set(['paycheck', 'paychecks', 'pay', 'net-pay', 'take-home',
+  'take-home-pay', 'takehome', 'salary', 'wages']);
+function isPayRow(name, rule) {
+  return rule === 'paycheck' || PAY_SLUGS.has(slugJs(name || ''));
+}
+
+/* The year's take-home pay, or null where nothing in it looks like pay. */
+function takeHomePay(st, computed, y) {
+  const yr = st.years[y];
+  if (!yr) return null;
+  if (yr.kind === 'summary') {
+    const rows = (yr.categoryTotals || [])
+      .filter(it => !it.isBalance && isPayRow(it.name));
+    return rows.length
+      ? round2(rows.reduce((t, it) => t + (it.total || 0), 0)) : null;
+  }
+  const ids = new Set((yr.categories || [])
+    .filter(c => isPayRow(c.name, c.rule)).map(c => c.id));
+  if (!ids.size) return null;
+  /* The COMPUTED cells, not just the stored ones — the same reason yearFlows
+     reads them: a year still running counts its projected months rather than
+     reading low until December, which would make the share of income look
+     enormous for eleven months and then snap back. */
+  const cells = (computed && computed.cells) || yr.cells || {};
+  let t = 0;
+  for (const [key, cell] of Object.entries(cells)) {
+    const [id, m] = key.split('|');
+    if (ids.has(id) && m.startsWith(`${y}-`)) t += (cell.v || 0);
+  }
+  return round2(t);
+}
+
+/* One pass over every year that holds a donation, oldest first — the year
+   cards and the over-time chart are two views of exactly these figures, and
+   working them out twice is how the two would drift apart. Pure over state and
+   the computed years, so the tests can pin it. A percentage is null wherever
+   its denominator is unknown or nil; nothing here invents one. */
+function givingStats(st, computed) {
+  const don = st.side.donations || {};
+  return Object.keys(don).filter(y => (don[y] || []).length).sort().map(y => {
+    const given = givenOutOfPocket(don[y]);
+    const gross = grossIncome(st, y);
+    const take = takeHomePay(st, (computed || {})[y], y);
+    return { y, given, gross, take,
+      grossPct: gross > 0 ? given / gross : null,
+      takePct: take > 0 ? given / take : null };
+  });
+}
+
+/* Every meter on this tab is drawn against ONE ceiling, so a year's two bars
+   compare with each other and with the years above and below it. It is the
+   biggest share any year reaches, rounded up to a whole percent, and never
+   less than 5% — otherwise a first year of modest giving would fill its bar to
+   the end and read as complete. */
+function givingCeiling(stats) {
+  const top = stats.reduce((m, t) =>
+    Math.max(m, t.grossPct || 0, t.takePct || 0), 0);
+  return Math.max(0.05, Math.ceil(top * 100) / 100);
+}
+
 function renderGiving() {
   const s = state.side;
   /* Only years that hold something. coerceShape prunes an emptied bucket on
@@ -3341,6 +3443,41 @@ function renderGiving() {
      the card has to go there and then, not on the next reload. */
   const years = Object.keys(s.donations || {})
     .filter(y => (s.donations[y] || []).length).sort().reverse();
+  const stats = givingStats(state, C);
+  const byYear = new Map(stats.map(t => [t.y, t]));
+  const ceiling = givingCeiling(stats);
+
+  /* Three tiles above each year's table: what the year cost you, and that
+     figure as a share of each kind of income. The share is the headline
+     because the dollars are already in the table underneath. */
+  const shareTiles = (y) => {
+    const t = byYear.get(y);
+    if (!t) return '';
+    const tile = (label, pct, of, ofLabel, why) => `<div class="goal">
+      <div class="label">${label}</div>
+      ${pct === null
+        ? `<div class="value muted">—</div><div class="foot">${why}</div>`
+        : `<div class="value">${(pct * 100).toFixed(2)}%</div>
+           <div class="bar" role="meter" aria-valuemin="0"
+             aria-valuemax="${(ceiling * 100).toFixed(0)}"
+             aria-valuenow="${(pct * 100).toFixed(2)}"
+             aria-label="${esc(y)} giving as a share of ${ofLabel}">
+             <i style="width:${Math.min(100, pct / ceiling * 100).toFixed(1)}%"></i></div>
+           <div class="foot">${fmtMoney(t.given)} of ${fmtMoney(of)} ${ofLabel}</div>`}
+    </div>`;
+    return `<div class="goalgrid" style="margin-bottom:12px">
+      <div class="goal">
+        <div class="label">Given</div>
+        <div class="value">${fmtMoney(t.given)}</div>
+        <div class="foot">Fund deposits and cash gifts — what left your own
+          accounts${helpBtn('givingShare', 'what counts as given')}</div>
+      </div>
+      ${tile('% of Gross Income', t.grossPct, t.gross, 'gross',
+        'No salary recorded for this year on the Comp tab.')}
+      ${tile('% of Take-Home Pay', t.takePct, t.take, 'take-home',
+        'No pay row in this year’s budget to measure against.')}
+    </div>`;
+  };
 
   const donTable = (y) => {
     const items = s.donations[y];
@@ -3366,8 +3503,10 @@ function renderGiving() {
         fmtMoney(Math.abs(sum(gone, 'cash')))} given as cash · ${
         fmtMoney(deductible)} deductible.${planned
           ? ` ${fmtMoney(planned)} more is planned but hasn't gone yet.` : ''}</p>
+      ${shareTiles(y)}
       <div class="tablewrap"><table>
         <thead><tr><th style="text-align:left">Date</th><th style="text-align:left">Foundation</th>
+          <th style="text-align:left">Event</th>
           <th style="text-align:left">Cause</th><th>Amount</th><th style="text-align:left">How</th>
           <th style="text-align:left">Status</th>
           <th style="text-align:left">Deductible</th></tr></thead>
@@ -3380,6 +3519,7 @@ function renderGiving() {
             data-year="${esc(y)}" data-idx="${idx}">
             <td style="text-align:left">${esc(fullDayLabel(i.date))}</td>
             <th scope="row">${esc(i.foundation)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
+            <td style="text-align:left">${esc(i.event || '')}</td>
             <td style="text-align:left">${esc(i.cause || '')}</td>
             <td>${fmtMoney(amount)}</td>
             <td style="text-align:left">${how}</td>
@@ -3402,6 +3542,19 @@ function renderGiving() {
       already donated for tax purposes, waiting to be granted to a cause.</p>
     ${holdingsTable(s.daf || [], 'daf')}
   </div>`;
+  /* One year of giving is a figure, not a trend — two lines and a row of bars
+     drawn through a single point say nothing you can't read off the card. The
+     chart appears by itself the moment a second year has something in it. */
+  const trend = stats.length < 2 ? '' : `<div class="card">
+    <h2>Giving over Time</h2>
+    <p class="sub">What you gave each year, and what that came to as a share of what you
+      earned. Bars are dollars against the left scale; the two lines are percentages
+      against the right one.${helpBtn('givingShare', 'the two percentages')}</p>
+    <div class="chartbox" style="height:320px"><canvas id="givingChart"></canvas></div>
+    <p class="chartkey"><i></i> Dashed bar and diamond points — a year still running:
+      what you have given so far, measured against the whole year's income.</p>
+  </div>`;
+
   return fund + `<div class="card">
     <h2>Donations</h2>
     <p class="sub">Each one files itself under the year of its date, newest year first.
@@ -3410,7 +3563,80 @@ function renderGiving() {
       going again when it doesn't.</p>
     ${years.length ? '' : `<div class="addbar"><button class="btn small" data-add="donation"
       data-year="${new Date().getFullYear()}">＋ Add the first donation</button></div>`}
-  </div>` + years.map(donTable).join('');
+  </div>` + trend + years.map(donTable).join('');
+}
+
+/* Dollars given as bars, both shares as lines on a percentage scale of their
+   own — one chart, because the whole question is whether the dollars kept pace
+   with the income behind them, and two charts side by side never answer it.
+   The two lines are told apart by DASH as well as colour (never hue alone),
+   and the diamond points + dashed bar edge mark a year that hasn't finished,
+   the same signal the History charts use for a figure still being worked out. */
+function buildGivingChart() {
+  const stats = givingStats(state, C);
+  if (stats.length < 2) return;
+  const thisYear = todayISO().slice(0, 4);
+  /* Not "is the grid projected" — what matters here is that the DONATIONS are
+     part of a year, so the share reads low until December. */
+  const running = stats.map(t => t.y >= thisYear);
+  const accent = cssVar('--accent'), ok = cssVar('--ok');
+  const points = (color) => ({
+    pointRadius: 4, pointBackgroundColor: color,
+    pointStyle: running.map(r => r ? 'rectRot' : 'circle'),
+  });
+  const pct = (v) => v === null ? null : round2(v * 100);
+  newChart('givingChart', {
+    type: 'bar',
+    data: { labels: stats.map(t => t.y), datasets: [
+      { type: 'bar', label: 'Given', yAxisID: 'y', order: 3,
+        data: stats.map(t => t.given),
+        backgroundColor: cssVar('--accent-bg'),
+        /* solid edge on a finished year, none on one still running —
+           dashedBarEdge draws that one instead */
+        borderColor: (ctx) => (ctx && running[ctx.dataIndex]) ? 'transparent' : accent,
+        _trueBorder: accent, borderWidth: 2, borderSkipped: false,
+        /* Two or three years is a handful of categories, and Chart.js hands
+           each one a third of the plot — a slab that wide stops reading as a
+           bar and swamps the lines drawn over it. */
+        maxBarThickness: 84 },
+      { type: 'line', label: '% of gross income', yAxisID: 'pct', order: 1,
+        data: stats.map(t => pct(t.grossPct)),
+        borderColor: accent, backgroundColor: 'transparent',
+        borderWidth: 2, tension: .2, spanGaps: true, ...points(accent) },
+      { type: 'line', label: '% of take-home pay', yAxisID: 'pct', order: 0,
+        data: stats.map(t => pct(t.takePct)),
+        borderColor: ok, backgroundColor: 'transparent',
+        borderWidth: 2, tension: .2, spanGaps: true, borderDash: [6, 4],
+        ...points(ok) },
+    ]},
+    options: {
+      plugins: {
+        /* `order` puts the lines in front of the bars, and the legend follows
+           the same ordering — which listed the two percentages before the
+           dollars they are worked out from. Reversed, it reads in the order
+           the sentence above the chart does. */
+        legend: { reverse: true, labels: { color: cssVar('--chart-tick') } },
+        dashedBarEdge: { projected: running },
+        tooltip: { callbacks: { label: (t) =>
+          `${t.dataset.label}: ${t.dataset.yAxisID === 'pct'
+            ? t.parsed.y.toFixed(2) + '%' : fmtMoney(t.parsed.y)}`
+          + (running[t.dataIndex] ? ' (year still running)' : '') } } },
+      scales: {
+        x: chartAxes(),
+        y: Object.assign(chartAxes(), { position: 'left',
+          ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }),
+        /* The percentage scale carries no gridlines of its own: two sets of
+           lines across one plot area is a grid you can't read either way. */
+        pct: Object.assign(chartAxes(), { position: 'right', beginAtZero: true,
+          grid: { drawOnChartArea: false, color: cssVar('--chart-grid') },
+          ticks: { color: cssVar('--chart-tick'), callback: (v) => `${v}%` } }),
+      },
+    },
+    plugins: [dashedBarEdge],
+  }, `Giving by year: ${stats.map(t => `${t.y}, ${fmtMoney(t.given)} given${
+    t.grossPct === null ? '' : `, ${(t.grossPct * 100).toFixed(2)}% of gross income`}${
+    t.takePct === null ? '' : `, ${(t.takePct * 100).toFixed(2)}% of take-home pay`}${
+    t.y >= thisYear ? ', year still running' : ''}`).join('; ')}.`);
 }
 
 /* ═══════════════════════════ History view ═════════════════════════════════ */
@@ -3498,6 +3724,10 @@ const dashedBarEdge = {
     chart.data.datasets.forEach((ds, di) => {
       const meta = chart.getDatasetMeta(di);
       if (meta.hidden) return;
+      /* Bars only. The Giving chart mixes lines into the same plot, and a point
+         has no `base` or `width` — strokeRect would be handed NaN and paint
+         nothing while quietly erroring on every frame. */
+      if ((ds.type || meta.type || chart.config.type) !== 'bar') return;
       meta.data.forEach((bar, i) => {
         if (!projected[i]) return;
         const { x, y, base, width } = bar.getProps(['x', 'y', 'base', 'width'], true);
@@ -3710,6 +3940,7 @@ function wireView(view) {
   if (view === 'goals') buildGoalChart();
   if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
   if (view === 'comp') buildCompChart();
+  if (view === 'giving') buildGivingChart();
   if (view === 'investments') wireInvestments();
   if (view === 'history') buildHistoryCharts();
 }
@@ -4974,7 +5205,10 @@ const EDITORS = {
     fields: [
       { key: 'date', label: 'Date', type: 'date',
         hint: 'Any year. One without a table yet gets one.' },
-      { key: 'foundation', label: 'Foundation', type: 'text', wide: true },
+      { key: 'foundation', label: 'Foundation', type: 'text', wide: true,
+        hint: 'Who receives it — the charity itself.' },
+      { key: 'event', label: 'Event', type: 'text',
+        hint: 'The walk, ride or appeal it was given through, if any.' },
       { key: 'cause', label: 'Cause', type: 'text' },
       { key: 'funding', label: 'Fund deposit', type: 'money' },
       { key: 'grant', label: 'DAF grant', type: 'money' },
@@ -4988,6 +5222,7 @@ const EDITORS = {
     blank: () => ({ date: todayISO() }),
     save(ds, v) {
       const row = { date: v.date || '', foundation: v.foundation || '?',
+        event: v.event || '',
         cause: v.cause || '', funding: v.funding ?? 0, grant: v.grant ?? 0,
         cash: v.cash ?? 0, deductible: !!v.deductible, pending: !!v.pending };
       if (v.note) row.note = v.note;
@@ -5971,6 +6206,7 @@ render();
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   afterRaise, bonusBase, bonusShare, yearFlows, summaryRowIsFlow, notesOfYear,
+  givenOutOfPocket, grossIncome, takeHomePay, givingStats, givingCeiling, isPayRow,
   hasNote,
   parseOpen, withSection,
   fmtMoney, monthAdd, monthDiff, monthLabel,
