@@ -95,9 +95,9 @@ def main():
     frames[-1].save('favicon.ico', format='ICO',
                     sizes=[(s, s) for s in SIZES])
     print('favicon.ico written at ' + ', '.join(f'{s}px' for s in SIZES))
-    print('Now bump the ?v= on both favicon.ico references in index.html — '
-          'browsers cache an icon for a long time and will keep showing the old '
-          'one otherwise.')
+    print('Now bump the ?v= on every favicon.ico reference — both in index.html '
+          'and the one in privacy.html — browsers cache an icon for a long time '
+          'and will keep showing the old one otherwise.')
 
 
 if __name__ == '__main__':
