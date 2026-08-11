@@ -465,6 +465,37 @@ made. Planned ones are OUT of the year's totals (counting money you haven't
 given would overstate the year and the deduction) and called out after them;
 the row reads italic plus the word "Planned", the estimate convention, never
 colour.
+**Giving as a share of income counts what LEFT YOUR OWN ACCOUNTS** —
+`givenOutOfPocket()` is fund deposits + cash gifts, magnitudes (a cash gift is
+typed +1000 one year and −1000 the next in real data), planned rows excluded. A
+**GRANT is deliberately not added**: that dollar was given the day it went into
+the fund and is already counted, so folding the grant in would double every
+percentage on the tab. The denominators: gross is the Comp tab's total comp
+(`afterRaise` + the bonus), take-home is the year's PAY rows only, through
+`isPayRow` (the paycheck rule, or a name whose slug is in `PAY_SLUGS` — which is
+what makes a history year, whose rows all carry rule `none`, work). A tax
+refund, a dividend or a reimbursement is money in but is not pay. `takeHomePay`
+reads the COMPUTED cells for the same reason `yearFlows` does — a year still
+running must count its projected months, or the share of income reads several
+times the truth for eleven months and then snaps back. **A missing denominator
+is a dash, never a guess**: no comp record, or nothing in the budget that looks
+like pay, and the tile says which. `givingStats` is the ONE pass both the year
+cards and the chart read, so the two can't drift; every meter is scaled to
+`givingCeiling` — the biggest share any year reaches, rounded up to a whole
+percent, floored at 5% — so a year's two bars compare with each other AND with
+the years above and below. The over-time chart is drawn only from a second year
+(one point is not a trend), mixes bars on a dollar axis with two lines on a
+percentage axis, and tells the lines apart by DASH as well as colour; the
+diamond points and dashed bar edge mark a year that hasn't finished, keyed off
+the calendar year rather than `yearIsProjected` — what matters there is that the
+DONATIONS are partial, not that the grid is. `dashedBarEdge` skips non-bar
+datasets: a line's points have no `base` or `width`, and `strokeRect` would be
+handed NaN on every frame.
+**A donation carries an `event`** — the walk, ride or appeal it was given
+through — between the foundation and the cause, in the dialog and in the grid.
+It is a plain text field, escaped at the sink like `foundation` and `cause`, and
+older rows simply have none; nothing tries to split an existing foundation name
+into the two, because " - " in a charity's own name is not a separator.
 **A field explains itself in its own `hint`, not in the dialog's `sub`.**
 Preferences had grown an eight-line paragraph describing five settings at once —
 one more sentence each time a setting was added — until the thing you came to
