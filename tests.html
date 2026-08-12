@@ -999,6 +999,80 @@ t('a budget row tagged with someone who has gone loses the tag, keeps the row', 
   eq(cats.length, 2, 'the row itself is untouched — only the label went');
 });
 
+/* ── Owner subtotals ────────────────────────────────────────────────────────
+   The roll-up under the grid. Two invariants matter: it adds up to Total (a
+   subtotal you can't add up is worse than none), and it says what it is made
+   of, like every other added-up figure in the grid. */
+group('Owner subtotals');
+function ownedFixture() {
+  const s = H.coerceShape(fixtureState());
+  s.people = [{ id: 'sam', name: 'Sam', role: 'adult' },
+              { id: 'ellis', name: 'Ellis', role: 'child' }];
+  const by = (id) => s.settings.accounts.find(a => a.id === id);
+  by('cash').owner = 'joint';
+  by('mid').owner = 'sam';
+  by('long').owner = 'ellis';
+  /* 'bank' is left unassigned on purpose — the case that would silently break
+     the adding-up if unowned accounts were dropped instead of bucketed. */
+  return s;
+}
+t('every account lands in a bucket, and the buckets reach Total', () => {
+  const s = ownedFixture();
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  for (const m of ['2030-01', '2030-04', '2030-06']) {
+    const sub = H.ownerSubtotals(s, c, m);
+    const sum = H.round2(Object.values(sub).reduce((t, b) => t + b.v, 0));
+    eq(sum, c.balances[`total|${m}`], m + ': the subtotals reach Total');
+  }
+});
+t('an account nobody has claimed gathers in its own bucket', () => {
+  const s = ownedFixture();
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const sub = H.ownerSubtotals(s, c, '2030-01');
+  eq(sub[H.UNOWNED].v, c.balances['bank|2030-01'], 'not dropped, not folded into someone');
+  eq(sub.sam.v, c.balances['mid|2030-01']);
+  eq(sub.ellis.v, c.balances['long|2030-01']);
+  eq(sub.joint.v, c.balances['cash|2030-01']);
+});
+t('a bucket spanning a settled figure and an estimated one reads as mixed', () => {
+  /* January states `long` outright (pinned) while `cash` is an entered month
+     (actual). Put both on one person and the subtotal has to say so. */
+  const s = ownedFixture();
+  s.settings.accounts.find(a => a.id === 'cash').owner = 'ellis';
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(c.balanceKinds['long|2030-01'], 'pinned', 'the fixture still states this one');
+  eq(c.balanceKinds['cash|2030-01'], 'actual');
+  eq(H.ownerSubtotals(s, c, '2030-01').ellis.kind, 'mixed');
+  eq(H.ownerSubtotals(s, c, '2030-01').ellis.kind, H.sumKind(['pinned', 'actual']),
+     'and it is sumKind that decides, not a second opinion');
+});
+t('a bucket of one account just carries that account’s kind', () => {
+  const s = ownedFixture();
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(H.ownerSubtotals(s, c, '2030-06').sam.kind, c.balanceKinds['mid|2030-06']);
+});
+t('a month an account is not tracked in contributes nothing', () => {
+  const s = ownedFixture();
+  const c = { balances: { 'mid|2030-01': 500 }, balanceKinds: { 'mid|2030-01': 'actual' } };
+  const sub = H.ownerSubtotals(s, c, '2030-01');
+  eq(sub.sam.v, 500);
+  eq(sub.ellis, undefined, 'no balance, no bucket — not a zero');
+  eq(sub[H.UNOWNED], undefined);
+});
+t('only a real person or the shared bucket can be stored as an owner', () => {
+  const s = { people: [{ id: 'sam', name: 'Sam' }] };
+  eq(H.validOwner(s, 'sam'), 'sam');
+  eq(H.validOwner(s, 'joint'), 'joint');
+  eq(H.validOwner(s, ''), undefined, 'the "Not said" blank means unassigned');
+  eq(H.validOwner(s, 'ghost'), undefined);
+});
+t('an account in a dropdown says whose it is, so two Checkings are tellable apart', () => {
+  const s = { people: [{ id: 'sam', name: 'Sam' }] };
+  eq(H.accountOption(s, { id: 'checking', name: 'Checking', owner: 'sam' }), 'Checking — Sam');
+  eq(H.accountOption(s, { id: 'checking-2', name: 'Checking', owner: 'joint' }), 'Checking — Joint');
+  eq(H.accountOption(s, { id: 'x', name: 'Checking' }), 'Checking', 'unassigned adds nothing');
+});
+
 /* ── Restoring a backup ─────────────────────────────────────────────────────
    The one failure mode of putting people at the top level is that a merge site
    forgets them and a restore silently drops the household. `load()`, the
