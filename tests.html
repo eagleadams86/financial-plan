@@ -94,6 +94,10 @@ t('monthLabel renders a short month + 2-digit year', () => {
   eq(H.monthLabel('2026-01'), 'Jan 26');
   eq(H.monthLabel('2027-12'), 'Dec 27');
 });
+t('monthLabelFull keeps the century, for a month written into a sentence', () => {
+  eq(H.monthLabelFull('2026-01'), 'Jan 2026');
+  eq(H.monthLabelFull('2033-09'), 'Sep 2033');
+});
 
 /* ── Money ────────────────────────────────────────────────────────────────── */
 group('Money');
@@ -110,11 +114,13 @@ t('fmtMoney renders US dollars', () => {
 /* ── State boundary ───────────────────────────────────────────────────────── */
 group('State boundary');
 t('coerceShape forces every collection to the right type', () => {
-  const d = H.coerceShape({ years: 'junk', goals: 'nope', side: 7, vacations: null });
+  const d = H.coerceShape({ years: 'junk', goals: 'nope', side: 7, vacations: null,
+                            people: 'nobody' });
   eq(typeof d.years, 'object');
   eq(Array.isArray(d.goals), true);
   eq(Array.isArray(d.side.taxable), true);
   eq(Array.isArray(d.vacations.trips), true);
+  eq(Array.isArray(d.people), true);
 });
 t('coerceShape repairs a damaged grid year without dropping it', () => {
   const d = H.coerceShape({ years: { '2026': { kind: 'grid', cells: 'junk', monthCount: 999 } } });
@@ -137,6 +143,25 @@ t('blankState carries the spreadsheet constants', () => {
   approx(s.settings.midTermRateAnnual, 0.03);
   approx(s.settings.longTermRateAnnual, 0.07);
   eq(s.settings.ptoAllowance, 32);
+  eq(Array.isArray(s.people), true, 'a fresh plan has an empty household');
+  eq(s.people.length, 0);
+  eq(s.settings.filingStatus, 'single',
+     'what the old fixed MAGI figure already meant — changing it would move a real answer');
+});
+t('a plan from before the household arrives with an empty one, nothing invented', () => {
+  /* Schema 3 is the version that predates people. It must come forward with an
+     empty list rather than a guessed household, and — the load-bearing half —
+     its accounts must NOT be stamped with an owner. */
+  const d = H.migrate(H.coerceShape({
+    schema: 3,
+    settings: { accounts: [{ id: 'cash', name: 'Cash', hub: true }, { id: 'mid', name: 'Savings' }] },
+    years: { '2026': { kind: 'grid', startMonth: '2026-01', monthCount: 12 } }
+  }));
+  eq(d.schema, 4);
+  eq(d.people, []);
+  eq(d.settings.filingStatus, 'single');
+  eq(d.settings.accounts.every(a => a.owner === undefined), true,
+     'migration never guesses who owns an account');
 });
 
 /* ── Formula engine (synthetic fixture) ───────────────────────────────────────
@@ -885,6 +910,141 @@ t('other-money balances become accounts stated in the month they joined', () => 
   eq(stated[1].v, 40);
 });
 
+/* ── The household ──────────────────────────────────────────────────────────
+   People are a LABEL over the engine's figures — nothing here should be able to
+   move a balance. What these pin is the id space (which other records point
+   into) and the derived facts, which are derived precisely so they can't go
+   stale. Invented names only. */
+group('The household');
+t('a person is normalised to a name, a role and an optional birth month', () => {
+  const d = H.coerceShape({ people: [
+    { name: 'Robin' },
+    { id: 'ellis', name: 'Ellis', role: 'child', birth: '2015-09' },
+    { id: 'x', name: 'X', role: 'wizard', birth: 'not-a-month' },
+  ] });
+  eq(d.people[0].id, 'robin', 'an id is slugged from the name when there is none');
+  eq(d.people[0].role, 'adult', 'adult is the default');
+  eq(d.people[1].birth, '2015-09');
+  eq(d.people[2].role, 'adult', 'an unknown role is not carried');
+  eq(d.people[2].birth, undefined, 'a malformed birth month is dropped, not kept');
+});
+t('retireAge is forced to a number — it reaches the page unescaped', () => {
+  const d = H.coerceShape({ people: [{ id: 'a', name: 'A', retireAge: '<script>' }] });
+  eq(typeof d.people[0].retireAge, 'number');
+  const e = H.coerceShape({ people: [{ id: 'b', name: 'B', retireAge: '65' }] });
+  eq(e.people[0].retireAge, 65, 'a numeric string still means what it says');
+});
+t('an age and a retirement year are worked out, never stored', () => {
+  const sam = { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 };
+  eq(H.ageAt(sam, '2026-08'), 40, 'four months past the birthday');
+  eq(H.ageAt(sam, '2026-03'), 39, 'one month before it');
+  eq(H.retirementYearOf(sam), 2051, '1986-04 plus 65 years');
+  eq(H.ageAt({ id: 'n', name: 'No birthday' }, '2026-08'), null, 'no birth month, no guess');
+  eq(H.retirementYearOf({ id: 'n', name: 'No birthday', retireAge: 65 }), null);
+});
+t('only a child reaches 18, and only an adult retires', () => {
+  const kid = { id: 'k', name: 'Ellis', role: 'child', birth: '2015-09' };
+  eq(H.majorityMonthOf(kid), '2033-09');
+  eq(H.retirementYearOf(kid), null, 'a child has no retirement year');
+  const adult = { id: 'a', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 };
+  eq(H.majorityMonthOf(adult), null, 'and an adult has no 18th birthday to come');
+});
+t('an 18th birthday lands in the right month across a year end', () => {
+  eq(H.majorityMonthOf({ role: 'child', birth: '2015-12' }), '2033-12');
+  eq(H.majorityMonthOf({ role: 'child', birth: '2016-01' }), '2034-01');
+});
+t('an owner naming nobody is dropped rather than left dangling', () => {
+  const d = H.coerceShape({
+    people: [{ id: 'sam', name: 'Sam' }],
+    settings: { accounts: [
+      { id: 'cash', name: 'Cash', hub: true, owner: 'sam' },
+      { id: 'mid', name: 'Savings', owner: 'joint' },
+      { id: 'bank', name: 'Other bank', owner: 'ghost' },
+    ] },
+    side: { retirementAccounts: [{ name: '401k', type: '401k', owner: 'ghost' }] },
+    goals: [{ id: 'g', name: 'College', accounts: [], for: 'ghost' }],
+  });
+  const by = (id) => d.settings.accounts.find(a => a.id === id);
+  eq(by('cash').owner, 'sam', 'a real person survives');
+  eq(by('mid').owner, 'joint', "and so does the reserved 'joint'");
+  eq(by('bank').owner, undefined, 'a deleted person degrades to unassigned');
+  eq(d.side.retirementAccounts[0].owner, undefined);
+  eq(d.goals[0].for, undefined);
+});
+t("'joint' is a reserved owner, not a person", () => {
+  /* It shares the id space, so it can be an owner without appearing in the
+     People list — and a goal can never be "for" it. */
+  const d = H.coerceShape({
+    people: [],
+    settings: { accounts: [{ id: 'cash', name: 'Cash', hub: true, owner: 'joint' }] },
+    goals: [{ id: 'g', name: 'College', accounts: [], for: 'joint' }],
+  });
+  eq(d.settings.accounts[0].owner, 'joint');
+  eq(d.goals[0].for, undefined, 'nobody is a child called Joint');
+  eq(H.ownerLabel({ people: [] }, 'joint'), 'Joint');
+  eq(H.ownerLabel({ people: [] }, undefined), '', 'unassigned reads as nothing');
+  eq(H.ownerLabel({ people: [{ id: 'sam', name: 'Sam' }] }, 'sam'), 'Sam');
+});
+t('a budget row tagged with someone who has gone loses the tag, keeps the row', () => {
+  const d = H.coerceShape({
+    people: [{ id: 'sam', name: 'Sam' }],
+    years: { '2026': { kind: 'grid', startMonth: '2026-01', monthCount: 12, categories: [
+      { id: 'pay', name: 'Paycheck', section: 'income', person: 'sam' },
+      { id: 'pay2', name: 'Their Paycheck', section: 'income', person: 'ghost' },
+    ], cells: {} } }
+  });
+  const cats = d.years['2026'].categories;
+  eq(cats[0].person, 'sam');
+  eq(cats[1].person, undefined);
+  eq(cats.length, 2, 'the row itself is untouched — only the label went');
+});
+
+/* ── Restoring a backup ─────────────────────────────────────────────────────
+   The one failure mode of putting people at the top level is that a merge site
+   forgets them and a restore silently drops the household. `load()`, the
+   Restore button and the cloud adopt all merge the same way — name `settings`,
+   `side` and `ui` (which need their defaults filling in) and let everything
+   else ride through the spread. This reproduces that merge exactly, so if
+   anyone ever adds `people` to the wrong side of it, this fails. */
+group('A restored file keeps the household');
+const restoreMerge = (incoming) => {
+  const parsed = H.migrate(H.coerceShape(incoming));
+  return Object.assign(H.blankState(), parsed, {
+    settings: Object.assign(H.blankState().settings, parsed.settings || {}),
+    side: Object.assign(H.blankState().side, parsed.side || {}),
+    ui: Object.assign(H.blankState().ui, parsed.ui || {})
+  });
+};
+t('people, owners and tags all survive the round trip', () => {
+  const s = restoreMerge({
+    schema: 4,
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 },
+             { id: 'ellis', name: 'Ellis', role: 'child', birth: '2015-09' }],
+    settings: { accounts: [{ id: 'cash', name: 'Cash', hub: true, owner: 'joint' },
+                           { id: 'mid', name: 'Savings', owner: 'ellis' }] },
+    goals: [{ id: 'g', name: 'College', accounts: ['mid'], count: 'capped', for: 'ellis' }],
+    years: { '2026': { kind: 'grid', startMonth: '2026-01', monthCount: 12 } }
+  });
+  eq(s.people.length, 2, 'the household came back');
+  eq(s.people[1].birth, '2015-09');
+  eq(s.settings.accounts.find(a => a.id === 'mid').owner, 'ellis', 'and so did the owners');
+  eq(s.goals[0].for, 'ellis');
+});
+t('a file with no household comes back with an empty one, not undefined', () => {
+  /* `undefined` here is what would make `peopleOf` throw further down. */
+  const s = restoreMerge({ years: { '2026': { kind: 'grid', startMonth: '2026-01' } } });
+  eq(Array.isArray(s.people), true);
+  eq(s.people.length, 0);
+});
+t('an empty copy still counts a household as data', () => {
+  /* finHasData decides the first-sign-in "which copy?" dialog. Someone who has
+     named their family and nothing else must not be treated as empty. */
+  ok(w.finHasData({ people: [{ id: 'sam', name: 'Sam' }] }),
+     'a plan that is only a household is not an empty one');
+  ok(!w.finHasData({ people: [], years: {}, goals: [] }));
+  eq(w.finCounts({ people: [{ id: 'a' }, { id: 'b' }] }).people, 2);
+});
+
 group('The imported free-form rows are gone');
 t('the archive keys are dropped on load, so a backup stops carrying them', () => {
   const d = H.coerceShape({ side: {
@@ -948,6 +1108,15 @@ t('rubbish in a stored order is ignored rather than drawn', () => {
 t('normalising an order is settled in one pass', () => {
   const once = H.tabOrder({ tabOrder: ['giving', 'nope', 'giving'] });
   eq(H.tabOrder({ tabOrder: once }), once);
+});
+t('an order saved before the Household tab existed picks it up', () => {
+  /* The real upgrade path: someone who had dragged their tabs before this
+     version shipped. No migration writes it — tabOrder appends it. */
+  const before = ['budget', 'goals', 'retirement', 'comp', 'investments',
+                  'vacations', 'giving', 'history'];
+  const after = H.tabOrder({ tabOrder: before });
+  ok(after.includes('household'), 'the new tab turns up');
+  eq(after.slice(0, 2), ['budget', 'goals'], 'and the arrangement is kept');
 });
 t('coerceShape survives a full payload without throwing', () => {
   /* It runs inside `let state = load()`, whose catch turns ANY throw into a
@@ -1276,7 +1445,7 @@ t('the reclassification runs once and then leaves you alone', () => {
   const first = H.migrate(H.coerceShape({ schema: 1, years: { '2015': year() } }));
   eq(first.years['2015'].categoryTotals[0].isBalance, undefined, 'Mortgage is a flow now');
   eq(first.years['2015'].categoryTotals[1].isBalance, true);
-  eq(first.schema, 3);
+  eq(first.schema, 4, 'and it comes forward to the current schema');
   /* now flip one by hand, as the row editor would, and load again */
   first.years['2015'].categoryTotals[0].isBalance = true;
   const second = H.migrate(H.coerceShape(JSON.parse(JSON.stringify(first))));
