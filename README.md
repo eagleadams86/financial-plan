@@ -16,7 +16,9 @@ sign-in uses Google Identity Services (works on corporate networks that block
 firebaseapp.com), and "Delete all data" removes the synced copy too. See
 [privacy.html](privacy.html). The import files (`financial-plan-data.json`,
 `expected-2026.json`) are gitignored from the very first commit; `git status`
-must never show them.
+must never show them. Since the Household tab arrived, a backup file or a
+screenshot can also carry family members' names and birth months, children's
+included — treat those the way you treat the figures.
 
 ## What It Does
 
@@ -77,12 +79,30 @@ must never show them.
   already claimed. Plus progress, target dates, required monthly saving,
   end-of-year liquidity, and a pace check that follows whichever goal is next:
   the soonest deadline you haven't met yet.
-- **Retirement** — Traditional vs Roth split; retirement accounts with a type
-  (401(k), Roth IRA, HSA…) and their own contribution history, so nothing
-  about Roth IRAs is special-cased; a **401(k) limit calculator** and a **Roth
-  IRA income (MAGI) calculator** that both recompute as you change the figures;
+- **Household** — who the plan is for: a partner, your children. Each person
+  has a role, an optional birth month and (for an adult) a retirement age, and
+  their age, retirement year and the month a child turns 18 are all **worked
+  out rather than stored**, so none of it goes stale. Naming people unlocks the
+  rest: every account can say whose it is — theirs, yours, **Joint**, or not
+  said — and the budget grid grows a subtotal per person just above Total.
+  Every account lands in exactly one of those rows (the unassigned gather under
+  "Unassigned"), so **the subtotals always add up to Total**. A savings goal can
+  say which child it is for, which files it under them here and suggests their
+  18th birthday as its target date — a starting point you type straight over.
+  Nothing on this tab changes a single figure the budget computes; owner is a
+  way of reading the plan, not an input to it. The whole tab stays out of the
+  way until you add someone.
+- **Retirement** — Traditional vs Roth split, with a per-person breakdown once
+  there are two of you; retirement accounts with a type
+  (401(k), Roth IRA, HSA…), an owner, and their own contribution history, so nothing
+  about Roth IRAs is special-cased; a **401(k) limit calculator per earner**
+  (that limit is per person) and a **Roth
+  IRA income (MAGI) calculator** that counts both incomes when you file jointly;
+  both recompute as you change the figures;
   and a projection of where the balances are heading at an assumed return.
   Contributions are rows you click to edit, one per year and account.
+  The thresholds stay figures **you** type: they move every year and differ by
+  filing status, and the app deliberately keeps no tax tables.
 - **Compensation** — where comp stands, raises over time (the raise in dollars
   and how the salary actually moved since last year, which differ whenever
   something lands mid-year), and bonuses by year — one figure per year, editable

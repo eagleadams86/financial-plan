@@ -12,6 +12,11 @@ all data in localStorage. `financial-plan-data.json` and `expected-2026.json`
 (the import script's outputs) are gitignored from the first commit; check
 `git status` before every push anyway. Test fixtures use invented round
 numbers only. If a change needs a realistic payload, invent one.
+**Since the household arrived the state also holds people's NAMES and BIRTH
+MONTHS, children's among them** — a category this repo never carried before and
+more sensitive than a dollar figure. Fixtures use invented names (Sam, Robin,
+Ellis); a screenshot pasted into an issue or the README now needs checking for
+family names as well as balances.
 
 ## Architecture
 
@@ -128,6 +133,58 @@ numbers only. If a change needs a realistic payload, invent one.
   or to the current month when an account is added — and deliberately has NO
   editor field: when tracking began is a fact about the data, and editing it
   would either blank months that hold figures or invent months that never did.
+- **The household is a way of READING the plan, never an input to it.**
+  `state.people` is a top-level list beside `goals` (not in `settings`, which is
+  the app-preferences bag) — `{id, name, role: 'adult'|'child', birth?, retireAge?}`.
+  Accounts, retirement accounts, goals (`for`) and budget rows (`person`) point
+  INTO it by id. `computeYear` knows nothing about any of it and must stay that
+  way: per-owner figures are derived at render time by `ownerSubtotals()`, the
+  way `computeGoals` derives over `computed.balances`. That is what keeps the
+  real-data cross-check passing untouched — if it ever moves after a household
+  change, the change is wrong.
+  - `birth` is a **`YYYY-MM` month**, guarded like `since`/`until`. Age, the
+    retirement year and the month a child turns 18 are DERIVED (`ageAt`,
+    `retirementYearOf`, `majorityMonthOf`) — a stored age is wrong within a year.
+  - **`'joint'` is a reserved owner value, not a person.** Shared money has no
+    birthday and doesn't retire. It shares the id space, so `person.save` must
+    push somebody actually called Joint onto `joint-2`.
+  - **Migration invents nothing.** Schema 4 rewrites no data at all: no people
+    are guessed and no account is stamped with an owner, because "we don't know"
+    and "it's shared" are different claims. An absent owner is the honest state
+    and renders as "Unassigned".
+  - **Subtotals must add up to Total.** Every account the year computes lands in
+    exactly one bucket, unassigned included; they use the grid's existing
+    `.subtotal` style and take their kind from `sumKind` like every other
+    added-up figure. Rendered only when there is more than one bucket.
+  - Renaming a person NEVER changes their id, and deleting one leaves what was
+    theirs unassigned (with a toast saying how much) rather than deleting it.
+  - Editors only touch `owner`/`for`/`person` **when the field was on the form** —
+    a dialog that never asked the question must not answer it.
+  - **No account `purpose`/`kind` tag.** It was considered and rejected: nothing
+    branches on it, the goal carries "this is for college" better (a 529 and a
+    taxable account can both fund one), and the filter axis is the owner. Expect
+    it to be re-proposed.
+  - Savings bonds and custodial handovers are deliberately NOT modelled. A flat
+    `rate` cannot describe an EE bond doubling at 20 years or an I-bond resetting
+    against CPI, and `until` must never be reused for majority — it drops the
+    account out of Total, and a UTMA reaching 21 is still real money.
+- **The Comp tab is ONE person's career** (`settings.compPerson`, defaulting to
+  the first adult). Do not reshape `side.comp` into a per-person map:
+  `sinceLastYear()` asks whether this salary picked up where last year's ended,
+  and a household total has no answer, because one of you can change jobs while
+  the other doesn't. A second earner's pay is a budget income row tagged
+  `person`, which is what `takeHomePay(st, computed, y, personId)` filters on.
+- **`limitsFor(year)` must keep its exact one-argument behaviour** — there is a
+  test pinning it. `limitsFor(year, personId)` reads `side.limits[year].by[personId]`;
+  the flat fields stay the single-earner case AND belong to the comp person until
+  they have their own, so naming a household can't empty a calculator already
+  filled in. `by` is the one key in that record that isn't money — coerceShape
+  must not let `num()` flatten it to 0. The 401(k) limit is per person; the Roth
+  MAGI check is per household. **Filing status decides whose income is counted
+  and NOTHING else** — it deliberately sets no threshold, because those move
+  every year and a figure shipped here would be quietly wrong within twelve
+  months while looking authoritative. The app has no tax model and must not grow
+  one.
 - A row's `role` is `normal` / `transfer` (+ `transferTo`) / `passthrough`
   (+ `transferTo` + `creditTiming`). The old fixed names (midTransfer, zelle,
   charitable…) still arrive from backups and hand-built fixtures, so every
@@ -303,6 +360,11 @@ The grid is keyboard-operable via `wireGridKeys()`: roving tabindex (one tab
 stop for the whole grid), arrow keys between cells, Enter/Space to open the cell
 editor — the table keeps its own row/column header semantics, so no ARIA grid
 roles are layered on.
+**A select with NOTHING to offer must not throw.** `buildFields` used to read
+`f.options[0][0]` unguarded, so "Claimed first by" — which lists the OTHER goals
+— took the whole dialog down for anyone who had none, i.e. everybody adding
+their first goal. The throw happens before `showModal()`, so the button simply
+did nothing.
 `side.retirement`/`side.rothLimit` are GONE — the spreadsheet's free-form
 "Imported spreadsheet rows" panel and its loose value arrays, which nothing
 computed from. `coerceShape` deletes both keys on load so they stop riding
@@ -427,7 +489,9 @@ carry the whole story. Retirement accounts are a generic list
 the old fixed `k401` fields and the separate `rothContribs` map migrate once
 in `coerceShape` and the sources are emptied so deletions can't resurrect
 them. Nothing about Roth IRAs is special-cased in code.
-A section may carry **`link(key)`**, called on every keystroke in any input: one
+A section may carry **`link(key)`**, called on every keystroke in any input AND
+on any select change (picking from a list is as much "one box filling in
+another" as typing is — it is what suggests a child's goal target date): one
 box filling in another as you type. It reads and writes the FORM, never the
 state — nothing is committed until Save, and setting `.value` fires no `input`
 event, so there is no loop. The comp editor is the user: **Raise % and Salary
