@@ -1073,6 +1073,49 @@ t('an account in a dropdown says whose it is, so two Checkings are tellable apar
   eq(H.accountOption(s, { id: 'x', name: 'Checking' }), 'Checking', 'unassigned adds nothing');
 });
 
+/* ── A child's goal ─────────────────────────────────────────────────────────
+   The education half. There is no new engine here on purpose: a college pot is
+   an ordinary goal with a name attached, and `computeGoals` already works out
+   progress and what it needs a month. */
+group("A child's goal");
+t('the suggested target date is the month they turn 18', () => {
+  eq(H.suggestedTargetDate({ role: 'child', birth: '2015-09' }), '2033-09-01');
+  eq(H.suggestedTargetDate({ role: 'child', birth: '2015-12' }), '2033-12-01',
+     'December does not roll into the next year');
+  eq(H.suggestedTargetDate({ role: 'child', birth: '2016-01' }), '2034-01-01');
+});
+t('there is nothing to suggest without a birth month, or for an adult', () => {
+  eq(H.suggestedTargetDate({ role: 'child' }), null);
+  eq(H.suggestedTargetDate({ role: 'adult', birth: '1986-04' }), null);
+  eq(H.suggestedTargetDate(null), null);
+});
+t('a goal named for a child keeps the name, and computeGoals carries it through', () => {
+  const s = H.coerceShape(fixtureState());
+  s.people = [{ id: 'ellis', name: 'Ellis', role: 'child', birth: '2015-09' }];
+  s.goals = [{ id: 'college', name: 'College', accounts: ['long'], count: 'capped',
+               target: 80000, targetDate: '2033-09-01', for: 'ellis' }];
+  const c = H.computeAll(s, TODAY_FIX);
+  const g = H.computeGoals(s, c, TODAY_FIX)[0];
+  eq(g.for, 'ellis', 'the Household tab files it under them off this');
+  ok(g.monthlyReq > 0, 'and it is an ordinary goal in every other way');
+  eq(g.saved, Math.min(c['2030'].balances['long|2030-04'], 80000));
+});
+t('a goal for a child who has gone still computes, it just loses the name', () => {
+  /* The same discipline as a goal naming a deleted account: keep working while
+     you repoint it, never break the page. */
+  const s = H.coerceShape({
+    people: [],
+    goals: [{ id: 'college', name: 'College', accounts: ['long'], count: 'capped',
+              target: 80000, targetDate: '2033-09-01', for: 'ellis' }],
+    years: { '2030': { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 6,
+                       seeds: { long: 1000 } } }
+  });
+  eq(s.goals[0].for, undefined);
+  const g = H.computeGoals(s, H.computeAll(s, TODAY_FIX), TODAY_FIX)[0];
+  eq(g.name, 'College', 'the goal itself is untouched');
+  eq(g.target, 80000);
+});
+
 /* ── Restoring a backup ─────────────────────────────────────────────────────
    The one failure mode of putting people at the top level is that a merge site
    forgets them and a restore silently drops the household. `load()`, the
