@@ -1060,6 +1060,17 @@ function ownerLabel(st, owner) {
   if (owner === JOINT_OWNER) return 'Joint';
   return personById(st, owner)?.name || '';
 }
+/* What an editor is allowed to store as an owner: somebody real, or the shared
+   bucket. Anything else — including the "Not said" blank — means unassigned. */
+const validOwner = (st, v) => (v === JOINT_OWNER || personById(st, v)) ? v : undefined;
+/* How an account reads in a dropdown. Two people each with a "Checking" are
+   ordinary, and their ids (checking, checking-2) are never on screen — the
+   owner is what tells them apart, so it goes in the label wherever accounts
+   are listed to choose from. */
+function accountOption(st, a) {
+  const who = ownerLabel(st, a.owner);
+  return who ? `${a.name} — ${who}` : a.name;
+}
 /* Age and the year someone retires are DERIVED, never stored — a stored age is
    wrong within twelve months. Both need a birth month; without one they are
    simply unknown, and every caller renders that as a dash rather than a guess. */
@@ -2568,9 +2579,38 @@ function gridCard(y, yr) {
     && yr.categories.some(cat => cat.rule === 'paycheck');
   const acctTitle = (a) => [
     a.name,
+    ownerLabel(state, a.owner),
     (a.rate || 0) ? `grows ${round2(a.rate * 100)}%/yr` : '',
     (a.rate || 0) && a.creditTo !== a.id ? `interest paid into ${accountName(state, a.creditTo)}` : '',
   ].filter(Boolean).join(' — ') + ' — click for name, rate & interest destination';
+  /* Whose money — a roll-up between the accounts and Total. Every account the
+     year computes lands in exactly one of these rows, so they always add up to
+     the figure underneath them; the ones nobody has claimed gather in
+     "Unassigned" rather than quietly going missing. Drawn only when the split
+     actually says something: one bucket holding everything is Total written
+     twice, and the grid is dense enough already. */
+  const ownerCols = months.map(m => ownerSubtotals(state, c, m));
+  const ownersSeen = new Set();
+  for (const col of ownerCols) for (const k of Object.keys(col)) ownersSeen.add(k);
+  const ownerRows = (peopleOf(state).length && ownersSeen.size >= 2)
+    ? [...peopleOf(state).map(p => p.id), JOINT_OWNER, UNOWNED].filter(o => ownersSeen.has(o))
+    : [];
+  const ownerRowsHtml = ownerRows.map(owner => {
+    const label = owner === UNOWNED ? 'Unassigned' : ownerLabel(state, owner);
+    /* `subtotal`, not `total`: the grid already has a style that means "an
+       added-up line that is not the headline", and the section subtotals use
+       it. Three more bold Total-weight rows above the real Total would read as
+       four Totals. */
+    return `<tr class="subtotal"><th class="lbl" scope="row">${esc(label)}</th>${
+      months.map((m, i) => {
+        const b = ownerCols[i][owner];
+        /* Same estimate mark as every other added-up figure in the grid — a
+           subtotal that said nothing about what it was made of would be
+           exactly the bug the Total row had. */
+        return `<td class="c-${b ? b.kind : 'missing'} ${m === thisM ? 'now' : ''}">${
+          b ? fmtCell(b.v) : '·'}</td>`;
+      }).join('')}${rowTotalTd()}</tr>`;
+  }).join('');
   const balRows = !activeAccounts.length ? '' : secheadRow('Accounts')
     + activeAccounts.map(a =>
     `<tr class="balance"><th class="lbl" scope="row" data-edit="account"
@@ -2596,6 +2636,7 @@ function gridCard(y, yr) {
             .filter(Boolean).join(' · '))}">${fmtCell(v || 0)}</td>`;
       }).join('')}${rowTotalTd()}</tr>`).join('')
     + secheadRow('')   // the same band that opens the block, closing it off
+    + ownerRowsHtml
     /* Total carries the same estimate mark as the accounts it adds up. It is
        the figure the whole plan gets read for, so it is the last one that
        should be able to look like a fact while every account above it says
@@ -3029,7 +3070,32 @@ function renderHousehold() {
   const kids = people.filter(p => p.role === 'child').length;
   const adults = people.length - kids;
 
-  return `<div class="card">
+  /* Who owns what. Balances come from the live year's current month — the same
+     figures the grid is showing — and fall back to just naming the accounts
+     when there is no budget year to read yet. */
+  const liveKey = latestGridYear();
+  const c = liveKey && C[liveKey];
+  const cur = liveKey && currentMonthOf(state.years[liveKey], todayISO());
+  const balanceOf = (a) => (c && cur) ? c.balances[`${a.id}|${cur}`] : undefined;
+  const buckets = [...people.map(p => [p.id, p.name]),
+                   [JOINT_OWNER, 'Joint'], [UNOWNED, 'Not said yet']]
+    .map(([id, label]) => [id, label, accountsOf(state).filter(a => (a.owner || UNOWNED) === id)])
+    .filter(([, , list]) => list.length);
+  const ownsHtml = buckets.map(([id, label, list]) => {
+    const known = list.map(balanceOf).filter(v => v !== undefined);
+    const sum = known.length ? round2(known.reduce((s, v) => s + v, 0)) : null;
+    return `<tr><th scope="row" colspan="2" style="font-weight:700;padding-top:14px">${esc(label)}${
+        id === UNOWNED ? ' <span class="muted">— click one to say whose it is</span>' : ''
+      }</th><td style="font-weight:700;padding-top:14px">${
+        sum === null ? '' : fmtMoney(sum)}</td></tr>`
+      + list.map(a => `<tr class="editrow" data-edit="account" data-bal="${esc(a.id)}">
+        <td style="width:16px"></td><th scope="row">${esc(a.name)}</th>
+        <td>${balanceOf(a) === undefined ? '<span class="muted">not tracked yet</span>'
+          : fmtMoney(balanceOf(a))}</td></tr>`).join('');
+  }).join('');
+
+  return `<div class="cards2 pairs">
+  <div class="card">
     <h2>The People in This Plan</h2>
     <p class="sub">${adults} adult${adults === 1 ? '' : 's'}${
       kids ? ` and ${kids} ${kids === 1 ? 'child' : 'children'}` : ''
@@ -3041,6 +3107,18 @@ function renderHousehold() {
       <tbody>${rows}</tbody>
     </table></div>
     <div class="addbar"><button class="btn small" data-add="person">＋ Add someone</button></div>
+  </div>
+  <div class="card">
+    <h2>Who Owns What</h2>
+    <p class="sub">Every account, grouped by whose it is${
+      cur ? `, as it stands in ${esc(monthLabelFull(cur))}` : ''
+      }. Click one to change its owner. The same grouping appears as subtotals under the
+      budget grid.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left" colspan="2">Account</th><th>Balance</th></tr></thead>
+      <tbody>${ownsHtml}</tbody>
+    </table></div>
+  </div>
   </div>`;
 }
 
@@ -4774,7 +4852,7 @@ const EDITORS = {
         options: accountsOf(state)
           .filter(a => !a.hub && (!a.until || a.id === (ds.id
             && (state.years[ds.year].categories.find(c => c.id === ds.id) || {}).transferTo)))
-          .map(a => [a.id, a.name]),
+          .map(a => [a.id, accountOption(state, a)]),
         showIf: (v) => v.role !== 'normal' },
       { key: 'creditTiming', label: 'Counted against that account', type: 'select', options: [
         ['pre', 'Before its monthly interest'],
@@ -4940,18 +5018,25 @@ const EDITORS = {
       : 'How this account behaves in the budget grid.',
     fields: (ds) => [
       { key: 'name', label: 'Account name', type: 'text', wide: true },
+      /* Only offered once there is a household to choose from — with nobody
+         named, "whose is it?" has one answer and doesn't need asking. */
+      ...(peopleOf(state).length ? [{ key: 'owner', label: 'Whose account', type: 'select',
+        options: [['', 'Not said'], ...peopleOf(state).map(p => [p.id, p.name]),
+                  [JOINT_OWNER, 'Joint — shared']],
+        hint: 'Groups the accounts into subtotals under the grid. It changes nothing the '
+          + 'budget computes.' }] : []),
       { key: 'rate', label: 'Interest / growth %/yr', type: 'percent',
         hint: 'Compounds monthly on the balance, in future months only. 0 for an account '
           + 'that just holds money.' },
       { key: 'creditTo', label: 'Interest is paid into', type: 'select',
-        options: accountsOf(state).map(a => [a.id, a.name]),
+        options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
         hint: 'Usually itself — growth that stays where it grew.' },
       { key: 'divRate', label: 'Dividends %/yr', type: 'percent',
         hint: 'Earned on the balance each month like interest, but paid out to wherever '
           + 'you send it below instead of compounding here. 0 for an account that pays '
           + 'none.' },
       { key: 'divTo', label: 'Dividends are paid into', type: 'select',
-        options: accountsOf(state).map(a => [a.id, a.name]),
+        options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
         hint: 'Often somewhere spendable: a brokerage usually sweeps its dividends into '
           + 'cash rather than reinvesting them here.' },
       { key: 'divEvery', label: 'Paid how often', type: 'select', options: [
@@ -4966,7 +5051,8 @@ const EDITORS = {
     ],
     get: (ds) => {
       const a = accountById(state, ds.bal) || {};
-      return { name: a.name, rate: a.rate || 0, creditTo: a.creditTo || a.id,
+      return { name: a.name, owner: a.owner || '', rate: a.rate || 0,
+               creditTo: a.creditTo || a.id,
                divRate: a.divRate || 0, divTo: a.divTo || a.id,
                divEvery: String(a.divEvery || 3) };
     },
@@ -4985,11 +5071,16 @@ const EDITORS = {
           divEvery: +v.divEvery || 3,
           creditTo: accountById(state, v.creditTo) ? v.creditTo : a.id,
           divTo: accountById(state, v.divTo) ? v.divTo : a.id });
+        /* Only when the field was actually on the form. An account marked
+           Joint in a household that has since been emptied still says Joint —
+           saving a dialog that never asked the question must not answer it. */
+        if (peopleOf(state).length) a.owner = validOwner(state, v.owner);
         return;
       }
       let id = slugJs(v.name), n = 2;
       while (accountById(state, id)) id = `${slugJs(v.name)}-${n++}`;
       state.settings.accounts.push({ id, name: v.name, rate: v.rate ?? 0,
+        owner: validOwner(state, v.owner),
         divRate: v.divRate ?? 0, divEvery: +v.divEvery || 3,
         creditTo: accountById(state, v.creditTo) ? v.creditTo : id,
         divTo: accountById(state, v.divTo) ? v.divTo : id });
@@ -5155,7 +5246,7 @@ const EDITORS = {
       { key: 'name', label: 'Name', type: 'text' },
       { key: 'target', label: 'Target', type: 'money' },
       { key: 'accounts', label: 'Saved adds up', type: 'checks', wide: true,
-        options: accountsOf(state).map(a => [a.id, a.name]),
+        options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
         hint: 'Every account whose balance counts toward this goal.' },
       { key: 'count', label: 'How much of it counts', type: 'select', options: [
         ['capped', 'Up to the target, no further'],
@@ -5905,6 +5996,33 @@ function sumKind(kinds) {
   return seen.has('actual') || seen.has('mixed') ? 'mixed' : 'auto';
 }
 
+/* Whose money is whose, for one month — a roll-up over balances the engine has
+   ALREADY worked out. Deliberately not part of `computeYear`: owner is a way of
+   reading the plan, not an input to it, so the balance chain stays exactly as
+   it was and the real-data cross-check keeps passing untouched.
+
+   Every active account lands in exactly one bucket — an owner, or UNOWNED —
+   which is what makes the rows add up to Total. Leaving the unassigned ones out
+   would print a set of subtotals that quietly don't reach the figure below
+   them, and a subtotal you can't add up is worse than no subtotal. Each bucket
+   gets its kind from `sumKind`, like every other added-up figure in the grid. */
+const UNOWNED = '';
+function ownerSubtotals(st, c, month, accounts) {
+  const acc = {};
+  for (const a of (accounts || accountsOf(st))) {
+    const v = c.balances[`${a.id}|${month}`];
+    if (v === undefined) continue;          // not tracked yet: not anybody's
+    const key = a.owner || UNOWNED;
+    const b = acc[key] || (acc[key] = { v: 0, kinds: [] });
+    b.v = round2(b.v + v);
+    b.kinds.push(c.balanceKinds[`${a.id}|${month}`]);
+  }
+  const out = {};
+  for (const [owner, b] of Object.entries(acc))
+    out[owner] = { v: b.v, kind: sumKind(b.kinds) };
+  return out;
+}
+
 /* ── Pinning the month header ────────────────────────────────────────────────
    The header row should stop under the app header and stay there while the
    rest of the grid scrolls past. `position: sticky` can't do it: the grid
@@ -6494,7 +6612,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
-  JOINT_OWNER,
+  ownerSubtotals, validOwner, accountOption, JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears,
   projectionYearsAfter, applyToRow, dropRow, swapRows, andList, tabOrder, VIEWS };
 
