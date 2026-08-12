@@ -152,9 +152,13 @@ included — treat those the way you treat the figures.
   they already had saved in their own browser is untouched. People's names are
   replaced with "Adult 1" and "Child 1" unless you tick the box, and your
   written notes stay out unless you ask for them — the two most personal things
-  in the plan are the two that leave by default. The dialog says what a link
-  costs in characters, names any tab the year window left empty, and says out
-  loud when a tab drags another tab's data along with it (Giving measures
+  in the plan are the two that leave by default, and so are the years you've
+  built ahead — a projection is a guess about money you don't have yet, and
+  handing someone one is a different claim from showing them what happened.
+  (A year stops counting as a projection the moment it takes over as the real
+  one, so that box has nothing to hold back once it has.) The dialog says what a
+  link costs in characters, names any tab the year window left empty, and says
+  out loud when a tab drags another tab's data along with it (Giving measures
   donations against the salary history, so a Giving link carries it). Trimming
   the years shortens the LINK, never the figures: the oldest year kept is
   re-seeded with the balances it opened on, so the recipient sees the same

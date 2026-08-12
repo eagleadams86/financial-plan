@@ -2401,6 +2401,115 @@ t('the window reaches the salary history, the donations and the PTO too', () => 
     'the old trip goes; one booked ahead and one with no year stay');
 });
 
+/* The fixture's 2026 is entered right through December, which would make a 2027
+   grid the live year — so a genuinely-not-yet-arrived year needs the marker
+   pulled back first. That IS the rule being tested, so it is set out here rather
+   than buried in each case. */
+function fixtureWithYearAhead(enteredThrough) {
+  const s = shareFixture();
+  s.years['2026'].enteredThrough = enteredThrough || '2026-06';
+  s.years['2027'] = { kind: 'grid', model: 'live', startMonth: '2027-01', monthCount: 12,
+    enteredThrough: '', categories: [{ id: 'pay', name: 'Paycheck', rule: 'carry',
+      role: 'normal', section: 'income' }], cells: {}, paychecks: {},
+    seeds: { cash: 9000 }, overrides: {}, balAdjust: {}, extraNotes: [] };
+  s.side.comp['2027'] = { salary: 110000 };
+  s.side.retirementAccounts[0].contribs['2027'] = 21000;
+  s.vacations.pto['2027'] = { used: 0 };
+  return s;
+}
+
+t('a year you have built ahead is a projection, and stays out unless asked for', () => {
+  const s = fixtureWithYearAhead();
+  const today = '2026-08-12';
+  eq(H.yearStarted(s, '2027', today), false, 'the fixture really has a year not yet arrived');
+  eq(H.shareCeilingYear(s, false, today), '2026', 'the newest year that has actually begun');
+  eq(H.shareCeilingYear(s, true, today), null, 'ticking the box lifts the ceiling entirely');
+  eq(H.shareFutureYears(s, H.shareCeilingYear(s, false, today)), ['2027']);
+  eq(H.shareFutureYears(s, null), [], 'nothing is held back when nothing is capped');
+});
+
+t('a year that has taken over is record, not a projection', () => {
+  /* Mark December entered and next year becomes the live one — the app's own
+     rule, via yearStarted(). From then on it goes in either way, and the box
+     has nothing left to hold back. */
+  const s = fixtureWithYearAhead('2026-12');
+  const today = '2026-08-12';
+  eq(H.yearStarted(s, '2027', today), true);
+  eq(H.shareCeilingYear(s, false, today), '2027');
+  eq(H.shareFutureYears(s, H.shareCeilingYear(s, false, today)), []);
+});
+
+t('the ceiling reaches every year-keyed table, same as the cutoff', () => {
+  const s = fixtureWithYearAhead();
+  eq(H.keepShareYear('2027', null, '2026'), false, 'newer than the ceiling');
+  eq(H.keepShareYear('2026', null, '2026'), true, 'the ceiling year itself is kept');
+  eq(H.keepShareYear('2027', null, null), true, 'no ceiling keeps everything');
+  eq(H.keepShareYear('2023', '2024', '2026'), false, 'both ends still apply at once');
+  const d = H.trimShareYearMaps(JSON.parse(JSON.stringify(s)), null, '2026');
+  eq(Object.keys(d.side.comp), ['2020', '2025', '2026']);
+  eq(Object.keys(d.side.retirementAccounts[0].contribs), ['2020', '2026']);
+  eq(Object.keys(d.vacations.pto), ['2020', '2026']);
+  eq(d.vacations.trips.map(t => t.name), ['Old', 'Soon', 'No year'],
+    'the 2028 trip is a plan too, and goes with the projections');
+  eq(H.trimShareYearMap(s.years, null, '2026').hasOwnProperty('2027'), false);
+});
+
+t('the history window is measured to the newest year that has begun', () => {
+  /* With 2027 built ahead, "the last 3 years" has to mean 2024–2026 — not
+     2025–2026 with 2027 counted as one of the three, which would silently hand
+     over two years of history. */
+  const s = fixtureWithYearAhead();
+  const started = H.shareStartedYear(s, '2026-08-12');
+  eq(started, '2026');
+  eq(H.shareCutoffYear(s, { kind: 'year', n: 3 }, started), '2024');
+  eq(H.shareCutoffYear(s, { kind: 'year', n: 1 }, started), '2026');
+  eq(H.shareStartedYear({ years: {} }, '2026-08-12'), '2026',
+    'a plan with no grid at all still has a line between record and projection');
+});
+
+t('a projection never travels without the year it is built on', () => {
+  /* The bug this pins, and it made a link WORTHLESS rather than merely short: a
+     year built ahead has no cells of its own — every month of it is derived from
+     the year before through priorYearRun. Counting it as part of the window
+     handed over a 2027 grid with 2026 cut away, and every carry, quarterly and
+     average rule in it read blank. The window is history; the projections ride
+     on top of it. */
+  const s = fixtureWithYearAhead();
+  const started = H.shareStartedYear(s, '2026-08-12');
+  for (const n of [1, 2, 3]) {
+    const cut = H.shareCutoffYear(s, { kind: 'year', n }, started);
+    const kept = Object.keys(H.trimShareYearMap(s.years, cut, null)).sort();
+    ok(kept.includes('2027'), 'projections are in when the box is ticked');
+    ok(kept.includes('2026'),
+      'n=' + n + ' dropped the year the 2027 plan is built on: ' + kept.join(','));
+  }
+  /* And the narrowest window is exactly those two — no accidental widening. */
+  const cut1 = H.shareCutoffYear(s, { kind: 'year', n: 1 }, started);
+  eq(Object.keys(H.trimShareYearMap(s.years, cut1, null)).sort(), ['2026', '2027']);
+});
+
+t('a link says when the projections are riding on top of the window', () => {
+  /* Otherwise the meta line's "4 of 5 years" reads like an arithmetic slip
+     against a scope note saying "the last 3 years". */
+  eq(H.shareScopeNote({ kind: 'year', n: 3 }, false, true, ['2027']),
+    "This link holds the last 3 years, plus the 2027 plan you've built ahead.");
+  eq(H.shareScopeNote({ kind: 'year', n: 1 }, false, true, []),
+    'This link holds the most recent year.');
+  eq(H.shareScopeNote({ kind: 'year', n: 2 }, false, true, ['2027', '2028']),
+    "This link holds the last 2 years, plus the 2027 and 2028 plans you've built ahead.");
+  eq(H.shareScopeNote({ kind: 'all' }, false, true, ['2027']), '',
+    'no window, nothing to explain');
+  eq(H.shareScopeNote({ kind: 'year', n: 1 }, false, false, ['2027']), '',
+    'a link with no years at all says nothing about years');
+});
+
+t('holding the projections back is stated plainly, never as a fault', () => {
+  eq(H.shareFutureNote(['2027']), "The 2027 plan you've built ahead is not in it.");
+  eq(H.shareFutureNote(['2027', '2028']),
+     "The 2027 and 2028 plans you've built ahead are not in it.");
+  eq(H.shareFutureNote([]), '', 'nothing built ahead, nothing to say');
+});
+
 t('leaving the notes out reaches every place a note can hide', () => {
   const d = H.stripNotes(shareFixture());
   const json = JSON.stringify(d);

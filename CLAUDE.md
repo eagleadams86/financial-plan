@@ -685,9 +685,25 @@ step.
   `side.comp`, `bonuses`, `limits`, `donations`, each retirement account's
   `contribs`, `vacations.pto` and dated trips. Trimming only the grid was the
   first version and it was wrong — "the last 3 years" shipped twenty years of
-  salary beside it. It is expressed as ONE cutoff year and everything from the
-  cutoff onwards is kept, so a year built ahead and a trip booked for next
-  summer survive: a window leaves old things out, it does not drop your plans.
+  salary beside it.
+- **The window has two ends and they are two different questions.** The CUTOFF
+  ("How many years") is how much history goes in. The CEILING (the "years you've
+  built ahead" box, unticked by default) is whether the projections ride along at
+  all — `shareCeilingYear` is null when they do. `keepShareYear(y, cutoff,
+  ceiling)` is the one predicate; either end may be null, which keeps "everything"
+  on the same code path as a window rather than a branch around it.
+- **The cutoff is ALWAYS measured to `shareStartedYear()`, whichever way the box
+  is set** — and getting this wrong made a link worthless rather than merely
+  short. A year built ahead has no cells of its own; every month of it is derived
+  from the year before through `priorYearRun`. Counting projections as part of
+  the window meant "the most recent year" plus projections handed over a 2027
+  grid with 2026 cut away, and every carry/quarterly/average rule in it read
+  blank. **The window is history; the projections sit on top of it.** There is a
+  test pinning that the year a projection is built on always travels with it.
+- **"Built ahead" is `yearStarted()`, not the calendar.** A 2027 grid becomes the
+  live year the moment December 2026 is marked entered, and from then on it goes
+  in either way — the box disables itself when there is nothing left to hold
+  back. Deriving it the same way the tabs do is what stops the two disagreeing.
 - **Trimming shortens the LINK, never the figures.** Balances chain — a January
   opens on the previous grid year's December, and only the first year falls back
   to `yr.seeds` — so a cut history would silently show the recipient a Cash line
@@ -715,6 +731,11 @@ step.
   bar back to decide whether to reorder, and a hidden button would still be in
   that list, so `want` and `have` could never agree and every render would
   re-append (and so blur) the whole bar. `allowedViews()` filters `want` to match.
+- **`squeeze()` catches the WRITER's promises as well as awaiting the reader.** A
+  truncated link reaches `DecompressionStream` as invalid deflate and the writable
+  side rejects too; only the readable side is awaited, so without those catches
+  the same failure also surfaced twice as red "Uncaught (in promise)" on a page
+  that had already caught it and drawn the "couldn't be opened" card.
 - The Alpha Vantage key is in its own localStorage key, not in state, so it can
   never reach a link. Keep it that way.
 
