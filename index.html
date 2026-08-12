@@ -296,6 +296,45 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
   border-bottom: 1px dotted var(--border-strong); }
 .changelog a:hover { color: var(--text-primary); }
 
+/* ── Read-only share view ───────────────────────────────────────────────── */
+/* A standing bar above the tabs, so a borrowed link never reads as your own
+   figures. Deliberately the focus colour rather than an amber warning — amber
+   means "something here needs attention", and a shared view is just a
+   different mode. Mirrored from Sprint Velocity, which owns this pattern. */
+.viewbar {
+  display: flex; gap: 10px 14px; align-items: baseline; flex-wrap: wrap;
+  border: 1px solid var(--border-strong); border-left: 4px solid var(--focus-border);
+  border-radius: var(--radius); background: var(--bg-card-alt);
+  padding: 11px 14px; margin: 0 0 16px; font-size: 13px;
+}
+.viewbar strong { font-weight: 700; }
+.viewbar .muted { color: var(--text-secondary); }
+.viewbar .mine { margin-left: auto; }
+/* "Open my own plan" is a real <a>, not a button that navigates, so ⌘-click and
+   "open in new tab" keep working — but a link brings an underline and the
+   browser's own colour with it, and `.btn` alone doesn't take either away. */
+a.btn { display: inline-flex; align-items: center; text-decoration: none; }
+/* overflow-x is spelled out because `overflow-y: auto` alone leaves the browser
+   free to reserve a horizontal scrollbar it never needs — a stripe of empty
+   gutter under a short list. Family rule, same in the sibling apps. */
+.checklist { display: grid; gap: 7px; max-height: 240px; overflow: hidden auto; }
+/* The count sits opposite the one control that changes the whole list. */
+.checklist-head { display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; margin-bottom: 8px; }
+/* Wider than the standard dialog: two panels side by side, and a link that is
+   more readable the fewer times it wraps. */
+#shareDialog { max-width: 820px; }
+/* The two choices sit side by side once there is room, rather than stacking and
+   pushing the link below the fold. No align-items: start — the panels stretch to
+   the taller of them, so the pair reads as one row. */
+@media (min-width: 760px) {
+  #shareDialog .share-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+}
+#shareLink {
+  width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; color: var(--text-secondary);
+}
+
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
@@ -574,6 +613,7 @@ details.section table th, details.section table td { padding: 4px 6px; }
     </select>
     <button class="btn small" id="prefsBtn" title="Currency, row order, rates and other app-wide settings">⚙ Preferences</button>
     <button class="btn small" id="dataBtn" title="Back up or restore your data">Back up</button>
+    <button class="btn small" id="shareBtn" title="Create a read-only link to show someone part of your plan">Share</button>
     <!-- Ships visible and signed-out at its final width (min-width in CSS), so
          the header doesn't reflow when the Firebase SDK arrives; the module
          hides it only when sync genuinely can't run. -->
@@ -583,6 +623,9 @@ details.section table th, details.section table td { padding: 4px 6px; }
 </header>
 
 <div class="wrap">
+  <!-- Filled once when a share link is opened; empty and invisible otherwise. -->
+  <div id="shareBar"></div>
+
   <div class="tabs" role="tablist" aria-label="Views">
     <button class="tab" role="tab" id="tab-budget"     aria-controls="views" data-view="budget"     aria-selected="true"  tabindex="0">Budget</button>
     <button class="tab" role="tab" id="tab-goals"      aria-controls="views" data-view="goals"      aria-selected="false" tabindex="-1">Goals</button>
@@ -637,6 +680,70 @@ details.section table th, details.section table td { padding: 4px 6px; }
   </fieldset>
   <div class="row" style="justify-content:flex-end;margin-top:18px">
     <button class="btn primary" id="dataCloseBtn">Close</button>
+  </div>
+</dialog>
+
+<!-- ── Share a read-only link ────────────────────────────────────────────── -->
+<dialog id="shareDialog" aria-labelledby="shareDialogTitle">
+  <h3 id="shareDialogTitle">Share a Read-Only Link</h3>
+  <p class="sub">Anyone opening this link sees the tabs you pick, with no way to change them
+    and no sign-in. The figures travel <em>inside</em> the link itself — nothing is uploaded
+    anywhere, and nothing they already have saved in their own browser is touched.</p>
+
+  <div class="share-choices">
+  <fieldset class="formpanel">
+    <legend>Which Tabs</legend>
+    <div class="checklist-head">
+      <span class="sub muted" id="shareTabCount" role="status"></span>
+      <button type="button" class="btn small" id="shareSelectAll">Select all</button>
+    </div>
+    <div class="checklist" id="shareTabs"></div>
+  </fieldset>
+
+  <fieldset class="formpanel">
+    <legend>What to Include</legend>
+    <div style="margin-bottom:12px">
+      <label class="field" for="shareYears">How many years</label>
+      <select id="shareYears">
+        <option value="all">Every year</option>
+        <option value="fit">As many as fit in a mailable link</option>
+        <option value="y:5">The last 5 years</option>
+        <option value="y:3">The last 3 years</option>
+        <option value="y:1">The most recent year only</option>
+      </select>
+    </div>
+    <!-- Both start OFF, so the two most personal things in the plan are left out
+         unless they are asked for. Names especially: a plan holds children's. -->
+    <label class="checkline"><input type="checkbox" id="shareNames">
+      <span>Real names — otherwise everyone reads as <strong>Adult 1</strong>,
+        <strong>Child 1</strong> and so on</span></label>
+    <p class="sub muted" style="margin:2px 0 0 24px">Ages, birth months and who owns
+      which account work either way. A goal or an account you named after someone still
+      says what you typed.</p>
+    <label class="checkline" style="margin-top:10px"><input type="checkbox" id="shareNotes">
+      <span>Your written notes on months, rows, goals and trips</span></label>
+  </fieldset>
+  </div>
+
+  <fieldset class="formpanel">
+    <legend>Your Link</legend>
+    <input type="text" id="shareLink" readonly aria-label="Read-only share link">
+    <p class="sub muted" id="shareMeta" role="status" style="margin:8px 0 0"></p>
+    <p class="sub muted" id="shareScope" role="status" style="margin:6px 0 0"></p>
+    <p class="warn" id="shareWarn" role="status"></p>
+    <div class="row" style="margin-top:10px">
+      <button type="button" class="btn primary" id="shareCopyBtn">Copy link</button>
+      <button type="button" class="btn" id="shareOpenBtn">Preview it</button>
+    </div>
+  </fieldset>
+
+  <p class="sub muted" style="margin-top:14px">This is a <strong>snapshot</strong>, frozen as it
+    looks right now — later edits won't appear, so send a fresh link when the figures move.
+    There's no way to withdraw one once sent, and whoever holds it can read everything inside
+    it, so treat it like emailing a spreadsheet.</p>
+
+  <div class="row" style="justify-content:flex-end;margin-top:18px">
+    <button type="button" class="btn primary" id="shareCloseBtn">Done</button>
   </div>
 </dialog>
 
@@ -1747,6 +1854,30 @@ function migrate(parsed) {
   return parsed;
 }
 
+/* ── Read-only share view ───────────────────────────────────────────────────
+   A share link carries its whole payload in the URL fragment, so this is known
+   before anything renders. `viewOnly` then does two jobs: it strips every edit
+   affordance, and — the load-bearing one — it turns save() into a no-op.
+
+   save() is the single chokepoint for localStorage *and* the cloud push, so
+   gating it there is what guarantees a borrowed view can never overwrite the
+   data of whoever opened the link. UI state (which tab, which year) still moves
+   in memory and re-renders; it just isn't written down, which is the right
+   behaviour for somebody else's figures. */
+const SHARE_PREFIX = '#share=';
+const shareToken = location.hash.startsWith(SHARE_PREFIX)
+  ? location.hash.slice(SHARE_PREFIX.length) : null;
+let viewOnly = !!shareToken;
+/* { sharedAt, label, sections, range, anon, notes } once a link has been decoded. */
+let shareMeta = null;
+/* The set of tabs a shared view is allowed to draw. Empty until decode; read by
+   render(), which is why it is a Set rather than a lookup into shareMeta. */
+let sharedViews = new Set();
+
+/* The sync module is a separate <script type="module"> and can't see this
+   scope, so the flag is mirrored for it to check before it initialises. */
+window.finViewOnly = viewOnly;
+
 let state = load();
 
 function load() {
@@ -1766,6 +1897,7 @@ function load() {
 }
 
 function save() {
+  if (viewOnly) return;   // someone else's figures — never write them over your own
   /* Guarded: Safari's private mode and a full quota both throw here, and an
      unguarded throw would kill the click handler mid-save. The in-memory state
      is still good — warn and carry on. */
@@ -2369,15 +2501,28 @@ function toast(msg) {
 
 let C = {};   // computeAll() output, rebuilt on every render
 
+/* The tabs this page is allowed to draw. Everything in a normal session; only
+   what the sender put in the link in a shared one — and the order still comes
+   from tabOrder(), so a shared view keeps the arrangement the sender dragged
+   the tabs into. openSharedView() removes the other buttons from the bar
+   outright, so `want` has to be filtered to match or render() would find the
+   bar permanently "out of order" and re-append (and so blur) on every pass. */
+function allowedViews() {
+  const order = tabOrder(state.ui);
+  return viewOnly ? order.filter(v => sharedViews.has(v)) : order;
+}
+
 function render() {
-  const view = VIEWS.includes(state.ui.activeTab) ? state.ui.activeTab : 'budget';
+  const allowed = allowedViews();
+  const view = allowed.includes(state.ui.activeTab) ? state.ui.activeTab
+    : (allowed[0] || 'budget');
   /* Re-appending in order is the whole layout step — the buttons themselves
      are static markup. Only when the bar is actually out of order, though:
      appending an element detaches and reinserts it, which BLURS it, and doing
      that on every render meant activating a tab from the keyboard threw focus
      away and the next arrow key went nowhere. */
   const bar = document.querySelector('.tabs');
-  const want = tabOrder(state.ui);
+  const want = allowed;
   const have = [...bar.querySelectorAll('.tab')].map(t => t.dataset.view);
   if (want.join() !== have.join())
     for (const v of want) {
@@ -2392,7 +2537,10 @@ function render() {
   F('views').setAttribute('aria-labelledby', `tab-${view}`);
   buildMoneyFormats(state.settings.currency);
   const target = F('views');
-  if (!hasData()) { target.innerHTML = welcomeCard(); return; }
+  /* The welcome card is about setting YOUR plan up, so it must never stand in
+     for a borrowed tab: a link can hold Investments and no budget year at all,
+     and that tab draws perfectly well without one. */
+  if (!hasData() && !viewOnly) { target.innerHTML = welcomeCard(); return; }
   C = computeAll(state, todayISO());
   const fn = {
     budget: renderBudget, goals: renderGoals, household: renderHousehold,
@@ -2401,7 +2549,34 @@ function render() {
     vacations: renderVacations, giving: renderGiving, history: renderHistory
   }[view];
   target.innerHTML = fn();
+  if (viewOnly) stripEditAffordances(target);
   wireView(view);
+}
+
+/* Everything that opens an editor is reached one of three ways: a `data-add`
+   button, a `data-edit` row, or a grid cell. Taking all three off the freshly
+   drawn markup — in the one place every view passes through — is what makes a
+   shared view read-only without touching nine renderers, and without a later
+   renderer quietly reintroducing an edit path nobody remembered to gate.
+   openRowEditor/openCellEditor refuse in viewOnly as well: this hides the
+   affordance, that closes the door. */
+function stripEditAffordances(root) {
+  root.querySelectorAll('.addbar, [data-add], .h-edit, #deleteYearBtn, #toSummaryBtn,'
+    + '#rolloverBtn, #closeMonthBtn, #reopenMonthBtn').forEach(el => el.remove());
+  root.querySelectorAll('[data-edit]').forEach(el => {
+    el.removeAttribute('data-edit');
+    el.classList.remove('editrow');
+    el.removeAttribute('title');       // every one of them says "Click to edit"
+    el.style.cursor = '';
+  });
+  /* The grid's cells are clickable through wireBudget()'s own listener rather
+     than a data-edit attribute, so the class that gives them the hand goes too;
+     wireBudget() skips the listener entirely in a shared view. */
+  root.querySelectorAll('td.cell').forEach(td => { td.style.cursor = 'default'; });
+  root.querySelectorAll('.notelist li[data-note]').forEach(li => {
+    li.removeAttribute('data-note');
+    li.style.cursor = 'default';
+  });
 }
 
 function welcomeCard() {
@@ -2487,7 +2662,12 @@ function yearPickerHtml(active) {
 
 function renderBudget() {
   const y = activeYearKey();
-  const yr = state.years[y];
+  const yr = y && state.years[y];
+  /* render() sends a plan with no years to the welcome card, so this is
+     unreachable in a normal session — but a share link is assembled elsewhere,
+     and an empty grid must say so rather than throw and blank the page. */
+  if (!yr) return `<div class="card"><div class="empty"><h2>No Budget Year Here</h2>
+    <p>This link doesn't carry a budget year.</p></div></div>`;
   const picker = `<div class="row" style="margin-bottom:14px">${yearPickerHtml(y)}</div>`;
   if (yr.kind === 'summary') return picker + summaryCard(y, yr);
   return picker + gridCard(y, yr);
@@ -2511,7 +2691,7 @@ function summaryCard(y, yr) {
       ? 'The months of this year were folded into totals.'
       : 'This year predates the monthly layout, so it\'s imported as totals only.'}
       ${yr.eoyCash !== undefined ? `End of year: <strong>${fmtMoney(yr.eoyCash)}</strong>.` : ''}
-      Click any row to edit it.</p>
+      ${viewOnly ? '' : 'Click any row to edit it.'}</p>
     <div class="sumlist">${flows.map(line).join('')}</div>
     ${bals.length ? `<h2 style="margin-top:18px">Balances &amp; Derived Rows${
         helpBtn('summaryBalances', 'balances in a summary year')}</h2>
@@ -2757,8 +2937,10 @@ function gridCard(y, yr) {
            ruleless.length === 1 ? 'it stays' : 'they stay'} blank all year and the totals here
            understate what ${esc(y)} will really cost — open a row to give it one.` : ''}`
       : live
-      ? `Entered through <strong>${esc(monthLabel(yr.enteredThrough))}</strong>; later months are estimates that update as real numbers land. Click any cell to edit it.`
-      : 'A finished year — every figure is history. Click a cell to correct it.'}</p>
+      ? `Entered through <strong>${esc(monthLabel(yr.enteredThrough))}</strong>; later months are estimates that update as real numbers land.${
+          viewOnly ? '' : ' Click any cell to edit it.'}`
+      : `A finished year — every figure is history.${
+          viewOnly ? '' : ' Click a cell to correct it.'}`}</p>
     ${monthControls}
     <div class="gridwrap"><table class="grid">
       <thead>${head}</thead>
@@ -2773,8 +2955,9 @@ function gridCard(y, yr) {
       <span>· — nothing recorded</span>
     </div>
     ${usesPaychecks ? `<p class="sub muted" style="margin-top:10px">Paycheck rows estimate a
-      future month as their per-check amount × that month's paycheck count (the Paychecks row —
-      click a month to change it).${helpBtn('perCheck', 'the paycheck rule')}</p>` : ''}
+      future month as their per-check amount × that month's paycheck count${
+      viewOnly ? '' : ' (the Paychecks row — click a month to change it)'}.${
+      helpBtn('perCheck', 'the paycheck rule')}</p>` : ''}
     ${yearNotes(y)}
   </div>`;
 }
@@ -3147,7 +3330,7 @@ function renderHousehold() {
     const known = list.map(balanceOf).filter(v => v !== undefined);
     const sum = known.length ? round2(known.reduce((s, v) => s + v, 0)) : null;
     return `<tr><th scope="row" colspan="2" style="font-weight:700;padding-top:14px">${esc(label)}${
-        id === UNOWNED ? ' <span class="muted">— click one to say whose it is</span>' : ''
+        id === UNOWNED && !viewOnly ? ' <span class="muted">— click one to say whose it is</span>' : ''
       }</th><td style="font-weight:700;padding-top:14px">${
         sum === null ? '' : fmtMoney(sum)}</td></tr>`
       + list.map(a => `<tr class="editrow" data-edit="account" data-bal="${esc(a.id)}">
@@ -3179,8 +3362,8 @@ function renderHousehold() {
           held.length ? ` holding ${fmtMoney(round2(held.reduce((s, v) => s + v, 0)))}` : ''}` : ''}</p>
         ${theirs.length
           ? `<div class="goalgrid">${theirs.map(([g, idx]) => goalCard(g, idx)).join('')}</div>`
-          : `<p class="sub">Nothing saved under ${esc(p.name)}'s name yet — add a goal on the
-              Goals tab and say it is for them, or open one of their accounts.</p>`}`;
+          : `<p class="sub">Nothing saved under ${esc(p.name)}'s name yet${viewOnly ? '.' : ` — add a goal
+              on the Goals tab and say it is for them, or open one of their accounts.`}</p>`}`;
     }).join('')}
     <div class="addbar"><button class="btn small" data-add="goal">＋ Add goal</button></div>
   </div>`;
@@ -3203,8 +3386,8 @@ function renderHousehold() {
     <h2>Who Owns What</h2>
     <p class="sub">Every account, grouped by whose it is${
       cur ? `, as it stands in ${esc(monthLabelFull(cur))}` : ''
-      }. Click one to change its owner. The same grouping appears as subtotals under the
-      budget grid.</p>
+      }.${viewOnly ? '' : ' Click one to change its owner.'} The same grouping appears as
+      subtotals under the budget grid.</p>
     <div class="tablewrap"><table>
       <thead><tr><th style="text-align:left" colspan="2">Account</th><th>Balance</th></tr></thead>
       <tbody>${ownsHtml}</tbody>
@@ -3301,8 +3484,8 @@ function renderRetirement() {
     <div class="card">
       <h2>Traditional vs Roth</h2>
       <p class="sub">Your retirement accounts, split by tax treatment — the type says which
-        side of the bar each one is on. Click a row to edit its balance, its type, or what
-        you put in each year.</p>
+        side of the bar each one is on.${viewOnly ? ''
+          : ' Click a row to edit its balance, its type, or what you put in each year.'}</p>
       ${splitHtml}
     </div>
     <div class="card">
@@ -3673,7 +3856,8 @@ function renderInvestments() {
   const panes = (s.portfolios || []).map(pf => `<div class="card">
       <h2>${esc(pf.name)} <button class="h-edit" data-edit="portfolio"
         data-id="${esc(pf.id)}" title="Rename this account, reorder it, or delete it">✎ Edit</button></h2>
-      <p class="sub">Value is shares × price. Type a price over a fetched one any time.</p>
+      <p class="sub">Value is shares × price.${
+        viewOnly ? '' : ' Type a price over a fetched one any time.'}</p>
       ${holdingsTable(pf.rows, 'pf:' + pf.id)}
     </div>`).join('');
   return priceBar
@@ -4870,6 +5054,7 @@ function readFields(fields) {
 }
 
 function openRowEditor(section, ds, isNew) {
+  if (viewOnly) return;   // someone else's figures — nothing here is yours to change
   const ed = EDITORS[section];
   if (!ed) return;
   const spec = typeof ed.fields === 'function' ? ed.fields(ds, isNew) : ed.fields;
@@ -6111,7 +6296,7 @@ function wireBudget() {
   pinnedShift = -1;  // fresh cells, so force a write
   pinGridHeader();   // a render starts with the header wherever the page is
   const grid = document.querySelector('.grid');
-  if (grid) grid.addEventListener('click', (e) => {
+  if (grid && !viewOnly) grid.addEventListener('click', (e) => {
     const td = e.target.closest('td.cell');
     if (!td) return;
     const y = activeYearKey();
@@ -6119,6 +6304,9 @@ function wireBudget() {
     else if (td.dataset.bal) openCellEditor(y, 'bal', td.dataset.bal, td.dataset.m);
     else if (td.dataset.pay) openCellEditor(y, 'pay', 'paychecks', td.dataset.pay);
   });
+  /* Keyboard navigation stays in a shared view — moving around the grid is
+     reading, not editing, and Enter simply opens nothing now that the click
+     listener above was never attached. */
   if (grid) wireGridKeys(grid);
   /* The gathered notes sit outside the table, so the grid's own listener can't
      reach them — but a note you can't get back to the cell of is only half
@@ -6374,6 +6562,7 @@ addEventListener('scroll', pinGridHeader, { passive: true });
 addEventListener('resize', pinGridHeader);
 
 function openCellEditor(yearKey, type, id, m) {
+  if (viewOnly) return;   // someone else's figures — nothing here is yours to change
   const yr = state.years[yearKey];
   const live = yr.model === 'live';
   editing = { yearKey, type, id, m };
@@ -6780,7 +6969,7 @@ function closeOnBackdropClick(dlg) {
 }
 /* syncChoiceDialog is deliberately excluded: "which copy of your data?" has no
    safe default, so it must be answered rather than dismissed. */
-['dataDialog', 'rowDialog', 'cellDialog', 'helpDialog'].forEach(id =>
+['dataDialog', 'rowDialog', 'cellDialog', 'helpDialog', 'shareDialog'].forEach(id =>
   closeOnBackdropClick(F(id)));
 
 /* ═════════════════════════════ Theme & chrome ═════════════════════════════ */
@@ -6907,9 +7096,735 @@ document.querySelectorAll('.tab').forEach(tab => {
   };
 });
 
+/* ═══════════════════════ Read-only share links ════════════════════════════
+   The whole payload rides in the URL fragment. Everything after '#' is never
+   sent to a server, so the figures reach the recipient without GitHub Pages,
+   Firebase or anyone else seeing them — which is also why this needs no
+   Firestore rules, no account and no network on either side.
+
+   Format: '#share=<marker>.<base64url>' where marker 1 is deflate-raw and 0 is
+   plain JSON. Two formats rather than one because CompressionStream is missing
+   on older Safari, and because an uncompressed link can be read by hand when
+   something looks wrong.
+
+   The payload is a TRIMMED COPY, never `state` itself: only the tabs that were
+   picked, only the branches those tabs actually read, and only as many years as
+   were asked for. Nothing identifying goes in — no email, no sync uid, and
+   never the Alpha Vantage key, which lives in its own localStorage key and is
+   not part of the state at all. This is the one feature in the app that hands
+   real figures to somebody else, so read the sensitivity rules at the top of
+   CLAUDE.md before widening what it sends.
+   (Ported from Sprint Velocity, which owns the family pattern.) */
+
+const SHARE_FORMAT = 1;
+
+const b64urlEncode = (bytes) => {
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
+const b64urlDecode = (str) => {
+  const b = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
+};
+
+const canCompress = () => typeof CompressionStream === 'function';
+
+async function squeeze(bytes, Stream, format) {
+  const s = new Stream(format);
+  const w = s.writable.getWriter();
+  w.write(bytes); w.close();
+  return new Uint8Array(await new Response(s.readable).arrayBuffer());
+}
+
+/* The tab names come off the buttons rather than being written out a second
+   time — a tab renamed in the markup and not here would read as its id in the
+   share dialog and in the recipient's banner. Captured now, because a shared
+   view removes the buttons it wasn't given. */
+const VIEW_LABEL = Object.fromEntries(VIEWS.map(v => {
+  const t = document.querySelector(`.tab[data-view="${v}"]`);
+  return [v, t ? t.textContent.trim() : v];
+}));
+const viewLabel = (v) => VIEW_LABEL[v] || v;
+
+/* ── What each tab actually reads ───────────────────────────────────────────
+   A tab is only worth sharing with the state it draws from, and sending more
+   than that is a leak. This table is the whole answer: nothing else decides
+   what travels. If a renderer starts reading a new branch, add it HERE or the
+   shared copy of that tab will quietly show blanks.
+
+   Several tabs read a branch that belongs to a different tab — Giving measures
+   donations against the salary history on Compensation, Goals reads its "saved
+   so far" out of the budget grid. Those come along, and the dialog says so out
+   loud (shareCarriesNote below); an exclusion is never silent, and neither is
+   an inclusion the sender didn't ask for. */
+const SECTION_NEEDS = {
+  budget:      ['years'],
+  goals:       ['years', 'goals'],
+  household:   ['years', 'goals', 'people'],
+  retirement:  ['people', 'side.retirementAccounts', 'side.limits',
+                'side.comp', 'side.bonuses'],
+  comp:        ['people', 'side.comp', 'side.bonuses'],
+  investments: ['side.portfolios', 'side.taxable'],
+  /* No people: the trips and PTO tables name nobody — checked, not assumed. */
+  vacations:   ['vacations'],
+  giving:      ['years', 'side.donations', 'side.daf', 'side.comp', 'side.bonuses'],
+  history:     ['years'],
+};
+
+/* Which tab a branch belongs to — the tab a reader would expect to have to pick
+   before that data went anywhere. Used twice: to decide whether a tab has
+   anything in it at all, and to work out which branches are being carried
+   beyond what the sender chose. */
+const BRANCH_OWNERS = {
+  years: ['budget', 'history'],
+  goals: ['goals'],
+  people: ['household'],
+  vacations: ['vacations'],
+  'side.comp': ['comp'], 'side.bonuses': ['comp'],
+  'side.portfolios': ['investments'], 'side.taxable': ['investments'],
+  'side.donations': ['giving'], 'side.daf': ['giving'],
+  'side.retirementAccounts': ['retirement'], 'side.limits': ['retirement'],
+};
+
+/* Deliberately not one label per branch: salary and bonus are one idea to a
+   reader, and so are the two holdings tables. Duplicates collapse, so the
+   sentence says each thing once. */
+const BRANCH_LABEL = {
+  years: 'your budget grid',
+  goals: 'your goals',
+  people: 'the people in your plan',
+  vacations: 'your trips and PTO',
+  'side.comp': 'your salary and bonus history',
+  'side.bonuses': 'your salary and bonus history',
+  'side.portfolios': 'your investment holdings',
+  'side.taxable': 'your investment holdings',
+  'side.donations': 'your donations',
+  'side.daf': 'your giving fund',
+  'side.retirementAccounts': 'your retirement accounts',
+  'side.limits': 'your contribution limits',
+};
+
+const readBranch = (d, b) => b.startsWith('side.') ? (d.side || {})[b.slice(5)] : d[b];
+
+/* "Is there anything in here?" — an empty array, an empty map, or a bag whose
+   every value is one of those (vacations is {trips, pto}, and both are empty
+   before a first trip). A number or a string is never empty: a zero is data. */
+function looksEmpty(v) {
+  if (v === null || v === undefined) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === 'object') return Object.values(v).every(looksEmpty);
+  return false;
+}
+
+/* A branch whose emptiness is not simply "no entries". An investment pane is a
+   CONTAINER: coerceShape migrates the old fixed taxable/HSA lists into two named
+   panes with no rows, so `side.portfolios` is a two-entry array on a plan that
+   has never recorded a single holding — and the dialog would have offered
+   Investments to everyone. */
+const BRANCH_HAS_DATA = {
+  'side.portfolios': (v) => (v || []).some(p => p && !looksEmpty(p.rows)),
+};
+
+/* A tab is worth sending when at least one of ITS OWN branches has something in
+   it. Its own, not everything it reads: Goals reads the budget grid, but a plan
+   with a grid and no goals has an empty Goals tab, and landing the recipient on
+   one is the same mistake as sending a team with no sprints. */
+function sectionHasData(d, s) {
+  return (SECTION_NEEDS[s] || []).some(b => {
+    if (!(BRANCH_OWNERS[b] || []).includes(s)) return false;
+    const has = BRANCH_HAS_DATA[b];
+    return has ? has(readBranch(d, b)) : !looksEmpty(readBranch(d, b));
+  });
+}
+
+/* ── How many years go in ───────────────────────────────────────────────────
+   A link carries its data in the URL, and this plan's grid runs back to 2011 —
+   the whole of it is tens of thousands of characters, well past what a mail
+   client will keep in one piece. The window is the way out: it shortens the
+   link without touching a single stored figure, which is the whole point —
+   deleting real data to be able to share it is the wrong trade.
+
+   'all' | 'fit' | 'y:3' from the picker; 'fit' has no fixed window of its own —
+   refreshShareLink() searches for the largest one that fits — so it starts life
+   as 'all' and the search narrows from there. */
+function parseShareScope(value) {
+  const [kind, n] = String(value || 'all').split(':');
+  if (kind !== 'y') return { kind: 'all' };
+  return { kind: 'year', n: Math.max(1, parseInt(n, 10) || 1) };
+}
+
+/* The window is expressed as ONE cutoff year, and everything year-shaped in the
+   plan is filtered against it — the budget grid, the salary and bonus history,
+   donations, contribution limits, retirement contributions, PTO and trips.
+   Trimming only the grid was the obvious first version and it was wrong: a
+   sender who asked for "the last 3 years" would have shipped twenty years of
+   salary alongside it, which is exactly the surprise this feature must not have.
+
+   A cutoff rather than a kept-list because it does the right thing at BOTH ends.
+   Years built ahead and trips booked for next summer are newer than the newest
+   recorded year, and a window is a request to leave old things out, never to
+   drop the plans you are making. So: keep everything from the cutoff onwards.
+
+   Counted over every year the plan mentions, not just the grid — otherwise the
+   same "last 3 years" would mean different spans on different tabs. */
+function shareYearUniverse(st) {
+  const side = st.side || {};
+  const all = new Set([
+    ...Object.keys(st.years || {}),
+    ...Object.keys(side.comp || {}), ...Object.keys(side.bonuses || {}),
+    ...Object.keys(side.limits || {}), ...Object.keys(side.donations || {}),
+    ...(side.retirementAccounts || []).flatMap(a => Object.keys(a.contribs || {})),
+    ...Object.keys((st.vacations || {}).pto || {}),
+  ]);
+  return [...all].filter(y => /^\d{4}$/.test(y)).sort();
+}
+
+/* The oldest year a window keeps, or null for "keep everything". */
+function shareCutoffYear(st, scope) {
+  if (!scope || scope.kind !== 'year') return null;
+  const all = shareYearUniverse(st);
+  if (!all.length) return null;
+  return all[Math.max(0, all.length - Math.max(1, scope.n))];
+}
+
+/* Pure on purpose — each takes its map rather than reading state — so tests.html
+   can pin them. A null cutoff keeps everything, which is what makes "every year"
+   the same code path as a window rather than a branch around it. */
+const keepShareYear = (y, cutoff) => !cutoff || String(y) >= cutoff;
+
+function trimShareYearMap(map, cutoff) {
+  const out = {};
+  for (const k of Object.keys(map || {})) if (keepShareYear(k, cutoff)) out[k] = map[k];
+  return out;
+}
+
+/* Applies the cutoff to everything year-keyed that isn't the grid itself. Runs
+   on the CLONE, after the branches have been picked, so a tab left out of the
+   link costs nothing here and a branch that travelled is trimmed exactly once. */
+function trimShareYearMaps(data, cutoff) {
+  if (!cutoff) return data;
+  const s = data.side || {};
+  for (const k of ['comp', 'bonuses', 'limits', 'donations'])
+    if (s[k]) s[k] = trimShareYearMap(s[k], cutoff);
+  for (const a of s.retirementAccounts || [])
+    if (a.contribs) a.contribs = trimShareYearMap(a.contribs, cutoff);
+  const v = data.vacations || {};
+  if (v.pto) v.pto = trimShareYearMap(v.pto, cutoff);
+  /* A trip with no year can't be placed, so it stays — the window is about
+     leaving old things out, and "unknown" is not old. */
+  if (Array.isArray(v.trips))
+    v.trips = v.trips.filter(t => !t || !t.year || keepShareYear(t.year, cutoff));
+  return data;
+}
+
+/* Every written word in the plan, wherever it sits: a cell's note, a note on
+   one part of a split month, a stated balance's note, a row's, a goal's, a
+   trip's, and the free-form notes that came in with the spreadsheet. Done by
+   walking the payload rather than by listing the places, so a note field added
+   to some future editor is covered without anyone remembering to come back
+   here — the failure mode of a list is that it silently ships a note. */
+function stripNotes(v) {
+  if (Array.isArray(v)) { v.forEach(stripNotes); return v; }
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) {
+      if (k === 'note') delete v[k];
+      else if (k === 'extraNotes') v[k] = [];
+      else stripNotes(v[k]);
+    }
+  }
+  return v;
+}
+
+/* ── Keeping a trimmed link's balances honest ───────────────────────────────
+   Every account's balance CHAINS: a month opens on the month before, a January
+   opens on the previous grid year's December, and only the very first year
+   falls back to its own `seeds`. Cut the front off the history and the oldest
+   surviving year loses what it opened on — so a link trimmed to three years
+   would show the recipient a Cash line tens of thousands of dollars away from
+   the sender's, silently and with no way to tell.
+
+   So the seeds are rewritten to the balances the sender's own engine worked out
+   for the December that was cut. The recipient then sees exactly the figures on
+   the sender's screen, with less history behind them: the window shortens the
+   LINK, never the numbers. (Estimate rules that read the prior year are the one
+   thing a window really does change, and shareYearNote() says so.)
+
+   Reads C — the render's computeAll output — rather than recomputing: it is
+   already the answer to this question, and a second computation is a second
+   place for the two to disagree. */
+function reseedShareYears(data) {
+  const keptGrid = Object.keys(data.years).sort()
+    .filter(y => data.years[y] && data.years[y].kind === 'grid');
+  if (!keptGrid.length) return data;
+  const first = keptGrid[0];
+  /* GRID years only, on both sides: computeAll skips summary years entirely, so
+     the year a trimmed January would have opened on is the last grid year
+     before it, not simply the previous key. */
+  const allGrid = Object.keys(state.years)
+    .filter(y => state.years[y].kind === 'grid').sort();
+  const i = allGrid.indexOf(first);
+  if (i <= 0) return data;                    // nothing was cut off the front
+  const pc = C[allGrid[i - 1]];
+  if (!pc || !pc.months || !pc.months.length) return data;
+  const lastM = pc.months[pc.months.length - 1];
+  const seeds = Object.assign({}, data.years[first].seeds || {});
+  for (const a of accountsOf(state)) {
+    const v = pc.balances[`${a.id}|${lastM}`];
+    if (v !== undefined) seeds[a.id] = v;     // absent = not tracked then; leave the seed
+  }
+  data.years[first] = Object.assign({}, data.years[first], { seeds });
+  return data;
+}
+
+/* Names are the most sensitive thing this app holds — children's among them —
+   so they are the one field that leaves by default. Ages, birth months and who
+   owns which account all still work: everything person-shaped keys off the id,
+   which doesn't change. A goal or an account the sender NAMED after somebody
+   still says what they typed; the dialog says so rather than trying to guess
+   which words are a name. */
+function anonymisePeople(d) {
+  let adults = 0, kids = 0;
+  for (const p of d.people || []) {
+    p.name = p.role === 'child' ? `Child ${++kids}` : `Adult ${++adults}`;
+    delete p.note;
+  }
+  return d;
+}
+
+function buildSharePayload({ sections, scope, includeNames, includeNotes }) {
+  const need = new Set();
+  for (const s of sections) for (const b of (SECTION_NEEDS[s] || [])) need.add(b);
+
+  const blank = blankState();
+  const cutoff = shareCutoffYear(state, scope);
+  /* Assembled from references first and cloned in one go below, so nothing
+     after this line can reach back into the real state and mutate it — which is
+     exactly what stripNotes() and anonymisePeople() would otherwise do. */
+  const picked = {
+    schema: state.schema || blank.schema,
+    settings: state.settings,
+    years: need.has('years') ? trimShareYearMap(state.years, cutoff) : {},
+    goals: need.has('goals') ? state.goals : [],
+    people: need.has('people') ? state.people : [],
+    vacations: need.has('vacations') ? state.vacations : blank.vacations,
+    side: Object.assign({}, blank.side),
+    ui: {},
+  };
+  for (const b of need) {
+    if (!b.startsWith('side.')) continue;
+    const k = b.slice(5);
+    if (state.side[k] !== undefined) picked.side[k] = state.side[k];
+  }
+
+  const data = JSON.parse(JSON.stringify(picked));
+  trimShareYearMaps(data, cutoff);
+  /* The account list is the budget's; with no grid in the link nothing reads it,
+     and shipping the names of somebody's accounts alongside a holdings table
+     they didn't ask about is a leak with no upside. */
+  if (!need.has('years')) data.settings.accounts = [];
+  else reseedShareYears(data);
+  if (!includeNotes) stripNotes(data);
+  if (!includeNames) anonymisePeople(data);
+
+  /* A window can leave a tab with nothing — Giving, for a year window that
+     misses every donation. Sending it anyway lands the recipient on an empty
+     tab, so it goes, and the dialog names it. Never all of them: decodeShare()
+     refuses a sectionless payload outright. */
+  const alive = sections.filter(s => sectionHasData(data, s));
+  const dropped = sections.filter(s => !alive.includes(s));
+  const keep = alive.length ? alive : sections;
+  buildSharePayload.dropped = alive.length ? dropped.map(viewLabel) : [];
+
+  const yearKeysIn = Object.keys(data.years).sort();
+  data.ui = { activeYear: yearKeysIn[yearKeysIn.length - 1] || null,
+              activeTab: keep[0], tabOrder: keep.slice() };
+
+  return {
+    v: 1,
+    sharedAt: Date.now(),
+    sections: keep,
+    /* Flags, not sentences. The recipient's banner is built from these rather
+       than from anything the sender wrote, so a hand-edited link has no text to
+       inject — and `range` is a bare number for the same reason. */
+    anon: !includeNames,
+    notes: !!includeNotes,
+    range: scope && scope.kind === 'year' ? { kind: 'year', n: scope.n } : undefined,
+    data,
+  };
+}
+
+async function encodeShare(payload) {
+  const json = new TextEncoder().encode(JSON.stringify(payload));
+  if (!canCompress()) return '0.' + b64urlEncode(json);
+  const packed = await squeeze(json, CompressionStream, 'deflate-raw');
+  return SHARE_FORMAT + '.' + b64urlEncode(packed);
+}
+
+async function decodeShare(token) {
+  const dot = token.indexOf('.');
+  if (dot < 1) throw new Error('no format marker');
+  const marker = token.slice(0, dot);
+  const bytes = b64urlDecode(token.slice(dot + 1));
+  let json;
+  if (marker === '0') {
+    json = new TextDecoder().decode(bytes);
+  } else if (marker === String(SHARE_FORMAT)) {
+    if (typeof DecompressionStream !== 'function') throw new Error('no DecompressionStream');
+    json = new TextDecoder().decode(await squeeze(bytes, DecompressionStream, 'deflate-raw'));
+  } else {
+    throw new Error('unknown format ' + marker);
+  }
+  const p = JSON.parse(json);
+  if (!p || !Array.isArray(p.sections) || !p.data || typeof p.data !== 'object')
+    throw new Error('not a share payload');
+  /* Filtered against VIEWS rather than trusted: the section list decides which
+     renderers run, and an unknown name would leave render() with a tab it has
+     no function for. */
+  const sections = p.sections.filter(s => VIEWS.includes(s));
+  if (!sections.length) throw new Error('no shareable tabs in payload');
+  /* A link is the least trusted input the app has — it arrives from someone
+     else, which is the whole point of the feature — so it goes through the same
+     coerceShape/migrate gate a restored backup does. */
+  return { sections, sharedAt: p.sharedAt, range: p.range,
+           anon: !!p.anon, notes: !!p.notes,
+           data: migrate(coerceShape(p.data)) };
+}
+
+/* ── Opening a shared link ──────────────────────────────────────────────── */
+
+/* Deliberately never falls back to the viewer's own data on failure: showing
+   their figures under a "shared view" banner would be worse than an error. */
+async function openSharedView() {
+  try {
+    const p = await decodeShare(shareToken);
+    sharedViews = new Set(p.sections);
+    shareMeta = { sharedAt: p.sharedAt, range: p.range, anon: p.anon,
+                  label: p.sections.map(viewLabel).join(', ') };
+    const d = p.data;
+    state = Object.assign(blankState(), d, {
+      settings: Object.assign(blankState().settings, d.settings || {}),
+      side: Object.assign(blankState().side, d.side || {}),
+      ui: Object.assign(blankState().ui, d.ui || {})
+    });
+    /* The tabs that aren't in the link are REMOVED, not hidden: render() reads
+       the bar back to decide whether it needs reordering, and a hidden button
+       would still be in that list — so `want` and `have` could never agree and
+       every render would re-append (and so blur) the whole bar. */
+    document.querySelectorAll('.tab').forEach(t => {
+      if (!sharedViews.has(t.dataset.view)) t.remove();
+    });
+    if (!sharedViews.has(state.ui.activeTab)) state.ui.activeTab = p.sections[0];
+    /* Fixed for the life of the page, so it's set here rather than inside
+       render(), which runs on every interaction. */
+    F('shareBar').innerHTML = shareBanner();
+    render();
+  } catch (e) {
+    console.warn('share link could not be read', e);
+    renderShareError();
+  }
+}
+
+function renderShareError() {
+  document.querySelector('.tabs').hidden = true;
+  F('views').innerHTML = `
+    <div class="card"><div class="empty">
+      <h2>This Shared Link Couldn’t Be Opened</h2>
+      <p>It looks incomplete — links are long, and mail apps sometimes cut them in half or
+         wrap them across two lines. Ask whoever sent it for a fresh copy, and paste the
+         whole thing in one go.</p>
+      <p style="margin-top:16px">
+        <a class="btn primary" href="${esc(location.pathname)}">Open my own plan</a></p>
+    </div></div>`;
+}
+
+/* Says out loud that a link holds a window rather than the whole plan, so a
+   figure the sender's own screen disagrees with has a visible reason. Read as a
+   number and rebuilt into a sentence here — nothing the sender typed reaches the
+   page — and deliberately without a total: the recipient learns a window is in
+   force without the sender publishing how much history sits behind it. */
+function shareRangeNote(range) {
+  if (!range || range.kind !== 'year') return '';
+  const n = Math.max(1, Math.floor(Number(range.n) || 1));
+  return ` It holds ${n === 1 ? 'the most recent year' : `the last ${n} years`
+    } — earlier years aren’t included.`;
+}
+
+function shareBanner() {
+  const when = shareMeta && shareMeta.sharedAt
+    ? new Date(shareMeta.sharedAt).toLocaleDateString(undefined,
+        { day: 'numeric', month: 'short', year: 'numeric' })
+    : null;
+  return `<div class="viewbar">
+    <strong>👁 Read-only view${shareMeta && shareMeta.label ? ' — ' + esc(shareMeta.label) : ''}</strong>
+    <span class="muted">Shared${when ? ' on ' + when : ''}. Nothing you do here is saved, and
+      your own plan is untouched.${shareRangeNote(shareMeta && shareMeta.range)}${
+      shareMeta && shareMeta.anon ? ' Names have been left out.' : ''}</span>
+    <a class="mine" href="${esc(location.pathname)}">Open my own plan</a>
+  </div>`;
+}
+
+/* ── Creating a link ────────────────────────────────────────────────────── */
+
+const shareDialog = F('shareDialog');
+
+/* Long URLs survive browsers fine but not always the trip through a mail
+   client, so warn well below any hard limit rather than at it. */
+const SHARE_WARN_AT = 8000;
+
+function openShare() {
+  const active = VIEWS.includes(state.ui.activeTab) ? state.ui.activeTab : 'budget';
+  /* Only the tabs with something on them: offering "Vacations" to someone who
+     has never recorded a trip is offering an empty card. */
+  const offer = tabOrder(state.ui).filter(v => sectionHasData(state, v));
+  F('shareTabs').innerHTML = (offer.length ? offer : [active]).map(v =>
+    `<label class="checkline"><input type="checkbox" data-share-tab="${esc(v)}"${
+      v === active ? ' checked' : ''}><span>${esc(viewLabel(v))}</span></label>`).join('');
+  F('shareTabs').querySelectorAll('input').forEach(i => {
+    i.onchange = () => { syncShareSelectAll(); refreshShareLink(); };
+  });
+  syncShareSelectAll();
+  /* Reset rather than remembered: what goes in a link is a decision about THAT
+     link, and inheriting the last one would quietly send more than the sender
+     meant to. The two riskiest choices therefore start off, and the window
+     starts at the whole plan — trimming by surprise would be worse than a link
+     that's too long and says so. */
+  F('shareNames').checked = false;
+  F('shareNotes').checked = false;
+  F('shareYears').value = 'all';
+  refreshShareLink();
+  shareDialog.showModal();
+  shareDialog.scrollTop = 0;
+}
+
+const shareBoxes = () => Array.from(F('shareTabs').querySelectorAll('input'));
+const sharePicked = () => shareBoxes().filter(i => i.checked).map(i => i.dataset.shareTab);
+
+/* One button rather than an All/None pair: with everything ticked the only
+   useful thing it can do is clear the lot, so it says so. */
+function syncShareSelectAll() {
+  const boxes = shareBoxes();
+  const picked = boxes.filter(i => i.checked).length;
+  const btn = F('shareSelectAll');
+  btn.textContent = (boxes.length && picked === boxes.length) ? 'Select none' : 'Select all';
+  btn.hidden = boxes.length < 2;
+  F('shareTabCount').textContent = `${picked} of ${boxes.length} selected`;
+}
+
+let shareSeq = 0;   // a slow encode must not overwrite the box after a later tick
+
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+/* The largest year window whose link still comes in under the warning length.
+   Link length only grows with the window, so this bisects rather than counting
+   down. Returns null when a later tick has started a newer search, exactly as
+   the caller's own sequence check does — with several encodes in flight,
+   checking only at the end would let a stale search finish over a fresh one. */
+async function fitShareWindow(build, busy) {
+  let lo = 1, hi = Math.max(1, shareYearUniverse(state).length), best = null;
+  while (lo <= hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const out = await build({ kind: 'year', n: mid });
+    if (busy !== shareSeq) return null;
+    if (out.url.length <= SHARE_WARN_AT) { best = out; lo = mid + 1; } else { hi = mid - 1; }
+  }
+  /* Nothing fitted, which means a single year is already too big — the tab
+     count or the notes are the cost rather than history. One year is the
+     shortest link there is; the length warning then fires on it and names the
+     other levers. */
+  if (best) return best;
+  const out = await build({ kind: 'year', n: 1 });
+  return busy === shareSeq ? out : null;
+}
+
+/* What the sender is told about the window. For the automatic option this is
+   the only place the answer appears, so it says the figure it landed on rather
+   than just "trimmed". */
+function shareScopeNote(scope, auto, carriesYears) {
+  if (!carriesYears) return '';
+  if (!scope || scope.kind !== 'year') {
+    return auto ? 'Every year fits — nothing was left out.' : '';
+  }
+  const what = scope.n === 1 ? 'the most recent year' : `the last ${scope.n} years`;
+  return auto
+    ? `Trimmed to ${what} to keep the link short enough to email.`
+    : `This link holds ${what}.`;
+}
+
+/* Which branches are travelling that the sender didn't pick a tab for. Giving
+   without Compensation still carries the salary history its percentages are
+   measured against, and someone deciding what to send is entitled to know that
+   before they send it — the same rule as every view that drops a row: say
+   which, and why. */
+function shareCarriesNote(sections) {
+  const chosen = new Set(sections);
+  const labels = [];
+  for (const s of sections)
+    for (const b of (SECTION_NEEDS[s] || [])) {
+      if ((BRANCH_OWNERS[b] || []).some(o => chosen.has(o))) continue;
+      if (looksEmpty(readBranch(state, b))) continue;   // nothing there to carry
+      const label = BRANCH_LABEL[b];
+      if (label && !labels.includes(label)) labels.push(label);
+    }
+  if (!labels.length) return '';
+  return `These tabs are worked out from ${andList(labels)}, so the link carries `
+    + `${labels.length === 1 ? 'it' : 'them'} too.`;
+}
+
+/* Trimming the years changes the FIGURES the recipient sees, not just the size
+   of the link: the same-month and average-of-last-year rules read the year
+   before, and the oldest year in a trimmed link no longer has one. Same rule as
+   converting a year to a summary, which warns about exactly this. */
+function shareYearNote(data) {
+  const kept = Object.keys(data.years || {}).sort();
+  if (!kept.length) return '';
+  const before = String(+kept[0] - 1);
+  if (!state.years[before]) return '';        // nothing was cut off the front
+  const rows = rulesNeedingYear(state, before);
+  if (!rows.length) return '';
+  return `${kept[0]} has ${plural(rows.length, 'row')} that look back into ${before} — `
+    + `${rows.slice(0, 4).join(', ')}${rows.length > 4 ? '…' : ''}. `
+    + `Those estimates read blank in this link.`;
+}
+
+async function refreshShareLink() {
+  const sections = sharePicked();
+  const link = F('shareLink'), meta = F('shareMeta');
+  const note = F('shareScope'), warn = F('shareWarn');
+  const busy = ++shareSeq;
+  const setBusy = (on) => {
+    F('shareCopyBtn').disabled = on;
+    F('shareOpenBtn').disabled = on;
+  };
+
+  if (!sections.length) {
+    link.value = '';
+    meta.textContent = 'Pick at least one tab.';
+    note.textContent = '';
+    warn.textContent = '';
+    setBusy(true);
+    return;
+  }
+
+  const includeNames = F('shareNames').checked;
+  const includeNotes = F('shareNotes').checked;
+  const choice = F('shareYears').value;
+  const auto = choice === 'fit';
+  /* Counted over every year the plan mentions, on both sides, because that is
+     what the window is measured in — a link with no budget grid can still have
+     had its salary history trimmed, and the meta line has to say so. */
+  const totalYears = shareYearUniverse(state).length;
+
+  /* One trial: the payload, its dropped-tab list read straight away before
+     another trial can overwrite it, and the finished URL to measure. */
+  const build = async (scope) => {
+    const payload = buildSharePayload({ sections, scope, includeNames, includeNotes });
+    const dropped = buildSharePayload.dropped;
+    const url = location.origin + location.pathname + SHARE_PREFIX + await encodeShare(payload);
+    return { payload, dropped, url, scope };
+  };
+
+  let out = await build(parseShareScope(auto ? 'all' : choice));
+  if (busy !== shareSeq) return;
+  if (auto && out.url.length > SHARE_WARN_AT) {
+    out = await fitShareWindow(build, busy);
+    if (!out) return;
+  }
+
+  link.value = out.url;
+  setBusy(false);
+
+  const kept = shareYearUniverse(out.payload.data).length;
+  const carriesYears = kept > 0;
+  meta.textContent = `${plural(out.payload.sections.length, 'tab')}`
+    + (carriesYears
+      ? `, ${kept < totalYears ? `${kept} of ${totalYears} years` : plural(kept, 'year')}`
+      : '')
+    + `${includeNames ? ', real names' : ', names left out'}`
+    + `${includeNotes ? ', notes included' : ', no notes'} · `
+    + `${out.url.length.toLocaleString()} characters`;
+  note.textContent = shareScopeNote(out.scope, auto, carriesYears);
+  warn.textContent = [
+    out.dropped.length
+      ? `${andList(out.dropped)} ${out.dropped.length === 1 ? 'has' : 'have'} nothing in `
+        + `this window, so ${out.dropped.length === 1 ? 'it isn’t' : 'they aren’t'} in the link.`
+      : '',
+    shareCarriesNote(out.payload.sections),
+    shareYearNote(out.payload.data),
+    out.url.length > SHARE_WARN_AT
+      ? 'That’s a long link — some mail apps break links this size across two lines. '
+        + 'Sharing fewer tabs, leaving notes out, or choosing fewer years will shorten it.'
+      : ''
+  ].filter(Boolean).join(' ');
+}
+
+F('shareBtn').onclick = openShare;
+F('shareCloseBtn').onclick = () => shareDialog.close();
+F('shareNames').onchange = refreshShareLink;
+F('shareNotes').onchange = refreshShareLink;
+F('shareYears').onchange = refreshShareLink;
+
+F('shareSelectAll').addEventListener('click', () => {
+  const boxes = shareBoxes();
+  const turnOn = boxes.some(i => !i.checked);
+  boxes.forEach(i => { i.checked = turnOn; });
+  syncShareSelectAll();
+  refreshShareLink();
+});
+
+F('shareCopyBtn').onclick = async () => {
+  const url = F('shareLink').value;
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Link copied — paste it into an email or a chat');
+  } catch (e) {
+    /* Clipboard access is refused on insecure origins and in some mobile
+       browsers; selecting the text is the honest fallback. */
+    F('shareLink').select();
+    toast('Press ⌘C / Ctrl+C to copy the selected link');
+  }
+};
+
+F('shareOpenBtn').onclick = () => {
+  if (F('shareLink').value) window.open(F('shareLink').value, '_blank', 'noopener');
+};
+
 /* ── Boot ───────────────────────────────────────────────────────────────── */
 applyTheme();
-render();
+
+/* Pasting a link into a tab that already has the app open changes only the
+   fragment, which browsers handle without reloading — so the page would sit
+   there looking broken. Reload instead, and let the normal boot path run. */
+addEventListener('hashchange', () => {
+  const nowShared = location.hash.startsWith(SHARE_PREFIX);
+  if (nowShared !== viewOnly
+    || (nowShared && location.hash.slice(SHARE_PREFIX.length) !== shareToken))
+    location.reload();
+});
+
+if (viewOnly) {
+  /* Everything that writes, imports or creates belongs to whoever owns the plan,
+     not to a visitor. The theme picker stays: that's the viewer's own preference,
+     kept in a separate key, and it alters nothing shared.
+     syncBtn is hidden from here rather than left to the sync module: this runs
+     while the page is still parsing and the module is deferred, so leaving it to
+     the module would show a visitor a sign-in button that then vanished. */
+  ['prefsBtn', 'dataBtn', 'shareBtn', 'syncBtn'].forEach(id => { F(id).hidden = true; });
+  /* The sync module normally rewrites this line; it never starts here, so the
+     default "your data is stored in this browser" text would be misleading. */
+  F('privacyNote').textContent = 'This is a read-only copy someone shared with you. It was '
+    + 'read from the link itself — nothing was uploaded or downloaded, and nothing you '
+    + 'already had saved in this browser has been changed.';
+  /* Decoding is async, so paint a holding card rather than the viewer's own
+     plan — a flash of their figures under a "shared view" banner would be
+     alarming. */
+  F('views').innerHTML = '<div class="card"><div class="empty"><h2>Opening Shared View…</h2></div></div>';
+  openSharedView();
+} else {
+  render();
+}
 
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
@@ -6928,7 +7843,15 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears,
-  projectionYearsAfter, applyToRow, dropRow, swapRows, andList, tabOrder, VIEWS };
+  projectionYearsAfter, applyToRow, dropRow, swapRows, andList, tabOrder, VIEWS,
+  /* Share links: the pure pieces, plus the three tables that decide what
+     travels. The tables are here so a test can fail the moment a tab is added
+     without one — a missing entry ships an empty tab, and a missing owner ships
+     a branch the sender was never told about. */
+  SECTION_NEEDS, BRANCH_OWNERS, BRANCH_LABEL, SHARE_PREFIX, SHARE_FORMAT,
+  parseShareScope, shareYearUniverse, shareCutoffYear, keepShareYear,
+  trimShareYearMap, trimShareYearMaps, stripNotes, anonymisePeople,
+  looksEmpty, sectionHasData, shareRangeNote, encodeShare, decodeShare };
 
 /* ── Hooks the sync module calls ──────────────────────────────────────────
    The module is a separate <script type="module"> and can't see this scope. */
@@ -7006,7 +7929,11 @@ catch (e) { /* cross-origin parent — not the harness */ }
 
 /* Visible and signed-out in the markup so the header is its final width at
    first paint; taken away only when sync genuinely can't run. */
-if (FIREBASE_CONFIG && !inTestHarness) {
+/* ...and never in a shared view: onAuthStateChanged → startSync() → finAdopt()
+   would replace the payload the visitor was sent with their OWN cloud copy,
+   under a banner still claiming to be somebody else's plan. The flag is set
+   before the page has finished parsing; the button is already hidden by then. */
+if (FIREBASE_CONFIG && !window.finViewOnly && !inTestHarness) {
   init().catch((e) => { console.warn('Sync unavailable:', e); btn.hidden = true; });
 } else {
   btn.hidden = true;
