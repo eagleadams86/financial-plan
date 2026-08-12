@@ -1116,6 +1116,160 @@ t('a goal for a child who has gone still computes, it just loses the name', () =
   eq(g.target, 80000);
 });
 
+/* ── Two earners ────────────────────────────────────────────────────────────
+   The 401(k) elective-deferral limit is PER PERSON; the Roth MAGI check is per
+   HOUSEHOLD and depends on how you file. Two opposite scopings, which is why
+   the limits record grew a `by` map rather than being reshaped. The pin that
+   matters most is the first one: a single-earner plan's answers must not have
+   moved a penny. */
+group('Two earners');
+/* `limitsFor` reads the app's live state, so these swap it IN MEMORY and put
+   it back afterwards. Nothing calls save(), so localStorage is never written —
+   the suite stays read-only, which matters because the iframe is a real
+   session pointed at the reader's own data. */
+function withState(patch, fn) {
+  const s = w.finGet();
+  const keep = { people: s.people, side: s.side, settings: s.settings };
+  try {
+    const d = H.coerceShape(JSON.parse(JSON.stringify(patch)));
+    s.people = d.people;
+    s.side = d.side;
+    s.settings = Object.assign({}, keep.settings, d.settings);
+    return fn();
+  } finally {
+    s.people = keep.people; s.side = keep.side; s.settings = keep.settings;
+  }
+}
+const EARNERS = {
+  people: [{ id: 'sam', name: 'Sam', role: 'adult' },
+           { id: 'robin', name: 'Robin', role: 'adult' },
+           { id: 'ellis', name: 'Ellis', role: 'child' }],
+  side: { comp: { '2030': { salary: 100000, raisePct: 0 } },
+          bonuses: { '2030': 10000 },
+          limits: { '2030': { pretaxPct: 0.1, bonusPct: 0.1, hsaPretax: 4000,
+                              k401Limit: 23000, magiLimit: 200000, magiPhaseOut: 10000,
+                              by: { robin: { salary: 60000, bonus: 0, pretaxPct: 0.05,
+                                             bonusPct: 0, hsaPretax: 0 } } } } }
+};
+t('limitsFor with one argument is exactly what it always was', () => {
+  /* The non-regression pin. A plan with no household and no `by` must get the
+     same object out of the same call. */
+  withState({ people: [], side: { comp: { '2030': { salary: 100000, raisePct: 0 } },
+    bonuses: { '2030': 10000 },
+    limits: { '2030': { pretaxPct: 0.1, bonusPct: 0.1, hsaPretax: 4000 } } } }, () => {
+    const L = H.limitsFor('2030');
+    eq(L.salary, 100000, 'still borrows the comp salary');
+    eq(L.bonus, 10000, 'still borrows the bonus');
+    approx(L.pretaxPct, 0.1);
+    eq(L.hsaPretax, 4000);
+    eq(L.k401Limit, 24500, 'and still falls back to the built-in limit');
+  });
+});
+t('the flat record belongs to the person the Comp tab is about', () => {
+  /* Naming your household must not empty a calculator you had filled in. */
+  withState(EARNERS, () => {
+    const flat = H.limitsFor('2030');
+    const sam = H.limitsFor('2030', 'sam');
+    eq(sam.salary, flat.salary, 'Sam inherits the figures typed before there was a household');
+    eq(sam.bonus, flat.bonus);
+    approx(sam.pretaxPct, flat.pretaxPct);
+  });
+});
+t('a second earner reads their own figures, and borrows nobody else’s salary', () => {
+  withState(EARNERS, () => {
+    const robin = H.limitsFor('2030', 'robin');
+    eq(robin.salary, 60000, 'their own, not the Comp tab’s');
+    eq(robin.bonus, 0, 'and not the household bonus either');
+    approx(robin.pretaxPct, 0.05);
+  });
+});
+t('the year’s limits are shared, because they are a fact about the year', () => {
+  withState(EARNERS, () => {
+    for (const id of [undefined, 'sam', 'robin']) {
+      const L = H.limitsFor('2030', id);
+      eq(L.k401Limit, 23000, 'same 401(k) limit for each of them');
+      eq(L.magiLimit, 200000);
+      eq(L.magiPhaseOut, 10000);
+    }
+  });
+});
+t('swapping the state back leaves the reader’s own plan untouched', () => {
+  /* The guard on the guard: these tests run inside a real session. */
+  const before = JSON.stringify(w.finGet().people);
+  withState(EARNERS, () => eq(H.adultsOf(w.finGet()).length, 2));
+  eq(JSON.stringify(w.finGet().people), before);
+});
+t('every adult gets a 401(k) card; a plan with no household still gets one', () => {
+  eq(H.limitEarners({ people: [] }), [undefined], 'the single unnamed earner');
+  eq(H.limitEarners({ people: [{ id: 'sam', name: 'Sam', role: 'adult' },
+                               { id: 'ellis', name: 'Ellis', role: 'child' }] }), ['sam'],
+     'a child does not get one');
+  eq(H.limitEarners({ people: [{ id: 'sam', role: 'adult' }, { id: 'robin', role: 'adult' }] }),
+     ['sam', 'robin']);
+});
+t('the Comp tab follows the first adult unless told otherwise', () => {
+  const s = { settings: {}, people: [{ id: 'sam', name: 'Sam', role: 'adult' },
+                                     { id: 'robin', name: 'Robin', role: 'adult' }] };
+  eq(H.compPersonId(s), 'sam');
+  eq(H.compPersonId({ ...s, settings: { compPerson: 'robin' } }), 'robin');
+  eq(H.compPersonId({ ...s, settings: { compPerson: 'ghost' } }), 'sam', 'a stranger is ignored');
+});
+t('a Comp pointer at a child or a ghost is dropped on load', () => {
+  const d = H.coerceShape({ settings: { compPerson: 'ellis' },
+    people: [{ id: 'ellis', name: 'Ellis', role: 'child' }] });
+  eq(d.settings.compPerson, undefined, 'a child has no salary history');
+  const e = H.coerceShape({ settings: { compPerson: 'gone' }, people: [] });
+  eq(e.settings.compPerson, undefined);
+});
+t('a second earner’s figures survive being coerced, and are not flattened to a number', () => {
+  /* `by` is the one key in the limits record that is not money — num() would
+     turn it into 0 and take their whole record with it. */
+  const d = H.coerceShape({
+    people: [{ id: 'robin', name: 'Robin', role: 'adult' }],
+    side: { limits: { '2030': { k401Limit: '23000',
+      by: { robin: { salary: '60000', pretaxPct: 0.05 } } } } } });
+  const L = d.side.limits['2030'];
+  eq(L.k401Limit, 23000, 'the flat fields are still forced to numbers');
+  eq(typeof L.by, 'object');
+  eq(L.by.robin.salary, 60000, 'and so are theirs');
+});
+t('figures belonging to somebody deleted do not linger', () => {
+  const d = H.coerceShape({ people: [],
+    side: { limits: { '2030': { by: { ghost: { salary: 60000 } } } } } });
+  eq(d.side.limits['2030'].by, undefined);
+});
+t('take-home can be read for one earner, and the household still adds up', () => {
+  const s = H.coerceShape({
+    people: [{ id: 'sam', name: 'Sam', role: 'adult' },
+             { id: 'robin', name: 'Robin', role: 'adult' }],
+    years: { '2030': { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 2,
+      enteredThrough: '2030-02',
+      categories: [
+        { id: 'pay', name: 'Paycheck', section: 'income', rule: 'none', person: 'sam' },
+        { id: 'pay2', name: 'Salary', section: 'income', rule: 'none', person: 'robin' },
+        { id: 'rent', name: 'Rent', section: 'expense', rule: 'none' },
+      ],
+      cells: { 'pay|2030-01': { v: 3000, kind: 'actual' }, 'pay|2030-02': { v: 3000, kind: 'actual' },
+               'pay2|2030-01': { v: 2000, kind: 'actual' }, 'pay2|2030-02': { v: 2000, kind: 'actual' },
+               'rent|2030-01': { v: -1500, kind: 'actual' } } } } });
+  const c = H.computeAll(s, '2030-02-15')['2030'];
+  eq(H.takeHomePay(s, c, '2030'), 10000, 'both of them, as it always was');
+  eq(H.takeHomePay(s, c, '2030', 'sam'), 6000);
+  eq(H.takeHomePay(s, c, '2030', 'robin'), 4000);
+  eq(H.takeHomePay(s, c, '2030', 'sam') + H.takeHomePay(s, c, '2030', 'robin'),
+     H.takeHomePay(s, c, '2030'), 'and the two reach the household figure');
+});
+t('filing status names itself and never sets a threshold', () => {
+  eq(H.FILING_LABEL.single, 'single filer');
+  eq(H.FILING_LABEL.joint, 'married filing jointly');
+  eq(H.FILING_LABEL.separate, 'married filing separately');
+  /* The thresholds stay typed — a figure shipped here would be out of date
+     within a year and look authoritative while it was. */
+  const d = H.coerceShape({ settings: { filingStatus: 'joint' } });
+  eq(d.settings.filingStatus, 'joint');
+  eq(H.limitsFor.length, 2, 'limitsFor takes a year and, optionally, a person');
+});
+
 /* ── Restoring a backup ─────────────────────────────────────────────────────
    The one failure mode of putting people at the top level is that a merge site
    forgets them and a restore silently drops the household. `load()`, the

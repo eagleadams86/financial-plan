@@ -1101,6 +1101,21 @@ function suggestedTargetDate(person) {
   const m = majorityMonthOf(person);
   return m ? `${m}-01` : null;
 }
+/* The adults, in the order they were added — who can hold a retirement account
+   and a 401(k) of their own. */
+const adultsOf = (st) => peopleOf(st).filter(p => p.role === 'adult');
+/* Whose career the Compensation tab describes. It is ONE person's salary
+   history — `sinceLastYear` asks whether this year's pay picked up where last
+   year's ended, and a household total has no answer to that, because one of
+   you can change jobs while the other doesn't. So the tab keeps its meaning
+   and simply says whose it is; a second earner's pay is a budget income row.
+   An explicit pointer rather than a role, because "primary" would be a label
+   that decided nothing else. */
+const compPersonId = (st) => {
+  const chosen = st.settings.compPerson;
+  return (chosen && personById(st, chosen)?.role === 'adult')
+    ? chosen : adultsOf(st)[0]?.id;
+};
 /* When an account starts being tracked is derived, never stored: it's the
    first month that has anything to say about it — a seed, a stated balance, an
    interest adjustment, or money moving into it. Months before that are blank
@@ -1480,9 +1495,28 @@ function coerceShape(data) {
   for (const y of Object.keys(s.limits)) {
     const L = obj(s.limits[y]);
     s.limits[y] = L;
+    /* `by` holds a second earner's own figures and is the one key here that is
+       NOT a number — num() would flatten it to 0 and take their salary,
+       elections and the whole record with it. Coerced separately, one nested
+       money map at a time. */
+    const by = L.by === undefined ? undefined : obj(L.by);
+    delete L.by;
     for (const k of Object.keys(L)) {
       L[k] = num(L[k]);
       if (typeof L[k] !== 'number') delete L[k];
+    }
+    if (by) {
+      for (const pid of Object.keys(by)) {
+        const own = obj(by[pid]);
+        by[pid] = own;
+        for (const k of Object.keys(own)) {
+          own[k] = num(own[k]);
+          if (typeof own[k] !== 'number') delete own[k];
+        }
+        /* Somebody deleted from the household leaves no figures behind. */
+        if (!peopleIds.has(pid)) delete by[pid];
+      }
+      if (Object.keys(by).length) L.by = by;
     }
   }
   /* A year with nothing in it is not a year: it draws a whole card with a $0
@@ -1590,6 +1624,12 @@ function coerceShape(data) {
      in `migrate`. 'single' is what the old fixed MAGI figure already encoded. */
   if (!['single', 'joint', 'separate'].includes(d.settings.filingStatus))
     d.settings.filingStatus = 'single';
+  /* Whose career the Comp tab is about. Falls back to the first adult, so it
+     is right without ever being set; a pointer at somebody deleted, or at a
+     child, is dropped rather than left to name a stranger. */
+  if (d.settings.compPerson
+      && d.people.find(p => p.id === d.settings.compPerson)?.role !== 'adult')
+    delete d.settings.compPerson;
   d.vacations = obj(d.vacations);
   d.vacations.trips = arr(d.vacations.trips);
   /* Trip nights and each line's figures reach the page unescaped, so coerce
@@ -3185,6 +3225,30 @@ function renderRetirement() {
     .reduce((t, a) => t + (a.amount || 0), 0));
   const total = round2(trad + roth);
   const tradPct = total ? trad / total : 0;
+  /* The split PER PERSON is a table, not a second bar and not a chart line.
+     Four people means four series, which means either four colours (there are
+     none to spare, and hue must never carry a meaning on its own here) or four
+     dash patterns nobody can tell apart. A table says it exactly. */
+  const showOwner = adultsOf(state).length > 1;
+  const perPersonSplit = !showOwner ? '' : (() => {
+    const rows = [...adultsOf(state).map(p => [p.id, p.name]), ['', 'Not said']]
+      .map(([id, label]) => {
+        const mine = accts.filter(a => (a.owner || '') === id);
+        if (!mine.length) return '';
+        const t = round2(mine.filter(a => retKind(a) !== 'roth')
+          .reduce((s, a) => s + (a.amount || 0), 0));
+        const r = round2(mine.filter(a => retKind(a) === 'roth')
+          .reduce((s, a) => s + (a.amount || 0), 0));
+        return `<tr><th scope="row">${esc(label)}</th><td>${fmtMoney(t)}</td>
+          <td>${fmtMoney(r)}</td><td>${fmtMoney(round2(t + r))}</td></tr>`;
+      }).join('');
+    return !rows ? '' : `<div class="tablewrap" style="margin-top:12px"><table>
+      <thead><tr><th style="text-align:left">Whose</th><th>Traditional</th><th>Roth</th>
+        <th>Total</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><th>Both of you</th><td>${fmtMoney(trad)}</td><td>${fmtMoney(roth)}</td>
+        <td>${fmtMoney(total)}</td></tr></tfoot></table></div>`;
+  })();
   const splitHtml = `${!total ? '' : `
     <div class="split" role="img"
       aria-label="Traditional ${(tradPct * 100).toFixed(0)} percent, Roth ${((1 - tradPct) * 100).toFixed(0)} percent">
@@ -3195,15 +3259,21 @@ function renderRetirement() {
       <span><span class="sw"></span>Traditional ${fmtMoney(trad)} (${(tradPct * 100).toFixed(0)}%)</span>
       <span><span class="sw b"></span>Roth ${fmtMoney(roth)} (${((1 - tradPct) * 100).toFixed(0)}%)</span>
     </div>`}
+    ${showOwner ? perPersonSplit : ''}
     ${accts.length ? `<div class="tablewrap" style="margin-top:12px"><table class="retaccts">
-      <thead><tr><th style="text-align:left">Account</th><th style="text-align:left">Type</th>
+      <thead><tr><th style="text-align:left">Account</th>${
+        showOwner ? '<th style="text-align:left">Whose</th>' : ''
+        }<th style="text-align:left">Type</th>
         <th>Balance</th><th>${esc(year)} in</th></tr></thead>
       <tbody>${accts.map((a, idx) => `<tr class="editrow" data-edit="retAcct" data-idx="${idx}">
         <th scope="row">${esc(a.name)}</th>
+        ${showOwner ? `<td style="text-align:left">${
+          esc(ownerLabel(state, a.owner)) || '<span class="muted">—</span>'}</td>` : ''}
         <td style="text-align:left">${esc(RET_TYPE_LABEL[a.type] || 'Other')}</td>
         <td>${fmtMoney(a.amount || 0)}</td>
         <td>${(a.contribs || {})[year] ? fmtMoney(a.contribs[year]) : ''}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><th>Total</th><td></td><td>${fmtMoney(total)}</td><td></td></tr></tfoot>
+      <tfoot><tr><th>Total</th>${showOwner ? '<td></td>' : ''}<td></td>
+        <td>${fmtMoney(total)}</td><td></td></tr></tfoot>
     </table></div>` : '<p class="sub">Nothing recorded.</p>'}
     <div class="addbar"><button class="btn small" data-add="retAcct">＋ Add account</button></div>`;
 
@@ -3223,7 +3293,7 @@ function renderRetirement() {
     return `<tr class="editrow" data-edit="contrib" data-idx="${e.idx}" data-key="${esc(e.y)}">
       <th scope="row">${esc(e.y)}${
         +e.y > new Date().getFullYear() ? ' <span class="muted">(planned)</span>' : ''}</th>
-      ${showAcct ? `<td style="text-align:left">${esc(e.a.name)}</td>` : ''}
+      ${showAcct ? `<td style="text-align:left">${esc(retAcctLabel(e.a))}</td>` : ''}
       <td>${fmtMoney(e.amount)}</td><td>${fmtMoney(cum)}</td></tr>`;
   }).join('');
 
@@ -3238,7 +3308,7 @@ function renderRetirement() {
     <div class="card">
       <h2>IRA Contributions</h2>
       <p class="sub">${iraAccts.length
-        ? `Every year across ${iraAccts.map(a => esc(a.name)).join(' + ')}, with the running total.`
+        ? `Every year across ${iraAccts.map(a => esc(retAcctLabel(a))).join(' + ')}, with the running total.`
         : 'Mark an account as a Roth or Traditional IRA and its yearly contributions show up here.'}</p>
       ${entries.length ? '<div class="chartbox" style="height:180px"><canvas id="rothChart"></canvas></div>' : ''}
       ${entries.length ? `<div class="tablewrap" style="margin-top:10px"><table>
@@ -3249,10 +3319,11 @@ function renderRetirement() {
       ${iraAccts.length ? `<div class="addbar"><button class="btn small" data-add="contrib"
         >＋ Add a contribution</button></div>` : ''}
     </div>
-    <div class="card">
-      <h2>401(k) Limit Check${helpBtn('k401Limit', 'the 401(k) limit check')}</h2>
-      ${limitsCard(year)}
-    </div>
+    ${limitEarners(state).map(id => `<div class="card">
+      <h2>401(k) Limit Check${id ? ` — ${esc(personById(state, id).name)}` : ''}${
+        helpBtn('k401Limit', 'the 401(k) limit check')}</h2>
+      ${limitsCard(year, id)}
+    </div>`).join('')}
     <div class="card">
       <h2>Roth IRA Eligibility${helpBtn('magi', 'the Roth IRA income check')}</h2>
       ${magiCard(year)}
@@ -3274,35 +3345,72 @@ function renderRetirement() {
    line. Inputs live in side.limits[year]; everything else is derived here. */
 
 const LIMIT_DEFAULTS = { k401Limit: 24500, magiLimit: 153000, magiPhaseOut: 15000 };
+/* Filing status decides WHOSE income the Roth check counts — and nothing else.
+   It deliberately does not default the threshold: those figures move every
+   year and this app has no tax tables, so a number shipped here would be
+   quietly wrong within twelve months and look authoritative while it was. The
+   thresholds stay typed, as they always have been. */
+const FILING_LABEL = { single: 'single filer', joint: 'married filing jointly',
+                       separate: 'married filing separately' };
 
-function limitsFor(year) {
+/* Called with a year alone this is exactly what it always was — the
+   single-earner record, same fields, same fallbacks — and existing data has
+   not moved a key. Called with a person as well it reads that person's own
+   figures out of `by[personId]`, which is how a second earner gets a 401(k)
+   check of their own: the elective-deferral limit is PER PERSON, so one card
+   for the household would have been the wrong shape.
+
+   The limits themselves stay on the flat record whoever is being looked at:
+   they are a fact about the year, not about the earner. */
+function limitsFor(year, personId) {
   const stored = (state.side.limits || {})[year] || {};
-  const comp = (state.side.comp || {})[year];
-  /* First open borrows from the comp figures rather than opening blank. */
+  /* Only the person the Comp tab is about can borrow from it — reading one
+     career's salary into somebody else's calculator would be a fiction. */
+  const borrows = personId === undefined || personId === compPersonId(state);
+  /* The flat record IS the comp person's, until they have one of their own:
+     it was typed when there was only one earner, and that earner is whoever
+     the Comp tab has always been about. Without this, naming your household
+     would silently empty a calculator you had already filled in. */
+  const own = personId === undefined ? stored
+    : ((stored.by || {})[personId] || (borrows ? stored : {}));
+  const comp = borrows ? (state.side.comp || {})[year] : null;
   return {
-    salary: stored.salary ?? (comp ? afterRaise(comp) : 0),
+    salary: own.salary ?? (comp ? afterRaise(comp) : 0),
     /* Bonuses by year covers years with no comp record, so the calculator can
        borrow one either way. */
-    bonus: stored.bonus ?? ((state.side.bonuses || {})[year] || 0),
-    pretaxPct: stored.pretaxPct ?? 0,
-    bonusPct: stored.bonusPct ?? 0,
-    hsaPretax: stored.hsaPretax ?? 0,
+    bonus: own.bonus ?? (borrows ? ((state.side.bonuses || {})[year] || 0) : 0),
+    pretaxPct: own.pretaxPct ?? 0,
+    bonusPct: own.bonusPct ?? 0,
+    hsaPretax: own.hsaPretax ?? 0,
     k401Limit: stored.k401Limit ?? LIMIT_DEFAULTS.k401Limit,
     magiLimit: stored.magiLimit ?? LIMIT_DEFAULTS.magiLimit,
     magiPhaseOut: stored.magiPhaseOut ?? LIMIT_DEFAULTS.magiPhaseOut,
   };
 }
 
-function limitsCard(year) {
-  const L = limitsFor(year);
+/* Who gets a 401(k) card: every adult once there is a household, otherwise the
+   single unnamed earner the flat record has always described. */
+const limitEarners = (st) => adultsOf(st).length ? adultsOf(st).map(p => p.id) : [undefined];
+
+/* A retirement account named in a list. Two people with a Roth IRA each is the
+   ordinary case, and "Roth IRA" twice over says nothing about which is which. */
+function retAcctLabel(a) {
+  const who = ownerLabel(state, a.owner);
+  return who ? `${a.name} — ${who}` : a.name;
+}
+
+function limitsCard(year, personId) {
+  const L = limitsFor(year, personId);
+  const who = personId ? personById(state, personId)?.name : null;
   const fromSalary = round2(L.salary * L.pretaxPct);
   const fromBonus = round2(L.bonus * L.bonusPct);
   const put = round2(fromSalary + fromBonus);
   const headroom = round2(L.k401Limit - put);
   const pct = L.k401Limit ? Math.min(1, put / L.k401Limit) : 0;
   const over = headroom < 0;
-  return `<p class="sub">${esc(year)} — what your own contributions add up to against the
-    IRS limit. The employer match doesn't count toward it.</p>
+  return `<p class="sub">${esc(year)} — what ${who ? esc(who) + '’s' : 'your'} own
+    contributions add up to against the IRS limit. The employer match doesn't count toward
+    it${who ? ', and each of you has a limit of your own' : ''}.</p>
   <div class="tablewrap"><table><tbody>
     <tr><th scope="row">Salary × ${(L.pretaxPct * 100).toFixed(1)}%</th><td>${fmtMoney(fromSalary)}</td></tr>
     <tr><th scope="row">Bonus × ${(L.bonusPct * 100).toFixed(1)}%</th><td>${fmtMoney(fromBonus)}</td></tr>
@@ -3317,19 +3425,34 @@ function limitsCard(year) {
   <p class="sub" style="margin-top:8px">${Math.round(pct * 100)}% of the limit
     ${over ? `· <span class="pill bad">✕ over the limit</span>` : ''}</p>
   <div class="addbar"><button class="btn small" data-edit="limits"
-    data-year="${esc(year)}">✎ Edit the figures</button></div>`;
+    data-year="${esc(year)}"${personId ? ` data-person="${esc(personId)}"` : ''
+    }>✎ Edit the figures</button></div>`;
 }
 
+/* Roth eligibility is judged on the HOUSEHOLD's income when you file jointly,
+   which is the half of this the app couldn't do until it knew there were two
+   of you. The threshold itself stays a figure you type: it moves every year and
+   differs by filing status, and this app has no tax tables and shouldn't grow
+   any — so filing status decides WHOSE income is counted, and the card says
+   plainly that the number beneath it is yours to check. */
 function magiCard(year) {
-  const L = limitsFor(year);
-  const gross = round2(L.salary + L.bonus);
-  const pretax = round2(L.salary * L.pretaxPct + L.bonus * L.bonusPct);
-  const magi = round2(gross - pretax - L.hsaPretax);
+  const joint = state.settings.filingStatus === 'joint' && adultsOf(state).length > 1;
+  /* One earner or both, the arithmetic below is the same sum over a list —
+     which is what keeps the single-earner answer bit-for-bit what it was. */
+  const each = (joint ? adultsOf(state).map(p => p.id) : [compPersonId(state)])
+    .map(id => limitsFor(year, id));
+  const L = limitsFor(year, compPersonId(state));
+  const sum = (f) => round2(each.reduce((t, x) => t + f(x), 0));
+  const gross = sum(x => x.salary + x.bonus);
+  const pretax = sum(x => x.salary * x.pretaxPct + x.bonus * x.bonusPct);
+  const hsa = sum(x => x.hsaPretax);
+  const magi = round2(gross - pretax - hsa);
   const band = L.magiLimit + L.magiPhaseOut;
   const verdict = magi < L.magiLimit ? ['good', '✓', 'Full contribution']
     : magi < band ? ['warn', '!', 'Reduced contribution (in the phase-out band)']
     : ['bad', '✕', 'No direct contribution'];
-  return `<p class="sub">${esc(year)} — the income figure Roth IRA eligibility is judged on.</p>
+  return `<p class="sub">${esc(year)} — the income figure Roth IRA eligibility is judged on${
+    joint ? `, counting both of you because this plan files jointly` : ''}.</p>
   <div class="tablewrap"><table><tbody>
     <tr><th scope="row">Salary + bonus</th><td>${fmtMoney(gross)}</td></tr>
     <tr><th scope="row">− pre-tax 401(k)</th><td>${fmtMoney(pretax)}</td></tr>
@@ -3341,6 +3464,9 @@ function magiCard(year) {
   <p class="sub" style="margin-top:10px"><span class="pill ${verdict[0]}">${verdict[1]} ${
     esc(verdict[2])}</span>
     ${magi < L.magiLimit ? ` · ${fmtMoney(L.magiLimit - magi)} of headroom` : ''}</p>
+  <p class="sub">Judged against the ${esc(FILING_LABEL[state.settings.filingStatus])} threshold
+    you have typed in. That figure moves every year and differs by filing status — this app
+    keeps no tax tables, so check it against the current IRS one and set it below.</p>
   <div class="addbar"><button class="btn small" data-edit="limits"
     data-year="${esc(year)}">✎ Edit the figures</button></div>`;
 }
@@ -3396,8 +3522,16 @@ function renderComp() {
   const bonusFor = (y) => bonuses[y] || 0;
   const totalComp = (y) => round2(afterRaise(comp[y]) + bonusFor(y));
 
+  /* This tab is ONE career, and says so once there is more than one to confuse
+     it with — `sinceLastYear` asks whether this salary picked up where last
+     year's ended, which a household total cannot answer. */
+  const whose = adultsOf(state).length > 1
+    ? personById(state, compPersonId(state))?.name : null;
+
   const currentCard = `<div class="card">
     <h2>Where Comp Stands${latest ? ` — ${esc(latest)}` : ''}</h2>
+    ${whose ? `<p class="sub">${esc(whose)}'s salary history (Preferences picks whose). A second
+      earner's pay is tracked as an income row in the budget instead.</p>` : ''}
     ${cur ? `<p class="sub">Total comp is salary with this year's raise applied, plus the bonus.</p>
       <div class="tablewrap"><table><tbody>
       <tr><th scope="row">Salary</th><td>${fmtMoney(cur.salary || 0)}</td></tr>
@@ -3692,18 +3826,25 @@ function isPayRow(name, rule) {
   return rule === 'paycheck' || PAY_SLUGS.has(slugJs(name || ''));
 }
 
-/* The year's take-home pay, or null where nothing in it looks like pay. */
-function takeHomePay(st, computed, y) {
+/* The year's take-home pay, or null where nothing in it looks like pay.
+
+   With a person, only THEIR pay rows count — which is how a second earner's
+   take-home can be read without moving `side.comp`, whose "did this salary
+   pick up where last year ended?" question a household total cannot answer. A
+   summary year has no rows to tag, so it has no per-person answer either. */
+function takeHomePay(st, computed, y, personId) {
   const yr = st.years[y];
   if (!yr) return null;
   if (yr.kind === 'summary') {
+    if (personId) return null;
     const rows = (yr.categoryTotals || [])
       .filter(it => !it.isBalance && isPayRow(it.name));
     return rows.length
       ? round2(rows.reduce((t, it) => t + (it.total || 0), 0)) : null;
   }
   const ids = new Set((yr.categories || [])
-    .filter(c => isPayRow(c.name, c.rule)).map(c => c.id));
+    .filter(c => isPayRow(c.name, c.rule))
+    .filter(c => !personId || c.person === personId).map(c => c.id));
   if (!ids.size) return null;
   /* The COMPUTED cells, not just the stored ones — the same reason yearFlows
      reads them: a year still running counts its projected months rather than
@@ -4880,6 +5021,14 @@ const EDITORS = {
         ['expense', 'Expense'],
         ['transfer', 'Transfer between accounts'],
       ]},
+      /* Whose pay this is. Offered on income rows once there are two adults —
+         which is how a second earner's take-home is read without reshaping
+         `side.comp`. It is a label: the grid adds the household's rows up
+         exactly as before. */
+      ...(adultsOf(state).length > 1 ? [{ key: 'person', label: 'Whose', type: 'select',
+        options: [['', 'Not said'], ...adultsOf(state).map(p => [p.id, p.name])],
+        showIf: (v) => v.section === 'income',
+        hint: 'For a second earner’s paycheck. Only a label — the row counts the same either way.' }] : []),
       { key: 'rule', label: 'Future months rule', type: 'select', options: [
         ['none', 'Blank (type estimates by hand)'],
         ['carry', 'Repeat the last month'],
@@ -4956,6 +5105,13 @@ const EDITORS = {
           else delete cat.creditTiming;
         }
         cat.note = v.note || undefined;
+        /* Only when the field was offered, and only on an income row: whose
+           an expense is isn't a question this plan asks. */
+        if (adultsOf(state).length > 1) {
+          if (section === 'income' && personById(state, v.person)?.role === 'adult')
+            cat.person = v.person;
+          else delete cat.person;
+        }
         if (v.rule === 'paycheck') cat.perCheck = v.perCheck || 0;
         else delete cat.perCheck;
         if (v.rule === 'quarterly' && v.every) cat.every = Math.max(1, Math.round(v.every));
@@ -5015,7 +5171,25 @@ const EDITORS = {
        and grew by a sentence every time one was added, until nobody could find
        the thing they came to change. */
     sub: () => 'Settings that apply everywhere.',
-    fields: [
+    fields: () => [
+      /* Household-wide, so they belong here rather than on a person: how you
+         file is one fact about the plan, and which career the Comp tab
+         describes is a choice between people. Both hidden until there is a
+         household to make them mean anything. */
+      ...(adultsOf(state).length ? [
+        { key: 'filingStatus', label: 'You file taxes as', type: 'select', options: [
+          ['single', 'Single'],
+          ['joint', 'Married, filing jointly'],
+          ['separate', 'Married, filing separately'],
+        ], hint: 'Filing jointly makes the Roth IRA check count both incomes. It does not '
+          + 'set any threshold — those stay yours to type.' },
+      ] : []),
+      ...(adultsOf(state).length > 1 ? [
+        { key: 'compPerson', label: 'Compensation tab follows', type: 'select',
+          options: adultsOf(state).map(p => [p.id, p.name]),
+          hint: 'That tab is one salary history. A second earner’s pay is tracked as a '
+            + 'budget income row instead.' },
+      ] : []),
       { key: 'currency', label: 'Currency', type: 'text',
         hint: 'Three-letter code — USD, EUR, GBP, CAD. Changes how figures read, not what they are.' },
       { key: 'ptoAllowance', label: 'PTO days a year', type: 'number', step: 1,
@@ -5036,6 +5210,8 @@ const EDITORS = {
         hint: 'For share-price lookups. Stays on this device — never synced, never in a backup.' },
     ],
     get: () => ({ currency: state.settings.currency || 'USD',
+                  filingStatus: state.settings.filingStatus || 'single',
+                  compPerson: compPersonId(state),
                   ptoAllowance: state.settings.ptoAllowance,
                   rowSort: state.settings.rowSort || 'manual',
                   paycheckRule: !!state.settings.paycheckRule,
@@ -5059,6 +5235,10 @@ const EDITORS = {
         return;
       }
       state.settings.currency = code;
+      if (['single', 'joint', 'separate'].includes(v.filingStatus))
+        state.settings.filingStatus = v.filingStatus;
+      if (personById(state, v.compPerson)?.role === 'adult')
+        state.settings.compPerson = v.compPerson;
       if (v.ptoAllowance) state.settings.ptoAllowance = v.ptoAllowance;
       state.settings.rowSort = v.rowSort === 'alpha' ? 'alpha' : 'manual';
       state.settings.paycheckRule = !!v.paycheckRule;
@@ -5432,13 +5612,19 @@ const EDITORS = {
     sub: () => 'The type decides which side of the Traditional / Roth split it counts on, '
       + 'and whether its yearly contributions show in the IRA table. Those are edited there, '
       + 'a row at a time.',
-    fields: [
+    fields: (ds) => [
       { key: 'name', label: 'Account', type: 'text' },
       { key: 'type', label: 'Type', type: 'select',
         options: RET_TYPES.map(([v, label]) => [v, label]) },
       { key: 'amount', label: 'Balance', type: 'money' },
+      /* A retirement account is one person's — there is no joint 401(k) or
+         joint IRA — so the shared bucket is deliberately not offered here. */
+      ...(adultsOf(state).length ? [{ key: 'owner', label: 'Whose', type: 'select',
+        options: [['', 'Not said'], ...adultsOf(state).map(p => [p.id, p.name])],
+        hint: 'Retirement accounts belong to one person — there is no joint one.' }] : []),
     ],
-    get: (ds) => state.side.retirementAccounts[+ds.idx],
+    get: (ds) => ({ ...state.side.retirementAccounts[+ds.idx],
+                    owner: state.side.retirementAccounts[+ds.idx].owner || '' }),
     blank: () => ({ type: '401k' }),
     save(ds, v) {
       const list = state.side.retirementAccounts;
@@ -5447,6 +5633,12 @@ const EDITORS = {
       const row = { name: v.name || '?', type,
         kind: (RET_TYPES.find(t => t[0] === type) || [])[2] || 'traditional',
         amount: v.amount ?? 0, contribs: { ...(old?.contribs || {}) } };
+      /* Only when the field was on the form, and only a real adult — same rule
+         as an account's owner. */
+      const owner = adultsOf(state).length
+        ? (personById(state, v.owner)?.role === 'adult' ? v.owner : undefined)
+        : old?.owner;
+      if (owner) row.owner = owner;
       if (old) list[+ds.idx] = row; else list.push(row);
     },
     del: (ds) => state.side.retirementAccounts.splice(+ds.idx, 1),
@@ -5492,31 +5684,60 @@ const EDITORS = {
 
   /* The two calculators' inputs (401(k) limit, Roth IRA income check) */
   limits: {
-    title: (ds) => `${ds.year} contribution figures`,
-    sub: () => 'Both calculators read these. Percentages are what you elect; the limits change '
-      + 'every year, so they are yours to set rather than baked in.',
-    fields: [
+    title: (ds) => ds.person
+      ? `${ds.year} figures — ${personById(state, ds.person)?.name || ''}`
+      : `${ds.year} contribution figures`,
+    sub: (ds) => (ds.person
+        ? 'Their own salary, bonus and elections — each earner has a 401(k) limit of their '
+          + 'own. '
+        : 'Both calculators read these. ')
+      + 'Percentages are what you elect; the limits change every year, so they are yours to '
+      + 'set rather than baked in.',
+    fields: (ds) => [
       { key: 'salary', label: 'Salary', type: 'money' },
       { key: 'bonus', label: 'Bonus', type: 'money' },
       { key: 'pretaxPct', label: '401(k) % of salary', type: 'percent' },
       { key: 'bonusPct', label: '401(k) % of bonus', type: 'percent' },
       { key: 'hsaPretax', label: 'Pre-tax HSA', type: 'money' },
-      { key: 'k401Limit', label: '401(k) limit this year', type: 'money' },
-      { key: 'magiLimit', label: 'Roth IRA phase-out starts at', type: 'money' },
+      { key: 'k401Limit', label: '401(k) limit this year', type: 'money',
+        hint: 'One figure for the year — the same limit applies to each of you separately.' },
+      { key: 'magiLimit', label: 'Roth IRA phase-out starts at', type: 'money',
+        hint: `The ${FILING_LABEL[state.settings.filingStatus]} threshold. Check it against `
+          + 'the current IRS figure; nothing here is baked in.' },
       { key: 'magiPhaseOut', label: 'Phase-out band width', type: 'money' },
     ],
-    get: (ds) => limitsFor(ds.year),
+    get: (ds) => limitsFor(ds.year, ds.person),
     save(ds, v) {
-      state.side.limits[ds.year] = {
-        salary: v.salary ?? 0, bonus: v.bonus ?? 0,
+      const rec = state.side.limits[ds.year] || (state.side.limits[ds.year] = {});
+      const own = { salary: v.salary ?? 0, bonus: v.bonus ?? 0,
         pretaxPct: v.pretaxPct ?? 0, bonusPct: v.bonusPct ?? 0,
-        hsaPretax: v.hsaPretax ?? 0,
+        hsaPretax: v.hsaPretax ?? 0 };
+      /* The limits are a fact about the YEAR, so they stay on the flat record
+         whichever earner's card you opened. */
+      Object.assign(rec, {
         k401Limit: v.k401Limit ?? LIMIT_DEFAULTS.k401Limit,
         magiLimit: v.magiLimit ?? LIMIT_DEFAULTS.magiLimit,
         magiPhaseOut: v.magiPhaseOut ?? LIMIT_DEFAULTS.magiPhaseOut,
-      };
+      });
+      /* A second earner's figures go under `by`; the person the Comp tab is
+         about keeps writing the flat fields, so a single-earner plan's record
+         never changes shape. */
+      if (ds.person && ds.person !== compPersonId(state)) {
+        rec.by = rec.by || {};
+        rec.by[ds.person] = own;
+      } else Object.assign(rec, own);
     },
-    del: (ds) => { delete state.side.limits[ds.year]; },
+    del: (ds) => {
+      /* Clearing one earner's figures must not take the year's limits — or the
+         other earner — with them. */
+      const rec = state.side.limits[ds.year];
+      if (!rec) return;
+      if (ds.person && ds.person !== compPersonId(state)) {
+        if (rec.by) delete rec.by[ds.person];
+        return;
+      }
+      delete state.side.limits[ds.year];
+    },
   },
 
   /* Year → amount maps: Roth contributions, bonuses (ds.map picks which) */
@@ -6704,6 +6925,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
   ownerSubtotals, validOwner, accountOption, suggestedTargetDate,
+  adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears,
   projectionYearsAfter, applyToRow, dropRow, swapRows, andList, tabOrder, VIEWS };
