@@ -731,6 +731,21 @@ step.
   bar back to decide whether to reorder, and a hidden button would still be in
   that list, so `want` and `have` could never agree and every render would
   re-append (and so blur) the whole bar. `allowedViews()` filters `want` to match.
+- **A shared view makes NO network call, and that is a promise in writing.**
+  `privacy.html` says creating and opening a link both involve no upload, so
+  anything that reaches the wire in `viewOnly` makes the policy false. The one
+  that did was the Alpha Vantage price lookup: `allTickers()` reads the SENDER's
+  holdings while `priceKey()` and the quote cache are the READER's, so opening a
+  shared Investments tab put somebody else's tickers on the wire under the
+  reader's own key — spending their 25-a-day free tier and overwriting the prices
+  the sender chose to show. `refreshPrices()` refuses in `viewOnly` (the
+  load-bearing guard), `wireInvestments()` returns early, and the whole price bar
+  is omitted from the render — every line of it describes the reader's own cache,
+  key and last run measured against the sender's tickers, so each would be
+  meaningless or a lie. Before adding anything that fetches, ask what it does in
+  a shared view. The changelog box is the one deliberate exception: it fetches
+  this repo's own public commit list, carries nothing about anybody, and only on
+  expand.
 - **`squeeze()` catches the WRITER's promises as well as awaiting the reader.** A
   truncated link reaches `DecompressionStream` as invalid deflate and the writable
   side rejects too; only the readable side is awaited, so without those catches

@@ -3868,7 +3868,13 @@ function renderInvestments() {
   const asOf = pricesAsOf();
   const stale = stalePrices().length;
   const run = lastPriceRun();
-  const priceBar = `<div class="row" style="margin:0 0 14px;align-items:center">
+  /* The whole bar goes in a shared view. Every line of it is about the READER's
+     own price cache, key and last run measured against the SENDER's tickers, so
+     each one would be either meaningless or an outright lie — "3 out of date"
+     about figures the reader can't refresh and shouldn't, and an invitation to
+     open a Preferences dialog that isn't there. A snapshot shows the prices it
+     was sent, which is the honest thing for a snapshot to do. */
+  const priceBar = viewOnly ? '' : `<div class="row" style="margin:0 0 14px;align-items:center">
     <button class="btn small" id="refreshPricesBtn">↻ Refresh prices</button>
     <span class="sub muted">${asOf
       ? `Prices as of ${new Date(asOf).toLocaleString()}${stale ? ` · ${stale} out of date` : ''}`
@@ -3899,6 +3905,7 @@ function renderInvestments() {
 }
 
 function wireInvestments() {
+  if (viewOnly) return;   // no button to wire, and nothing here is the reader's to fetch
   const btn = F('refreshPricesBtn');
   if (btn) btn.onclick = () => refreshPrices(false);
   /* Opening the tab is the natural moment to top up anything stale — quiet,
@@ -4808,6 +4815,16 @@ let refreshingPrices = false;
 const priceAutoTried = new Set();
 async function refreshPrices(quiet) {
   if (refreshingPrices) return;
+  /* Never in a shared view, and this is the load-bearing guard rather than the
+     hidden button: allTickers() reads the SENDER's holdings while priceKey() and
+     the quote cache are the VIEWER's, so a lookup here would put somebody else's
+     tickers on the wire under the reader's own API key. Three things wrong with
+     that at once — it is an upload, on a page whose whole promise (and the
+     privacy policy's wording) is that opening a link uploads nothing; it spends
+     the reader's 25-a-day free tier on holdings that aren't theirs; and it
+     overwrites the prices the sender chose to show, so the figures stop being
+     the snapshot that was sent. */
+  if (viewOnly) return;
   const key = priceKey();
   let want = stalePrices();
   /* A quiet auto-refresh skips anything it has already had a go at, so a ticker
