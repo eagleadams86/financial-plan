@@ -789,7 +789,20 @@ fails with origin_mismatch. Sign-in is GIS → `signInWithCredential`
 never as Firestore fields: Firestore rejects arrays nested inside arrays
 (invalid-argument), and the free-form tables are exactly that. Charlie's real
 data hit this on the first sign-in — don't "improve" the doc back to
-field-per-field. `remotePayload()` is the single reader (it also accepts the
+field-per-field. There is a **second, quieter reason that string is
+load-bearing**: Firestore also rejects a document holding a single `undefined`
+anywhere in it (same `invalid-argument` code), and this app's live state
+routinely carries several — 10 of them on 2026-08-12, in `people[].retireAge`,
+`side.comp[].raisePct`, `side.donations`, `side.retirementAccounts[].amount`
+and `vacations.pto[].allowance`, all perfectly normal half-filled rows.
+`JSON.stringify` drops them on the way out, so sync works; hand the object
+straight to `setDoc()` and **every push fails from the first one**. Sprint
+Velocity lost its sync to exactly that on 2026-08-12, and the local copy looked
+perfect throughout because `localStorage` drops the same keys silently. Also:
+`invalid-argument` does **not** mean "too big" — Firestore uses that one code
+for both, so `describeSyncError()` only says size when Firestore's own message
+does, rather than telling the user to delete a year over an app bug.
+`remotePayload()` is the single reader (it also accepts the
 old `{ data }` shape). Rules the
 module keeps: localStorage is the source of truth and the cloud only mirrors
 it; the first-sign-in "which copy?" dialog is load-bearing; **an empty copy

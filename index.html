@@ -8224,9 +8224,22 @@ let syncError = null;
 
 function describeSyncError(e) {
   const code = String((e && e.code) || e || '');
-  if (code.includes('invalid-argument')) return {
-    reason: 'There’s more history here than can be synced in one go.',
-    fix: 'Export a backup, then delete a year you no longer need — sync picks up again on the next change.' };
+  /* Firestore reports two unrelated things as invalid-argument: a document over the
+     1 MiB cap, and a value it can't store. This branch used to assume the first, so
+     an app fault would have told the user to delete a year of their plan — the worst
+     advice this app is capable of giving, and the more likely of the two here, since
+     the whole reason the state is stored as one JSON string is that Firestore refuses
+     shapes this app's data takes naturally (nested arrays; undefined in a half-filled
+     row). Size wording only when Firestore's own message says size. */
+  if (code.includes('invalid-argument')) {
+    const detail = String((e && e.message) || '');
+    if (/maximum allowed size|exceeds|too large|longer than|bytes/i.test(detail)) return {
+      reason: 'There’s more history here than can be synced in one go.',
+      fix: 'Export a backup, then delete a year you no longer need — sync picks up again on the next change.' };
+    return {
+      reason: 'The cloud refused this copy of your plan — that’s a fault in the app, not in what you entered.',
+      fix: 'Nothing is lost: everything is still here and still saved. Reloading the page usually clears it.' };
+  }
   if (code.includes('permission-denied') || code.includes('unauthenticated')) return {
     reason: 'Google refused the sign-in for this data.',
     fix: 'Signing out and back in usually clears it.' };
