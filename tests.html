@@ -1910,6 +1910,49 @@ window.addEventListener('load', async () => {
   else frame.addEventListener('load', start, { once: true });
 });
 
+
+/* ── The scorecard, where the suite itself can't run ─────────────────────────
+   Refusing to run and then saying nothing about whether the tests pass is half
+   an answer: the question someone opens this page to ask is "is it green?".
+   The same suite runs headless in CI on every push, so ask GitHub how that went
+   and show it here. Nothing is booted and nothing is stored — it is one public,
+   unauthenticated read of a workflow's run list.
+─────────────────────────────────────────────────────────────────────────── */
+function showLatestRun() {
+  const tr = document.createElement('tr');
+  const td = document.createElement('td');
+  td.colSpan = 3;
+  td.style.cssText = 'font-size:14px;line-height:1.6;padding:12px 16px';
+  td.textContent = 'Checking the latest CI run…';
+  tr.appendChild(td);
+  document.getElementById('out').appendChild(tr);
+
+  fetch('https://api.github.com/repos/eagleadams86/financial-plan/actions/workflows/tests.yml/runs?branch=main&per_page=1')
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((d) => {
+      const run = d && d.workflow_runs && d.workflow_runs[0];
+      if (!run) { td.textContent = 'No CI runs found for this repository yet.'; return; }
+      const done = run.status === 'completed';
+      const okRun = run.conclusion === 'success';
+      tr.className = !done ? '' : (okRun ? 'pass' : 'fail');
+      const when = run.updated_at ? new Date(run.updated_at).toLocaleString() : '';
+      const sha = String(run.head_sha || '').slice(0, 7);
+      /* Only ever build an <a> when the API really did hand back a GitHub https
+         URL — the same guard the app's changelog uses. */
+      const url = String(run.html_url || '');
+      td.textContent = (!done ? '⏳ The latest run is still going'
+        : okRun ? '✓ The full suite passed in CI' : '✕ The suite FAILED in CI')
+        + (when ? ' — ' + when : '') + (sha ? ' · commit ' + sha : '') + '. ';
+      if (/^https:\/\/github\.com\//.test(url)) {
+        const a = document.createElement('a');
+        a.href = url; a.rel = 'noopener noreferrer';
+        a.textContent = 'Open the run for the full scorecard';
+        td.appendChild(a);
+      }
+    })
+    .catch(() => { td.textContent = 'Could not reach GitHub to check the latest CI run.'; });
+}
+
 function run() {
   w = document.getElementById('app').contentWindow;
   /* A frame that never got the app is a SETUP problem — the folder isn't being
@@ -2007,6 +2050,7 @@ if (LOCAL_HOSTS.includes(location.hostname)) {
     '<a href="index.html">back to Financial Plan</a>.' +
     '</td></tr>';
 }
+  showLatestRun();
 </script>
 </body>
 </html>
