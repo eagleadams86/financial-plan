@@ -1092,6 +1092,15 @@ function majorityMonthOf(person) {
   if (!person || person.role !== 'child' || !person.birth) return null;
   return monthAdd(person.birth, MAJORITY_MONTHS);
 }
+/* The date a pot saved for a child is usually wanted by. Offered INTO the goal
+   form when you say who it is for, and only ever into an empty box — plenty of
+   people want the money at 17 or spread across to 22, and the one who knows is
+   the one filling it in. Never stored arithmetic: what gets saved is whatever
+   date is in the box when you press Save. */
+function suggestedTargetDate(person) {
+  const m = majorityMonthOf(person);
+  return m ? `${m}-01` : null;
+}
 /* When an account starts being tracked is derived, never stored: it's the
    first month that has anything to say about it — a seed, a stated balance, an
    interest adjustment, or money moving into it. Months before that are blank
@@ -2197,6 +2206,14 @@ function computeGoals(st, computed, todayIso) {
    can be a paragraph and can be read on a phone. Keys are referenced by
    helpBtn(key, label) in the renderers. */
 const HELP = {
+  savingFor: { title: 'Saving for a Child',
+    body: 'Naming the child a goal is for does two things, and only two. It files the goal '
+      + 'under them on the Household tab, and — when the target date is still empty — it '
+      + 'suggests the month they turn 18. That is a starting point, not a rule: fees are '
+      + 'usually spread over several years, and plenty of people want the money a year '
+      + 'earlier or four years later. Type over it. Nothing about the goal\'s arithmetic '
+      + 'changes either way; it still watches the accounts you ticked against the target and '
+      + 'the date, and it never spends itself.' },
   perCheck: { title: 'Per-Check Amount',
     body: 'Some money arrives (or leaves) once per paycheck rather than once per month, '
       + 'and the number of paychecks changes: two in most months, three in a few. A row on '
@@ -2860,6 +2877,27 @@ const SECTION_LABEL = { income: 'Income', expense: 'Expenses', transfer: 'Transf
 const fmtYrMo = (months) =>
   `${Math.floor(months / 12)} yr ${months % 12} mo`;
 
+/* One goal's progress card. At module scope rather than inside `renderGoals`
+   because the Household tab draws a child's goals with it too — the same
+   figures in two places have to come out of the same code, the `afterRaise`
+   lesson. `idx` is the position in `state.goals`, which is what the editor
+   keys off. */
+function goalCard(g, idx) {
+  const done = g.target && g.saved >= g.target;
+  const pct = Math.min(1, g.progress);
+  return `<div class="goal ${done ? 'done' : ''}" data-edit="goal" data-idx="${idx}"
+    style="cursor:pointer" title="Click to edit${g.note ? ' · ' + esc(g.note) : ''}">
+    <div class="label">${esc(g.name)}${done ? ' <span aria-hidden="true">✓</span><span class="sr-only"> — reached</span>' : ''}</div>
+    <div class="value">${fmtMoney(g.saved)} <span class="of">of ${fmtMoney(g.target)}</span></div>
+    <div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100"
+      aria-valuenow="${Math.round(pct * 100)}" aria-label="${esc(g.name)} progress">
+      <i style="width:${(pct * 100).toFixed(1)}%"></i></div>
+    <div class="foot">${Math.round(g.progress * 100)}%
+      ${g.targetDate ? ` · target ${esc(monthLabel(g.targetDate.slice(0, 7)))} (${fmtYrMo(g.monthsLeft)})` : ''}
+      ${!done && g.monthlyReq ? ` · needs ${fmtMoney(g.monthlyReq)}/mo` : ''}</div>
+  </div>`;
+}
+
 function renderGoals() {
   const liveKey = latestGridYear();
   if (!liveKey)
@@ -2875,22 +2913,6 @@ function renderGoals() {
   const c = C[liveKey];
   const goals = computeGoals(state, C, todayISO());
   const cur = currentMonthOf(yr, todayISO());
-
-  const goalCard = (g, idx) => {
-    const done = g.target && g.saved >= g.target;
-    const pct = Math.min(1, g.progress);
-    return `<div class="goal ${done ? 'done' : ''}" data-edit="goal" data-idx="${idx}"
-      style="cursor:pointer" title="Click to edit${g.note ? ' · ' + esc(g.note) : ''}">
-      <div class="label">${esc(g.name)}${done ? ' <span aria-hidden="true">✓</span><span class="sr-only"> — reached</span>' : ''}</div>
-      <div class="value">${fmtMoney(g.saved)} <span class="of">of ${fmtMoney(g.target)}</span></div>
-      <div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100"
-        aria-valuenow="${Math.round(pct * 100)}" aria-label="${esc(g.name)} progress">
-        <i style="width:${(pct * 100).toFixed(1)}%"></i></div>
-      <div class="foot">${Math.round(g.progress * 100)}%
-        ${g.targetDate ? ` · target ${esc(monthLabel(g.targetDate.slice(0, 7)))} (${fmtYrMo(g.monthsLeft)})` : ''}
-        ${!done && g.monthlyReq ? ` · needs ${fmtMoney(g.monthlyReq)}/mo` : ''}</div>
-    </div>`;
-  };
 
   /* Total liquidity — the sheet's overall progress bar */
   const totalNow = c.balances[`total|${cur}`] || 0;
@@ -3094,6 +3116,35 @@ function renderHousehold() {
           : fmtMoney(balanceOf(a))}</td></tr>`).join('');
   }).join('');
 
+  /* What is being saved for each child, in one place: their own accounts, and
+     the goals filed under them. The goal cards are the SAME `goalCard` the
+     Goals tab draws, so the two can't drift apart. */
+  const children = people.filter(p => p.role === 'child');
+  const allGoals = liveKey ? computeGoals(state, C, todayISO()) : [];
+  const childrenHtml = !children.length ? '' : `<div class="card">
+    <h2>The Children${helpBtn('savingFor', 'saving for a child')}</h2>
+    <p class="sub">Their own accounts and whatever is being saved for them.</p>
+    ${children.map(p => {
+      const m = majorityMonthOf(p);
+      const accts = accountsOf(state).filter(a => a.owner === p.id);
+      const theirs = allGoals
+        .map((g, idx) => [g, idx])
+        .filter(([g]) => g.for === p.id);
+      const held = accts.map(balanceOf).filter(v => v !== undefined);
+      return `<h3 style="margin:18px 0 4px">${esc(p.name)}</h3>
+        <p class="sub" style="margin-bottom:10px">${
+          m ? `Turns 18 in ${esc(monthLabelFull(m))}`
+            : 'No birth month yet, so there is no 18th birthday to work from'
+        }${accts.length ? ` · ${accts.length} account${accts.length === 1 ? '' : 's'}${
+          held.length ? ` holding ${fmtMoney(round2(held.reduce((s, v) => s + v, 0)))}` : ''}` : ''}</p>
+        ${theirs.length
+          ? `<div class="goalgrid">${theirs.map(([g, idx]) => goalCard(g, idx)).join('')}</div>`
+          : `<p class="sub">Nothing saved under ${esc(p.name)}'s name yet — add a goal on the
+              Goals tab and say it is for them, or open one of their accounts.</p>`}`;
+    }).join('')}
+    <div class="addbar"><button class="btn small" data-add="goal">＋ Add goal</button></div>
+  </div>`;
+
   return `<div class="cards2 pairs">
   <div class="card">
     <h2>The People in This Plan</h2>
@@ -3119,7 +3170,7 @@ function renderHousehold() {
       <tbody>${ownsHtml}</tbody>
     </table></div>
   </div>
-  </div>`;
+  </div>${childrenHtml}`;
 }
 
 function renderRetirement() {
@@ -4556,8 +4607,16 @@ function buildFields(fields, values, link) {
     input.id = `rf-${f.key}`;
     /* A field that only matters for one choice re-evaluates whenever any
        select moves, so picking a rule reveals exactly that rule's setting. */
+    /* A select drives `link` too, not just field visibility: picking something
+       from a list is as much "one box filling in another" as typing in one is —
+       choosing which child a goal is for is what suggests its target date. The
+       existing linked pairs are all text boxes keyed off `changed`, so this
+       hands them a key they ignore. */
     if (input.tagName === 'SELECT')
-      input.addEventListener('change', () => applyFieldVisibility(fields));
+      input.addEventListener('change', () => {
+        applyFieldVisibility(fields);
+        if (link) link(f.key);
+      });
     /* A section may carry `link(key)`: one box filling in another as you type,
        for fields that are two ways of saying the same thing. It reads and
        writes the FORM, never the state — nothing is committed until Save, and
@@ -5265,8 +5324,28 @@ const EDITORS = {
           .map(g => [g.id, g.name || g.id]),
         showIf: (v) => v.count === 'overflow' },
       { key: 'targetDate', label: 'Target date', type: 'date' },
+      /* Offered only when there is a child to name. A college pot is the case
+         this exists for, and picking someone fills the target date in below. */
+      ...(peopleOf(state).some(p => p.role === 'child')
+        ? [{ key: 'for', label: 'Saving this for', type: 'select',
+            options: [['', 'Nobody in particular'],
+                      ...peopleOf(state).filter(p => p.role === 'child')
+                        .map(p => [p.id, p.name])],
+            hint: 'Naming a child suggests their 18th birthday as the target date — change '
+              + 'it to whenever you actually want the money.' }]
+        : []),
       noteField,
     ],
+    /* Picking the child fills an EMPTY target date in. A date already there is
+       never touched: it was either typed or saved earlier, and both are
+       answers this shouldn't overrule. */
+    link(changed) {
+      if (changed !== 'for') return;
+      const box = F('rf-targetDate');
+      if (!box || box.value) return;
+      const suggested = suggestedTargetDate(personById(state, F('rf-for').value));
+      if (suggested) box.value = suggested;
+    },
     get: (ds) => ({ ...state.goals[+ds.idx],
                     accounts: state.goals[+ds.idx].accounts || [] }),
     blank: () => ({ count: 'capped',
@@ -5279,6 +5358,13 @@ const EDITORS = {
         targetDate: v.targetDate || null });
       if (v.count === 'overflow' && v.overflowOf) g.overflowOf = v.overflowOf;
       else delete g.overflowOf;
+      /* Only when the field was on the form — a goal filed under a child stays
+         filed under them when the dialog never asked the question. Only a
+         child can be named: "for" means money being saved on someone's behalf. */
+      if (peopleOf(state).some(p => p.role === 'child')) {
+        if (personById(state, v.for)?.role === 'child') g.for = v.for;
+        else delete g.for;
+      }
       g.note = v.note || undefined;
     },
     del: (ds) => state.goals.splice(+ds.idx, 1),
@@ -6617,7 +6703,8 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
-  ownerSubtotals, validOwner, accountOption, JOINT_OWNER, UNOWNED,
+  ownerSubtotals, validOwner, accountOption, suggestedTargetDate,
+  JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears,
   projectionYearsAfter, applyToRow, dropRow, swapRows, andList, tabOrder, VIEWS };
 
