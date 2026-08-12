@@ -408,9 +408,27 @@ all; a row called "Cash" otherwise fetches the real listed company CASH and
 overwrites the balance with its share price. The Investments tab tops up stale
 prices when it opens, but a ticker that can never be quoted (a fund, a wrong
 key, the daily limit, being offline) stays stale — and `refreshPrices()` ends in
-`render()`, which re-opens the tab. `priceAutoTried` remembers what the quiet
-auto-refresh has attempted this page load so it can't re-fire in a tight loop;
-the manual Refresh button ignores the set and always retries.
+`render()`, which re-opens the tab. Two separate things keep that from becoming
+a request loop, and **they are not interchangeable**:
+- **`priceAutoTried`** is per ticker, and a ticker joins it only on a
+  DETERMINATE answer — a price, or a genuine "no quote for that". It used to be
+  stamped across the whole batch up front, including tickers the loop broke
+  before ever reaching, which is why a run cut short after one quote gave up on
+  every remaining holding for the rest of the page's life. That was the "it only
+  does one at a time" complaint: the quiet pass never went back for them.
+- **`priceCoolOffUntil`** is per run, and holds the quiet pass off for a minute
+  after a batch ends throttled, capped or failed. That is what actually stops
+  the render→refresh loop, which is what frees `priceAutoTried` to be honest
+  about what was really asked. The manual Refresh button ignores both.
+
+`Note` and `Information` mean opposite things and must stay apart: `Note` is
+Alpha Vantage's frequency limit, which clears in about a minute (`run.throttled`
+— say "press Refresh again in a minute"), while `Information` is the daily
+allowance gone or the key wrong (`run.limited` — the 25-a-day message). Reporting
+a transient throttle as the daily cap told the reader to come back tomorrow when
+the fix was to press the button again. `run.left` is what the batch never
+reached, so the tab can say how many are still to come rather than leaving a
+bare "5 out of date" reading as a failure.
 Both History charts carry a `.chartkey` under them for the dashed projected
 outline — the signal was explained only in the prose above the chart, which is
 not where you look when wondering why two bars are drawn differently. Its swatch

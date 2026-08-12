@@ -3886,6 +3886,12 @@ function renderInvestments() {
     Alpha Vantage's free tier quotes shares and ETFs but not mutual funds, so those
     stay as you typed them. If a row isn't a security at all — a cash balance, say —
     open it and turn its price lookup off so it stops being asked for.</p>` : ''}
+  ${run && run.throttled ? `<p class="sub" style="margin:-6px 0 14px"><strong>Alpha Vantage
+    only answers a few lookups a minute.</strong> ${run.left && run.left.length
+      ? `${plural(run.left.length, 'holding')} still to fetch — press Refresh again in a
+         minute and it carries on from where it stopped.`
+      : 'Press Refresh again in a minute for anything still out of date.'}
+    Nothing already fetched is lost.</p>` : ''}
   ${run && run.limited ? `<p class="sub" style="margin:-6px 0 14px"><strong>Alpha Vantage
     stopped answering.</strong> The free tier allows 25 lookups a day; the prices already
     fetched are kept.</p>` : ''}`;
@@ -4813,8 +4819,21 @@ let refreshingPrices = false;
    is a tight request loop. The manual Refresh button ignores this set, so it
    always retries. */
 const priceAutoTried = new Set();
+/* When the quiet auto-refresh may next run. A throttled or failed batch stops
+   the loop below part-way, and refreshPrices() ends in render(), which re-runs
+   wireInvestments() and its quiet pass — so SOMETHING has to stand between the
+   two or a throttled key gets hammered in a tight loop. It used to be
+   priceAutoTried, marked for the whole batch up front including tickers the
+   loop never reached; that stopped the loop but it also meant a run cut short
+   after one quote gave up on every remaining holding for the rest of the page's
+   life, which is what "it only does one at a time" was. A cool-off stops the
+   loop without blacklisting anything that was never actually asked about. */
+let priceCoolOffUntil = 0;
+const PRICE_COOL_OFF_MS = 60 * 1000;   // Alpha Vantage's frequency window
+
 async function refreshPrices(quiet) {
   if (refreshingPrices) return;
+  if (quiet && Date.now() < priceCoolOffUntil) return;
   /* Never in a shared view, and this is the load-bearing guard rather than the
      hidden button: allTickers() reads the SENDER's holdings while priceKey() and
      the quote cache are the VIEWER's, so a lookup here would put somebody else's
@@ -4833,18 +4852,17 @@ async function refreshPrices(quiet) {
   if (!key) { if (!quiet) toast('Add an Alpha Vantage API key in ⚙ Preferences first'); return; }
   if (!want.length) { if (!quiet) toast('Every price is already less than six hours old'); return; }
   refreshingPrices = true;
-  /* Mark the whole batch tried up front, not per ticker: the loop below breaks
-     out on a rate-limit or network failure, and the tickers it never reached
-     must still count as attempted or the next quiet pass would retry them and
-     loop. */
-  want.forEach(t => priceAutoTried.add(t));
   const cache = quoteCache();
   /* Kept per ticker, not as a count: "updated 1 price" out of four leaves you
      guessing which three didn't, and the reasons differ — Alpha Vantage's free
      tier quotes shares and ETFs but not mutual funds, so a fund comes back
      empty rather than as an error. The result is stored, so the Investments
      tab can still show it after the toast has gone. */
-  const run = { at: Date.now(), updated: [], missing: [], limited: false, failed: false };
+  /* `left` is what the batch never got to — the difference between "we asked and
+     Alpha Vantage had nothing" and "we never asked", which is the difference
+     between giving up on a ticker and coming back to it. */
+  const run = { at: Date.now(), updated: [], missing: [], limited: false,
+                throttled: false, failed: false, left: [] };
   try {
     for (const ticker of want) {
       const url = 'https://www.alphavantage.co/query?function=GLOBAL_QUOTE'
@@ -4852,9 +4870,20 @@ async function refreshPrices(quiet) {
       const res = await fetch(url);
       if (!res.ok) { run.failed = true; break; }
       const data = await res.json();
-      /* Alpha Vantage answers 200 with a prose message rather than an error
-         status when the daily allowance is gone, or the key is wrong. */
-      if (data.Note || data.Information) { run.limited = true; break; }
+      /* Alpha Vantage answers 200 with prose rather than an error status, and
+         the two messages mean opposite things: `Note` is "you're going too
+         fast", which clears in a minute, while `Information` is the daily
+         allowance gone or the key wrong, which doesn't. Treating both as the
+         daily cap told you to come back tomorrow when the real answer was to
+         press the button again in a minute. */
+      if (data.Note) { run.throttled = true; break; }
+      if (data.Information) { run.limited = true; break; }
+      /* Marked only once there is a DETERMINATE answer — a price, or a genuine
+         "no quote for that". A ticker the loop broke on was refused rather than
+         answered, so it stays unmarked and a later pass asks again; that is the
+         difference between "Alpha Vantage says this fund has no quote" and
+         "Alpha Vantage wouldn't talk to us just then". */
+      priceAutoTried.add(ticker);
       const price = parseFloat(data['Global Quote']?.['05. price']);
       if (!Number.isFinite(price)) { run.missing.push(ticker); continue; }
       cache[ticker] = { price: round2(price), ts: Date.now() };
@@ -4864,6 +4893,14 @@ async function refreshPrices(quiet) {
     console.warn('price lookup failed', e);
     run.failed = true;
   }
+  /* Whatever the loop never reached — recorded so the tab can say how many are
+     still to come, rather than leaving a bare "5 out of date" to be read as a
+     failure. */
+  run.left = want.filter(t => !priceAutoTried.has(t));
+  /* A run cut short holds the automatic pass off for a minute so it can't loop
+     on the render below. The manual button ignores this and retries at once. */
+  if (run.throttled || run.limited || run.failed)
+    priceCoolOffUntil = Date.now() + PRICE_COOL_OFF_MS;
   refreshingPrices = false;
   writeQuoteCache(cache);
   try { localStorage.setItem(PRICE_RUN, JSON.stringify(run)); } catch (e) {}
@@ -4878,9 +4915,16 @@ async function refreshPrices(quiet) {
   }
   render();
   const named = run.updated.map(u => `${u.ticker} ${fmtMoney(u.price)}`).join(', ');
-  if (run.limited) toast(named
+  const rest = run.left.length
+    ? ` ${plural(run.left.length, 'holding')} still to do.` : '';
+  if (run.throttled) toast((named ? `Updated ${named}. ` : '')
+    + `Alpha Vantage only answers a few lookups a minute.${rest} `
+    + 'Press Refresh again in a minute for the rest.');
+  else if (run.limited) toast(named
     ? `Updated ${named}, then Alpha Vantage stopped answering for today`
     : 'Alpha Vantage says no more lookups today (or the key is wrong)');
+  else if (run.failed) toast((named ? `Updated ${named}. ` : '')
+    + `The price lookup couldn't be reached.${rest} Try Refresh again shortly.`);
   else if (run.updated.length && run.missing.length)
     toast(`Updated ${named}. No quote for ${run.missing.join(', ')} — see the note above the tables.`);
   else if (run.updated.length) toast(`Updated ${named}`);
