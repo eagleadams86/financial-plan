@@ -648,6 +648,97 @@ Info dots (`helpBtn(key, label)` + the `HELP` table + `#helpDialog`) explain
 arithmetic the reader can't see; clicking outside any dialog except the
 sync-choice one closes it without saving.
 
+## Read-only share links
+
+Ported from Sprint Velocity, which owns the family pattern — if a share rule
+changes there, mirror it here. `#share=<marker>.<base64url>`; marker 1 is
+deflate-raw, 0 is plain JSON (older Safari has no `CompressionStream`, and an
+uncompressed link can be read by hand when one looks wrong). The payload rides
+in the FRAGMENT, which is never sent to a server: no Firestore rules, no
+account, no network on either side. `privacy.html` says so and must stay in
+step.
+
+- **`viewOnly` does two jobs**: it strips every edit affordance, and — the
+  load-bearing one — it makes `save()` a no-op, which is what guarantees a
+  borrowed link can never overwrite the plan of whoever opened it. The flag is
+  mirrored onto `window.finViewOnly` so the sync module (a separate
+  `<script type="module">`) can refuse to initialise: without that,
+  `onAuthStateChanged` → `finAdopt()` would replace the visitor's shared payload
+  with their own cloud copy under a banner still claiming to be somebody else's
+  plan.
+- **Read-only is enforced at one chokepoint, not nine renderers.**
+  `stripEditAffordances()` runs on the freshly drawn markup inside `render()` and
+  takes out `data-add`, `data-edit`, `.addbar`, `.h-edit` and the year buttons;
+  `openRowEditor`/`openCellEditor` refuse outright. Adding a renderer needs no
+  new gate. The imperative COPY is gated per renderer (`viewOnly ? '' : ' Click
+  a row to edit it.'`) — a read-only view that tells you to click things is a
+  bug in the writing.
+- **`SECTION_NEEDS` is the whole privacy model.** It maps each tab to the state
+  branches it actually reads, and nothing else decides what travels. Start
+  reading a new branch in a renderer and it must be added there, or the shared
+  copy of that tab shows blanks. `BRANCH_OWNERS` says which tab a branch belongs
+  to; a branch travelling for a tab that doesn't own it is named out loud in the
+  dialog (`shareCarriesNote`) — Giving measures donations against `side.comp`, so
+  a Giving link carries the salary history, and the sender is told before they
+  send. There is a test that fails the moment a tab is added without an entry.
+- **The year window applies to EVERYTHING year-keyed**, not just `state.years`:
+  `side.comp`, `bonuses`, `limits`, `donations`, each retirement account's
+  `contribs`, `vacations.pto` and dated trips. Trimming only the grid was the
+  first version and it was wrong — "the last 3 years" shipped twenty years of
+  salary beside it.
+- **The window has two ends and they are two different questions.** The CUTOFF
+  ("How many years") is how much history goes in. The CEILING (the "years you've
+  built ahead" box, unticked by default) is whether the projections ride along at
+  all — `shareCeilingYear` is null when they do. `keepShareYear(y, cutoff,
+  ceiling)` is the one predicate; either end may be null, which keeps "everything"
+  on the same code path as a window rather than a branch around it.
+- **The cutoff is ALWAYS measured to `shareStartedYear()`, whichever way the box
+  is set** — and getting this wrong made a link worthless rather than merely
+  short. A year built ahead has no cells of its own; every month of it is derived
+  from the year before through `priorYearRun`. Counting projections as part of
+  the window meant "the most recent year" plus projections handed over a 2027
+  grid with 2026 cut away, and every carry/quarterly/average rule in it read
+  blank. **The window is history; the projections sit on top of it.** There is a
+  test pinning that the year a projection is built on always travels with it.
+- **"Built ahead" is `yearStarted()`, not the calendar.** A 2027 grid becomes the
+  live year the moment December 2026 is marked entered, and from then on it goes
+  in either way — the box disables itself when there is nothing left to hold
+  back. Deriving it the same way the tabs do is what stops the two disagreeing.
+- **Trimming shortens the LINK, never the figures.** Balances chain — a January
+  opens on the previous grid year's December, and only the first year falls back
+  to `yr.seeds` — so a cut history would silently show the recipient a Cash line
+  tens of thousands of dollars off. `reseedShareYears()` rewrites the oldest
+  kept year's seeds from `C`'s balances for the December that was cut. There is
+  a test that the sender's and the recipient's balances match exactly. The one
+  thing a window really does change is the estimate rules that read the prior
+  year, and `shareYearNote()` says which rows, reusing `rulesNeedingYear()` —
+  the app's own existing answer to that question.
+- **Names and notes leave by default** (both boxes start unticked, and every
+  choice resets on each open — a link is a decision about THAT link). Names are
+  the most sensitive thing the app holds, children's among them: `anonymisePeople`
+  rewrites `people[].name` to "Adult 1"/"Child 1" and drops their notes. Ids,
+  birth months and every owner reference are untouched, so ages and who-owns-what
+  still work. A goal or account the sender NAMED after somebody keeps what they
+  typed — the dialog says so rather than guessing which words are a name.
+  `stripNotes` WALKS the payload rather than listing the places a note can be:
+  the failure mode of a list is that it silently ships one.
+- **Nothing the sender typed reaches the recipient's banner.** The label is
+  rebuilt from the section list (a fixed vocabulary, filtered against `VIEWS`),
+  and the range is two numbers — so a hand-edited link has no text to inject.
+  `decodeShare` runs the payload through the same `coerceShape`/`migrate` gate a
+  restored backup gets; a link is the least trusted input the app has.
+- Tabs not in a link are REMOVED from the bar, not hidden — `render()` reads the
+  bar back to decide whether to reorder, and a hidden button would still be in
+  that list, so `want` and `have` could never agree and every render would
+  re-append (and so blur) the whole bar. `allowedViews()` filters `want` to match.
+- **`squeeze()` catches the WRITER's promises as well as awaiting the reader.** A
+  truncated link reaches `DecompressionStream` as invalid deflate and the writable
+  side rejects too; only the readable side is awaited, so without those catches
+  the same failure also surfaced twice as red "Uncaught (in promise)" on a page
+  that had already caught it and drawn the "couldn't be opened" card.
+- The Alpha Vantage key is in its own localStorage key, not in state, so it can
+  never reach a link. Keep it that way.
+
 ## Sync
 
 Optional Google sign-in + Firestore, the family pattern (ported from Sprint
@@ -688,6 +779,9 @@ is what the tests diff the JS engine against.
 
 `tests.html` (SV harness: hidden iframe onto the real `index.html`,
 `window.__finTestHooks` hands over the consts). Synthetic fixtures only.
+**`run()` is async and `await`s each test**, because the share-link encode/decode
+goes through `CompressionStream`; `await` on an ordinary return value is a no-op,
+so every synchronous test is untouched.
 **It only runs on localhost, and enforces that itself** — the family rule from
 Team Dashboard: the iframe is created by the gate at the foot of the script
 (never in the markup — don't put it back), because on the published site the

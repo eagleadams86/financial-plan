@@ -9,7 +9,9 @@ spreadsheet kept since 2011. Live at
 **This repo is public and holds code only — never data.** Everything you see
 in the app lives in your browser's localStorage. No account is needed; without
 signing in, the only network call the page makes is to the GitHub API for the
-"Recent changes" box. **Optional sync**: "Sign in to sync" (Google) mirrors
+"Recent changes" box. **Read-only share links** carry their figures inside the
+link's own fragment, which is never sent to any server — creating one and
+opening one both upload nothing. **Optional sync**: "Sign in to sync" (Google) mirrors
 your data to a private Firestore document in the `financialplan-60c6e`
 Firebase project — security rules confine every account to its own document,
 sign-in uses Google Identity Services (works on corporate networks that block
@@ -143,6 +145,25 @@ included — treat those the way you treat the figures.
   two charts tell the same story. The oldest years come from bi-weekly sheets
   whose rows the importer couldn't tell apart; they're sorted out on load, and
   any row it reads wrong is one click to fix.
+- **Share a read-only link** — show someone part of the plan without giving them
+  an account, a file or edit rights. You pick which tabs go in and how many
+  years go with them; the whole payload rides in the link's `#fragment`, so
+  nothing is uploaded, nothing is stored on the reader's device, and whatever
+  they already had saved in their own browser is untouched. People's names are
+  replaced with "Adult 1" and "Child 1" unless you tick the box, and your
+  written notes stay out unless you ask for them — the two most personal things
+  in the plan are the two that leave by default, and so are the years you've
+  built ahead — a projection is a guess about money you don't have yet, and
+  handing someone one is a different claim from showing them what happened.
+  (A year stops counting as a projection the moment it takes over as the real
+  one, so that box has nothing to hold back once it has.) The dialog says what a
+  link costs in characters, names any tab the year window left empty, and says
+  out loud when a tab drags another tab's data along with it (Giving measures
+  donations against the salary history, so a Giving link carries it). Trimming
+  the years shortens the LINK, never the figures: the oldest year kept is
+  re-seeded with the balances it opened on, so the recipient sees the same
+  numbers you do. It's a snapshot — later edits don't appear, and a link can't
+  be withdrawn once sent, so treat one like emailing a spreadsheet.
 - **Year rollover** — "Build ⟨next year⟩" duplicates the live grid the way
   Charlie used to duplicate the sheet. Build it as early as you like to see
   where the plan is heading: a year that hasn't arrived shows nothing but
@@ -167,7 +188,9 @@ included — treat those the way you treat the figures.
 up the current year's budget with a starter set of rows (all renameable,
 deletable, reorderable) and every tab's ＋ Add buttons do the rest. No import
 needed, no account, and each person's data stays in their own browser — so
-sharing the URL shares the app, never the numbers.
+sharing the plain URL shares the app, never the numbers. (A **share link** is
+the deliberate exception: it carries the figures you picked inside the link
+itself.)
 
 Charlie's own one-time migration from the Numbers spreadsheet:
 

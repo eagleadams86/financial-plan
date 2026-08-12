@@ -2282,6 +2282,341 @@ t('converting warns when next year looks back into this one', () => {
   eq(H.rulesNeedingYear(s, '2030'), [], 'nothing after 2030 to break');
 });
 
+group('Share links — what travels');
+
+/* A fixture that has something on every tab, so "which branches went in the
+   link" is a question with a real answer. Invented figures and invented names,
+   like every other fixture here. */
+function shareFixture() {
+  const mkYear = (y) => ({
+    kind: 'grid', model: 'live', startMonth: y + '-01', monthCount: 12,
+    enteredThrough: y + '-12',
+    categories: [{ id: 'pay', name: 'Paycheck', rule: 'carry', role: 'normal',
+                   section: 'income', note: 'Row note' },
+                 { id: 'rent', name: 'Rent', rule: 'carry', role: 'normal',
+                   section: 'expense' }],
+    cells: { ['pay|' + y + '-01']: { v: 5000, kind: 'actual', note: 'Cell note' },
+             ['rent|' + y + '-01']: { v: -2000, kind: 'actual',
+               parts: [{ v: -1000, kind: 'actual', note: 'Part note' },
+                       { v: -1000, kind: 'actual' }] } },
+    paychecks: {}, seeds: { cash: 1000 },
+    overrides: { ['cash|' + y + '-06']: { v: 4000, note: 'Balance note' } },
+    balAdjust: {}, extraNotes: [{ where: y + '!Sheet', note: 'Imported note' }],
+  });
+  return {
+    schema: 4,
+    settings: { accounts: [{ id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true }],
+                currency: 'USD', ptoAllowance: 30 },
+    years: { '2020': mkYear('2020'), '2024': mkYear('2024'),
+             '2025': mkYear('2025'), '2026': mkYear('2026') },
+    goals: [{ id: 'g1', name: 'Emergency fund', target: 10000, accounts: ['cash'],
+              count: 'cap', note: 'Goal note' }],
+    people: [{ id: 'p1', name: 'Sam', role: 'adult', birth: '1986-04', note: 'Person note' },
+             { id: 'p2', name: 'Robin', role: 'adult', birth: '1988-09' },
+             { id: 'p3', name: 'Ellis', role: 'child', birth: '2017-03' }],
+    side: { portfolios: [{ id: 'pf', name: 'Brokerage',
+                           rows: [{ ticker: 'AAA', shares: 10, price: 100 }] }],
+            taxable: [], rothContribs: {}, k401: {}, hsa: [],
+            comp: { '2020': { salary: 80000 }, '2025': { salary: 100000 },
+                    '2026': { salary: 105000 } },
+            bonuses: { '2020': 4000, '2026': 6000 },
+            daf: [], donations: { '2020': [{ foundation: 'Old', cash: 100 }],
+                                  '2026': [{ foundation: 'New', cash: 200 }] },
+            limits: { '2026': {} },
+            retirementAccounts: [{ name: '401(k)', kind: 'traditional', type: '401k',
+              owner: 'p1', balance: 1000, contribs: { '2020': 15000, '2026': 20000 } }] },
+    vacations: { trips: [{ id: 't0', name: 'Old', year: '2020', nights: 3, cost: 500,
+                           note: 'Trip note' },
+                         { id: 't1', name: 'Soon', year: '2026', nights: 4, cost: 900 },
+                         { id: 't2', name: 'Booked ahead', year: '2028', nights: 5, cost: 1200 },
+                         { id: 't3', name: 'No year', nights: 1, cost: 100 }],
+                 pto: { '2020': { used: 5 }, '2026': { used: 12 } } },
+    ui: { activeYear: '2026', activeTab: 'budget' }
+  };
+}
+
+t('every tab says what it reads, and every branch says whose it is', () => {
+  /* The tables are the whole privacy model: a tab with no entry ships an empty
+     card, and a branch with no owner travels without the dialog ever naming it. */
+  for (const v of H.VIEWS) {
+    ok(Array.isArray(H.SECTION_NEEDS[v]) && H.SECTION_NEEDS[v].length,
+      v + ' has no SECTION_NEEDS entry');
+    ok(H.SECTION_NEEDS[v].some(b => (H.BRANCH_OWNERS[b] || []).includes(v)),
+      v + ' owns none of the branches it reads, so it can never be found to have data');
+  }
+  const branches = new Set();
+  for (const v of H.VIEWS) for (const b of H.SECTION_NEEDS[v]) branches.add(b);
+  for (const b of branches) {
+    ok((H.BRANCH_OWNERS[b] || []).length, b + ' has no owning tab');
+    ok(H.BRANCH_LABEL[b], b + ' has no label to name it with in the dialog');
+    for (const o of H.BRANCH_OWNERS[b])
+      ok(H.VIEWS.includes(o), b + ' is owned by ' + o + ', which is not a tab');
+  }
+});
+
+t('the history picker reads as a window, and anything else is the whole plan', () => {
+  eq(H.parseShareScope('y:3'), { kind: 'year', n: 3 });
+  eq(H.parseShareScope('y:1'), { kind: 'year', n: 1 });
+  eq(H.parseShareScope('all'), { kind: 'all' });
+  eq(H.parseShareScope('fit'), { kind: 'all' }, 'fit starts as the whole plan and narrows');
+  eq(H.parseShareScope(''), { kind: 'all' });
+  eq(H.parseShareScope(undefined), { kind: 'all' });
+  eq(H.parseShareScope('y:0'), { kind: 'year', n: 1 }, 'never a window of nothing');
+  eq(H.parseShareScope('y:nope'), { kind: 'year', n: 1 });
+});
+
+t('a window is counted over every year the plan mentions, not just the grid', () => {
+  const s = shareFixture();
+  eq(H.shareYearUniverse(s), ['2020', '2024', '2025', '2026'],
+    'comp, donations, contributions and PTO all name years too');
+  eq(H.shareCutoffYear(s, { kind: 'year', n: 3 }), '2024');
+  eq(H.shareCutoffYear(s, { kind: 'year', n: 1 }), '2026');
+  eq(H.shareCutoffYear(s, { kind: 'year', n: 99 }), '2020', 'a window past the start keeps all');
+  eq(H.shareCutoffYear(s, { kind: 'all' }), null, 'no window, no cutoff');
+});
+
+t('a window drops what is older and never what is newer', () => {
+  eq(H.keepShareYear('2026', '2024'), true);
+  eq(H.keepShareYear('2024', '2024'), true, 'the cutoff year itself is kept');
+  eq(H.keepShareYear('2023', '2024'), false);
+  eq(H.keepShareYear('2028', '2024'), true, 'a year built ahead is not old');
+  eq(H.keepShareYear('2020', null), true, 'no cutoff keeps everything');
+  eq(H.trimShareYearMap({ '2020': 1, '2025': 2, '2026': 3 }, '2025'),
+     { '2025': 2, '2026': 3 });
+  eq(H.trimShareYearMap({ '2020': 1 }, null), { '2020': 1 });
+  eq(H.trimShareYearMap(undefined, '2025'), {});
+});
+
+t('the window reaches the salary history, the donations and the PTO too', () => {
+  /* The bug this pins: trimming only the budget grid, so "the last 3 years"
+     shipped twenty years of salary alongside it. */
+  const d = H.trimShareYearMaps(shareFixture(), '2025');
+  eq(Object.keys(d.side.comp), ['2025', '2026']);
+  eq(Object.keys(d.side.bonuses), ['2026']);
+  eq(Object.keys(d.side.donations), ['2026']);
+  eq(Object.keys(d.side.limits), ['2026']);
+  eq(Object.keys(d.side.retirementAccounts[0].contribs), ['2026']);
+  eq(Object.keys(d.vacations.pto), ['2026']);
+  eq(d.vacations.trips.map(t => t.name), ['Soon', 'Booked ahead', 'No year'],
+    'the old trip goes; one booked ahead and one with no year stay');
+});
+
+/* The fixture's 2026 is entered right through December, which would make a 2027
+   grid the live year — so a genuinely-not-yet-arrived year needs the marker
+   pulled back first. That IS the rule being tested, so it is set out here rather
+   than buried in each case. */
+function fixtureWithYearAhead(enteredThrough) {
+  const s = shareFixture();
+  s.years['2026'].enteredThrough = enteredThrough || '2026-06';
+  s.years['2027'] = { kind: 'grid', model: 'live', startMonth: '2027-01', monthCount: 12,
+    enteredThrough: '', categories: [{ id: 'pay', name: 'Paycheck', rule: 'carry',
+      role: 'normal', section: 'income' }], cells: {}, paychecks: {},
+    seeds: { cash: 9000 }, overrides: {}, balAdjust: {}, extraNotes: [] };
+  s.side.comp['2027'] = { salary: 110000 };
+  s.side.retirementAccounts[0].contribs['2027'] = 21000;
+  s.vacations.pto['2027'] = { used: 0 };
+  return s;
+}
+
+t('a year you have built ahead is a projection, and stays out unless asked for', () => {
+  const s = fixtureWithYearAhead();
+  const today = '2026-08-12';
+  eq(H.yearStarted(s, '2027', today), false, 'the fixture really has a year not yet arrived');
+  eq(H.shareCeilingYear(s, false, today), '2026', 'the newest year that has actually begun');
+  eq(H.shareCeilingYear(s, true, today), null, 'ticking the box lifts the ceiling entirely');
+  eq(H.shareFutureYears(s, H.shareCeilingYear(s, false, today)), ['2027']);
+  eq(H.shareFutureYears(s, null), [], 'nothing is held back when nothing is capped');
+});
+
+t('a year that has taken over is record, not a projection', () => {
+  /* Mark December entered and next year becomes the live one — the app's own
+     rule, via yearStarted(). From then on it goes in either way, and the box
+     has nothing left to hold back. */
+  const s = fixtureWithYearAhead('2026-12');
+  const today = '2026-08-12';
+  eq(H.yearStarted(s, '2027', today), true);
+  eq(H.shareCeilingYear(s, false, today), '2027');
+  eq(H.shareFutureYears(s, H.shareCeilingYear(s, false, today)), []);
+});
+
+t('the ceiling reaches every year-keyed table, same as the cutoff', () => {
+  const s = fixtureWithYearAhead();
+  eq(H.keepShareYear('2027', null, '2026'), false, 'newer than the ceiling');
+  eq(H.keepShareYear('2026', null, '2026'), true, 'the ceiling year itself is kept');
+  eq(H.keepShareYear('2027', null, null), true, 'no ceiling keeps everything');
+  eq(H.keepShareYear('2023', '2024', '2026'), false, 'both ends still apply at once');
+  const d = H.trimShareYearMaps(JSON.parse(JSON.stringify(s)), null, '2026');
+  eq(Object.keys(d.side.comp), ['2020', '2025', '2026']);
+  eq(Object.keys(d.side.retirementAccounts[0].contribs), ['2020', '2026']);
+  eq(Object.keys(d.vacations.pto), ['2020', '2026']);
+  eq(d.vacations.trips.map(t => t.name), ['Old', 'Soon', 'No year'],
+    'the 2028 trip is a plan too, and goes with the projections');
+  eq(H.trimShareYearMap(s.years, null, '2026').hasOwnProperty('2027'), false);
+});
+
+t('the history window is measured to the newest year that has begun', () => {
+  /* With 2027 built ahead, "the last 3 years" has to mean 2024–2026 — not
+     2025–2026 with 2027 counted as one of the three, which would silently hand
+     over two years of history. */
+  const s = fixtureWithYearAhead();
+  const started = H.shareStartedYear(s, '2026-08-12');
+  eq(started, '2026');
+  eq(H.shareCutoffYear(s, { kind: 'year', n: 3 }, started), '2024');
+  eq(H.shareCutoffYear(s, { kind: 'year', n: 1 }, started), '2026');
+  eq(H.shareStartedYear({ years: {} }, '2026-08-12'), '2026',
+    'a plan with no grid at all still has a line between record and projection');
+});
+
+t('a projection never travels without the year it is built on', () => {
+  /* The bug this pins, and it made a link WORTHLESS rather than merely short: a
+     year built ahead has no cells of its own — every month of it is derived from
+     the year before through priorYearRun. Counting it as part of the window
+     handed over a 2027 grid with 2026 cut away, and every carry, quarterly and
+     average rule in it read blank. The window is history; the projections ride
+     on top of it. */
+  const s = fixtureWithYearAhead();
+  const started = H.shareStartedYear(s, '2026-08-12');
+  for (const n of [1, 2, 3]) {
+    const cut = H.shareCutoffYear(s, { kind: 'year', n }, started);
+    const kept = Object.keys(H.trimShareYearMap(s.years, cut, null)).sort();
+    ok(kept.includes('2027'), 'projections are in when the box is ticked');
+    ok(kept.includes('2026'),
+      'n=' + n + ' dropped the year the 2027 plan is built on: ' + kept.join(','));
+  }
+  /* And the narrowest window is exactly those two — no accidental widening. */
+  const cut1 = H.shareCutoffYear(s, { kind: 'year', n: 1 }, started);
+  eq(Object.keys(H.trimShareYearMap(s.years, cut1, null)).sort(), ['2026', '2027']);
+});
+
+t('a link says when the projections are riding on top of the window', () => {
+  /* Otherwise the meta line's "4 of 5 years" reads like an arithmetic slip
+     against a scope note saying "the last 3 years". */
+  eq(H.shareScopeNote({ kind: 'year', n: 3 }, false, true, ['2027']),
+    "This link holds the last 3 years, plus the 2027 plan you've built ahead.");
+  eq(H.shareScopeNote({ kind: 'year', n: 1 }, false, true, []),
+    'This link holds the most recent year.');
+  eq(H.shareScopeNote({ kind: 'year', n: 2 }, false, true, ['2027', '2028']),
+    "This link holds the last 2 years, plus the 2027 and 2028 plans you've built ahead.");
+  eq(H.shareScopeNote({ kind: 'all' }, false, true, ['2027']), '',
+    'no window, nothing to explain');
+  eq(H.shareScopeNote({ kind: 'year', n: 1 }, false, false, ['2027']), '',
+    'a link with no years at all says nothing about years');
+});
+
+t('holding the projections back is stated plainly, never as a fault', () => {
+  eq(H.shareFutureNote(['2027']), "The 2027 plan you've built ahead is not in it.");
+  eq(H.shareFutureNote(['2027', '2028']),
+     "The 2027 and 2028 plans you've built ahead are not in it.");
+  eq(H.shareFutureNote([]), '', 'nothing built ahead, nothing to say');
+});
+
+t('leaving the notes out reaches every place a note can hide', () => {
+  const d = H.stripNotes(shareFixture());
+  const json = JSON.stringify(d);
+  ok(!/Row note|Cell note|Part note|Balance note|Goal note|Person note|Trip note/.test(json),
+    'a note survived: ' + json.slice(0, 200));
+  ok(!/Imported note/.test(json), 'the imported free-form notes went too');
+  eq(d.years['2026'].extraNotes, [], 'and their list is emptied, not deleted');
+  eq(d.years['2026'].cells['pay|2026-01'].v, 5000, 'the figures are untouched');
+});
+
+t('leaving the names out renames by role and keeps everything derived', () => {
+  const d = H.anonymisePeople(shareFixture());
+  eq(d.people.map(p => p.name), ['Adult 1', 'Adult 2', 'Child 1']);
+  eq(d.people.map(p => p.id), ['p1', 'p2', 'p3'], 'ids never change — accounts point at them');
+  eq(d.people[0].birth, '1986-04', 'the birth month stays, so an age still works');
+  eq(d.people[0].note, undefined, 'a note could say the name back');
+  eq(d.side.retirementAccounts[0].owner, 'p1', 'and who owns what still resolves');
+});
+
+t('a tab with nothing of its own in it is not worth sending', () => {
+  const s = shareFixture();
+  for (const v of H.VIEWS) ok(H.sectionHasData(s, v), v + ' should have fixture data');
+  /* coerceShape's own output, not a bare {}: it migrates the old fixed taxable
+     and HSA lists into two NAMED but empty investment panes, so an empty plan
+     arrives with a two-entry side.portfolios. Offering Investments to someone
+     who has never recorded a holding is exactly the bug this pins. */
+  const bare = H.coerceShape({});
+  ok(H.coerceShape({}).side.portfolios.length, 'the migration really does make panes');
+  for (const v of H.VIEWS) eq(H.sectionHasData(bare, v), false, v + ' on an empty plan');
+  const onePane = H.coerceShape({});
+  onePane.side.portfolios[0].rows = [{ ticker: 'AAA', shares: 1, price: 2 }];
+  eq(H.sectionHasData(onePane, 'investments'), true, 'one holding is enough');
+  /* Goals reads the budget grid, but a grid with no goals is still an empty
+     Goals tab — a tab is judged on its OWN branches. */
+  const noGoals = shareFixture(); noGoals.goals = [];
+  eq(H.sectionHasData(noGoals, 'budget'), true);
+  eq(H.sectionHasData(noGoals, 'goals'), false);
+});
+
+t('empty means empty, and a zero is not empty', () => {
+  eq(H.looksEmpty([]), true);
+  eq(H.looksEmpty({}), true);
+  eq(H.looksEmpty({ trips: [], pto: {} }), true, 'the shape vacations has before a first trip');
+  eq(H.looksEmpty({ trips: [{}], pto: {} }), false);
+  eq(H.looksEmpty(0), false, 'a typed zero is data');
+  eq(H.looksEmpty(null), true);
+  eq(H.looksEmpty(undefined), true);
+});
+
+t('a link survives the round trip', async () => {
+  const payload = { v: 1, sharedAt: 1750000000000, sections: ['budget', 'goals'],
+    anon: true, notes: false, range: { kind: 'year', n: 3 }, data: shareFixture() };
+  const token = await H.encodeShare(payload);
+  const back = await H.decodeShare(token);
+  eq(back.sections, ['budget', 'goals']);
+  eq(back.anon, true);
+  eq(back.range, { kind: 'year', n: 3 });
+  eq(Object.keys(back.data.years), ['2020', '2024', '2025', '2026']);
+  eq(back.data.goals[0].name, 'Emergency fund');
+});
+
+t('an uncompressed link still reads, for a browser without CompressionStream', () => {
+  /* Marker 0 is the fallback format AND the one a person can decode by hand
+     when a link looks wrong — it has to keep working. */
+  const payload = { v: 1, sections: ['budget'], data: shareFixture() };
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  let s = ''; for (const b of bytes) s += String.fromCharCode(b);
+  const b64 = btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return H.decodeShare('0.' + b64).then(back => {
+    eq(back.sections, ['budget']);
+    eq(back.data.settings.currency, 'USD');
+  });
+});
+
+t('a link that is not a link is refused rather than half-opened', async () => {
+  const refuses = async (token, why) => {
+    try { await H.decodeShare(token); throw new Error('accepted ' + why); }
+    catch (e) { ok(!/^accepted /.test(e.message), e.message); }
+  };
+  await refuses('nomarker', 'a token with no format marker');
+  await refuses('.abc', 'an empty marker');
+  await refuses('9.abc', 'an unknown format');
+  await refuses('0.' + btoa('{"nope":1}'), 'JSON that is not a payload');
+  await refuses('0.' + btoa('{"sections":[],"data":{}}'), 'a payload with no tabs');
+  await refuses('0.' + btoa('{"sections":["nonsense"],"data":{}}'),
+    'a payload whose only tab does not exist');
+  await refuses('0.' + btoa('not json at all'), 'rubbish');
+});
+
+t('an unknown tab in a link is dropped, not drawn', async () => {
+  const back = await H.decodeShare('0.' + btoa(JSON.stringify(
+    { sections: ['budget', 'nonsense', 'goals'], data: { years: {} } })));
+  eq(back.sections, ['budget', 'goals'], 'render() has no function for a tab it has never heard of');
+});
+
+t('the recipient banner is built from numbers, never from the sender words', () => {
+  /* Nothing the sender typed reaches the banner, so a hand-edited link has no
+     text to inject. The range is two fields, and both are read as numbers. */
+  eq(H.shareRangeNote({ kind: 'year', n: 1 }), ' It holds the most recent year — earlier years aren’t included.');
+  eq(H.shareRangeNote({ kind: 'year', n: 3 }), ' It holds the last 3 years — earlier years aren’t included.');
+  eq(H.shareRangeNote({ kind: 'year', n: '<img src=x onerror=alert(1)>' }),
+     ' It holds the most recent year — earlier years aren’t included.',
+     'a hand-edited n is a number or it is 1');
+  eq(H.shareRangeNote(null), '');
+  eq(H.shareRangeNote({ kind: 'sneaky' }), '');
+});
+
 /* ── Local-only real-data cross-check ─────────────────────────────────────────
    Fetches the two gitignored import files. On this Mac, with a fresh import
    run, it diffs the JS engine against the spreadsheet's own cached values.
@@ -2393,7 +2728,10 @@ function showLatestRun() {
     .catch(() => { td.textContent = 'Could not reach GitHub to check the latest CI run.'; });
 }
 
-function run() {
+/* Async because a handful of tests are: the share-link encode/decode goes
+   through CompressionStream, which is promise-based. `await` on an ordinary
+   return value is a no-op, so every synchronous test is untouched. */
+async function run() {
   w = document.getElementById('app').contentWindow;
   /* A frame that never got the app is a SETUP problem — the folder isn't being
      served, so index.html came back 404 — and without this every test throws
@@ -2426,7 +2764,7 @@ function run() {
     const name = document.createElement('td'); name.textContent = item.name;
     const msg = document.createElement('td'); msg.className = 'msg';
     try {
-      item.fn();
+      await item.fn();
       tr.className = 'pass'; st.textContent = '✓'; pass++;
     } catch (e) {
       tr.className = 'fail'; st.textContent = '✕'; msg.textContent = e.message; fail++;
