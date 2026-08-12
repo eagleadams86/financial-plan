@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-off edit for a Money Map backup file — stdlib only, no data inside.
+"""One-off edit for a Financial Plan backup file — stdlib only, no data inside.
 
 Does one thing, because it is the one thing the app will not do on its own:
 take the next year back out of the live grid. The spreadsheet ran 24 months so
@@ -58,7 +58,7 @@ def main(argv):
         sys.exit(f"No such file: {src}")
     state = json.loads(src.read_text())
     if not isinstance(state.get("years"), dict):
-        sys.exit(f"{src} doesn't look like a Money Map backup (no years object)")
+        sys.exit(f"{src} doesn't look like a Financial Plan backup (no years object)")
 
     key, removed, was = strip_future_months(state)
     if key:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-time converter: Financial Plan.xlsx (Numbers export) -> Money Map JSON.
+"""One-time converter: Financial Plan.xlsx (Numbers export) -> Financial Plan JSON.
 
 Reads the spreadsheet with the standard library only (zipfile + ElementTree —
 openpyxl is deliberately not required) and writes:

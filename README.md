@@ -1,4 +1,4 @@
-# Money Map
+# Financial Plan
 
 Charlie's personal financial planner — the web-app successor to a Numbers
 spreadsheet kept since 2011. Live at
@@ -157,7 +157,7 @@ python3 import_xlsx.py "~/Downloads/Financial Plan.xlsx"
 
 Then open the app → **Back up** → **Restore JSON…** → pick
 `financial-plan-data.json`. The same Restore path handles ordinary backups —
-Export writes `money-map-YYYY-MM-DD.json`, Restore reads it back.
+Export writes `financial-plan-YYYY-MM-DD.json`, Restore reads it back.
 
 `migrate_local_data.py` does the one thing the app deliberately won't do to
 your data by itself: it takes the next year back out of the live grid. The

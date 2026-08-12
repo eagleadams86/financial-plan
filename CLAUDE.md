@@ -1,8 +1,8 @@
-# Money Map (financial-plan)
+# Financial Plan (financial-plan)
 
 Charlie's personal financial planner, ported from a Numbers spreadsheet kept
 2011–2026. Deployed via GitHub Pages: https://eagleadams86.github.io/financial-plan/
-On-screen name is **Money Map**; the repo stays `financial-plan`.
+On-screen name is **Financial Plan** (tagline: “Charlie’s Epic Money Map”); the repo stays `financial-plan`.
 
 ## The one rule that outranks everything
 
