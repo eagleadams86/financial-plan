@@ -4,7 +4,7 @@ Charlie's personal financial planner — the web-app successor to a Numbers
 spreadsheet kept since 2011. Live at
 **https://eagleadams86.github.io/financial-plan/**
 
-## Your numbers never leave your browser (unless you sign in)
+## Your Numbers Never Leave Your Browser (Unless You Sign In)
 
 **This repo is public and holds code only — never data.** Everything you see
 in the app lives in your browser's localStorage. No account is needed; without
@@ -18,7 +18,7 @@ firebaseapp.com), and "Delete all data" removes the synced copy too. See
 `expected-2026.json`) are gitignored from the very first commit; `git status`
 must never show them.
 
-## What it does
+## What It Does
 
 - **Budget** — the monthly grid, 2011–present, grouped into **Income,
   Expenses, Transfers and Accounts** sections, with per-month subtotals (a
@@ -141,7 +141,7 @@ must never show them.
   the rest carry on reading this one — until 1 January, or until you mark
   December entered.
 
-## Getting started
+## Getting Started
 
 **Anyone can just use it** — open the page and press **Start fresh**: it sets
 up the current year's budget with a starter set of rows (all renameable,
