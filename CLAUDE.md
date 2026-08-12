@@ -629,7 +629,12 @@ Team Dashboard: the iframe is created by the gate at the foot of the script
 (never in the markup — don't put it back), because on the published site the
 invisible frame is a live session and a signed-in browser would start real
 sync traffic. The iframe carries `data-fin-tests`, which the sync module in
-`index.html` checks so it never initialises inside the harness. CI reaches the
+`index.html` checks so it never initialises inside the harness.
+**`file://` is deliberately NOT in `LOCAL_HOSTS`**: it has no hostname, and `''` used to sit
+in that list on the reasoning that the suite couldn't run there anyway — but that sent it down
+the iframe branch, where the frame silently fails to load and the suite blamed the app.
+Opening the file off disk now gets the advice that fixes it, and a frame that never loaded the
+app is reported as one setup problem rather than as every test failing at once. CI reaches the
 page on `localhost:8016`, so the gate lets it through. The
 "Real data (local only)" group fetches the gitignored JSONs and SKIPS on 404
 — green in CI and on the public site by design. It compares the LIVE YEAR's

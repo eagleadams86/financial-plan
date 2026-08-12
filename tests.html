@@ -1912,6 +1912,20 @@ window.addEventListener('load', async () => {
 
 function run() {
   w = document.getElementById('app').contentWindow;
+  /* A frame that never got the app is a SETUP problem — the folder isn't being
+     served, so index.html came back 404 — and without this every test throws
+     "Cannot read properties of undefined" in turn, which reads like the app is
+     catastrophically broken. Say the one thing that fixes it instead. */
+  if (!w || !w.__finTestHooks) {
+    const s = document.getElementById('summary');
+    s.className = 'bad';
+    s.textContent = 'The hidden frame never loaded index.html — is this folder being served?';
+    document.getElementById('out').innerHTML =
+      '<tr><td class="msg" style="white-space:normal;font-family:inherit;font-size:13px">' +
+      'Run <code>cd ~/claude-financial-plan &amp;&amp; python3 -m http.server 8016</code> and open ' +
+      '<code>http://localhost:8016/tests.html</code>.</td></tr>';
+    return;
+  }
   H = w.__finTestHooks;
   const out = document.getElementById('out');
   let pass = 0, fail = 0;
@@ -1953,7 +1967,7 @@ function run() {
    way (file:// iframes are blocked), so it gets the ordinary "serve it over
    localhost" message. Ported from Team Dashboard's gate; same shape in Sprint
    Velocity, PAPTrack and Golf Handicap. */
-const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]', ''];
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
 if (LOCAL_HOSTS.includes(location.hostname)) {
   const frame = document.createElement('iframe');
@@ -1967,15 +1981,26 @@ if (LOCAL_HOSTS.includes(location.hostname)) {
   frame.src = 'index.html';           /* set before append: one load event, the real one */
   document.body.appendChild(frame);
 } else {
+  /* Two reasons to be here, needing different sentences: a published copy
+     (where booting the app would start a live, possibly signed-in session) and a
+     file:// copy off disk (where it simply cannot work — browsers block file://
+     frames). Both end at the same instruction. */
+  const onDisk = location.protocol === 'file:';
   const s = document.getElementById('summary');
   s.className = 'bad';
-  s.textContent = 'Not run here — this page only works on localhost.';
+  s.textContent = onDisk
+    ? 'Not run from a file — this page needs a local server.'
+    : 'Not run here — this page only works on localhost.';
   document.getElementById('out').innerHTML =
     '<tr><td class="msg" style="white-space:normal;font-family:inherit;font-size:13px">' +
-    'The suite boots the real app in a hidden frame, which on <strong>' +
-    location.hostname.replace(/[<&]/g, '') + '</strong> would start a live session — ' +
-    'including cloud sync, if this browser has signed in. It only runs on ' +
-    '<code>localhost</code>, against a copy served from the repo folder:<br><br>' +
+    (onDisk
+      ? 'The suite boots the real app in a hidden frame, and a browser blocks that frame '
+        + 'when the page is opened straight off disk — so the tests would have nothing to run '
+        + 'against. Serve the folder instead:'
+      : 'The suite boots the real app in a hidden frame, which on <strong>'
+        + location.hostname.replace(/[<&]/g, '') + '</strong> would start a live session — '
+        + 'including cloud sync, if this browser has signed in. It only runs on '
+        + '<code>localhost</code>, against a copy served from the repo folder:') + '<br><br>' +
     '<code>cd ~/claude-financial-plan &amp;&amp; python3 -m http.server 8016</code><br>' +
     'then open <code>http://localhost:8016/tests.html</code>.<br><br>' +
     'Nothing has been changed by opening this page — ' +
