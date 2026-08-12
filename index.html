@@ -586,6 +586,7 @@ details.section table th, details.section table td { padding: 4px 6px; }
   <div class="tabs" role="tablist" aria-label="Views">
     <button class="tab" role="tab" id="tab-budget"     aria-controls="views" data-view="budget"     aria-selected="true"  tabindex="0">Budget</button>
     <button class="tab" role="tab" id="tab-goals"      aria-controls="views" data-view="goals"      aria-selected="false" tabindex="-1">Goals</button>
+    <button class="tab" role="tab" id="tab-household"  aria-controls="views" data-view="household"  aria-selected="false" tabindex="-1">Household</button>
     <button class="tab" role="tab" id="tab-retirement" aria-controls="views" data-view="retirement" aria-selected="false" tabindex="-1">Retirement</button>
     <button class="tab" role="tab" id="tab-comp"       aria-controls="views" data-view="comp"       aria-selected="false" tabindex="-1">Compensation</button>
     <button class="tab" role="tab" id="tab-investments" aria-controls="views" data-view="investments" aria-selected="false" tabindex="-1">Investments</button>
@@ -764,7 +765,7 @@ details.section table th, details.section table td { padding: 4px 6px; }
    load()` further down — a const declared after that point would still be in
    its temporal dead zone, load() would catch the ReferenceError, and the whole
    workbook would silently come up blank. */
-const VIEWS = ['budget', 'goals', 'retirement', 'comp', 'investments',
+const VIEWS = ['budget', 'goals', 'household', 'retirement', 'comp', 'investments',
   'vacations', 'giving', 'history'];
 
 /* Anything stored that is no longer a view is dropped and anything missing is
@@ -832,6 +833,13 @@ function monthDiff(a, b) {   // b - a in months
 const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function monthLabel(m) {
   return `${MONTH_ABBR[+m.slice(5, 7) - 1]} ${m.slice(2, 4)}`;
+}
+/* The same month with its century — for a month written into a SENTENCE rather
+   than a grid heading. The two-digit form above exists because the budget's
+   month columns are narrow; a line saying when a child turns 18 is fifteen or
+   twenty years out, where "Sep 33" reads as an age as easily as a year. */
+function monthLabelFull(m) {
+  return `${MONTH_ABBR[+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`;
 }
 /* "2026-07-04" -> "Jul 4". Sliced, never parsed into a Date: a Date built from
    a bare ISO day is UTC midnight, which reads as the day before west of
@@ -1030,6 +1038,49 @@ const accountsOf = (st) => (st.settings.accounts || []);
 const accountById = (st, id) => accountsOf(st).find(a => a.id === id);
 const accountName = (st, id) => accountById(st, id)?.name || id;
 const hubAccount = (st) => accountsOf(st).find(a => a.hub) || accountsOf(st)[0];
+
+/* ── The household ────────────────────────────────────────────────────────
+   A plan can name the people in it, and then say whose each account is. The
+   list is empty for everyone who hasn't filled it in, and everything
+   person-shaped stays hidden while it is — there is no setting to turn on.
+
+   `JOINT_OWNER` is a reserved owner value, NOT a person record: money you own
+   together has no birthday and doesn't retire, so making it a person would put
+   a row in the People list with nothing to fill in. It sits in the same id
+   space, which is why `person.save` has to treat it as taken — someone with a
+   partner called Jo would otherwise slug straight onto it. */
+const JOINT_OWNER = 'joint';
+const peopleOf = (st) => (st.people || []);
+const personById = (st, id) => peopleOf(st).find(p => p.id === id);
+/* What to call an owner on screen. A person's name, "Joint" for the shared
+   bucket, and nothing at all when an account hasn't been assigned — "" reads
+   as unassigned everywhere it lands, which is the honest answer for a plan
+   that has never been asked the question. */
+function ownerLabel(st, owner) {
+  if (owner === JOINT_OWNER) return 'Joint';
+  return personById(st, owner)?.name || '';
+}
+/* Age and the year someone retires are DERIVED, never stored — a stored age is
+   wrong within twelve months. Both need a birth month; without one they are
+   simply unknown, and every caller renders that as a dash rather than a guess. */
+function ageAt(person, month) {
+  if (!person || !person.birth || !month) return null;
+  return Math.floor(monthDiff(person.birth, month) / 12);
+}
+function retirementYearOf(person) {
+  if (!person || person.role === 'child') return null;
+  if (!person.birth || !person.retireAge) return null;
+  return +monthAdd(person.birth, Math.round(person.retireAge * 12)).slice(0, 4);
+}
+/* The month a child turns 18 — the majority marker, and the target date a
+   college goal is suggested against. 18 years is 216 months; it is a
+   SUGGESTION at the point of use, never stored arithmetic, because plenty of
+   people want the money a year earlier or four years later. */
+const MAJORITY_MONTHS = 18 * 12;
+function majorityMonthOf(person) {
+  if (!person || person.role !== 'child' || !person.birth) return null;
+  return monthAdd(person.birth, MAJORITY_MONTHS);
+}
 /* When an account starts being tracked is derived, never stored: it's the
    first month that has anything to say about it — a seed, a stated balance, an
    interest adjustment, or money moving into it. Months before that are blank
@@ -1060,7 +1111,7 @@ const DEFAULT_ACCOUNTS = [
 
 function blankState() {
   return {
-    schema: 3,
+    schema: 4,
     settings: {
       midTermRateAnnual: 0.03,   // dividend estimate: rate/12 × prior (cash+mid)
       longTermRateAnnual: 0.07,  // legacy: seeds the Investments rate on old data
@@ -1076,10 +1127,19 @@ function blankState() {
       retirementReturnAnnual: 0.07,  // the retirement projection's assumed return
       paycheckRule: false,  // show the per-check machinery (Preferences)
       givingFund: false,    // show the donor-advised fund section (Preferences)
-      rowSort: 'manual'     // 'manual' (drag with ↑/↓) or 'alpha' within a section
+      rowSort: 'manual',    // 'manual' (drag with ↑/↓) or 'alpha' within a section
+      /* Defaults the Roth MAGI limit and decides whose income that check
+         counts. 'single' is what the old fixed $153,000 already meant, so
+         existing plans must keep it or their answer changes silently. */
+      filingStatus: 'single'
     },
     years: {},        // "YYYY" → grid year or summary year (see import_xlsx.py)
     goals: [],
+    /* The people this plan is for — see the household helpers above. Ordinary
+       top-level list like `goals`: accounts, retirement accounts and goals
+       point INTO it by id, which is what keeps it out of `settings` (the
+       app-preferences bag) and out of the engine entirely. */
+    people: [],
     side: {
       portfolios: [], taxable: [], rothContribs: {}, k401: {}, hsa: [],
       comp: {}, bonuses: {}, daf: [],
@@ -1111,6 +1171,32 @@ function coerceShape(data) {
   const numHolding = (h) => { h.shares = num(h.shares); h.price = num(h.price); };
   d.schema = typeof d.schema === 'number' ? d.schema : 1;
   d.settings = obj(d.settings);
+  /* The household, normalised BEFORE the accounts: the account loop below
+     sweeps owners that point at nobody, so it needs the id set to exist.
+     Ids are NOT deduped here on purpose — renaming a duplicate would break
+     every account, retirement account and goal pointing at it, which is worse
+     than the collision. `person.save` is what guarantees they're unique. */
+  d.people = arr(d.people);
+  const peopleIds = new Set();          // real people only — 'joint' is not one
+  for (const p of d.people) {
+    p.id = String(p.id || slugJs(p.name || 'person'));
+    p.name = String(p.name || p.id);
+    /* Two roles, because two things branch: an adult has retirement accounts
+       and income, a child ages into majority and has money saved for them. */
+    p.role = p.role === 'child' ? 'child' : 'adult';
+    /* A birth MONTH, the format the rest of the app speaks (`since`, `until`,
+       monthAdd/monthDiff). Same guard as those two: anything else is dropped
+       rather than carried, so nothing downstream has to re-check it. */
+    if (!/^\d{4}-\d{2}$/.test(p.birth || '')) delete p.birth;
+    /* Reaches the page unescaped inside "retires in 2047" — coerce the field,
+       don't just esc the one sink. */
+    p.retireAge = num(p.retireAge);
+    peopleIds.add(p.id);
+  }
+  /* An owner naming someone who has been deleted degrades to unassigned. The
+     same discipline as a goal whose account id is gone: the record keeps
+     working and you repoint it, rather than the page breaking. */
+  const ownerOk = (o) => !o || o === JOINT_OWNER || peopleIds.has(o);
   /* Accounts used to be four fixed ids with their names and rates in two
      parallel maps. They're an ordered list now — any number of accounts, each
      with its own rate, its own destination for that interest, and optionally a
@@ -1147,6 +1233,11 @@ function coerceShape(data) {
        when a past year's balance row becomes an account, and like `since` it
        is a fact about the data rather than something to type. */
     if (!/^\d{4}-\d{2}$/.test(a.until || '')) delete a.until;
+    /* Whose account this is: a person's id, the reserved 'joint', or absent.
+       Absent is the ordinary case and stays absent — migration never guesses
+       an owner, because "we don't know" and "it's shared" are different
+       claims and only one of them is true of a plan that predates people. */
+    if (!ownerOk(a.owner)) delete a.owner;
     acctIds.add(a.id);
   }
   for (const a of d.settings.accounts) {
@@ -1180,6 +1271,10 @@ function coerceShape(data) {
         const looksLikeTransfer = ['bankTransfer', 'midTransfer', 'longTransfer',
           'zelle', 'transfer'].includes(cat.role);
         Object.assign(cat, normRole(cat));   // one-time role → role + target
+        /* Whose row it is — a second earner's paycheck, tagged so take-home
+           can be read per person. Only ever a label; the engine sums the
+           household's rows regardless. */
+        if (cat.person && !peopleIds.has(cat.person)) delete cat.person;
         if (cat.section) continue;
         if (looksLikeTransfer) { cat.section = 'transfer'; continue; }
         let sum = 0;
@@ -1210,6 +1305,9 @@ function coerceShape(data) {
   for (const g of d.goals) {
     if (!Array.isArray(g.accounts)) g.accounts = [];
     if (!['all', 'capped', 'overflow'].includes(g.count)) g.count = 'capped';
+    /* Who the goal is for — a child, usually, for a college pot. Only ever a
+       label and a target-date suggestion; `computeGoals` never reads it. */
+    if (g.for && !peopleIds.has(g.for)) delete g.for;
   }
   d.side = obj(d.side);
   const s = d.side;
@@ -1277,6 +1375,10 @@ function coerceShape(data) {
   for (const a of s.retirementAccounts) {
     a.amount = num(a.amount);
     for (const y of Object.keys(a.contribs || {})) a.contribs[y] = num(a.contribs[y]);
+    /* Whose retirement account it is — the same owner field the budget
+       accounts carry, and the one place "spouses have different retirement
+       accounts" actually lives. */
+    if (!ownerOk(a.owner)) delete a.owner;
   }
 
   /* "Other money" used to be a standalone list of balances on the Retirement
@@ -1463,6 +1565,11 @@ function coerceShape(data) {
       || Object.values(s.donations).some(rows =>
         (rows || []).some(r => r && (r.funding || r.grant)));
   if (d.settings.rowSort !== 'alpha') d.settings.rowSort = 'manual';
+  /* Defaulted from absence rather than migrated: a `??`-style fill can run on
+     every load without ever overwriting a choice, so it belongs here and not
+     in `migrate`. 'single' is what the old fixed MAGI figure already encoded. */
+  if (!['single', 'joint', 'separate'].includes(d.settings.filingStatus))
+    d.settings.filingStatus = 'single';
   d.vacations = obj(d.vacations);
   d.vacations.trips = arr(d.vacations.trips);
   /* Trip nights and each line's figures reach the page unescaped, so coerce
@@ -1569,6 +1676,14 @@ function migrate(parsed) {
     }
     parsed.schema = 3;
   }
+  /* Schema 4 added the household — and deliberately rewrites NOTHING. No
+     people are invented (a plan from before this has exactly one person in it,
+     whose name the app has never been told, and an empty list is honest where
+     a guess isn't) and no account is stamped with an owner. The gate exists
+     anyway so a backup file says whether it predates people: the moment a real
+     one-way migration is needed, this is where it goes, and it has to be able
+     to tell the two apart. */
+  if ((parsed.schema || 1) < 4) parsed.schema = 4;
   return parsed;
 }
 
@@ -2212,7 +2327,8 @@ function render() {
   if (!hasData()) { target.innerHTML = welcomeCard(); return; }
   C = computeAll(state, todayISO());
   const fn = {
-    budget: renderBudget, goals: renderGoals, retirement: renderRetirement,
+    budget: renderBudget, goals: renderGoals, household: renderHousehold,
+    retirement: renderRetirement,
     comp: renderComp, investments: renderInvestments,
     vacations: renderVacations, giving: renderGiving, history: renderHistory
   }[view];
@@ -2875,6 +2991,57 @@ function contribYears(filter) {
       out[y] = round2((out[y] || 0) + (v || 0));
   }
   return out;
+}
+
+/* ── Household ─────────────────────────────────────────────────────────────
+   Who the plan is for. Everything here is a LABEL over figures the engine
+   already worked out — naming people changes no arithmetic anywhere, which is
+   what lets the whole feature stay out of `computeYear`. */
+function renderHousehold() {
+  const people = peopleOf(state);
+  if (!people.length)
+    return `<div class="card"><div class="empty"><h2>No One Here Yet</h2>
+      <p>Name the people this plan is for — a partner, your children — and then every
+        account, retirement account and goal can say whose it is.</p>
+      <p>Your Total doesn't move: this records who owns the money, not how much
+        of it there is.</p>
+      <p style="margin-top:14px"><button class="btn primary" data-add="person">＋ Add the first person</button></p>
+    </div></div>`;
+
+  const now = thisMonth();
+  const rows = people.map((p, idx) => {
+    const age = ageAt(p, now);
+    const retires = retirementYearOf(p);
+    const major = majorityMonthOf(p);
+    /* One "what's next" column rather than two mostly-empty ones: an adult has
+       a retirement year, a child has an 18th birthday, and neither has both. */
+    const ahead = retires ? `Retires in ${retires}`
+      : major ? `Turns 18 in ${esc(monthLabelFull(major))}`
+      : '<span class="muted">—</span>';
+    return `<tr class="editrow" data-edit="person" data-idx="${idx}"
+      title="Click to edit${p.note ? ' · ' + esc(p.note) : ''}">
+      <th scope="row">${esc(p.name)}</th>
+      <td style="text-align:left">${p.role === 'child' ? 'Child' : 'Adult'}</td>
+      <td>${age === null ? '<span class="muted">—</span>' : age}</td>
+      <td style="text-align:left">${ahead}</td></tr>`;
+  }).join('');
+
+  const kids = people.filter(p => p.role === 'child').length;
+  const adults = people.length - kids;
+
+  return `<div class="card">
+    <h2>The People in This Plan</h2>
+    <p class="sub">${adults} adult${adults === 1 ? '' : 's'}${
+      kids ? ` and ${kids} ${kids === 1 ? 'child' : 'children'}` : ''
+      }. An age or a retirement year needs a birth month — both are worked out, never
+      stored, so neither can go stale.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Name</th><th style="text-align:left">Role</th>
+        <th>Age</th><th style="text-align:left">What's next</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <div class="addbar"><button class="btn small" data-add="person">＋ Add someone</button></div>
+  </div>`;
 }
 
 function renderRetirement() {
@@ -4869,6 +5036,82 @@ const EDITORS = {
       state.settings.accounts.findIndex(a => a.id === ds.bal), dir),
   },
 
+  /* Someone this plan is for. Renaming NEVER changes the id — accounts,
+     retirement accounts, goals and budget rows all point at it, and a rename
+     is the ordinary thing to do (a nickname, a married name). */
+  person: {
+    title: (ds, isNew) => isNew ? 'Add Someone' : 'Household Member',
+    cols: 2,
+    sub: () => 'Naming someone lets an account, a retirement account or a goal say it is '
+      + 'theirs. Nothing here changes what the budget computes — your Total is still the '
+      + 'household\'s.',
+    fields: (ds) => [
+      { key: 'name', label: 'Name', type: 'text', wide: true },
+      { key: 'role', label: 'Role', type: 'select', options: [
+        ['adult', 'Adult — earns, saves for retirement'],
+        ['child', 'Child — money saved for them'],
+      ], hint: 'The two that behave differently: only an adult retires, and only a child '
+        + 'reaches 18.' },
+      { key: 'birth', label: 'Birth month', type: 'month',
+        hint: 'Optional. It is what works out an age, a retirement year, and the month a '
+          + 'child turns 18.' },
+      { key: 'retireAge', label: 'Retires at age', type: 'number', step: '1',
+        showIf: (v) => v.role === 'adult',
+        hint: 'Optional, and only a marker — the retirement projection does not draw down '
+          + 'yet.' },
+      noteField,
+    ],
+    get: (ds) => state.people[+ds.idx],
+    blank: () => ({ role: 'adult' }),
+    save(ds, v) {
+      if (!v.name) return;
+      const role = v.role === 'child' ? 'child' : 'adult';
+      const birth = /^\d{4}-\d{2}$/.test(v.birth || '') ? v.birth : undefined;
+      /* A child has no retirement age; keeping one from before the role was
+         changed would show a retirement year for a nine-year-old. */
+      const retireAge = role === 'adult' && v.retireAge ? v.retireAge : undefined;
+      const p = ds.idx !== undefined ? state.people[+ds.idx] : null;
+      if (p) {
+        Object.assign(p, { name: v.name, role, birth, retireAge,
+                           note: v.note || undefined });
+        return;
+      }
+      /* 'joint' is a reserved owner rather than a person, but it shares this id
+         space — so someone actually called Joint has to be pushed off it. */
+      let id = slugJs(v.name), n = 2;
+      while (id === JOINT_OWNER || personById(state, id)) id = `${slugJs(v.name)}-${n++}`;
+      state.people.push({ id, name: v.name, role, birth, retireAge,
+                          note: v.note || undefined });
+    },
+    /* Deleting someone leaves whatever was theirs UNASSIGNED rather than
+       deleting it — the money is still real. Say how much was let go of: it
+       happens off-screen, on tabs you may not be looking at. */
+    del(ds) {
+      const p = state.people[+ds.idx];
+      if (!p) return;
+      let accts = 0, ret = 0, goals = 0, rows = 0;
+      for (const a of accountsOf(state)) if (a.owner === p.id) { delete a.owner; accts++; }
+      for (const a of state.side.retirementAccounts || [])
+        if (a.owner === p.id) { delete a.owner; ret++; }
+      for (const g of state.goals) if (g.for === p.id) { delete g.for; goals++; }
+      for (const y of yearKeys()) {
+        const yr = state.years[y];
+        if (yr.kind !== 'grid') continue;
+        for (const cat of yr.categories || [])
+          if (cat.person === p.id) { delete cat.person; rows++; }
+      }
+      state.people.splice(+ds.idx, 1);
+      const bits = [];
+      const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+      if (accts) bits.push(plural(accts, 'account'));
+      if (ret) bits.push(plural(ret, 'retirement account'));
+      if (goals) bits.push(plural(goals, 'goal'));
+      if (rows) bits.push(plural(rows, 'budget row'));
+      if (bits.length) return `${p.name} removed — ${andList(bits)} no longer say whose they are`;
+    },
+    move: (ds, dir) => listSwap(state.people, +ds.idx, dir),
+  },
+
   /* Summary-year rows (2011–2019) */
   sumrow: {
     title: (ds, isNew) => isNew ? 'Add a Row' : 'Yearly Row',
@@ -6245,11 +6488,13 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   givenOutOfPocket, grossIncome, takeHomePay, givingStats, givingCeiling, isPayRow,
   hasNote,
   parseOpen, withSection,
-  fmtMoney, monthAdd, monthDiff, monthLabel,
+  fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
   normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,
+  peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
+  JOINT_OWNER,
   yearStarted, startedGridYears,
   projectionYearsAfter, applyToRow, dropRow, swapRows, andList, tabOrder, VIEWS };
 
@@ -6267,13 +6512,20 @@ window.finAdopt = (incoming, ts) => {
   localStorage.setItem(UPDATED_KEY, String(ts || Date.now()));
   render();
 };
+/* What the "which copy?" dialog counts. People belong here: someone who has
+   named their family and nothing else has typed real data, and an empty copy
+   must never silently beat one with data. (Not the same question as `hasData`
+   further up, which asks whether there is a BUDGET YEAR to draw — a household
+   with no budget year still has nothing to render.) */
 window.finCounts = (d) => ({
   years: d && d.years ? Object.keys(d.years).length : 0,
   goals: d && d.goals ? d.goals.length : 0,
+  people: d && d.people ? d.people.length : 0,
   trips: d && d.vacations && d.vacations.trips ? d.vacations.trips.length : 0
 });
 window.finHasData = (d) => !!(d && ((d.years && Object.keys(d.years).length)
   || (d.goals && d.goals.length)
+  || (d.people && d.people.length)
   || (d.vacations && d.vacations.trips && d.vacations.trips.length)));
 </script>
 
