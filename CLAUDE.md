@@ -428,6 +428,20 @@ re-testing CORS first.
 - The key lives in localStorage **`fin-pricekey`** (named for the job, not the
   supplier). The old `fin-avkey` is deleted on load: nothing can call that host
   any more, and a credential that can't be used is only a liability.
+- **`priceProvenance()` puts the fetch time in the holding editor**, as the
+  Price field's own `hint`, and the holding editor's `fields` is a FUNCTION
+  rather than a list so it can be computed per row. This exists because the bar
+  above the tables reports one time for the whole table and deliberately the
+  OLDEST of them (`pricesAsOf` is a `Math.min`) — honest as a summary, "nothing
+  here is older than this", and useless as provenance. Two holdings fetched
+  hours apart both sit under the older heading, which is precisely what made a
+  working mutual-fund lookup look like it had never run on 2026-08-13 and cost
+  an hour of misdiagnosis. It distinguishes five states, and the one that earns
+  its keep is **"you typed this over $X, fetched at…"**: a fetched price is
+  copied into the holding but you may type over it, so a hint claiming "fetched"
+  above a figure the reader corrected themselves would be the same class of lie
+  it was added to stop. Compare, don't assume. Pure over the cache entry with an
+  injectable `now`, so the wording is pinned by tests without a clock.
 
 The price lookup records its result per ticker (`fin-quote-run`) and the
 Investments tab reports it: a count alone can't say WHICH ticker failed, and

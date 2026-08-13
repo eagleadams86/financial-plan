@@ -4849,6 +4849,42 @@ const lastPriceRun = () => {
 const sameDay = (a, b) => a.toDateString() === b.toDateString();
 const runIsToday = (run) => !!run && sameDay(new Date(run.at || 0), new Date());
 const runIsRecent = (run, ms) => !!run && (Date.now() - (run.at || 0)) < ms;
+
+/* When one price was fetched, said in a sentence. The day is included only when
+   it isn't today: a holding is nearly always read on the day it was last
+   fetched, and "8/13/2026, 3:41:12 PM" is a lot of characters for "an hour
+   ago". */
+function fetchedWhen(ts, now) {
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return sameDay(d, new Date(now === undefined ? Date.now() : now))
+    ? `today at ${time}` : `on ${d.toLocaleDateString()} at ${time}`;
+}
+/* What the number in the Price box actually IS — fetched, typed over the top of
+   a fetched one, or never looked up — and when.
+   The bar above the tables cannot answer this and shouldn't try: it reports one
+   time for the whole table, and deliberately the OLDEST of them, so a holding
+   fetched two minutes ago sits under a heading three hours old. That is honest
+   as a summary ("nothing here is older than this") and useless as provenance —
+   it is exactly what made a working mutual-fund lookup look like it had never
+   run. Beside the box itself there is room to be exact about one holding.
+   Pure over the cache entry, so the wording is testable without a network or a
+   clock. */
+function priceProvenance(q, price, lookupOn, now) {
+  if (!lookupOn)
+    return 'Lookup is off for this row, so the price is only ever the one you type.';
+  if (!q || !q.ts) return 'Not fetched yet.';
+  if (q.noQuote)
+    return `No quote came back ${fetchedWhen(q.ts, now)} — the price above is your own.`;
+  if (typeof q.price !== 'number') return 'Not fetched yet.';
+  /* Compared rather than assumed: a fetched price is copied into the holding,
+     but you are free to type over it, and a row saying "fetched at 3:41" above
+     a figure you corrected yourself would be a lie of exactly the kind this
+     hint exists to stop. */
+  if (round2(Number(price) || 0) === q.price)
+    return `Fetched ${fetchedWhen(q.ts, now)}.`;
+  return `You typed this over ${fmtMoney(q.price)}, fetched ${fetchedWhen(q.ts, now)}.`;
+}
 const stalePrices = () => {
   const cache = quoteCache();
   return allTickers().filter(t => !quoteFresh(cache[t]));
@@ -5983,12 +6019,21 @@ const EDITORS = {
     sub: () => 'Value is shares × price. A row that is not a security — a cash balance '
       + 'sitting in the account — should have its price lookup off, or it will be quoted '
       + 'as whatever company happens to share its name.',
-    fields: [
-      { key: 'ticker', label: 'Ticker', type: 'text' },
-      { key: 'shares', label: 'Shares', type: 'number' },
-      { key: 'price', label: 'Price', type: 'money' },
-      { key: 'lookup', label: 'Look its price up automatically', type: 'check' },
-    ],
+    /* A function rather than a list so the Price box can say where its number
+       came from. Computed on open from the row as STORED — a hint describes
+       what you are looking at, not what you are part-way through typing. */
+    fields: (ds) => {
+      const h = ds.idx === undefined ? null : holdingList(ds.list)[+ds.idx];
+      const t = h ? (h.ticker || '').trim().toUpperCase() : '';
+      const hint = h && t && t !== '?'
+        ? priceProvenance(quoteCache()[t], h.price, h.lookup !== false) : '';
+      return [
+        { key: 'ticker', label: 'Ticker', type: 'text' },
+        { key: 'shares', label: 'Shares', type: 'number' },
+        { key: 'price', label: 'Price', type: 'money', ...(hint ? { hint } : {}) },
+        { key: 'lookup', label: 'Look its price up automatically', type: 'check' },
+      ];
+    },
     get: (ds) => {
       const h = holdingList(ds.list)[+ds.idx];
       return { ...h, lookup: h.lookup !== false };
@@ -8178,6 +8223,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
      which of a run's complaints are still true are both decided here, and both
      were got wrong in ways that only showed up a day later. */
   quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote,
+  priceProvenance, fetchedWhen,
   fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
