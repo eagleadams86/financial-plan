@@ -400,16 +400,45 @@ or corrupted backup would otherwise execute. Coerce the field, don't just esc
 the one sink: it closes the whole class. The money maps (comp, bonuses, limits,
 donations, retirement amounts/contribs) are num()'d too — a string there is
 only ever $NaN on screen, never markup, but NaN poisons every total it reaches.
+**Prices come from Twelve Data (`api.twelvedata.com/quote`), not Alpha Vantage.**
+The swap happened 2026-08-13 for two reasons that were never going to be fixed
+by tuning: AV allowed 25 lookups a day against Twelve Data's 800, and AV's free
+tier did not quote MUTUAL FUNDS at all, so a fund could never be priced however
+much allowance was left. Twelve Data also answers with an HTTP status and a
+`code` (401 wrong key, 404 unknown symbol, 429 out of credits) where AV returned
+200 and a paragraph of English that had to be pattern-matched. **Yahoo was
+evaluated and rejected on evidence, not taste**: it quotes funds with no key at
+all, but sends no `Access-Control-Allow-Origin` header, so no browser page can
+read it — reaching it needs a proxy, and a proxy puts the holdings on somebody
+else's server. Stooq has no CORS either. Don't re-litigate this without
+re-testing CORS first.
+- `classifyQuote(status, data)` is the single pure decision — price / noQuote /
+  throttled / limited / badKey / failed — and it is table-tested. The response is
+  parsed **even when `res.ok` is false**, which is the whole benefit of the new
+  supplier: a 401, 404 and 429 each say what happened, and bailing on `res.ok`
+  would flatten them back into one shrug.
+- **`throttled` and `limited` are both 429 and must never be merged** — the
+  per-minute allowance clears while you read the message, the daily one doesn't.
+  Twelve Data names which in its message ("the current minute"), so the test is
+  a word rather than guesswork. Reporting a transient throttle as the daily cap
+  told the reader to come back tomorrow when the fix was to press the button
+  again; that bug predates the swap and must not be reintroduced by it.
+- **`badKey` is its own outcome**, which AV could never express. Crucially it
+  writes NO `noQuote` marker — a mistyped key must not blacklist every ticker.
+- The key lives in localStorage **`fin-pricekey`** (named for the job, not the
+  supplier). The old `fin-avkey` is deleted on load: nothing can call that host
+  any more, and a credential that can't be used is only a liability.
+
 The price lookup records its result per ticker (`fin-quote-run`) and the
 Investments tab reports it: a count alone can't say WHICH ticker failed, and
-the reasons differ — Alpha Vantage's free tier quotes shares and ETFs but not
-mutual funds. A holding carries `lookup: false` when it shouldn't be quoted at
-all; a row called "Cash" otherwise fetches the real listed company CASH and
-overwrites the balance with its share price. The Investments tab tops up stale
-prices when it opens, but a ticker that can never be quoted (a fund, a wrong
-key, the daily limit, being offline) stays stale — and `refreshPrices()` ends in
-`render()`, which re-opens the tab. Two separate things keep that from becoming
-a request loop, and **they are not interchangeable**:
+the reasons differ. A holding carries `lookup: false` when it shouldn't be
+quoted at all; a row called "Cash" otherwise fetches the real listed company
+CASH and overwrites the balance with its share price. The Investments tab tops
+up stale prices when it opens, but a ticker that can never be quoted (a wrong
+symbol, a wrong key, the daily limit, being offline) stays stale — and
+`refreshPrices()` ends in `render()`, which re-opens the tab. Two separate
+things keep that from becoming a request loop, and **they are not
+interchangeable**:
 - **`priceAutoTried`** is per ticker, and a ticker joins it only on a
   DETERMINATE answer — a price, or a genuine "no quote for that". It used to be
   stamped across the whole batch up front, including tickers the loop broke
@@ -421,13 +450,16 @@ a request loop, and **they are not interchangeable**:
   the render→refresh loop, which is what frees `priceAutoTried` to be honest
   about what was really asked. The manual Refresh button ignores both.
 - **A `noQuote` marker in the quote cache** is the third, and the one that
-  actually protects the 25-a-day allowance. `priceAutoTried` dies with the page,
-  so a holding that can NEVER be quoted — a mutual fund on the free tier, a row
-  that isn't a security — was asked about again on every page load, spending a
-  lookup each time and never getting anything back. A determinate "no price"
-  now writes `{ noQuote: true, ts }` into `fin-quotes` beside the real prices,
-  and the quiet pass skips it for `NO_QUOTE_TTL_MS` (a day, so a fund that gets
-  covered later is still retried). The manual button ignores it like the others.
+  actually protects the daily allowance. `priceAutoTried` dies with the page,
+  so a holding that can NEVER be quoted — a mistyped symbol, a row that isn't a
+  security — was asked about again on every page load, spending a lookup each
+  time and never getting anything back. It emptied Alpha Vantage's 25-a-day tier
+  in an afternoon; it is kept at 800 for the same reason, since the drain is
+  per page load and unbounded. A determinate "no price" writes
+  `{ noQuote: true, ts }` into `fin-quotes` beside the real prices, and the quiet
+  pass skips it for `NO_QUOTE_TTL_MS` (a day, so a symbol that starts being
+  covered is still retried). The manual button ignores it like the others, and
+  a `badKey` deliberately writes no marker at all.
   Two consequences to keep: `quoteFresh` must never read a marker as a price
   (it has none), and `pricesAsOf()` counts only entries that hold a price —
   a marker is stamped with the moment we ASKED, so letting it through dates the
@@ -463,21 +495,20 @@ about today) and `runIsRecent` gates the throttle note (it clears in about a
 minute). The `missing` note has no clock on purpose — that a fund has no quote
 is a durable fact about the fund, not news about this minute.
 
-**There is no free replacement for mutual funds, and it has been checked.**
-Yahoo's chart endpoint quotes them accurately with no key, but sends no
-`Access-Control-Allow-Origin` at all, so no browser page can read it — verified,
-not assumed. Stooq has no CORS either. Anything that works from a page needs a
-key (Twelve Data does send CORS headers and allows 800 calls a day, but its
-mutual-fund coverage on the free plan is unconfirmed). A proxy would put the
-holdings on somebody else's server and add a CSP entry, which is a bad trade for
-a NAV that moves once a day. Hand-typed fund prices are the deliberate answer.
+**Mutual funds DO have a free source, and it is the one now in use.** This
+paragraph previously concluded the opposite and was wrong — Twelve Data's free
+plan quotes FSKAX and VTSAX, proven against a real key before the swap, which is
+what made replacing Alpha Vantage worth doing rather than merely tidier. A fund
+returns the last NAV struck after the close (identical open/high/low/close,
+dated the previous session), so a fund price is never live and never can be;
+that is the instrument, not a fault in the lookup. The six-hour cache is
+therefore more than fast enough for one.
 
-`Note` and `Information` mean opposite things and must stay apart: `Note` is
-Alpha Vantage's frequency limit, which clears in about a minute (`run.throttled`
-— say "press Refresh again in a minute"), while `Information` is the daily
-allowance gone or the key wrong (`run.limited` — the 25-a-day message). Reporting
-a transient throttle as the daily cap told the reader to come back tomorrow when
-the fix was to press the button again. `run.left` is what the batch never
+The throttle/cap distinction now lives in `classifyQuote` (see above) rather
+than in pattern-matched prose, but the RULE it protects is unchanged and is the
+reason that function is table-tested: a transient throttle reported as the daily
+cap tells the reader to come back tomorrow when the fix was to press the button
+again. `run.left` is what the batch never
 reached, so the tab can say how many are still to come rather than leaving a
 bare "5 out of date" reading as a failure.
 Both History charts carry a `.chartkey` under them for the dashed projected
@@ -803,10 +834,10 @@ step.
 - **A shared view makes NO network call, and that is a promise in writing.**
   `privacy.html` says creating and opening a link both involve no upload, so
   anything that reaches the wire in `viewOnly` makes the policy false. The one
-  that did was the Alpha Vantage price lookup: `allTickers()` reads the SENDER's
+  that did was the holding price lookup: `allTickers()` reads the SENDER's
   holdings while `priceKey()` and the quote cache are the READER's, so opening a
   shared Investments tab put somebody else's tickers on the wire under the
-  reader's own key — spending their 25-a-day free tier and overwriting the prices
+  reader's own key — spending their own free tier and overwriting the prices
   the sender chose to show. `refreshPrices()` refuses in `viewOnly` (the
   load-bearing guard), `wireInvestments()` returns early, and the whole price bar
   is omitted from the render — every line of it describes the reader's own cache,
@@ -820,7 +851,7 @@ step.
   side rejects too; only the readable side is awaited, so without those catches
   the same failure also surfaced twice as red "Uncaught (in promise)" on a page
   that had already caught it and drawn the "couldn't be opened" card.
-- The Alpha Vantage key is in its own localStorage key, not in state, so it can
+- The price-lookup key is in its own localStorage key, not in state, so it can
   never reach a link. Keep it that way.
 
 ## Sync
@@ -908,10 +939,10 @@ Chromium against `python3 -m http.server 8016`).
 - Commit subjects are **user-facing** (the Recent changes box lists them
   verbatim) — plain English for a reader, not a diff.
 - CSP `connect-src`: `'self'`, the Firebase/Google sign-in hosts, the GitHub
-  API (changelog) and `https://www.alphavantage.co` (holding prices — ticker
+  API (changelog) and `https://api.twelvedata.com` (holding prices — ticker
   only). A new feature that talks to a new endpoint must add it to the CSP in
   the same commit, and update `privacy.html` if it changes what leaves the
-  browser. The Alpha Vantage key lives in localStorage `fin-avkey`, NOT in
+  browser. The price-lookup key lives in localStorage `fin-pricekey`, NOT in
   state: state syncs to Firestore and rides along in every backup file, and a
   credential belongs in neither.
 - Keep README.md current whenever the app meaningfully changes.

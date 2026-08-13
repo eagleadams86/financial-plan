@@ -1991,6 +1991,42 @@ t('a pane with no holdings still survives the shape check', () => {
   eq(Array.isArray(d.side.portfolios[0].rows), true);
 });
 
+group('What one price answer means');
+/* Real shapes, captured from Twelve Data rather than imagined. The two 429s
+   are the pair that must never merge: the per-minute one clears while you are
+   reading about it, the daily one does not. */
+t('a quote is a price', () => {
+  const v = H.classifyQuote(200, { symbol: 'FSKAX', close: '213.92999' });
+  eq(v.kind, 'price');
+  eq(v.price, 213.93, 'rounded to cents like every other figure in the app');
+});
+t('a fund quotes like anything else — the whole reason for the move', () => {
+  eq(H.classifyQuote(200, { symbol: 'VTSAX', close: '185.87000' }).kind, 'price');
+});
+t('running out for the minute is not running out for the day', () => {
+  const minute = H.classifyQuote(429, { code: 429, status: 'error', message:
+    'You have run out of API credits for the current minute. 9 API credits were used, ' +
+    'with the current limit being 8. Wait for the next minute or consider upgrading.' });
+  eq(minute.kind, 'throttled', 'press Refresh again in a minute — do NOT say come back tomorrow');
+  const day = H.classifyQuote(429, { code: 429, status: 'error', message:
+    'You have run out of API credits for the current day.' });
+  eq(day.kind, 'limited');
+});
+t('a rejected key says so, instead of hiding as “no quote”', () => {
+  eq(H.classifyQuote(401, { code: 401, status: 'error',
+    message: '**apikey** parameter is incorrect or not specified.' }).kind, 'badKey');
+  eq(H.classifyQuote(403, { code: 403, status: 'error', message: 'forbidden' }).kind, 'badKey');
+});
+t('an unknown symbol is a determinate “there is no price”', () => {
+  eq(H.classifyQuote(404, { code: 404, status: 'error',
+    message: '**symbol** or **figi** parameter is missing or invalid.' }).kind, 'noQuote');
+  eq(H.classifyQuote(200, { symbol: 'X' }).kind, 'noQuote', 'a 200 carrying no price');
+});
+t('their outage is not our answer, and must not mark the ticker', () => {
+  eq(H.classifyQuote(503, { code: 503, status: 'error', message: 'unavailable' }).kind, 'failed');
+  eq(H.classifyQuote(500, {}).kind, 'failed');
+});
+
 group('The price lookup’s memory');
 /* A holding that can NEVER be quoted — a mutual fund on the free tier, or a row
    that isn't a security — used to be asked about on every single page load,

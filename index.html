@@ -7,9 +7,11 @@
      is inline script and style by design, with no build step to generate hashes.
      The host allowlists are the real value: scripts from this origin, Firebase's
      CDN and Google sign-in only; network calls to the Firestore/auth endpoints
-     the optional sync uses, the GitHub API (changelog box), Alpha Vantage
+     the optional sync uses, the GitHub API (changelog box), Twelve Data
      (holding price lookups — ticker only), and 'self' (the local-only test
-     fixtures). accounts.google.com appears in script-src,
+     fixtures). alphavantage.co was removed when the price lookup moved to
+     Twelve Data: an endpoint nothing calls has no business being reachable.
+     accounts.google.com appears in script-src,
      connect-src AND frame-src because sign-in goes through Google Identity
      Services rather than Firebase's hosted handler (corporate filters block
      firebaseapp.com hostnames unpredictably) — same flow as the sibling apps.
@@ -17,7 +19,7 @@
      commit (family rule). form-action is 'self' rather than 'none' because
      dialogs submit with method="dialog", which some browsers historically
      checked against it. frame-ancestors is ignored in a meta tag. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://api.github.com https://www.alphavantage.co; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://api.github.com https://api.twelvedata.com; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Financial Plan · Charlie’s Epic Money Map</title>
 <meta name="description" content="A personal financial planner: monthly budget with projections, savings goals, retirement, vacations and giving.">
@@ -2501,10 +2503,13 @@ const HELP = {
       + 'guessed at. The current year measures what you have given so far against the '
       + 'whole year\'s income, so it reads low until December.' },
   priceLookup: { title: 'Looking up Prices',
-    body: 'Prices come from Alpha Vantage, which needs a free API key (Preferences). Only '
-      + 'the ticker is sent. A fetched price is cached for six hours, so opening this tab '
-      + 'repeatedly costs nothing, and every price stays editable by hand — typing one over '
-      + 'a fetched price is fine.' },
+    body: 'Prices come from Twelve Data, which needs a free API key (Preferences). Only '
+      + 'the ticker is sent. Shares, ETFs and mutual funds are all quoted, though a fund '
+      + 'strikes one price a day after the close, so its figure is the last one published '
+      + 'rather than a live one. The free allowance is 800 lookups a day and eight a '
+      + 'minute; a fetched price is cached for six hours, so opening this tab repeatedly '
+      + 'costs nothing, and every price stays editable by hand — typing one over a fetched '
+      + 'price is fine.' },
 };
 
 function helpBtn(key, label) {
@@ -3878,22 +3883,25 @@ function renderInvestments() {
     <button class="btn small" id="refreshPricesBtn">↻ Refresh prices</button>
     <span class="sub muted">${asOf
       ? `Prices as of ${new Date(asOf).toLocaleString()}${stale ? ` · ${stale} out of date` : ''}`
-      : priceKey() ? 'No prices fetched yet' : 'Add an Alpha Vantage key in ⚙ Preferences to fetch prices'}
+      : priceKey() ? 'No prices fetched yet' : 'Add a Twelve Data key in ⚙ Preferences to fetch prices'}
       ${helpBtn('priceLookup', 'the price lookup')}</span>
   </div>
   ${run && run.missing && run.missing.length ? `<p class="sub" style="margin:-6px 0 14px">
     <strong>No quote came back for ${esc(run.missing.join(', '))}.</strong>
-    Alpha Vantage's free tier quotes shares and ETFs but not mutual funds, so those
-    stay as you typed them. If a row isn't a security at all — a cash balance, say —
-    open it and turn its price lookup off so it stops being asked for.</p>` : ''}
-  ${run && run.throttled && runIsRecent(run, 10 * 60 * 1000) ? `<p class="sub" style="margin:-6px 0 14px"><strong>Alpha Vantage
-    only answers a few lookups a minute.</strong> ${run.left && run.left.length
+    Twelve Data didn't recognise the symbol, so those stay as you typed them —
+    check the ticker is right. If a row isn't a security at all — a cash balance,
+    say — open it and turn its price lookup off so it stops being asked for.</p>` : ''}
+  ${run && run.badKey && runIsRecent(run, 10 * 60 * 1000) ? `<p class="sub" style="margin:-6px 0 14px">
+    <strong>Twelve Data rejected the API key.</strong> Check it in ⚙ Preferences —
+    prices already fetched are kept, and every one stays editable by hand.</p>` : ''}
+  ${run && run.throttled && runIsRecent(run, 10 * 60 * 1000) ? `<p class="sub" style="margin:-6px 0 14px"><strong>Twelve Data
+    only answers eight lookups a minute.</strong> ${run.left && run.left.length
       ? `${plural(run.left.length, 'holding')} still to fetch — press Refresh again in a
          minute and it carries on from where it stopped.`
       : 'Press Refresh again in a minute for anything still out of date.'}
     Nothing already fetched is lost.</p>` : ''}
-  ${run && run.limited && runIsToday(run) ? `<p class="sub" style="margin:-6px 0 14px"><strong>Alpha Vantage
-    stopped answering.</strong> The free tier allows 25 lookups a day; the prices already
+  ${run && run.limited && runIsToday(run) ? `<p class="sub" style="margin:-6px 0 14px"><strong>Twelve Data
+    stopped answering.</strong> The free tier allows 800 lookups a day; the prices already
     fetched are kept. The allowance resets each day.</p>` : ''}`;
   const panes = (s.portfolios || []).map(pf => `<div class="card">
       <h2>${esc(pf.name)} <button class="h-edit" data-edit="portfolio"
@@ -4747,18 +4755,37 @@ function buildRothChart() {
 }
 
 /* ═══════════════════════════ Price lookups ════════════════════════════════
-   Holdings carry a hand-typed price. Alpha Vantage can fill it in instead —
-   a free key, 25 lookups a day, and only the ticker ever leaves this browser.
+   Holdings carry a hand-typed price. Twelve Data can fill it in instead —
+   a free key, 800 lookups a day, and only the ticker ever leaves this browser.
+
+   It replaced Alpha Vantage, which was free too but wrong on the two things
+   that actually mattered here: 25 lookups a day rather than 800, and no mutual
+   funds at all, so a fund could never be quoted however many lookups were left.
+   Twelve Data also answers with an HTTP STATUS and a `code` — 401 wrong key,
+   404 unknown symbol, 429 out of credits — where Alpha Vantage returned 200 and
+   a paragraph of English that had to be pattern-matched to find out which of
+   those had happened. Yahoo quotes funds too and needs no key at all, and was
+   rejected for a reason worth writing down: it sends no CORS header whatsoever,
+   so no browser page can read it. Reaching it would take a proxy, and a proxy
+   means these holdings pass through somebody else's server.
 
    The key deliberately does NOT live in state: state syncs to Firestore and
    rides along in every backup file, and a credential doesn't belong in either.
    It stays in this browser, re-entered per device (Preferences).
 
-   Prices cache for six hours. That is what makes the daily allowance enough —
-   opening the tab repeatedly costs nothing — and it means a fetched price is
-   still just a number in the holding row, editable by hand like any other. */
+   Prices cache for six hours, which is unchanged and still right: a mutual fund
+   only strikes one NAV a day anyway, so asking more often cannot learn anything
+   new — and it means a fetched price is still just a number in the holding row,
+   editable by hand like any other. */
 
-const PRICE_KEY = 'fin-avkey';
+/* Named for the job, not the supplier, so the next swap doesn't strand a key
+   under a name that lies about who issues it. */
+const PRICE_KEY = 'fin-pricekey';
+/* The Alpha Vantage key is a dead credential the moment this file loads:
+   nothing calls that host and the CSP no longer permits it. It is dropped
+   rather than left sitting in storage, because a credential that cannot be
+   used is nothing but a liability. Getting it back is a visit to their site. */
+try { localStorage.removeItem('fin-avkey'); } catch (e) { /* private mode */ }
 const QUOTE_CACHE = 'fin-quotes';
 const PRICE_RUN = 'fin-quote-run';   // what the last refresh managed, per ticker
 const QUOTE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -4781,14 +4808,15 @@ function writeQuoteCache(c) {
 }
 const quoteFresh = (q) => q && typeof q.price === 'number'
   && (Date.now() - (q.ts || 0)) < QUOTE_TTL_MS;
-/* A ticker Alpha Vantage ANSWERED about and had no price for — a mutual fund on
-   the free tier, or a row that isn't a security at all. It is written into the
-   same cache a price would be, because the alternative is asking again on every
-   page load for ever: `priceAutoTried` dies with the page, so a holding that can
-   never be quoted spent one of the 25 daily lookups each time the tab was
-   opened and never got anything back for it. That, not heavy use, is how the
-   allowance really goes. Its own longer TTL, so a fund Alpha Vantage starts
-   covering — or a ticker typed properly after a typo — is retried tomorrow
+/* A ticker the supplier ANSWERED about and had no price for — a mistyped
+   symbol, or a row that isn't a security at all. It is written into the same
+   cache a price would be, because the alternative is asking again on every page
+   load for ever: `priceAutoTried` dies with the page, so a holding that can
+   never be quoted spent a lookup each time the tab was opened and never got
+   anything back for it. That, not heavy use, is how an allowance really goes —
+   it emptied a 25-a-day tier in an afternoon, and the marker is worth keeping
+   at 800 for the same reason. Its own longer TTL, so a symbol that starts being
+   covered — or a ticker typed properly after a typo — is retried tomorrow
    rather than written off for good. */
 const NO_QUOTE_TTL_MS = 24 * 60 * 60 * 1000;
 const noQuoteFresh = (q) => !!q && q.noQuote === true
@@ -4871,7 +4899,7 @@ const priceAutoTried = new Set();
    life, which is what "it only does one at a time" was. A cool-off stops the
    loop without blacklisting anything that was never actually asked about. */
 let priceCoolOffUntil = 0;
-const PRICE_COOL_OFF_MS = 60 * 1000;   // Alpha Vantage's frequency window
+const PRICE_COOL_OFF_MS = 60 * 1000;   // Twelve Data's per-minute window
 /* No request may hang for ever, and this is the guard that makes the latch
    above safe. `refreshingPrices` is released in a `finally` now, but a `fetch`
    that never settles never REACHES a finally — the await simply parks, nothing
@@ -4882,6 +4910,34 @@ const PRICE_COOL_OFF_MS = 60 * 1000;   // Alpha Vantage's frequency window
    reload was the only cure. Timing the request out turns that into an ordinary
    "couldn't be reached", which the existing failure path already handles. */
 const PRICE_TIMEOUT_MS = 10 * 1000;
+/* One answer in, one decision out — no fetching and no storage — so the whole
+   table of outcomes can be pinned by tests instead of being discovered a day
+   later in the wild. The distinctions it draws are the load-bearing part:
+   - `throttled` and `limited` are BOTH 429 and must never be merged. The
+     per-minute allowance clears while you are reading the message; the daily
+     one does not. Telling you to come back tomorrow when the answer was to
+     press the button again is the bug this app already had once, under the
+     previous supplier, and the supplier changing is no reason to reintroduce
+     it. Twelve Data names which in its message ("the current minute"), so the
+     test is a word rather than the guesswork the old prose forced.
+   - `badKey` is its own outcome now. Alpha Vantage gave a mistyped key and an
+     exhausted allowance the same answer, so the app had to hedge in the toast
+     and say "or the key is wrong". A 401 says so outright.
+   - `noQuote` is a DETERMINATE "there is no price for that", which is what
+     earns a ticker its remembered marker. Anything indeterminate must not. */
+function classifyQuote(status, data) {
+  const price = parseFloat(data && data.close);
+  if (Number.isFinite(price)) return { kind: 'price', price: round2(price) };
+  const code = Number((data && data.code) || status);
+  const msg = String((data && data.message) || '');
+  if (code === 429) return { kind: /minute/i.test(msg) ? 'throttled' : 'limited' };
+  if (code === 401 || code === 403) return { kind: 'badKey' };
+  if (code === 404) return { kind: 'noQuote' };
+  /* Their trouble, not ours: worth retrying, so it must not mark the ticker. */
+  if (code >= 500) return { kind: 'failed' };
+  /* A 200 carrying nothing usable — the symbol resolved but has no price. */
+  return { kind: 'noQuote' };
+}
 /* Guarded rather than called outright: an older Safari without AbortSignal
    .timeout would throw a TypeError inside the try below, which the catch would
    dutifully report as a failed lookup — breaking prices entirely on the browsers
@@ -4904,7 +4960,7 @@ async function refreshPrices(quiet) {
      tickers on the wire under the reader's own API key. Three things wrong with
      that at once — it is an upload, on a page whose whole promise (and the
      privacy policy's wording) is that opening a link uploads nothing; it spends
-     the reader's 25-a-day free tier on holdings that aren't theirs; and it
+     the reader's own daily free tier on holdings that aren't theirs; and it
      overwrites the prices the sender chose to show, so the figures stop being
      the snapshot that was sent. */
   if (viewOnly) return;
@@ -4913,57 +4969,59 @@ async function refreshPrices(quiet) {
   let want = stalePrices();
   /* A quiet auto-refresh skips anything it has already had a go at, so a ticker
      that can never be freshened can't drive the render→refresh loop — and skips
-     anything Alpha Vantage has already answered "no price" for today, which is
-     what stops a mutual fund quietly spending a lookup on every page load for
-     ever. The manual button ignores both on purpose: pressing Refresh is a
-     request to try again NOW, whatever we think we already know. */
+     anything the supplier has already answered "no price" for today, which is
+     what stops an unquotable holding quietly spending a lookup on every page
+     load for ever. The manual button ignores both on purpose: pressing Refresh
+     is a request to try again NOW, whatever we think we already know. */
   if (quiet) want = want.filter(t => !priceAutoTried.has(t) && !noQuoteFresh(cache[t]));
-  if (!key) { if (!quiet) toast('Add an Alpha Vantage API key in ⚙ Preferences first'); return; }
+  if (!key) { if (!quiet) toast('Add a Twelve Data API key in ⚙ Preferences first'); return; }
   if (!want.length) { if (!quiet) toast('Every price is already less than six hours old'); return; }
   refreshingPrices = true;
   priceRunStartedAt = Date.now();
   const token = ++priceRunToken;
   /* Kept per ticker, not as a count: "updated 1 price" out of four leaves you
-     guessing which three didn't, and the reasons differ — Alpha Vantage's free
-     tier quotes shares and ETFs but not mutual funds, so a fund comes back
-     empty rather than as an error. The result is stored, so the Investments
-     tab can still show it after the toast has gone. */
+     guessing which three didn't, and the reasons still differ — a ticker that
+     isn't a security at all comes back as an unknown symbol rather than as an
+     outage. The result is stored, so the Investments tab can still show it
+     after the toast has gone. */
   /* `left` is what the batch never got to — the difference between "we asked and
-     Alpha Vantage had nothing" and "we never asked", which is the difference
-     between giving up on a ticker and coming back to it. */
+     there was nothing" and "we never asked", which is the difference between
+     giving up on a ticker and coming back to it. */
   const run = { at: Date.now(), updated: [], missing: [], limited: false,
-                throttled: false, failed: false, left: [] };
+                throttled: false, failed: false, badKey: false, left: [] };
   try {
     for (const ticker of want) {
-      const url = 'https://www.alphavantage.co/query?function=GLOBAL_QUOTE'
-        + `&symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(key)}`;
+      const url = 'https://api.twelvedata.com/quote'
+        + `?symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(key)}`;
       const res = await fetch(url, { signal: priceTimeout() });
-      if (!res.ok) { run.failed = true; break; }
-      const data = await res.json();
-      /* Alpha Vantage answers 200 with prose rather than an error status, and
-         the two messages mean opposite things: `Note` is "you're going too
-         fast", which clears in a minute, while `Information` is the daily
-         allowance gone or the key wrong, which doesn't. Treating both as the
-         daily cap told you to come back tomorrow when the real answer was to
-         press the button again in a minute. */
-      if (data.Note) { run.throttled = true; break; }
-      if (data.Information) { run.limited = true; break; }
+      /* Read even when the status is NOT ok, which is the whole reason this
+         supplier is easier to live with: a 401, a 404 and a 429 each say
+         exactly what went wrong in the body. Bailing on `res.ok` would flatten
+         all three back into one shrug, which is the position the old prose-in-
+         a-200 left us in. Only an unreadable body is a genuine failure. */
+      let data = null;
+      try { data = await res.json(); } catch (e) { data = null; }
+      if (!data) { run.failed = true; break; }
+      const verdict = classifyQuote(res.status, data);
+      if (verdict.kind === 'throttled') { run.throttled = true; break; }
+      if (verdict.kind === 'limited') { run.limited = true; break; }
+      if (verdict.kind === 'badKey') { run.badKey = true; break; }
+      if (verdict.kind === 'failed') { run.failed = true; break; }
       /* Marked only once there is a DETERMINATE answer — a price, or a genuine
          "no quote for that". A ticker the loop broke on was refused rather than
          answered, so it stays unmarked and a later pass asks again; that is the
-         difference between "Alpha Vantage says this fund has no quote" and
-         "Alpha Vantage wouldn't talk to us just then". */
+         difference between "there is no price for this" and "we weren't
+         answered just then". */
       priceAutoTried.add(ticker);
-      const price = parseFloat(data['Global Quote']?.['05. price']);
-      if (!Number.isFinite(price)) {
+      if (verdict.kind === 'noQuote') {
         run.missing.push(ticker);
         /* Recorded, not merely reported — see noQuoteFresh. This is the line
            that stops the free tier being spent on questions already answered. */
         cache[ticker] = { noQuote: true, ts: Date.now() };
         continue;
       }
-      cache[ticker] = { price: round2(price), ts: Date.now() };
-      run.updated.push({ ticker, price: round2(price) });
+      cache[ticker] = { price: verdict.price, ts: Date.now() };
+      run.updated.push({ ticker, price: verdict.price });
     }
   } catch (e) {
     /* An AbortError from the timeout arrives here like any other network
@@ -4987,7 +5045,7 @@ async function refreshPrices(quiet) {
   run.left = want.filter(t => !priceAutoTried.has(t));
   /* A run cut short holds the automatic pass off for a minute so it can't loop
      on the render below. The manual button ignores this and retries at once. */
-  if (run.throttled || run.limited || run.failed)
+  if (run.throttled || run.limited || run.failed || run.badKey)
     priceCoolOffUntil = Date.now() + PRICE_COOL_OFF_MS;
   writeQuoteCache(cache);
   try { localStorage.setItem(PRICE_RUN, JSON.stringify(run)); } catch (e) {}
@@ -5005,11 +5063,15 @@ async function refreshPrices(quiet) {
   const rest = run.left.length
     ? ` ${plural(run.left.length, 'holding')} still to do.` : '';
   if (run.throttled) toast((named ? `Updated ${named}. ` : '')
-    + `Alpha Vantage only answers a few lookups a minute.${rest} `
+    + `Twelve Data only answers eight lookups a minute.${rest} `
     + 'Press Refresh again in a minute for the rest.');
   else if (run.limited) toast(named
-    ? `Updated ${named}, then Alpha Vantage stopped answering for today`
-    : 'Alpha Vantage says no more lookups today (or the key is wrong)');
+    ? `Updated ${named}, then Twelve Data stopped answering for today`
+    : 'Twelve Data says no more lookups today — the daily allowance resets tomorrow');
+  /* Said plainly, because now we actually know. The old supplier answered a
+     mistyped key and a spent allowance identically, so this had to be a hedge
+     tacked onto the message above. */
+  else if (run.badKey) toast('Twelve Data rejected the API key — check it in ⚙ Preferences');
   else if (run.failed) toast((named ? `Updated ${named}. ` : '')
     + `The price lookup couldn't be reached.${rest} Try Refresh again shortly.`);
   else if (run.updated.length && run.missing.length)
@@ -5569,8 +5631,9 @@ const EDITORS = {
         hint: 'Used by a dividend row with no rate of its own.' },
       { key: 'retirementReturnAnnual', label: 'Retirement return %/yr', type: 'percent',
         hint: 'What the retirement projection assumes.' },
-      { key: 'avKey', label: 'Alpha Vantage key', type: 'text', wide: true,
-        hint: 'For share-price lookups. Stays on this device — never synced, never in a backup.' },
+      { key: 'priceApiKey', label: 'Twelve Data key', type: 'text', wide: true,
+        hint: 'For holding-price lookups — shares, ETFs and mutual funds. Free from '
+            + 'twelvedata.com. Stays on this device — never synced, never in a backup.' },
     ],
     get: () => ({ currency: state.settings.currency || 'USD',
                   filingStatus: state.settings.filingStatus || 'single',
@@ -5581,7 +5644,7 @@ const EDITORS = {
                   givingFund: !!state.settings.givingFund,
                   midTermRateAnnual: state.settings.midTermRateAnnual ?? 0.03,
                   retirementReturnAnnual: state.settings.retirementReturnAnnual ?? 0.07,
-                  avKey: priceKey() }),
+                  priceApiKey: priceKey() }),
     save(ds, v) {
       const code = (v.currency || 'USD').trim().toUpperCase();
       /* Intl accepts any well-formed 3-letter code and renders unknown ones
@@ -5609,7 +5672,7 @@ const EDITORS = {
       if (v.midTermRateAnnual !== null) state.settings.midTermRateAnnual = v.midTermRateAnnual;
       if (v.retirementReturnAnnual !== null)
         state.settings.retirementReturnAnnual = v.retirementReturnAnnual;
-      setPriceKey(v.avKey);
+      setPriceKey(v.priceApiKey);
     },
   },
 
@@ -7288,7 +7351,7 @@ document.querySelectorAll('.tab').forEach(tab => {
    The payload is a TRIMMED COPY, never `state` itself: only the tabs that were
    picked, only the branches those tabs actually read, and only as many years as
    were asked for. Nothing identifying goes in — no email, no sync uid, and
-   never the Alpha Vantage key, which lives in its own localStorage key and is
+   never the price-lookup key, which lives in its own localStorage key and is
    not part of the state at all. This is the one feature in the app that hands
    real figures to somebody else, so read the sensitivity rules at the top of
    CLAUDE.md before widening what it sends.
@@ -8114,7 +8177,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   /* Price lookup: the pure predicates only. What the free tier is spent on and
      which of a run's complaints are still true are both decided here, and both
      were got wrong in ways that only showed up a day later. */
-  quoteFresh, noQuoteFresh, runIsToday, runIsRecent,
+  quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote,
   fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
