@@ -252,6 +252,14 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
 .grid-fields > div > label.field { min-height: 2.5em; margin-bottom: 0; }
 .grid-fields > div > input, .grid-fields > div > select { width: 100%; height: 40px; }
 .grid-fields > div.wide { grid-column: 1 / -1; }
+/* A figure the dialog WORKS OUT rather than asks for. Given the same 40px an
+   input occupies so it sits on the row with the boxes either side instead of
+   reading as a stray line of prose, and tabular figures so it doesn't jiggle
+   as you type. No border and no box: nothing here is yours to edit. */
+.grid-fields > div > .field-readout {
+  margin: 0; min-height: 40px; display: flex; align-items: center;
+  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: var(--text); }
 /* A field with an action button. The button sits UNDER its box rather than
    beside it: alongside, it would eat into that one column and leave its input
    visibly shorter than the boxes either side, which is the raggedness this
@@ -5167,7 +5175,9 @@ function buildFields(fields, values, link) {
     const label = document.createElement('label');
     label.className = 'field';
     label.textContent = f.label;
-    label.htmlFor = `rf-${f.key}`;
+    /* A readout is a <p>, which `for` cannot point at — it names its own label
+       with aria-labelledby instead, the way `checks` does with its group. */
+    if (f.type !== 'readout') label.htmlFor = `rf-${f.key}`;
     label.id = `rf-${f.key}-lbl`;
     cell.appendChild(label);
     let input;
@@ -5213,6 +5223,15 @@ function buildFields(fields, values, link) {
          bottom of its cell, which made it drift up or down with however many
          lines its hint happened to run to. */
       input.style.cssText = 'width:20px;height:20px;margin-top:10px;align-self:flex-start';
+    } else if (f.type === 'readout') {
+      /* Not an input at all: a figure the dialog derives and the reader never
+         types. It carries nothing into save() — `readFields` skips it — and it
+         is filled by `link`, like any other derived box, so it keeps up as you
+         type. */
+      input = document.createElement('p');
+      input.className = 'field-readout';
+      input.setAttribute('aria-labelledby', `rf-${f.key}-lbl`);
+      input.textContent = values[f.key] ?? '';
     } else if (f.type === 'note') {
       input = document.createElement('textarea');
       input.rows = 2;
@@ -5334,6 +5353,9 @@ function applyFieldVisibility(fields) {
 function readFields(fields) {
   const out = {};
   for (const f of fields) {
+    /* Derived on screen and never stored — it has no `.value` to read, and
+       asking for one would throw. */
+    if (f.type === 'readout') continue;
     const el = F(`rf-${f.key}`);
     if (f.type === 'checks') {
       out[f.key] = [...el.querySelectorAll('input:checked')].map(b => b.value);
@@ -6057,8 +6079,48 @@ const EDITORS = {
         { key: 'ticker', label: 'Ticker', type: 'text' },
         { key: 'shares', label: 'Shares', type: 'number' },
         { key: 'price', label: 'Price', type: 'money', ...(hint ? { hint } : {}) },
-        { key: 'lookup', label: 'Look its price up automatically', type: 'check' },
+        /* The dialog opens by saying value is shares × price and then never
+           showed it. It is the one figure this row exists to produce, and the
+           only place it appeared was the table underneath — which is no help
+           while you are part-way through changing the numbers it comes from. */
+        { key: 'value', label: 'Value', type: 'readout' },
+        /* Fills the row, and earns it: how much of the account this one holding
+           is, is the question you actually have when looking at a list of them,
+           and it was answerable only by doing the arithmetic yourself off the
+           table. */
+        { key: 'share', label: 'Share of account', type: 'readout' },
+        /* "…automatically" measured 193px into a 191px column, so the label
+           wrapped to a second line, outgrew `min-height: 2.5em` and pushed its
+           checkbox below the two figures beside it. The paragraph above already
+           explains when to switch it off; two words are not worth a ragged
+           row. */
+        { key: 'lookup', label: 'Look its price up', type: 'check' },
       ];
+    },
+    /* Keeps both readouts in step as you type rather than only on open —
+       changing the shares is exactly when you want to see what it comes to.
+       Reads the FORM, never the state, so nothing is committed until Save. */
+    link(key, ds) {
+      const out = F('rf-value');
+      if (!out) return;
+      const shares = parseFloat(F('rf-shares').value);
+      const price = parseMoney(F('rf-price').value);
+      /* An em dash, not $0.00: a half-filled row has no value yet, and a
+         confident zero is a different claim from "you haven't said". */
+      const mine = (Number.isFinite(shares) && Number.isFinite(price))
+        ? shares * price : null;
+      out.textContent = mine === null ? '—' : fmtMoney(round2(mine));
+      /* Measured against the pane as it WOULD be once saved: every other row as
+         stored, plus whatever is in the boxes right now. A share worked out
+         against the old total would disagree with the table the moment you
+         changed anything, which is the one moment it is being read. */
+      const idx = ds.idx === undefined ? -1 : +ds.idx;
+      let total = mine === null ? 0 : mine;
+      (holdingList(ds.list) || []).forEach((h, i) => {
+        if (i !== idx) total += (Number(h.shares) || 0) * (Number(h.price) || 0);
+      });
+      F('rf-share').textContent = (mine === null || total <= 0) ? '—'
+        : `${(mine / total * 100).toFixed(1)}%`;
     },
     get: (ds) => {
       const h = holdingList(ds.list)[+ds.idx];

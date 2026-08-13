@@ -370,6 +370,26 @@ did nothing.
 computed from. `coerceShape` deletes both keys on load so they stop riding
 along in every backup; don't reintroduce them. (`side.retirementAccounts` is
 the real retirement list and is unrelated despite the near-identical name.)
+A field spec may be **`type: 'readout'`** — a figure the dialog WORKS OUT and
+the reader never types. It renders as a `<p class="field-readout">` rather than
+an input, so `readFields` skips it (a `<p>` has no `.value` and asking for one
+throws) and nothing about it reaches `save()`; it is filled by `link` like any
+other derived box, so it keeps up as you type. Its label uses
+`aria-labelledby`, not `for`, because `for` cannot point at a `<p>`. It obeys
+the rule that computed values are never persisted — this is the read-only end of
+the same principle the balance branch applies with placeholders.
+The **holding editor** uses two: Value (shares × price) and Share of account.
+The dialog opened by saying "value is shares × price" and then never showed it,
+and the second readout is measured against the pane as it WOULD be once saved —
+every other row as stored, plus whatever is in the boxes right now — because a
+share worked out against the old total disagrees with the table at the exact
+moment it is being read. Both show an em dash, never `$0.00`, while a box is
+empty: a half-filled row has no value yet, and a confident zero is a different
+claim from "you haven't said". Its lookup checkbox is labelled "Look its price
+up", NOT "…automatically": the longer label measured 193px into a 191px column,
+wrapped, outgrew `label.field`'s `min-height: 2.5em` and pushed its checkbox
+below the two figures beside it. Watch that whenever a label is lengthened in a
+three-column dialog.
 A field spec may carry an **`action`** — a small button beside its box for a
 move you'd otherwise make by hand across two fields, like the trip line's
 "✓ Paid" folding Still due into Paid. It edits the FORM, like `link` does, so

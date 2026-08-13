@@ -126,7 +126,8 @@ included — treat those the way you treat the figures.
   question at every visit. Prices top themselves up automatically when they are
   more than six hours old; the **Refresh prices** button ignores that and
   fetches everything on the spot. Open a holding and its Price box says where
-  that number came from — fetched and when, typed over a fetched one, or never
+  that number came from — plus what the holding is worth and how much of the
+  account it is, both keeping up as you type — — fetched and when, typed over a fetched one, or never
   looked up — since the line above the tables can only report the oldest fetch
   across the whole table.
 - **Vacations** — per-trip cost tables grouped into one row per year, newest
