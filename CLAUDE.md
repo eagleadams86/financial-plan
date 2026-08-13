@@ -738,7 +738,8 @@ Roth MAGI) and prefills from `side.comp` on first open. App-wide preferences
 since Intl renders unknown codes literally rather than throwing — PTO
 default, row sort, the paycheck-rule toggle, the dividend fallback rate, the
 assumed retirement return, and the price-lookup key) live behind the header's
-⚙ button; `buildMoneyFormats()` rebuilds the formatters on every render.
+Preferences button; `buildMoneyFormats()` rebuilds the formatters on every
+render.
 **Every note a year holds is gathered at its foot** by `notesOfYear(st, y)` —
 row notes, cell notes, the per-part notes of a split month, notes on a stated
 balance, and the `extraNotes` that arrived with the import (whose `where`
