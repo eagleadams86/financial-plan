@@ -133,6 +133,15 @@ family names as well as balances.
   or to the current month when an account is added — and deliberately has NO
   editor field: when tracking began is a fact about the data, and editing it
   would either blank months that hold figures or invent months that never did.
+- **An account with no balance this month says WHY** (`noBalanceReason`) —
+  "closed Dec 2022", "starts Mar 2027", or "not tracked yet". They are three
+  different facts and were one sentence: a closed account reading "not tracked
+  yet" says the opposite of what happened, since it was tracked for years and
+  then stopped. Closed ones then read as history rather than as something you
+  forgot to fill in — which matters more now that merging leaves the closed
+  accounts standing alone in the list. `until <= month` counts as closed: the
+  only way to reach the check in the closing month itself is to have no figure
+  in it. Months compare as strings, which `YYYY-MM` is built for.
 - **Accounts sharing an exact name are ONE account told over the years**
   (`mergeAccountsByName`). The history import made an account per distinct row
   NAME per sheet, so one real brokerage account arrived as four ids —
