@@ -133,6 +133,42 @@ family names as well as balances.
   or to the current month when an account is added — and deliberately has NO
   editor field: when tracking began is a fact about the data, and editing it
   would either blank months that hold figures or invent months that never did.
+- **Accounts sharing an exact name are ONE account told over the years**
+  (`mergeAccountsByName`). The history import made an account per distinct row
+  NAME per sheet, so one real brokerage account arrived as four ids —
+  "Individual TOD", "Bridge", "Invested", "Holdings" — as the spreadsheet's
+  wording drifted, and the Who Owns What list read as several identical rows
+  each holding a few years. Renaming them to match is how you say they are the
+  same thing. Rules that must hold:
+  - **It is a SUCCESSION, not a sum.** No month (nor a year's seed) may be
+    claimed by two members; where one is, the whole group is left alone and the
+    caller is told how many months were in the way. A balance is a fact and
+    dropping one to tidy a list is not a trade worth making. This is what makes
+    the function safe to run over any state, a restored backup included.
+  - **The survivor is the latest incarnation** — still open beats closed, a
+    later `until` beats an earlier one. That leaves `until` already correct
+    (sorted descending) and means most references need no rewriting, because the
+    live account is the one other things point at. `since` widens to the
+    earliest, and a member with no `since` outranks any date. `hub` carries
+    across: it is a fact about the account, not about the row that won.
+  - **Every reference moves**: `creditTo`, `divTo`, a category's `transferTo`,
+    and `goal.accounts` (deduplicated — a goal naming both must not list the
+    survivor twice). Missing one leaves a row paying into an account that no
+    longer exists, which reads on screen as money vanishing.
+  - It runs **once, under the schema 5 gate in `migrate`** — NOT in
+    `coerceShape`, for the same reason schema 3's row classification isn't:
+    coerceShape runs on every load and this overwrites something you can set by
+    hand, so two accounts you deliberately gave one name would be re-merged the
+    moment you split them. From then on the **account editor's rename** does the
+    job, at the point where you actually said they were the same, and returns a
+    toast naming what moved — a merge that silently swallowed four years of
+    balances would be indistinguishable from losing them.
+  - Verified against Charlie's real data before shipping (2026-08-13): 17
+    accounts to 10, all 191 stored figures preserved by name/month, and **all
+    402 computed balances across eight years identical** — including 2027's
+    closing total. Re-run that comparison if this is ever touched: the reason it
+    matters is that a live year opens on the prior December, so moving a
+    December balance onto a live account's id could move the year after it.
 - **The household is a way of READING the plan, never an input to it.**
   `state.people` is a top-level list beside `goals` (not in `settings`, which is
   the app-preferences bag) — `{id, name, role: 'adult'|'child', birth?, retireAge?}`.

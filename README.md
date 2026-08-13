@@ -35,7 +35,11 @@ included — treat those the way you treat the figures.
   each with its own name, growth rate, a choice of which account that interest
   is paid into, and a start that follows your data: an account is tracked from the first month
   you put a figure in, earlier months stay blank rather than zero, and typing
-  into one of them moves the start back. The current year is live: months you've
+  into one of them moves the start back. Giving two accounts **exactly the same
+  name** says they are the same account under different labels — years of
+  history imported under drifting names fold into one row, carrying every
+  balance with them. It refuses if both hold a figure in the same month, since
+  that would mean losing one. The current year is live: months you've
   entered are actuals, everything after them is an estimate that recomputes the
   way the spreadsheet's formulas did — **the account balances included**, so the
   current month reads as the estimate it is until you mark it entered, rather

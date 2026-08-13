@@ -157,7 +157,7 @@ t('a plan from before the household arrives with an empty one, nothing invented'
     settings: { accounts: [{ id: 'cash', name: 'Cash', hub: true }, { id: 'mid', name: 'Savings' }] },
     years: { '2026': { kind: 'grid', startMonth: '2026-01', monthCount: 12 } }
   }));
-  eq(d.schema, 4);
+  eq(d.schema, 5);
   eq(d.people, []);
   eq(d.settings.filingStatus, 'single');
   eq(d.settings.accounts.every(a => a.owner === undefined), true,
@@ -1716,7 +1716,7 @@ t('the reclassification runs once and then leaves you alone', () => {
   const first = H.migrate(H.coerceShape({ schema: 1, years: { '2015': year() } }));
   eq(first.years['2015'].categoryTotals[0].isBalance, undefined, 'Mortgage is a flow now');
   eq(first.years['2015'].categoryTotals[1].isBalance, true);
-  eq(first.schema, 4, 'and it comes forward to the current schema');
+  eq(first.schema, 5, 'and it comes forward to the current schema');
   /* now flip one by hand, as the row editor would, and load again */
   first.years['2015'].categoryTotals[0].isBalance = true;
   const second = H.migrate(H.coerceShape(JSON.parse(JSON.stringify(first))));
@@ -1989,6 +1989,73 @@ t('a pane with no holdings still survives the shape check', () => {
   const d = H.coerceShape({ side: { portfolios: [{ id: 'x', name: 'Brokerage' }] } });
   eq(d.side.portfolios[0].name, 'Brokerage');
   eq(Array.isArray(d.side.portfolios[0].rows), true);
+});
+
+group('Accounts sharing a name are one account');
+/* The history import made an account per distinct row NAME per sheet, so one
+   real brokerage account arrived as four ids as the spreadsheet's wording
+   drifted. Renaming them to match is how you say they are the same thing. */
+const twoYears = (a, b) => ({
+  settings: { accounts: [
+    { id: 'old', name: 'Savings', until: '2021-12', creditTo: 'old', divTo: 'old' },
+    { id: 'new', name: 'Savings', creditTo: 'new', divTo: 'new' }] },
+  years: {
+    '2021': { kind: 'grid', model: 'pinned', startMonth: '2021-01', monthCount: 12,
+              overrides: a, seeds: {}, categories: [], cells: {} },
+    '2022': { kind: 'grid', startMonth: '2022-01', monthCount: 12,
+              overrides: b, seeds: {}, categories: [], cells: {} } },
+});
+t('a succession of same-named accounts becomes one, keeping every figure', () => {
+  const st = twoYears({ 'old|2021-06': { v: 100 }, 'old|2021-12': { v: 250 } },
+                      { 'new|2022-06': { v: 400 } });
+  const rep = H.mergeAccountsByName(st);
+  eq(st.settings.accounts.length, 1, 'one account left');
+  eq(st.settings.accounts[0].id, 'new', 'the still-open one survives, not the closed one');
+  eq(st.settings.accounts[0].until, undefined, 'and it is open, because the survivor was');
+  eq(st.years['2021'].overrides['new|2021-06'].v, 100, 'the old balances moved across');
+  eq(st.years['2021'].overrides['new|2021-12'].v, 250);
+  eq(st.years['2021'].overrides['old|2021-06'], undefined, 'and left nothing behind');
+  eq(st.years['2022'].overrides['new|2022-06'].v, 400, 'the survivor keeps its own');
+  eq(rep[0].moved, 2);
+});
+t('a month claimed by both refuses the merge outright', () => {
+  /* A balance is a fact. Dropping one to tidy a list is not a trade worth
+     making, so an overlap leaves the whole group alone. */
+  const st = twoYears({ 'old|2021-06': { v: 100 }, 'new|2021-06': { v: 999 } }, {});
+  const rep = H.mergeAccountsByName(st);
+  eq(st.settings.accounts.length, 2, 'both survive');
+  eq(st.years['2021'].overrides['old|2021-06'].v, 100, 'and neither figure moved');
+  eq(st.years['2021'].overrides['new|2021-06'].v, 999);
+  eq(rep[0].refused, 1, 'and it says how many months were in the way');
+});
+t('every reference to an absorbed account is repointed', () => {
+  /* Missing one would leave a row paying into an account that no longer
+     exists, which reads on screen as money vanishing. */
+  const st = twoYears({ 'old|2021-06': { v: 1 } }, {});
+  st.settings.accounts[1].creditTo = 'old';
+  st.years['2022'].categories = [{ id: 'x', name: 'X', role: 'transfer', transferTo: 'old' }];
+  st.goals = [{ id: 'g', name: 'G', accounts: ['old', 'new'] }];
+  H.mergeAccountsByName(st);
+  eq(st.settings.accounts[0].creditTo, 'new');
+  eq(st.years['2022'].categories[0].transferTo, 'new');
+  eq(st.goals[0].accounts, ['new'], 'and a goal naming both does not list it twice');
+});
+t('different names are left well alone, and running twice changes nothing', () => {
+  const st = twoYears({ 'old|2021-06': { v: 100 } }, { 'new|2022-06': { v: 400 } });
+  st.settings.accounts[0].name = 'Old Savings';
+  eq(H.mergeAccountsByName(st).length, 0, 'nothing to do');
+  eq(st.settings.accounts.length, 2);
+  st.settings.accounts[0].name = 'Savings';
+  H.mergeAccountsByName(st);
+  const once = JSON.stringify(st);
+  H.mergeAccountsByName(st);
+  eq(JSON.stringify(st), once, 'a second pass is a no-op');
+});
+t('the hub survives being merged into', () => {
+  const st = twoYears({ 'old|2021-06': { v: 1 } }, {});
+  st.settings.accounts[0].hub = true;          // the closed one was the hub
+  H.mergeAccountsByName(st);
+  eq(st.settings.accounts[0].hub, true, 'hub is a fact about the account, not the row that won');
 });
 
 group('The Refresh button ignores the six-hour cache');

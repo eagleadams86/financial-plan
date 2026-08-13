@@ -1293,7 +1293,7 @@ const DEFAULT_ACCOUNTS = [
 
 function blankState() {
   return {
-    schema: 4,
+    schema: 5,
     settings: {
       midTermRateAnnual: 0.03,   // dividend estimate: rate/12 × prior (cash+mid)
       longTermRateAnnual: 0.07,  // legacy: seeds the Investments rate on old data
@@ -1870,6 +1870,114 @@ function summaryRowIsFlow(items) {
    changes that can be spotted from the data itself live in coerceShape and run
    on every load; this is for the ones that must happen ONCE, because they
    overwrite something you could reasonably have set by hand afterwards. */
+/* ── Accounts that share a name are one account told over the years ─────────
+   The history import made an account per distinct row NAME per sheet, so the
+   same real account arrived under a different id each time the spreadsheet's
+   wording drifted — "Individual TOD", "Bridge", "Invested", "Holdings" are one
+   brokerage account described four ways. Renaming them to match is the natural
+   way to say so, and until now it only made the Who Owns What list read as
+   several identical rows, each holding a few years and "not tracked yet" for
+   the rest.
+
+   The merge is a SUCCESSION, not a sum: these accounts follow one another
+   through time, so no month may be claimed by two of them. Where one is, the
+   group is left completely alone — a balance is a fact and dropping one to
+   tidy a list is not a trade worth making. That check is what makes this safe
+   to run over any state, including a restored backup.
+
+   Pure over the state it is handed, so the whole thing is testable. */
+function mergeAccountsByName(st) {
+  const accounts = (st.settings && st.settings.accounts) || [];
+  const years = Object.entries(st.years || {});
+  const byName = new Map();
+  for (const a of accounts) {
+    const key = (a.name || '').trim();
+    if (!key) continue;
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(a);
+  }
+  const report = [];
+  const dropped = new Set();
+  for (const [name, group] of byName) {
+    if (group.length < 2) continue;
+    /* The survivor is the LATEST incarnation — still open beats closed, and a
+       later close beats an earlier one. It is the one other things are most
+       likely to point at (the live "Long-term (VOO)" is named by two transfer
+       rows and a goal), so keeping it means most references need no rewriting
+       at all. Sorting descending also leaves `until` already correct: the
+       merged account closes when the last of them did, or never. */
+    const survivor = group.slice().sort((a, b) =>
+      (b.until || '9999-99').localeCompare(a.until || '9999-99'))[0];
+    const others = group.filter(a => a !== survivor);
+    const ids = new Set(others.map(a => a.id));
+
+    /* One slot, one owner. Seeds count: a year's opening balance is as much a
+       stated figure as a month is. */
+    const owners = new Map();
+    const claim = (slot, id) => {
+      if (!owners.has(slot)) owners.set(slot, new Set());
+      owners.get(slot).add(id);
+    };
+    for (const [y, yr] of years) {
+      for (const k of Object.keys(yr.overrides || {}))
+        if (group.some(a => a.id === k.slice(0, k.indexOf('|'))))
+          claim(`${y}|${k.slice(k.indexOf('|') + 1)}`, k.slice(0, k.indexOf('|')));
+      for (const k of Object.keys(yr.seeds || {}))
+        if (group.some(a => a.id === k)) claim(`${y}|seed`, k);
+    }
+    const clashes = [...owners.entries()].filter(([, s]) => s.size > 1).map(([slot]) => slot);
+    if (clashes.length) { report.push({ name, refused: clashes.length }); continue; }
+
+    let moved = 0;
+    for (const [, yr] of years) {
+      for (const field of ['overrides', 'balAdjust']) {
+        const map = yr[field];
+        if (!map) continue;
+        for (const k of Object.keys(map)) {
+          const bar = k.indexOf('|');
+          if (!ids.has(k.slice(0, bar))) continue;
+          map[survivor.id + k.slice(bar)] = map[k];
+          delete map[k];
+          moved++;
+        }
+      }
+      for (const k of Object.keys(yr.seeds || {})) {
+        if (!ids.has(k)) continue;
+        yr.seeds[survivor.id] = yr.seeds[k];
+        delete yr.seeds[k];
+        moved++;
+      }
+    }
+    /* Every way one account can name another. Missing one would leave a row
+       paying into an account that no longer exists, which reads as money
+       vanishing. */
+    for (const a of accounts) {
+      if (ids.has(a.creditTo)) a.creditTo = survivor.id;
+      if (ids.has(a.divTo)) a.divTo = survivor.id;
+    }
+    for (const [, yr] of years)
+      for (const c of (yr.categories || []))
+        if (ids.has(c.transferTo)) c.transferTo = survivor.id;
+    for (const g of (st.goals || []))
+      if (Array.isArray(g.accounts))
+        g.accounts = [...new Set(g.accounts.map(id => ids.has(id) ? survivor.id : id))];
+
+    /* The merged account began when the EARLIEST of them did. A member with no
+       `since` was there from the start, which outranks any date. `hub` carries
+       across for the same reason a reference does — it is a fact about the
+       account, not about the row that happened to survive. */
+    if (group.every(a => a.since)) survivor.since = group.map(a => a.since).sort()[0];
+    else delete survivor.since;
+    if (group.some(a => a.hub)) survivor.hub = true;
+
+    for (const id of ids) dropped.add(id);
+    report.push({ name, kept: survivor.id, absorbed: [...ids], moved });
+  }
+  if (dropped.size)
+    st.settings.accounts = accounts.filter(a => !dropped.has(a.id));
+  return report;
+}
+
 function migrate(parsed) {
   if ((parsed.schema || 1) < 3) {
     /* Once only: after this you can flip any row yourself in its editor, and a
@@ -1891,6 +1999,16 @@ function migrate(parsed) {
      one-way migration is needed, this is where it goes, and it has to be able
      to tell the two apart. */
   if ((parsed.schema || 1) < 4) parsed.schema = 4;
+  /* Schema 5 folds the same-named accounts together, ONCE. It belongs here and
+     not in `coerceShape` for the reason schema 3's row classification does:
+     coerceShape runs on every load, and this overwrites something you can set
+     by hand — two accounts you deliberately gave the same name would be merged
+     again the moment you split them apart. A rename does the same job from then
+     on, at the point where you actually said they were the same thing. */
+  if ((parsed.schema || 1) < 5) {
+    mergeAccountsByName(parsed);
+    parsed.schema = 5;
+  }
   return parsed;
 }
 
@@ -5829,6 +5947,22 @@ const EDITORS = {
            Joint in a household that has since been emptied still says Joint —
            saving a dialog that never asked the question must not answer it. */
         if (peopleOf(state).length) a.owner = validOwner(state, v.owner);
+        /* Renaming an account to exactly match another IS the way you say the
+           two are the same account under different names, which is what the
+           history import leaves you needing to say. Doing it here rather than
+           on every load means it happens when you asked for it and never
+           behind your back — and it reports what moved, because a merge that
+           silently swallowed four years of balances would be indistinguishable
+           from losing them. A month claimed by both refuses instead. */
+        const done = mergeAccountsByName(state).filter(r => r.name === a.name);
+        const refused = done.find(r => r.refused);
+        /* No esc(): a returned string is toasted through textContent, and
+           escaping here would put "M&amp;T Checking" on screen. */
+        if (refused) return `Kept "${a.name}" separate — ${plural(refused.refused, 'month')} `
+          + 'would have had a balance in both. Nothing was changed.';
+        const did = done.find(r => r.absorbed && r.absorbed.length);
+        if (did) return `Merged ${plural(did.absorbed.length + 1, 'account')} named `
+          + `"${a.name}" into one — ${plural(did.moved, 'figure')} moved across.`;
         return;
       }
       let id = slugJs(v.name), n = 2;
@@ -8314,6 +8448,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
   fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
+  mergeAccountsByName,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
   normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,
