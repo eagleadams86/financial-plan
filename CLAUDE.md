@@ -145,7 +145,12 @@ family names as well as balances.
   re-anchoring (a pinned balance is already the correction — later months chain
   from it). Only on a LIVE year: a pinned history year computes nothing to
   disagree with, so `editing.computed` is left unset and the note never appears;
-  it never appears on a category cell either. Colourless by rule — the size of
+  it never appears on a category cell either. **Nor on a month that already
+  carries an override**, and that exclusion is the subtle one: a stated month's
+  "computed" balance IS the override, so the note compared the figure with
+  itself and reported perfect agreement. It shipped saying "Matches the plan
+  exactly" over one of Charlie's Venmo months whose stated balance was $40
+  adrift from every row feeding it — agreement with yourself is not a check. Colourless by rule — the size of
   the gap is the signal.
 - **`passthrough` is how a float is modelled, and the role picker now says so.**
   The generic role already covered it; what was missing was any hint that
