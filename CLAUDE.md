@@ -420,6 +420,57 @@ a request loop, and **they are not interchangeable**:
   after a batch ends throttled, capped or failed. That is what actually stops
   the render→refresh loop, which is what frees `priceAutoTried` to be honest
   about what was really asked. The manual Refresh button ignores both.
+- **A `noQuote` marker in the quote cache** is the third, and the one that
+  actually protects the 25-a-day allowance. `priceAutoTried` dies with the page,
+  so a holding that can NEVER be quoted — a mutual fund on the free tier, a row
+  that isn't a security — was asked about again on every page load, spending a
+  lookup each time and never getting anything back. A determinate "no price"
+  now writes `{ noQuote: true, ts }` into `fin-quotes` beside the real prices,
+  and the quiet pass skips it for `NO_QUOTE_TTL_MS` (a day, so a fund that gets
+  covered later is still retried). The manual button ignores it like the others.
+  Two consequences to keep: `quoteFresh` must never read a marker as a price
+  (it has none), and `pricesAsOf()` counts only entries that hold a price —
+  a marker is stamped with the moment we ASKED, so letting it through dates the
+  whole "prices as of" line from the last time a lookup failed.
+
+**The refresh latch is a clock, not a flag, and that is not a refinement.**
+`refreshingPrices` guards against two runs at once, but it was released only on
+the line after the awaited fetch loop — and a `fetch` that never settles never
+reaches any release at all: the await simply parks, nothing throws, so the latch
+stayed true for the life of the page. From that moment `refreshPrices()` returned
+at its own first line and **every press of ↻ Refresh did nothing, silently**,
+while the bar went on showing the last completed run — which is how a daily-cap
+message from the previous morning came to read as a live refusal. Three things
+fix it and all three are needed:
+- `AbortSignal.timeout(PRICE_TIMEOUT_MS)` on the request, guarded for browsers
+  without it (an outright call would throw into the catch and break lookups
+  entirely on the oldest browsers). This handles the ordinary case only.
+- **The guard expires on wall-clock time** (`priceRunStartedAt` +
+  `PRICE_RUN_STALE_MS`). This is the load-bearing one, because the timer above
+  is exactly what cannot be trusted here: `AbortSignal.timeout` is throttled in
+  a hidden document and may not fire while the tab is in the background or the
+  laptop is asleep — the very situation that strands a request. Nothing has to
+  fire for the button to come back.
+- **`priceRunToken`**, so a stranded run that finally wakes hours later releases
+  nothing it no longer owns and publishes nothing at all — it still holds its own
+  `cache` snapshot and tally, and writing either would clobber whatever ran since.
+A manual press during a genuine run now toasts instead of returning in silence:
+a button that does nothing without saying so is how this hid for a whole day.
+
+**The two failure notes are aged; the third is not.** `runIsToday` gates the
+daily-cap note (the allowance resets each day, so yesterday's cap says nothing
+about today) and `runIsRecent` gates the throttle note (it clears in about a
+minute). The `missing` note has no clock on purpose — that a fund has no quote
+is a durable fact about the fund, not news about this minute.
+
+**There is no free replacement for mutual funds, and it has been checked.**
+Yahoo's chart endpoint quotes them accurately with no key, but sends no
+`Access-Control-Allow-Origin` at all, so no browser page can read it — verified,
+not assumed. Stooq has no CORS either. Anything that works from a page needs a
+key (Twelve Data does send CORS headers and allows 800 calls a day, but its
+mutual-fund coverage on the free plan is unconfirmed). A proxy would put the
+holdings on somebody else's server and add a CSP entry, which is a bad trade for
+a NAV that moves once a day. Hand-typed fund prices are the deliberate answer.
 
 `Note` and `Information` mean opposite things and must stay apart: `Note` is
 Alpha Vantage's frequency limit, which clears in about a minute (`run.throttled`

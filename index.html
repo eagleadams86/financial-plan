@@ -3886,15 +3886,15 @@ function renderInvestments() {
     Alpha Vantage's free tier quotes shares and ETFs but not mutual funds, so those
     stay as you typed them. If a row isn't a security at all — a cash balance, say —
     open it and turn its price lookup off so it stops being asked for.</p>` : ''}
-  ${run && run.throttled ? `<p class="sub" style="margin:-6px 0 14px"><strong>Alpha Vantage
+  ${run && run.throttled && runIsRecent(run, 10 * 60 * 1000) ? `<p class="sub" style="margin:-6px 0 14px"><strong>Alpha Vantage
     only answers a few lookups a minute.</strong> ${run.left && run.left.length
       ? `${plural(run.left.length, 'holding')} still to fetch — press Refresh again in a
          minute and it carries on from where it stopped.`
       : 'Press Refresh again in a minute for anything still out of date.'}
     Nothing already fetched is lost.</p>` : ''}
-  ${run && run.limited ? `<p class="sub" style="margin:-6px 0 14px"><strong>Alpha Vantage
+  ${run && run.limited && runIsToday(run) ? `<p class="sub" style="margin:-6px 0 14px"><strong>Alpha Vantage
     stopped answering.</strong> The free tier allows 25 lookups a day; the prices already
-    fetched are kept.</p>` : ''}`;
+    fetched are kept. The allowance resets each day.</p>` : ''}`;
   const panes = (s.portfolios || []).map(pf => `<div class="card">
       <h2>${esc(pf.name)} <button class="h-edit" data-edit="portfolio"
         data-id="${esc(pf.id)}" title="Rename this account, reorder it, or delete it">✎ Edit</button></h2>
@@ -4781,6 +4781,18 @@ function writeQuoteCache(c) {
 }
 const quoteFresh = (q) => q && typeof q.price === 'number'
   && (Date.now() - (q.ts || 0)) < QUOTE_TTL_MS;
+/* A ticker Alpha Vantage ANSWERED about and had no price for — a mutual fund on
+   the free tier, or a row that isn't a security at all. It is written into the
+   same cache a price would be, because the alternative is asking again on every
+   page load for ever: `priceAutoTried` dies with the page, so a holding that can
+   never be quoted spent one of the 25 daily lookups each time the tab was
+   opened and never got anything back for it. That, not heavy use, is how the
+   allowance really goes. Its own longer TTL, so a fund Alpha Vantage starts
+   covering — or a ticker typed properly after a typo — is retried tomorrow
+   rather than written off for good. */
+const NO_QUOTE_TTL_MS = 24 * 60 * 60 * 1000;
+const noQuoteFresh = (q) => !!q && q.noQuote === true
+  && (Date.now() - (q.ts || 0)) < NO_QUOTE_TTL_MS;
 
 /* Every ticker across the three holdings tables, deduplicated. */
 const priceLists = () => [
@@ -4799,18 +4811,48 @@ const lastPriceRun = () => {
   try { return safeParse(localStorage.getItem(PRICE_RUN) || 'null'); }
   catch (e) { return null; }
 };
+/* A run's complaints have a shelf life, and the two differ. The daily allowance
+   resets each day, so a cap hit yesterday morning says nothing about today; the
+   frequency limit clears in about a minute. Both used to be drawn straight out
+   of stored state with no age check at all, so a run from the previous day sat
+   there reading as a live refusal — which is exactly what "how can I be out of
+   lookups?" was looking at. `missing` deliberately carries no clock: that a fund
+   has no quote is a durable fact about the fund, not news about this minute. */
+const sameDay = (a, b) => a.toDateString() === b.toDateString();
+const runIsToday = (run) => !!run && sameDay(new Date(run.at || 0), new Date());
+const runIsRecent = (run, ms) => !!run && (Date.now() - (run.at || 0)) < ms;
 const stalePrices = () => {
   const cache = quoteCache();
   return allTickers().filter(t => !quoteFresh(cache[t]));
 };
-/* When the oldest cached price was fetched — what the "as of" line reports. */
+/* When the oldest cached price was fetched — what the "as of" line reports.
+   Only entries that actually HOLD a price count: a `noQuote` marker is stamped
+   with the moment we asked, and letting that through would date the whole line
+   from the last time a lookup FAILED. */
 function pricesAsOf() {
   const cache = quoteCache();
-  const stamps = allTickers().map(t => cache[t]?.ts).filter(Boolean);
+  const stamps = allTickers().map(t => cache[t])
+    .filter(q => q && typeof q.price === 'number')
+    .map(q => q.ts).filter(Boolean);
   return stamps.length ? Math.min(...stamps) : null;
 }
 
 let refreshingPrices = false;
+/* The latch is a CLOCK, not just a flag, and that is the load-bearing half of
+   the fix. Timing the request out covers the ordinary case, but a timer is the
+   one thing that cannot be relied on here: `AbortSignal.timeout` is throttled
+   in a hidden document and may not fire at all while the tab sits in the
+   background or the laptop sleeps — which is exactly the situation that strands
+   a request in the first place. So the guard below expires on wall-clock time
+   instead: however badly a run is stuck, a press a minute later takes over.
+   Nothing has to fire for the button to come back. */
+let priceRunStartedAt = 0;
+const PRICE_RUN_STALE_MS = 60 * 1000;
+/* Which run is allowed to publish. A stranded run that finally wakes up hours
+   later still holds its own `cache` snapshot and its own tally, and writing
+   either would clobber whatever ran since — so it is allowed to finish and then
+   quietly keep its results to itself. */
+let priceRunToken = 0;
 /* Tickers the automatic (quiet) refresh has already attempted this page load.
    A lookup that can't return a price — a mutual fund on the free tier, a wrong
    key, the daily limit, or simply being offline — leaves its ticker "stale"
@@ -4830,9 +4872,31 @@ const priceAutoTried = new Set();
    loop without blacklisting anything that was never actually asked about. */
 let priceCoolOffUntil = 0;
 const PRICE_COOL_OFF_MS = 60 * 1000;   // Alpha Vantage's frequency window
+/* No request may hang for ever, and this is the guard that makes the latch
+   above safe. `refreshingPrices` is released in a `finally` now, but a `fetch`
+   that never settles never REACHES a finally — the await simply parks, nothing
+   is thrown, and the latch stays true for the life of the page. From that
+   moment every press of ↻ Refresh returns at the guard and does nothing at all,
+   silently, while the bar goes on showing whatever the last completed run
+   stored. A laptop sleeping mid-request is enough to cause it, and a full page
+   reload was the only cure. Timing the request out turns that into an ordinary
+   "couldn't be reached", which the existing failure path already handles. */
+const PRICE_TIMEOUT_MS = 10 * 1000;
+/* Guarded rather than called outright: an older Safari without AbortSignal
+   .timeout would throw a TypeError inside the try below, which the catch would
+   dutifully report as a failed lookup — breaking prices entirely on the browsers
+   least able to spare the help. No signal there just means no timeout. */
+const priceTimeout = () => (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+  ? AbortSignal.timeout(PRICE_TIMEOUT_MS) : undefined;
 
 async function refreshPrices(quiet) {
-  if (refreshingPrices) return;
+  /* A manual press says so out loud. A button that silently does nothing is
+     indistinguishable from one that ran and found nothing to change, which is
+     how a stranded latch stayed hidden for a whole day. */
+  if (refreshingPrices && Date.now() - priceRunStartedAt < PRICE_RUN_STALE_MS) {
+    if (!quiet) toast('A price refresh is already running');
+    return;
+  }
   if (quiet && Date.now() < priceCoolOffUntil) return;
   /* Never in a shared view, and this is the load-bearing guard rather than the
      hidden button: allTickers() reads the SENDER's holdings while priceKey() and
@@ -4845,14 +4909,20 @@ async function refreshPrices(quiet) {
      the snapshot that was sent. */
   if (viewOnly) return;
   const key = priceKey();
+  const cache = quoteCache();
   let want = stalePrices();
   /* A quiet auto-refresh skips anything it has already had a go at, so a ticker
-     that can never be freshened can't drive the render→refresh loop. */
-  if (quiet) want = want.filter(t => !priceAutoTried.has(t));
+     that can never be freshened can't drive the render→refresh loop — and skips
+     anything Alpha Vantage has already answered "no price" for today, which is
+     what stops a mutual fund quietly spending a lookup on every page load for
+     ever. The manual button ignores both on purpose: pressing Refresh is a
+     request to try again NOW, whatever we think we already know. */
+  if (quiet) want = want.filter(t => !priceAutoTried.has(t) && !noQuoteFresh(cache[t]));
   if (!key) { if (!quiet) toast('Add an Alpha Vantage API key in ⚙ Preferences first'); return; }
   if (!want.length) { if (!quiet) toast('Every price is already less than six hours old'); return; }
   refreshingPrices = true;
-  const cache = quoteCache();
+  priceRunStartedAt = Date.now();
+  const token = ++priceRunToken;
   /* Kept per ticker, not as a count: "updated 1 price" out of four leaves you
      guessing which three didn't, and the reasons differ — Alpha Vantage's free
      tier quotes shares and ETFs but not mutual funds, so a fund comes back
@@ -4867,7 +4937,7 @@ async function refreshPrices(quiet) {
     for (const ticker of want) {
       const url = 'https://www.alphavantage.co/query?function=GLOBAL_QUOTE'
         + `&symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(key)}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: priceTimeout() });
       if (!res.ok) { run.failed = true; break; }
       const data = await res.json();
       /* Alpha Vantage answers 200 with prose rather than an error status, and
@@ -4885,14 +4955,32 @@ async function refreshPrices(quiet) {
          "Alpha Vantage wouldn't talk to us just then". */
       priceAutoTried.add(ticker);
       const price = parseFloat(data['Global Quote']?.['05. price']);
-      if (!Number.isFinite(price)) { run.missing.push(ticker); continue; }
+      if (!Number.isFinite(price)) {
+        run.missing.push(ticker);
+        /* Recorded, not merely reported — see noQuoteFresh. This is the line
+           that stops the free tier being spent on questions already answered. */
+        cache[ticker] = { noQuote: true, ts: Date.now() };
+        continue;
+      }
       cache[ticker] = { price: round2(price), ts: Date.now() };
       run.updated.push({ ticker, price: round2(price) });
     }
   } catch (e) {
+    /* An AbortError from the timeout arrives here like any other network
+       trouble, which is right: "it didn't answer in ten seconds" and "it
+       couldn't be reached" are the same news to a reader. */
     console.warn('price lookup failed', e);
     run.failed = true;
+  } finally {
+    /* Released HERE, not down beside the reporting: a return or a throw added
+       to the lines below must never be able to strand it again. Only by the run
+       that still owns the latch — a stranded one waking up must not unlock a
+       fresher run that has since taken its place. */
+    if (token === priceRunToken) refreshingPrices = false;
   }
+  /* Superseded: another run started while this one hung, so its cache snapshot
+     and its tally are both out of date. Say nothing, write nothing. */
+  if (token !== priceRunToken) return;
   /* Whatever the loop never reached — recorded so the tab can say how many are
      still to come, rather than leaving a bare "5 out of date" to be read as a
      failure. */
@@ -4901,7 +4989,6 @@ async function refreshPrices(quiet) {
      on the render below. The manual button ignores this and retries at once. */
   if (run.throttled || run.limited || run.failed)
     priceCoolOffUntil = Date.now() + PRICE_COOL_OFF_MS;
-  refreshingPrices = false;
   writeQuoteCache(cache);
   try { localStorage.setItem(PRICE_RUN, JSON.stringify(run)); } catch (e) {}
   if (run.updated.length) {
@@ -8024,6 +8111,10 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   givenOutOfPocket, grossIncome, takeHomePay, givingStats, givingCeiling, isPayRow,
   hasNote,
   parseOpen, withSection,
+  /* Price lookup: the pure predicates only. What the free tier is spent on and
+     which of a run's complaints are still true are both decided here, and both
+     were got wrong in ways that only showed up a day later. */
+  quoteFresh, noQuoteFresh, runIsToday, runIsRecent,
   fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,

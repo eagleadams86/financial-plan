@@ -1991,6 +1991,44 @@ t('a pane with no holdings still survives the shape check', () => {
   eq(Array.isArray(d.side.portfolios[0].rows), true);
 });
 
+group('The price lookup’s memory');
+/* A holding that can NEVER be quoted — a mutual fund on the free tier, or a row
+   that isn't a security — used to be asked about on every single page load,
+   spending one of the 25 daily lookups each time and never getting anything
+   back. The marker is what stops that; its expiry is what keeps it honest. */
+t('a “no quote” marker is remembered, but only for a day', () => {
+  const now = Date.now();
+  eq(H.noQuoteFresh({ noQuote: true, ts: now }), true, 'just answered — do not ask again');
+  eq(H.noQuoteFresh({ noQuote: true, ts: now - 23 * 3600e3 }), true, 'still the same day');
+  eq(H.noQuoteFresh({ noQuote: true, ts: now - 25 * 3600e3 }), false,
+     'a fund the free tier starts covering is retried tomorrow');
+  eq(H.noQuoteFresh(undefined), false, 'never asked about at all');
+});
+t('a marker is not a price, and a price is not a marker', () => {
+  const now = Date.now();
+  eq(H.quoteFresh({ noQuote: true, ts: now }), false,
+     'a marker must never be read as a price — it has none');
+  eq(H.noQuoteFresh({ price: 12, ts: now }), false,
+     'a real quote is not a refusal');
+  eq(H.quoteFresh({ price: 12, ts: now }), true);
+});
+
+group('How long a lookup’s complaints stay true');
+/* Both notes used to be drawn straight out of stored state with no age check,
+   so a run from the previous morning sat on the tab reading as a live refusal —
+   which is exactly what "how can I be out of lookups?" was looking at. */
+t('the daily cap is news only on the day it happened', () => {
+  eq(H.runIsToday({ at: Date.now() }), true);
+  eq(H.runIsToday({ at: Date.now() - 26 * 3600e3 }), false,
+     'the allowance has reset since — saying otherwise sends you away for nothing');
+  eq(H.runIsToday(null), false);
+});
+t('the frequency limit clears in about a minute', () => {
+  eq(H.runIsRecent({ at: Date.now() - 5e3 }, 10 * 60e3), true);
+  eq(H.runIsRecent({ at: Date.now() - 30 * 60e3 }, 10 * 60e3), false);
+  eq(H.runIsRecent(null, 10 * 60e3), false);
+});
+
 group('Average of last year');
 t('averages the prior year’s stored months, ignoring what it estimated', () => {
   const s = H.coerceShape(fixtureState());

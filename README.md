@@ -118,7 +118,10 @@ included — treat those the way you treat the figures.
 - **Investments** — one pane per place you hold investments (add, rename and
   reorder them), with optional **automatic price lookups** (Alpha Vantage; free
   key kept on the device, cached six hours, and every price still editable by
-  hand).
+  hand). The free tier allows 25 lookups a day and quotes shares and ETFs but
+  **not mutual funds**, so a fund keeps the price you type; once Alpha Vantage
+  has said it has no quote for a holding, that answer is remembered for the day
+  rather than spending an allowance on the same question at every visit.
 - **Vacations** — per-trip cost tables grouped into one row per year, newest
   first, reorderable within a year. A new trip starts from the lines most trips
   need (airfare, stay, transport, excursions, food, tips, spa) or from nothing,
