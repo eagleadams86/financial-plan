@@ -463,6 +463,16 @@ interchangeable**:
   after a batch ends throttled, capped or failed. That is what actually stops
   the render→refresh loop, which is what frees `priceAutoTried` to be honest
   about what was really asked. The manual Refresh button ignores both.
+- **The manual button also ignores the six-hour cache** (`stalePrices()` takes a
+  TTL; a press passes `MANUAL_FRESH_MS`, two minutes, instead of
+  `QUOTE_TTL_MS`). The six hours only ever existed to stop the AUTOMATIC pass
+  spending the allowance on prices that can't have moved — refusing a deliberate
+  press with "everything is less than six hours old" is the app arguing with an
+  instruction. **The two minutes are not a token gesture and must not go to
+  zero**: when a batch stops at the per-minute limit, the next press is how you
+  carry on, and re-asking from the top would spend the whole next minute
+  re-fetching what the last press already got and never reach the holdings it
+  missed. Long enough for that hand-over, far too short to be a cache.
 - **A `noQuote` marker in the quote cache** is the third, and the one that
   actually protects the daily allowance. `priceAutoTried` dies with the page,
   so a holding that can NEVER be quoted — a mistyped symbol, a row that isn't a

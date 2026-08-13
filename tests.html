@@ -1991,6 +1991,27 @@ t('a pane with no holdings still survives the shape check', () => {
   eq(Array.isArray(d.side.portfolios[0].rows), true);
 });
 
+group('The Refresh button ignores the six-hour cache');
+/* Pressing the button is an explicit "look now". The six hours only ever
+   existed to stop the AUTOMATIC pass spending the allowance on prices that
+   cannot have moved. */
+t('a price the automatic pass calls fresh is re-asked by a manual press', () => {
+  const q = { price: 100, ts: Date.now() - 60 * 60e3 };   // an hour old
+  eq(H.freshWithin(q, H.QUOTE_TTL_MS), true, 'the automatic pass leaves it alone');
+  eq(H.freshWithin(q, H.MANUAL_FRESH_MS), false, 'the button asks again');
+});
+t('but a press seconds after the last one does not re-ask what it just got', () => {
+  /* This is what makes a throttled batch CARRY ON instead of starting over:
+     without it the next press spends the whole minute re-fetching the holdings
+     the previous press already had, and never reaches the ones it missed. */
+  const justNow = { price: 100, ts: Date.now() - 10e3 };
+  eq(H.freshWithin(justNow, H.MANUAL_FRESH_MS), true);
+});
+t('the manual window is far too short to be a cache', () => {
+  eq(H.MANUAL_FRESH_MS < H.QUOTE_TTL_MS, true);
+  eq(H.MANUAL_FRESH_MS <= 5 * 60e3, true, 'minutes, not hours');
+});
+
 group('Where a holding’s price came from');
 /* The bar above the tables reports ONE time for the whole table, and the oldest
    of them, so a holding fetched minutes ago sits under a heading hours old.

@@ -123,8 +123,10 @@ included — treat those the way you treat the figures.
   than a live one. The free tier allows 800 lookups a day and eight a minute;
   once the supplier says it has no price for a holding, that answer is
   remembered for the day rather than spending the allowance on the same
-  question at every visit. Open a holding and its Price box says where that
-  number came from — fetched and when, typed over a fetched one, or never
+  question at every visit. Prices top themselves up automatically when they are
+  more than six hours old; the **Refresh prices** button ignores that and
+  fetches everything on the spot. Open a holding and its Price box says where
+  that number came from — fetched and when, typed over a fetched one, or never
   looked up — since the line above the tables can only report the oldest fetch
   across the whole table.
 - **Vacations** — per-trip cost tables grouped into one row per year, newest

@@ -2508,8 +2508,10 @@ const HELP = {
       + 'strikes one price a day after the close, so its figure is the last one published '
       + 'rather than a live one. The free allowance is 800 lookups a day and eight a '
       + 'minute; a fetched price is cached for six hours, so opening this tab repeatedly '
-      + 'costs nothing, and every price stays editable by hand — typing one over a fetched '
-      + 'price is fine.' },
+      + 'costs nothing. The Refresh button ignores that cache and fetches everything on '
+      + 'the spot — the six hours only ever held back the automatic top-up. Every price '
+      + 'stays editable by hand, and typing one over a fetched price is fine; open a '
+      + 'holding to see where its price came from and when.' },
 };
 
 function helpBtn(key, label) {
@@ -3880,7 +3882,8 @@ function renderInvestments() {
      open a Preferences dialog that isn't there. A snapshot shows the prices it
      was sent, which is the honest thing for a snapshot to do. */
   const priceBar = viewOnly ? '' : `<div class="row" style="margin:0 0 14px;align-items:center">
-    <button class="btn small" id="refreshPricesBtn">↻ Refresh prices</button>
+    <button class="btn small" id="refreshPricesBtn"
+      title="Fetches every holding now, whether or not its price is still fresh">↻ Refresh prices</button>
     <span class="sub muted">${asOf
       ? `Prices as of ${new Date(asOf).toLocaleString()}${stale ? ` · ${stale} out of date` : ''}`
       : priceKey() ? 'No prices fetched yet' : 'Add a Twelve Data key in ⚙ Preferences to fetch prices'}
@@ -4806,8 +4809,20 @@ function quoteCache() {
 function writeQuoteCache(c) {
   try { localStorage.setItem(QUOTE_CACHE, JSON.stringify(c)); } catch (e) {}
 }
-const quoteFresh = (q) => q && typeof q.price === 'number'
-  && (Date.now() - (q.ts || 0)) < QUOTE_TTL_MS;
+const freshWithin = (q, ms) => !!q && typeof q.price === 'number'
+  && (Date.now() - (q.ts || 0)) < ms;
+const quoteFresh = (q) => freshWithin(q, QUOTE_TTL_MS);
+/* How fresh is fresh enough when a PERSON asks. The six-hour cache exists to
+   stop the automatic pass spending the allowance on prices that can't have
+   moved; pressing the button is not that pass, and refusing it with "everything
+   is less than six hours old" is the app arguing with an explicit instruction.
+   So a manual run re-asks almost everything — but not quite everything, and the
+   gap is load-bearing: when a batch stops at the per-minute limit, the next
+   press is how you carry on, and starting again from the top would spend the
+   whole of the next minute re-fetching what the last press already got and
+   never reach the holdings that were actually missed. Two minutes is long
+   enough to cover that hand-over and far too short to be a cache. */
+const MANUAL_FRESH_MS = 2 * 60 * 1000;
 /* A ticker the supplier ANSWERED about and had no price for — a mistyped
    symbol, or a row that isn't a security at all. It is written into the same
    cache a price would be, because the alternative is asking again on every page
@@ -4885,9 +4900,12 @@ function priceProvenance(q, price, lookupOn, now) {
     return `Fetched ${fetchedWhen(q.ts, now)}.`;
   return `You typed this over ${fmtMoney(q.price)}, fetched ${fetchedWhen(q.ts, now)}.`;
 }
-const stalePrices = () => {
+/* Default six hours — the "N out of date" count and the automatic pass both
+   mean that one. A manual press passes MANUAL_FRESH_MS instead. */
+const stalePrices = (ttl) => {
   const cache = quoteCache();
-  return allTickers().filter(t => !quoteFresh(cache[t]));
+  const limit = ttl === undefined ? QUOTE_TTL_MS : ttl;
+  return allTickers().filter(t => !freshWithin(cache[t], limit));
 };
 /* When the oldest cached price was fetched — what the "as of" line reports.
    Only entries that actually HOLD a price count: a `noQuote` marker is stamped
@@ -5002,16 +5020,24 @@ async function refreshPrices(quiet) {
   if (viewOnly) return;
   const key = priceKey();
   const cache = quoteCache();
-  let want = stalePrices();
+  let want = stalePrices(quiet ? undefined : MANUAL_FRESH_MS);
   /* A quiet auto-refresh skips anything it has already had a go at, so a ticker
      that can never be freshened can't drive the render→refresh loop — and skips
      anything the supplier has already answered "no price" for today, which is
      what stops an unquotable holding quietly spending a lookup on every page
-     load for ever. The manual button ignores both on purpose: pressing Refresh
-     is a request to try again NOW, whatever we think we already know. */
+     load for ever. The manual button ignores both on purpose, as it ignores the
+     six-hour cache above: pressing Refresh is a request to try again NOW,
+     whatever we think we already know. */
   if (quiet) want = want.filter(t => !priceAutoTried.has(t) && !noQuoteFresh(cache[t]));
   if (!key) { if (!quiet) toast('Add a Twelve Data API key in ⚙ Preferences first'); return; }
-  if (!want.length) { if (!quiet) toast('Every price is already less than six hours old'); return; }
+  if (!want.length) {
+    /* Only reachable now when the last press was seconds ago, or when there is
+       genuinely nothing with a ticker on it — two different things to be told. */
+    if (!quiet) toast(allTickers().length
+      ? 'Every price was fetched moments ago — give it a minute'
+      : 'No holdings with a ticker to look up');
+    return;
+  }
   refreshingPrices = true;
   priceRunStartedAt = Date.now();
   const token = ++priceRunToken;
@@ -8223,7 +8249,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
      which of a run's complaints are still true are both decided here, and both
      were got wrong in ways that only showed up a day later. */
   quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote,
-  priceProvenance, fetchedWhen,
+  priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
   fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
