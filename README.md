@@ -50,7 +50,9 @@ included — treat those the way you treat the figures.
   per check opens that way already, one line per payday with the amount filled
   in, so correcting a single cheque — a bonus, a missed shift — is one box to
   type in rather than a lump sum to break apart first. A month's
-  balance cell shows what the account earned that month and lets you override
+  balance cell reconciles as you type — say what an account really holds and it
+  tells you how far that is from what the plan expected, or confirms the two
+  agree. It also shows what the account earned that month and lets you override
   the interest or add a dividend — correct either and the balance recomputes
   around it, in whichever account the money is paid into, for that month and
   every month after. **Every note you've written anywhere in a year is gathered

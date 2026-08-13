@@ -133,6 +133,28 @@ family names as well as balances.
   or to the current month when an account is added — and deliberately has NO
   editor field: when tracking began is a fact about the data, and editing it
   would either blank months that hold figures or invent months that never did.
+- **Typing a balance says how far it is from the computed one**
+  (`reconcileNote`, shown live under the Amount box in the balance branch of
+  `#cellDialog`). The dialog always displayed the computed figure and then took
+  whatever was typed over it in silence, so a correction and a mistyped digit
+  looked identical. Agreement is reported too — that is the check passing, and
+  the reason to open the dialog at all when the phone says one thing and the
+  plan says another. **It states the gap and stops**: it deliberately does not
+  offer to invent a correcting row, because the app cannot know what the missing
+  money was and a row labelled "adjustment" is a worse record than an honest
+  re-anchoring (a pinned balance is already the correction — later months chain
+  from it). Only on a LIVE year: a pinned history year computes nothing to
+  disagree with, so `editing.computed` is left unset and the note never appears;
+  it never appears on a category cell either. Colourless by rule — the size of
+  the gap is the signal.
+- **`passthrough` is how a float is modelled, and the role picker now says so.**
+  The generic role already covered it; what was missing was any hint that
+  "money that lives in an app on my phone" is what it's for. Charlie's Venmo
+  balance and his Chase/M&T Zelle rails are the same shape — money that never
+  touches the Fidelity hub — and the pattern needs NO new code: `passthrough` +
+  split amounts with per-part labels + an occasional pinned balance to
+  re-anchor. Resist a named "Venmo feature": the moment there is one, PayPal and
+  Cash App want theirs, and the generic role already outlives all of them.
 - **An account with no balance this month says WHY** (`noBalanceReason`) —
   "closed Dec 2022", "starts Mar 2027", or "not tracked yet". They are three
   different facts and were one sentence: a closed account reading "not tracked

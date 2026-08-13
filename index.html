@@ -849,6 +849,10 @@ details.section table th, details.section table td { padding: 4px 6px; }
         </div>
       </div>
     </div>
+    <!-- Reconciliation: how far the balance you are typing is from the one the
+         plan worked out. Only ever on a balance, and only while there is a
+         computed figure to disagree with. -->
+    <p class="field-hint" id="cellReconcile" hidden></p>
     <!-- Split a month into several amounts: three groceries trips, an
          estimated bill next to a paid one. Each part is actual or estimate on
          its own, and the cell shows their sum. -->
@@ -5696,7 +5700,10 @@ const EDITORS = {
         ['normal', `Ordinary ${hubAccount(state)?.name || 'cash'} money — the usual`],
         ['transfer', `Moves ${hubAccount(state)?.name || 'cash'} into another account`],
         ['pass', `Never touches ${hubAccount(state)?.name || 'cash'} — another account pays it`],
-      ]},
+      ], hint: 'The last one is for money that lives somewhere else entirely — a Venmo or '
+        + 'PayPal balance you spend straight out of, or an account you keep only because '
+        + `your main one can't do something (Zelle, say). It moves that account and leaves ${
+          hubAccount(state)?.name || 'cash'} alone.` },
       /* Closed accounts are left out: money can't move into a bank you no
          longer have, and after a history import they would outnumber the
          live ones in this list. One already pointed at a closed account
@@ -7082,6 +7089,39 @@ function pinGridHeader() {
 addEventListener('scroll', pinGridHeader, { passive: true });
 addEventListener('resize', pinGridHeader);
 
+/* ── Reconciling a balance ──────────────────────────────────────────────────
+   The gap between the balance you are typing and the one the plan worked out.
+   The dialog has always SHOWN the computed figure and then silently accepted
+   whatever was typed over it, which makes a correction and a mistyped digit
+   look exactly alike. Naming the difference is the whole check: a balance that
+   agrees is a month reconciled and worth being told so, and one that doesn't is
+   either something that never got recorded or a number entered wrong — both
+   worth seeing BEFORE saving, because every later month chains from the figure
+   pinned here.
+
+   It states the gap and stops. It deliberately does not offer to invent a
+   correcting row: the app cannot know what the missing money was, and a row
+   labelled "adjustment" is a worse record than an honest re-anchoring. Pure, so
+   the wording is pinned by tests, and colourless — the size of the gap is the
+   signal, and nothing in this app lets hue carry a meaning. */
+function reconcileNote(typed, computed) {
+  if (!Number.isFinite(typed) || !Number.isFinite(computed)) return '';
+  const gap = round2(typed - computed);
+  if (gap === 0) return `Matches the plan exactly — ${fmtMoney(round2(computed))} reconciled.`;
+  return `${fmtMoney(Math.abs(gap))} ${gap > 0 ? 'more' : 'less'} than the plan expects `
+    + `(${fmtMoney(round2(computed))}). Saving corrects it, and later months chain `
+    + 'from your figure.';
+}
+/* Re-read on every keystroke. `editing.computed` is set only on a live balance,
+   so a category cell and a paycheck count never reach the note at all. */
+function updateReconcile() {
+  const el = F('cellReconcile');
+  const msg = (editing && editing.type === 'bal')
+    ? reconcileNote(parseMoney(F('cellValue').value), editing.computed) : '';
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
 function openCellEditor(yearKey, type, id, m) {
   if (viewOnly) return;   // someone else's figures — nothing here is yours to change
   const yr = state.years[yearKey];
@@ -7182,6 +7222,10 @@ function openCellEditor(yearKey, type, id, m) {
     F('cellValue').dataset.money = 'on';
     F('cellValue').value = ov ? showMoney(ov.v) : '';
     F('cellValue').placeholder = cur === undefined ? '' : fmtMoney(round2(cur || 0));
+    /* Only a LIVE year has a figure worth disagreeing with. A pinned history
+       year computes nothing — its balances are read off a statement, so there
+       is no "expected" to reconcile against and the note stays away. */
+    if (live && cur !== undefined) editing.computed = round2(cur || 0);
     F('cellNote').value = ov?.note || '';
     F('cellBalWrap').hidden = !live;   // nothing to adjust where nothing is computed
     F('cellInterest').value = showMoney(typeof adj.interest === 'number' ? adj.interest : '');
@@ -7210,8 +7254,10 @@ function openCellEditor(yearKey, type, id, m) {
     revertBtn.hidden = true;
     clearBtn.hidden = stored === undefined;
   }
+  updateReconcile();   // a balance already typed over shows its gap on opening
   cellDialog.showModal();
 }
+F('cellValue').addEventListener('input', updateReconcile);
 
 F('cellForm').onsubmit = () => {
   const { yearKey, type, id, m } = editing;
@@ -8460,6 +8506,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote,
   priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
   fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
+  reconcileNote,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   mergeAccountsByName,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
