@@ -1025,6 +1025,26 @@ from, so the sentence and the curve cannot drift apart. A pinned or summary year
 returns `${y}-12`, which is what keeps history solid all the way through. The
 tooltip still distinguishes "(estimate)" from "(year built ahead)" — both are
 projections, but they are not the same news.
+**The retirement projection carries a dotted rule per person, and the horizon
+now bends to fit them.** `retirementMarkers(st, labels)` is pure and takes the
+CHART'S OWN LABELS, so a rule can never be drawn at a year the chart hasn't got
+— a marker clamped to the edge would be a lie told in the one place nobody
+would check. Only an adult with both a birth month and a retirement age gets
+one (`retirementYearOf` already refuses everyone else, children included);
+people retiring in the same year share ONE line, because two rules a pixel
+apart is a smudge. The rule is DOTTED and neutral for the reason the spending
+chart's average line is: the projection itself is dashed, and a second dashed
+thing on the same plot would be two signals in one costume. The name carries
+the meaning, never a hue.
+`retirementHorizon()` is why the 25 years became a FLOOR: somebody in their
+thirties retires past the end of a 25-year chart, which is the reader whose
+marker matters most and the only one who would never see it. It stretches to
+two years past the last datable retirement — the headroom is not cosmetic, a
+rule against the right-hand edge has nowhere to put its name — capped at
+`RET_YEARS_MAX`, because a mistyped retirement age must not flatten twenty-five
+real years into the left-hand inch. `retMarkerNote()` says out loud who has no
+rule and why; a marker that silently isn't drawn reads as the app lacking the
+feature rather than as a question nobody has answered.
 **A paragraph explaining a section is a `.note info`, never a `.card`.** A card
 promises figures underneath it; one holding nothing but prose leaves the reader
 waiting for a table that never comes, which is what the Donations intro was.

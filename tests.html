@@ -958,6 +958,64 @@ t('only a child reaches 18, and only an adult retires', () => {
   const adult = { id: 'a', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 };
   eq(H.majorityMonthOf(adult), null, 'and an adult has no 18th birthday to come');
 });
+/* The retirement projection carries a dotted rule per person, and the two
+   things that can go wrong with one are silent: a rule drawn from a date
+   nobody gave, and a rule that isn't drawn because the chart stops short of
+   the year it belongs in. */
+t('a retirement rule is only drawn for somebody the plan can date', () => {
+  const labels = [];
+  for (let y = 2026; y <= 2076; y++) labels.push(String(y));
+  const st = { people: [
+    { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 },
+    { id: 'no-age', name: 'Alex', role: 'adult', birth: '1990-01' },
+    { id: 'no-birth', name: 'Jo', role: 'adult', retireAge: 65 },
+    { id: 'ellis', name: 'Ellis', role: 'child', birth: '2015-09' },
+  ] };
+  const marks = H.retirementMarkers(st, labels);
+  eq(marks.map(m => m.year), [2051], 'only the fully-keyed adult');
+  eq(marks[0].label, 'Sam retires');
+  eq(labels[marks[0].index], '2051', 'the index points at its own year');
+});
+t('two people retiring in the same year share one rule', () => {
+  const labels = ['2026', '2027', '2028'];
+  const st = { people: [
+    { id: 'sam', name: 'Sam', role: 'adult', birth: '1962-04', retireAge: 65 },
+    { id: 'robin', name: 'Robin', role: 'adult', birth: '1962-11', retireAge: 65 },
+  ] };
+  const marks = H.retirementMarkers(st, labels);
+  eq(marks.length, 1, 'one line, not two a pixel apart');
+  eq(marks[0].label, 'Sam and Robin retire');
+});
+t('a year the chart has not got is left undrawn rather than clamped', () => {
+  const st = { people: [
+    { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 },
+  ] };
+  eq(H.retirementMarkers(st, ['2026', '2027']), [],
+    'no rule at all beats a rule at the wrong year');
+});
+t('the chart stretches to reach a retirement, within a limit', () => {
+  const none = { people: [] };
+  eq(H.retirementHorizon(none, 2026), H.RET_YEARS_MIN, '25 years is the floor');
+  const soon = { people: [
+    { id: 'a', name: 'A', role: 'adult', birth: '1986-04', retireAge: 60 }] };
+  eq(H.retirementHorizon(soon, 2026), H.RET_YEARS_MIN,
+    '2046 sits inside the 25 years with room to spare, so nothing stretches');
+  const edge = { people: [
+    { id: 'e', name: 'E', role: 'adult', birth: '1986-04', retireAge: 65 }] };
+  eq(H.retirementHorizon(edge, 2026), 27,
+    'a retirement ON the old last year still earns its two years of headroom — a rule '
+    + 'drawn against the right-hand edge has nowhere to put its name');
+  const later = { people: [
+    { id: 'b', name: 'B', role: 'adult', birth: '1996-04', retireAge: 65 }] };
+  eq(H.retirementHorizon(later, 2026), 37, '2061, plus two years of headroom');
+  const silly = { people: [
+    { id: 'c', name: 'C', role: 'adult', birth: '2000-01', retireAge: 99 }] };
+  eq(H.retirementHorizon(silly, 2026), H.RET_YEARS_MAX,
+    'a mistyped age must not flatten the real years into an inch');
+  const past = { people: [
+    { id: 'd', name: 'D', role: 'adult', birth: '1940-01', retireAge: 65 }] };
+  eq(H.retirementHorizon(past, 2026), H.RET_YEARS_MIN, 'a year gone by shortens nothing');
+});
 t('an 18th birthday lands in the right month across a year end', () => {
   eq(H.majorityMonthOf({ role: 'child', birth: '2015-12' }), '2033-12');
   eq(H.majorityMonthOf({ role: 'child', birth: '2016-01' }), '2034-01');

@@ -143,7 +143,11 @@ included — treat those the way you treat the figures.
   (that limit is per person) and a **Roth
   IRA income (MAGI) calculator** that counts both incomes when you file jointly;
   both recompute as you change the figures;
-  and a projection of where the balances are heading at an assumed return.
+  and a projection of where the balances are heading at an assumed return, with
+  a **dotted rule marking each person's retirement year** — worked out from the
+  birth month and retirement age on the Household tab, and only for somebody
+  who has both, since the alternative is a date you never gave. The chart
+  stretches far enough to reach the last of them.
   Contributions are rows you click to edit, one per year and account.
   The thresholds stay figures **you** type: they move every year and differ by
   filing status, and the app deliberately keeps no tax tables.

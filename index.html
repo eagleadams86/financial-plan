@@ -2928,7 +2928,10 @@ const HELP = {
     body: 'Each year the balance grows by the assumed return (set in Preferences) and then '
       + 'the year\'s planned contributions are added. It is a straight-line sketch, not a '
       + 'forecast: real returns arrive unevenly, and a bad first decade matters far more '
-      + 'than the average suggests.' },
+      + 'than the average suggests. A dotted rule down the chart marks each person\'s '
+      + 'retirement year, worked out from the birth month and retirement age on the '
+      + 'Household tab — so the chart runs at least far enough to show it. Nobody without '
+      + 'both of those gets a rule: the date would be a guess.' },
   summaryBalances: { title: 'Balances in a Summary Year',
     body: 'Flow rows in a summary hold the year\'s total. Balance rows can\'t — adding up '
       + 'twelve monthly balances would be meaningless — so they hold December\'s figure, '
@@ -4154,7 +4157,8 @@ function renderRetirement() {
     <div class="card" style="grid-column:1/-1">
       <h2>Holdings &amp; Where They're Heading${helpBtn('retProjection', 'the retirement projection')}</h2>
       <p class="sub">Today's balances grown at ${round2((state.settings.retirementReturnAnnual ?? 0.07) * 100)}%/yr
-        (Preferences), with each year's planned contributions added on top.</p>
+        (Preferences), with each year's planned contributions added on top.${
+        accts.length ? ` ${retMarkerNote()}` : ''}</p>
       ${accts.length
         ? '<div class="chartbox" style="height:280px"><canvas id="retChart"></canvas></div>'
         : '<p class="sub">Add an account above and its projection appears here.</p>'}
@@ -4295,6 +4299,127 @@ function magiCard(year) {
 }
 
 
+/* Where each person's retirement lands on the projection, ready to be drawn
+   down it. Only somebody the plan can actually DATE gets a marker — an adult
+   with both a birth month and a retirement age — because a rule drawn from a
+   half-filled row would be a date the reader never gave, and this chart runs
+   far enough out that a wrong one would go unchallenged for years. Two people
+   retiring in the same year share ONE line: two rules a pixel apart is a
+   smudge, and their names read better together anyway. Pure over state and the
+   chart's own labels, so a marker can never be drawn at a year the chart
+   hasn't got. */
+function retirementMarkers(st, labels) {
+  const byYear = new Map();
+  for (const p of peopleOf(st)) {
+    const y = retirementYearOf(p);
+    if (!y) continue;
+    const index = labels.indexOf(String(y));
+    if (index < 0) continue;
+    if (!byYear.has(y)) byYear.set(y, { year: y, index, names: [] });
+    byYear.get(y).names.push(p.name);
+  }
+  return [...byYear.values()].sort((a, b) => a.year - b.year).map(m =>
+    Object.assign(m, {
+      label: `${andList(m.names)} ${m.names.length > 1 ? 'retire' : 'retires'}`,
+    }));
+}
+
+/* What the rules down the projection mean — and, just as load-bearing, who
+   hasn't got one. An adult with no birth month or no retirement age simply
+   isn't on the chart, and a marker that silently isn't drawn reads as the app
+   not having the feature rather than as a question nobody has answered yet.
+   Children are left out of both halves: retirement is not a date this plan
+   holds for them, which is why `retirementYearOf` refuses to give them one. */
+function retMarkerNote() {
+  const thisYear = new Date().getFullYear();
+  const horizon = retirementHorizon(state, thisYear);
+  const adults = peopleOf(state).filter(p => p.role !== 'child');
+  const yearOf = (p) => retirementYearOf(p) || 0;
+  const shown = adults.filter(p => yearOf(p) >= thisYear && yearOf(p) - thisYear <= horizon);
+  const behind = adults.filter(p => yearOf(p) && yearOf(p) < thisYear);
+  const undated = adults.filter(p => !yearOf(p));
+  if (!adults.length) return '';
+  return [
+    shown.length && `A dotted rule marks ${andList(shown.map(p =>
+      `${esc(p.name)}'s retirement (${yearOf(p)})`))}.`,
+    behind.length && `${andList(behind.map(p => `${esc(p.name)} (${yearOf(p)})`))} already
+      ${behind.length > 1 ? 'fall' : 'falls'} behind where this chart starts, so there is no
+      rule for ${behind.length > 1 ? 'those' : 'that'}.`,
+    undated.length && `${andList(undated.map(p => esc(p.name)))} ${
+      undated.length > 1 ? 'have' : 'has'} no birth month or retirement age yet — fill
+      ${undated.length > 1 ? 'those' : 'that'} in on the Household tab and a rule appears.`,
+  ].filter(Boolean).join(' ');
+}
+
+/* The markers themselves, drawn down the plot. A vertical rule is chart
+   FURNITURE rather than a second series, so it takes the neutral tick colour
+   and a DOTTED line — the projection itself is dashed, and a second dashed
+   thing on the same card would be two signals wearing one costume, which is
+   the reasoning that made the spending chart's average line dotted. The NAME
+   carries the meaning; no hue carries any of it. */
+const retirementMarkerLines = {
+  id: 'retirementMarkerLines',
+  afterDatasetsDraw(chart, args, opts) {
+    const marks = (opts && opts.markers) || [];
+    const scale = chart.scales.x;
+    if (!marks.length || !scale) return;
+    const { ctx, chartArea: area } = chart;
+    const tick = cssVar('--chart-tick');
+    const pad = 4, lineH = 16;
+    ctx.save();
+    ctx.font = `${cssVar('--fw-semibold') || 600} ${cssVar('--fs-sm') || '12px'} ${
+      cssVar('--font-sans') || 'sans-serif'}`;
+    ctx.textBaseline = 'top';
+    const rows = [];   // the right-hand edge of the last label placed on each row
+    for (const m of marks) {
+      /* The half-pixel is what keeps a 1px rule one crisp pixel rather than two
+         grey ones — the same reason the gridlines under it look sharp. */
+      const px = Math.round(scale.getPixelForValue(m.index)) + 0.5;
+      ctx.strokeStyle = tick;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath();
+      ctx.moveTo(px, area.top);
+      ctx.lineTo(px, area.bottom);
+      ctx.stroke();
+      /* The label sits to the RIGHT of its rule and flips to the left when that
+         would run it off the plot — a retirement in the last year or two of the
+         chart is precisely the one worth reading. */
+      const w = ctx.measureText(m.label).width;
+      const lx = (px + pad * 2 + w > area.right) ? px - pad * 2 - w : px + pad * 2;
+      /* The first row with nothing already in the way, so two retirements a few
+         years apart don't print on top of each other. Markers arrive oldest
+         first, so a row is free once this label starts to the right of whatever
+         was last put on it. */
+      let row = 0;
+      while (rows[row] !== undefined && lx < rows[row]) row++;
+      rows[row] = lx + w + pad * 2;
+      const ly = area.top + pad + row * lineH;
+      /* A card-coloured backing, so a name never has to be read through the
+         projection line running under it. */
+      ctx.setLineDash([]);
+      ctx.fillStyle = cssVar('--bg-card');
+      ctx.fillRect(lx - pad, ly - 2, w + pad * 2, lineH);
+      ctx.fillStyle = tick;
+      ctx.fillText(m.label, lx, ly);
+    }
+    ctx.restore();
+  }
+};
+
+/* Twenty-five years is the shape of this chart, and the floor rather than the
+   rule: somebody in their thirties retires past the end of it, which is the
+   reader whose marker matters most and the one who would never see it. The
+   horizon stretches to a couple of years past the last retirement it can date,
+   capped — a mistyped retirement age must not flatten twenty-five real years
+   into the left-hand inch. */
+const RET_YEARS_MIN = 25, RET_YEARS_MAX = 50;
+function retirementHorizon(st, thisYear) {
+  const years = peopleOf(st).map(retirementYearOf).filter(Boolean);
+  return Math.min(RET_YEARS_MAX,
+    Math.max(RET_YEARS_MIN, ...years.map(y => y - thisYear + 2)));
+}
+
 function buildRetirementChart() {
   const accts = state.side.retirementAccounts || [];
   if (!accts.length) return;
@@ -4303,12 +4428,13 @@ function buildRetirementChart() {
   const labels = [], data = [];
   let bal = round2(accts.reduce((t, a) => t + (a.amount || 0), 0));
   const contribs = contribYears();
-  for (let i = 0; i <= 25; i++) {
+  for (let i = 0; i <= retirementHorizon(state, thisYear); i++) {
     const y = thisYear + i;
     if (i) bal = round2(bal * (1 + r) + (contribs[String(y)] || 0));
     labels.push(String(y));
     data.push(bal);
   }
+  const markers = retirementMarkers(state, labels);
   const accent = cssVar('--accent');
   newChart('retChart', {
     type: 'line',
@@ -4321,15 +4447,25 @@ function buildRetirementChart() {
     }]},
     options: {
       plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: (t) => fmtMoney(t.parsed.y) + ' (projected)' } } },
+        retirementMarkerLines: { markers },
+        /* A marker year says whose it is in the tooltip too: the rule is drawn
+           at the top of the plot and the figure you came for is read down at
+           the line, which is a long way for an eye to carry a name. */
+        tooltip: { callbacks: { label: (t) => {
+          const m = markers.find(k => k.index === t.dataIndex);
+          return fmtMoney(t.parsed.y) + ' (projected)' + (m ? ` · ${m.label}` : '');
+        } } } },
       scales: { x: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
           maxRotation: 0, autoSkipPadding: 14 } }),
         y: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
           callback: (v) => fmtMoney0(v) } }) },
     },
+    plugins: [retirementMarkerLines],
   }, `Projected retirement balance at ${round2(r * 100)}% a year: ${fmtMoney(data[0])} in ${
     labels[0]}, reaching ${fmtMoney(data[data.length - 1])} by ${
-    labels[labels.length - 1]}. A straight-line projection, not a forecast.`);
+    labels[labels.length - 1]}.${markers.map(m =>
+      ` ${m.label} in ${m.year}, with ${fmtMoney(data[m.index])} projected by then.`).join('')
+    } A straight-line projection, not a forecast.`);
 }
 
 /* ═══════════════════════════ Compensation view ════════════════════════════ */
@@ -9744,6 +9880,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
   ownerSubtotals, validOwner, accountOption, suggestedTargetDate,
+  retirementMarkers, retirementHorizon, RET_YEARS_MIN, RET_YEARS_MAX,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears, enteredThroughOf, goalChartPoints,
