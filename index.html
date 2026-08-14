@@ -3099,7 +3099,7 @@ function gridCard(y, yr) {
        order, so dragging there would move a row that then springs back. */
     const drag = state.settings.rowSort === 'alpha' || viewOnly ? '' : ` data-sec="${sec}"`;
     return secheadRow(SECTION_LABEL[sec])
-      + cats.map(cat => `<tr data-cat="${esc(cat.id)}"${drag}>${catTh(cat)}${
+      + cats.map(cat => `<tr data-move="${esc(cat.id)}"${drag}>${catTh(cat)}${
           months.map(m => cellTd(cat, m)).join('')}${
           rowTotalTd(catTotal(cat), false, catTotalKind(cat))}</tr>`).join('')
       /* One row is its own subtotal — repeating it just adds a line to read. */
@@ -3161,9 +3161,10 @@ function gridCard(y, yr) {
           b ? fmtCell(b.v) : '·'}</td>`;
       }).join('')}${rowTotalTd()}</tr>`;
   }).join('');
+  const acctDrag = viewOnly ? '' : ' data-sec="accounts"';
   const balRows = !activeAccounts.length ? '' : secheadRow('Accounts')
     + activeAccounts.map(a =>
-    `<tr class="balance"><th class="lbl" scope="row" data-edit="account"
+    `<tr class="balance" data-move="${esc(a.id)}"${acctDrag}><th class="lbl" scope="row" data-edit="account"
       data-bal="${esc(a.id)}" style="cursor:pointer"
       title="${esc(acctTitle(a))}">${esc(a.name)}</th>${
       months.map(m => {
@@ -5857,19 +5858,22 @@ function swapRows(yrs, a, b) {
    in each, and moving by index would shuffle a year that merely happens to be
    shorter. A year missing either row is left alone — the same rule the swap
    already follows. Pure over a list of years, so it can be tested. */
+function moveInList(arr, id, beforeId) {
+  const from = arr.findIndex(x => x.id === id);
+  if (from < 0) return false;
+  if (beforeId !== null && !arr.some(x => x.id === beforeId)) return false;
+  const [item] = arr.splice(from, 1);
+  /* Found AFTER the removal: taking the item out shifts everything below it up
+     by one, and an index read before that is off by one whenever the item is
+     moving downwards. */
+  const to = beforeId === null ? arr.length : arr.findIndex(x => x.id === beforeId);
+  arr.splice(to, 0, item);
+  return true;
+}
+/* Budget rows, across this year and the ones built ahead of it. Accounts use
+   `moveInList` directly — they are one global list, not a list per year. */
 function moveRowBefore(yrs, id, beforeId) {
-  for (const yr of yrs) {
-    const cats = yr.categories;
-    const from = cats.findIndex(c => c.id === id);
-    if (from < 0) continue;
-    if (beforeId !== null && !cats.some(c => c.id === beforeId)) continue;
-    const [row] = cats.splice(from, 1);
-    /* Found AFTER the removal: taking the row out shifts everything below it
-       up by one, and an index read before that is off by one whenever the row
-       is moving downwards. */
-    const to = beforeId === null ? cats.length : cats.findIndex(c => c.id === beforeId);
-    cats.splice(to, 0, row);
-  }
+  for (const yr of yrs) moveInList(yr.categories, id, beforeId);
 }
 
 /* "2027", "2027 and 2028", "2027, 2028 and 2029" — for saying which. */
@@ -7206,7 +7210,7 @@ function wireRowDrag(grid) {
 
   const rowAt = (x, y) => {
     const el = document.elementFromPoint(x, y);
-    const tr = el && el.closest('tr[data-cat][data-sec]');
+    const tr = el && el.closest('tr[data-move][data-sec]');
     /* Same section only. The grid is drawn grouped, so a row that hopped into
        Expenses from Income would land somewhere its own subtotal doesn't add
        up, and the render would put it back where it belongs — a move that
@@ -7223,7 +7227,7 @@ function wireRowDrag(grid) {
   body.addEventListener('pointerdown', (e) => {
     if (e.button) return;                       // right/middle click is not a drag
     const th = e.target.closest('th.lbl');
-    const tr = th && th.closest('tr[data-cat][data-sec]');
+    const tr = th && th.closest('tr[data-move][data-sec]');
     if (!tr || tr.parentElement !== body) return;
     row = tr; sec = tr.dataset.sec;
     startX = e.clientX; startY = e.clientY; dragging = false;
@@ -7251,16 +7255,21 @@ function wireRowDrag(grid) {
     /* Read the order back off the DOM the drag has already arranged, rather
        than tracking it in a variable through every insertBefore. */
     const after = row.nextElementSibling;
-    const before = after && after.matches('tr[data-cat][data-sec]')
-      && after.dataset.sec === sec ? after.dataset.cat : null;
-    const id = row.dataset.cat, y = activeYearKey();
+    const before = after && after.matches('tr[data-move][data-sec]')
+      && after.dataset.sec === sec ? after.dataset.move : null;
+    const id = row.dataset.move, y = activeYearKey();
     stop();
     /* The browser fires a click after the drag, and it would open the editor
        for whatever row the pointer finished on. It cannot be swallowed on the
        tbody, because the render below replaces that element before the click
        arrives — so the delegated listener is told to skip one instead. */
     rowDragEndedAt = Date.now();
-    moveRowBefore([state.years[y], ...projectionsAfter(y).map(k => state.years[k])],
+    /* Accounts are ONE list shared by every year — reordering them in 2026
+       reorders them in 2019 too, which is right: an account has one place in
+       the plan. Budget rows are per year, so they carry the new order into the
+       years built ahead as well. */
+    if (sec === 'accounts') moveInList(state.settings.accounts, id, before);
+    else moveRowBefore([state.years[y], ...projectionsAfter(y).map(k => state.years[k])],
       id, before);
     save();
     render();   // the subtotals and the notes list are drawn from the same order
@@ -9064,7 +9073,8 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears,
-  projectionYearsAfter, applyToRow, dropRow, swapRows, moveRowBefore, andList, tabOrder, VIEWS,
+  projectionYearsAfter, applyToRow, dropRow, swapRows, moveRowBefore, moveInList,
+  andList, tabOrder, VIEWS,
   /* Share links: the pure pieces, plus the three tables that decide what
      travels. The tables are here so a test can fail the moment a tab is added
      without one — a missing entry ships an empty tab, and a missing owner ships

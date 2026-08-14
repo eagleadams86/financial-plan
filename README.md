@@ -84,7 +84,9 @@ included — treat those the way you treat the figures.
   within its own section, the same way the tabs rearrange. The order follows
   into the years you've built ahead, so two grids stay readable side by side.
   (Sorting alphabetically turns dragging off, since that order isn't yours to
-  arrange; the ↑↓ buttons in a row's editor still work everywhere.)
+  arrange; the ↑↓ buttons in a row's editor still work everywhere.) The account
+  rows drag too, in their own block — and since accounts are one list rather
+  than one per year, that order holds across every year of the plan.
 - **The tabs are yours to arrange** — drag one anywhere along the bar (with a
   mouse or a finger), or hold Alt and use the arrow keys. The order is saved and
   follows you to your other devices.

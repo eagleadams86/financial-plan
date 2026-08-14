@@ -588,8 +588,15 @@ container swallows the click that listener needs — capturing up front meant a
 label that no longer opened its editor. For the same reason the trailing click
 cannot be swallowed on the tbody: `render()` replaces that element before the
 click arrives, so `rowDragEndedAt` tells the delegated listener to skip one.
-`data-sec` is stamped on the row and is the whole permission model: no stamp, no
-drag. It is absent under `rowSort === 'alpha'` (a display sort over an untouched
+**Accounts drag the same way**, in their own `data-sec="accounts"` group, and
+the two lists cannot be dragged into each other. They are ONE list shared by
+every year (`settings.accounts`), so reordering them in 2026 reorders them in
+2019 — an account has one place in the plan — whereas budget rows are per year
+and carry their new order into the years built ahead. Accounts are NOT gated on
+`rowSort`, which sorts budget rows only. Both use `moveInList(arr, id,
+beforeId)`; `moveRowBefore` is just that applied across a list of years.
+`data-move` names the thing being moved in whichever list it belongs to, and
+`data-sec` is the whole permission model: no stamp, no drag. It is absent under `rowSort === 'alpha'` (a display sort over an untouched
 stored order — a row dragged there would spring back on the next render) and in
 `viewOnly`. `moveRowBefore(yrs, id, beforeId)` is the persistence, and it is NOT
 `swapRows`: a drag lands a row anywhere, which two neighbours trading places
