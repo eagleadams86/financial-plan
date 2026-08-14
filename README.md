@@ -177,9 +177,16 @@ included — treat those the way you treat the figures.
   and cash gifts); a grant out of the fund isn't counted twice.
 - **History** — total liquidity 2011→now, and money in vs out for every one of
   those years, with the interest your accounts earned counted as money in so the
-  two charts tell the same story. The oldest years come from bi-weekly sheets
+  two charts tell the same story. Under them, **what you actually spent each
+  year**: the expense rows alone, so money swept into savings or moved between
+  your own accounts doesn't read as a heavy year — each bar is the year's
+  Expenses total from the Budget tab, with a dotted line across the years
+  already recorded to say what's usual, and a hover giving the change on the
+  year before. The oldest years come from bi-weekly sheets
   whose rows the importer couldn't tell apart; they're sorted out on load, and
-  any row it reads wrong is one click to fix.
+  any row it reads wrong is one click to fix. Those years have no Income /
+  Expenses / Transfers split to read, so their spending bar counts everything
+  the old sheets recorded going out, and the note under the chart says so.
 - **Share a read-only link** — show someone part of the plan without giving them
   an account, a file or edit rights. You pick which tabs go in and how many
   years go with them; the whole payload rides in the link's `#fragment`, so

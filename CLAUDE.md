@@ -768,10 +768,31 @@ cap tells the reader to come back tomorrow when the fix was to press the button
 again. `run.left` is what the batch never
 reached, so the tab can say how many are still to come rather than leaving a
 bare "5 out of date" reading as a failure.
-Both History charts carry a `.chartkey` under them for the dashed projected
+All three History charts carry a `.chartkey` under them for the dashed projected
 outline — the signal was explained only in the prose above the chart, which is
 not where you look when wondering why two bars are drawn differently. Its swatch
 is neutral, not either series colour: the DASH is the meaning.
+**`yearSpending(yr, computed, y)` is a different question from `yearFlows`, not a
+slice of it.** Money out counts every dollar that moved, transfers between the
+reader's own accounts included, so a year that swept $40,000 into the brokerage
+reads as a $40,000 year — which is why "what did I spend" needed its own figure.
+It reads the row SECTIONS (`expense` and nothing else, unsectioned falling to
+`expense` exactly as `renderBudget` does) rather than re-deciding what counts,
+and that is the load-bearing part: the bar must equal the year's **Expenses total
+on the Budget tab**, which the sub-line promises out loud and which was checked
+against Charlie's real 2024/2025/2026 to the cent before shipping. Rows are
+NETTED across the year, so a refund reduces what the year spent. A summary year
+has no sections — the old sheets predate them — so it falls back to everything
+that went out, i.e. the same figure as money out; the sub-line names the first
+grid year and says so, rather than leaving 2019 and 2020 silently measured by
+different rules. The reference line averages the RECORDED years only (a
+projection is the plan's own guess, and averaging it in would move the line the
+guess is measured against; an empty year is left out too — a zero there says the
+sheet is blank, not that nothing was spent) and is **dotted, not dashed**,
+because a dash already means "projected" on the bars and in the key beneath
+them. Its legend is `reverse: true` for the reason the Giving chart's is:
+`order` puts the line in front when it draws, and the legend follows the same
+ordering unless told otherwise.
 Charts get a `summary` argument: a `<canvas>` announces nothing to a screen
 reader, and a chart that can't be drawn shouldn't render an empty one. Chart.js
 4's BAR element ignores `borderDash` (only lines and arcs honour it), so the

@@ -4658,6 +4658,39 @@ function yearFlows(yr, computed, y) {
   return { in: round2(inn), out: round2(Math.abs(out)) };
 }
 
+/* What a year actually SPENT, which is a different question from the money-out
+   bars above: those count every dollar that moved, so a year that swept $40,000
+   into the brokerage reads as a $40,000 year of money out. A grid year has the
+   answer in its SECTIONS — the expense rows and nothing else, income being money
+   in and a transfer being money that only changed pocket — so this figure is the
+   same one the Budget tab's "Expenses total" column shows for that year, which
+   is why it reads the section rather than re-deciding what counts. A summary
+   year has no sections (the old bi-weekly sheets predate them), so it falls back
+   to everything that went out; the note under the chart says so rather than
+   leaving the reader to work out why 2019 and 2020 aren't measured alike. */
+function yearSpending(yr, computed, y) {
+  let out = 0;
+  if (yr.kind === 'summary') {
+    for (const item of yr.categoryTotals || [])
+      if (!item.isBalance && item.total < 0) out += item.total;
+    return round2(-out);
+  }
+  /* The COMPUTED cells, for the reason yearFlows takes them: a year still
+     running — and one built ahead, which has nothing stored at all — has to show
+     what it comes to rather than what has been typed in so far. */
+  const cells = (computed && computed.cells) || yr.cells || {};
+  const spending = new Set((yr.categories || [])
+    .filter(cat => (cat.section || 'expense') === 'expense').map(cat => cat.id));
+  for (const [key, cell] of Object.entries(cells)) {
+    const [id, m] = key.split('|');
+    /* Netted across the year, not summed as magnitudes: a refund lands in the
+       row it came out of, and a month that gave money back really did reduce
+       what the year spent. */
+    if (spending.has(id) && m.startsWith(y)) out += cell.v;
+  }
+  return round2(-out);
+}
+
 /* True where a year's bars include figures the plan worked out rather than
    ones that happened — this year past the entered marker, and every year
    built ahead of it. */
@@ -4669,8 +4702,13 @@ function yearIsProjected(y) {
 
 function renderHistory() {
   const eoyYears = yearKeys().filter(y => state.years[y].eoyCash !== undefined);
-  const liveKey = latestGridYear();
-  /* The two charts share one signal, so they share one key. It sat only in the
+  /* The spending chart measures a summary year differently from a grid one, and
+     the place to say so is under the chart. Named only where there is actually
+     a summary year to explain — a plan that starts at its first grid year has
+     nothing to warn anybody about. */
+  const firstGrid = yearKeys().some(y => state.years[y].kind === 'summary')
+    ? yearKeys().find(y => state.years[y].kind === 'grid') : null;
+  /* The three charts share one signal, so they share one key. It sat only in the
      prose above each chart, which is not where you look when you are trying to
      work out why two bars are drawn differently from the rest. */
   const projectedKey = `<p class="chartkey"><i></i> Dashed — projected: a year still
@@ -4688,6 +4726,16 @@ function renderHistory() {
       them included, and the interest they earned counted as money in. Striped bars are
       money out. Early years are best-effort reads of the old bi-weekly sheets.</p>
     <div class="chartbox" style="height:300px"><canvas id="flowChart"></canvas></div>
+    ${projectedKey}
+  </div>
+  <div class="card">
+    <h2>Spending, Year by Year</h2>
+    <p class="sub">The expense rows alone — money moved between your own accounts is left
+      out, which is what makes these bars smaller than the money-out bars above. Each one
+      is the year's Expenses total on the Budget tab.${firstGrid ? ` Before ${
+        esc(firstGrid)} there were no sections to read, so those years count everything
+      the old sheets recorded going out.` : ''}</p>
+    <div class="chartbox" style="height:300px"><canvas id="spendChart"></canvas></div>
     ${projectedKey}
   </div>`;
 }
@@ -4804,6 +4852,79 @@ function buildHistoryCharts() {
   }, `Money in and money out per year: ${flowYears.map((y, i) =>
     `${y}, in ${fmtMoney(flows[i].in)}, out ${fmtMoney(flows[i].out)}${
       projected[i] ? ', projected' : ''}`).join('; ')}.`);
+
+  buildSpendingChart();
+}
+
+/* One bar a year, with a reference line to read them against — sixteen bars
+   with nothing to measure them by answers "what did I spend" but not "was that
+   a lot", which is the question anybody actually opens this with. */
+function buildSpendingChart() {
+  const years = yearKeys();
+  if (!years.length) return;
+  const spend = years.map(y => yearSpending(state.years[y], C[y], y));
+  const projected = years.map(yearIsProjected);
+  /* The average is taken over the years that HAPPENED. A projection is the
+     plan's own guess, and averaging the guess in would move the very line the
+     guess is being measured against. A year with nothing in it is left out too:
+     it says the sheet is empty, not that nothing was spent, and a zero in the
+     mean drags the line down by a year that never had an opinion. */
+  const recorded = spend.filter((v, i) => !projected[i] && v);
+  const avg = recorded.length > 1
+    ? round2(recorded.reduce((s, v) => s + v, 0) / recorded.length) : null;
+  const accent = cssVar('--accent'), tick = cssVar('--chart-tick');
+  /* Solid edge on a recorded year, none on a projected one — dashedBarEdge
+     draws that one instead, the same arrangement the flow bars use. */
+  const datasets = [{ type: 'bar', label: 'Spent', order: 2, data: spend,
+    backgroundColor: cssVar('--accent-bg'),
+    borderColor: (ctx) => (ctx && projected[ctx.dataIndex]) ? 'transparent' : accent,
+    _trueBorder: accent, borderWidth: 2, borderSkipped: false,
+    /* Two or three years is a handful of categories, and Chart.js hands each
+       one a third of the plot — a slab that wide stops reading as a bar. */
+    maxBarThickness: 84 }];
+  if (avg !== null) datasets.push({ type: 'line', order: 1,
+    label: `Average of the recorded years (${fmtMoney(avg)})`,
+    data: years.map(() => avg),
+    /* Neutral, so it reads as a rule drawn across the chart rather than another
+       series of money. DOTTED, not dashed, and that is not decoration: a dash
+       already means "projected" on the bars beside it and in the key under
+       them, and a second neutral dashed thing on the same card would be two
+       signals wearing one costume. */
+    borderColor: tick, backgroundColor: 'transparent', borderDash: [2, 4],
+    borderWidth: 2, pointRadius: 0, tension: 0 });
+  /* How this year compares with the one before it — the figure you were going
+     to work out in your head off two bars that aren't side by side. */
+  const against = (i) => {
+    const prev = spend[i - 1];
+    if (!i || !prev || !spend[i]) return null;
+    const d = round2(spend[i] - prev);
+    if (!d) return `The same as ${years[i - 1]}`;
+    return `${d > 0 ? 'Up' : 'Down'} ${fmtMoney(Math.abs(d))} on ${years[i - 1]}`
+      + ` (${Math.abs(d / prev * 100).toFixed(1)}%)`;
+  };
+  newChart('spendChart', {
+    type: 'bar',
+    data: { labels: years, datasets },
+    options: {
+      plugins: {
+        /* Named only when there is something to name: one dataset is the chart
+           heading written twice. Reversed so the money comes before the line
+           drawn across it — `order` puts the line in front when it DRAWS, and
+           the legend follows the same ordering unless told otherwise. */
+        legend: { reverse: true, display: datasets.length > 1, labels: { color: tick } },
+        dashedBarEdge: { projected },
+        tooltip: { callbacks: { label: (t) => t.dataset.type === 'line'
+          ? t.dataset.label
+          : [`Spent: ${fmtMoney(t.parsed.y)}${projected[t.dataIndex] ? ' (projected)' : ''}`,
+             against(t.dataIndex)].filter(Boolean) } },
+      },
+      scales: { x: chartAxes(), y: Object.assign(chartAxes(),
+        { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
+    },
+    plugins: [dashedBarEdge],
+  }, `Spending per year: ${years.map((y, i) => `${y}, ${fmtMoney(spend[i])}${
+    projected[i] ? ' projected' : ''}`).join('; ')}.${
+    avg === null ? '' : ` Average of the recorded years, ${fmtMoney(avg)}.`}`);
 }
 
 /* ═══════════════════════════ Year rollover ════════════════════════════════ */
@@ -9052,7 +9173,7 @@ booted = true;
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
-  afterRaise, bonusBase, bonusShare, yearFlows, summaryRowIsFlow, notesOfYear,
+  afterRaise, bonusBase, bonusShare, yearFlows, yearSpending, summaryRowIsFlow, notesOfYear,
   givenOutOfPocket, grossIncome, takeHomePay, givingStats, givingCeiling, isPayRow,
   hasNote,
   parseOpen, withSection, zoomPct, ZOOM_MIN, ZOOM_MAX,

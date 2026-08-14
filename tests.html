@@ -1776,6 +1776,61 @@ t('a summary year still leaves its balance rows out', () => {
   approx(f.out, 25000);
 });
 
+group('Spending, year by year');
+/* A year of rows the sections tell apart — the same shape the Budget grid
+   groups under Income / Expenses / Transfers. */
+function spendYear(cells) {
+  return { kind: 'grid', model: 'live', categories: [
+    { id: 'pay', name: 'Paycheck', section: 'income' },
+    { id: 'rent', name: 'Rent', section: 'expense' },
+    { id: 'food', name: 'Groceries', section: 'expense' },
+    { id: 'invest', name: 'Investing', section: 'transfer' },
+  ], cells };
+}
+t('only the expense rows count as spending', () => {
+  /* The point of the chart: money swept into the brokerage is money that
+     changed pocket, and counting it would read as a year of heavy spending. */
+  const yr = spendYear({});
+  const spend = H.yearSpending(yr, { cells: {
+    'pay|2030-01': { v: 5000 }, 'rent|2030-01': { v: -1500 },
+    'food|2030-01': { v: -600 }, 'invest|2030-01': { v: -4000 },
+  } }, '2030');
+  approx(spend, 2100, 'rent + groceries, and neither the pay nor the transfer');
+});
+t('a refund nets off the year it landed in', () => {
+  const spend = H.yearSpending(spendYear({}), { cells: {
+    'food|2030-01': { v: -600 }, 'food|2030-02': { v: 100 },
+  } }, '2030');
+  approx(spend, 500, 'money given back really did reduce what the year spent');
+});
+t('another year’s months are not counted', () => {
+  const spend = H.yearSpending(spendYear({}),
+    { cells: { 'rent|2031-01': { v: -1500 } } }, '2030');
+  approx(spend, 0);
+});
+t('a row with no section counts as an expense, like the grid', () => {
+  /* The Budget tab files an unsectioned row under Expenses; the chart has to
+     agree with the total the reader can see there. */
+  const yr = { kind: 'grid', categories: [{ id: 'misc', name: 'Misc' }], cells: {} };
+  approx(H.yearSpending(yr, { cells: { 'misc|2030-05': { v: -75 } } }, '2030'), 75);
+});
+t('a year with nothing stored falls back to its own cells', () => {
+  const yr = spendYear({ 'rent|2030-03': { v: -1200 } });
+  approx(H.yearSpending(yr, undefined, '2030'), 1200);
+});
+t('a summary year counts everything that went out', () => {
+  /* The old sheets have no sections to read, so the fallback is the money-out
+     figure — and its balance rows stay out of it, same as the flow bars. */
+  const spend = H.yearSpending({ kind: 'summary', categoryTotals: [
+    { name: 'Income', total: 30000 },
+    { name: 'Mortgage', total: -9000 },
+    { name: 'Utilities', total: -1200 },
+    { name: 'Checking', total: 900, isBalance: true },
+    { name: 'Savings', total: -400, isBalance: true },
+  ] }, undefined, '2015');
+  approx(spend, 10200, 'the two outgoings, not the stated balance below them');
+});
+
 group('Past-year balance rows become accounts');
 function historyState() {
   const bal = (id, name) => ({ id, name, role: 'normal', rule: 'none', isBalance: true });
