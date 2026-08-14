@@ -259,6 +259,16 @@ Then open the app → **Back up** → **Restore JSON…** → pick
 `financial-plan-data.json`. The same Restore path handles ordinary backups —
 Export writes `financial-plan-YYYY-MM-DD.json`, Restore reads it back.
 
+Folded away at the foot of that same dialog, under **Start again**, is
+**Delete all data**. It's behind a fold on purpose: the one irreversible action
+in the app shouldn't sit a mis-click away from Export. Pressing it opens a
+confirmation of its own that says exactly how much is going ("This deletes 8
+years of budgets, 3 goals…"), says out loud when you're signed in that the
+synced copy goes too and you'll be signed out, and offers the same JSON export
+as a last chance to keep any of it. The cloud copy is deleted first: failing up
+there after deleting locally would leave the account holding the only copy, and
+the next sign-in would pour it straight back.
+
 `migrate_local_data.py` does the one thing the app deliberately won't do to
 your data by itself: it takes the next year back out of the live grid. The
 spreadsheet ran 24 months so it could see a year ahead; the app ends a year at

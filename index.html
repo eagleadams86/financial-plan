@@ -152,6 +152,11 @@ button, select, input, textarea { font: inherit; color: inherit; }
    it sizes ~3px shorter than a button with identical padding and font — pinning
    the height on both is the only way to keep the row even. */
 .btn.small { padding: 4px 9px; font-size: 13px; min-height: var(--chrome-h); }
+/* Destructive buttons. Same shape as every other button — only the colour differs,
+   from the existing --err token, so nothing here diverges from the theme pack.
+   Mirrored in Sprint Predictability, Flow Metrics, PAPTrack and Golf Handicap. */
+.btn.danger { color: var(--err); border-color: var(--err); background: transparent; }
+.btn.danger:hover { background: var(--err-bg); border-color: var(--err); }
 select, input[type=text], input[type=number], input[type=date], input[type=month], textarea {
   background: var(--bg-card); border: 1px solid var(--input-border);
   border-radius: var(--radius-sm); padding: 7px 9px;
@@ -472,6 +477,14 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
 .h-edit:hover { color: var(--text-primary); border-color: var(--text-muted); }
 .warn { color: var(--err); font-size: 13px; margin-top: 10px; }
 .warn:empty { display: none; }
+
+/* "Start again" inside the backup dialog. Folded away deliberately: the one
+   irreversible action in the app should take a deliberate open, not sit a
+   mis-click away from Export. Same pattern in the sibling apps. */
+details.danger-zone { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
+details.danger-zone > summary { cursor: pointer; font-size: 13px; font-weight: 600;
+  color: var(--text-secondary); }
+details.danger-zone > summary:hover { color: var(--text-primary); }
 .muted { color: var(--text-secondary); }
 
 #toast {
@@ -850,7 +863,7 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
       <option value="200">200%</option>
     </select>
     <button class="btn small" id="prefsBtn" title="Currency, row order, rates and other app-wide settings">Preferences</button>
-    <button class="btn small" id="dataBtn" title="Back up or restore your data">Back up</button>
+    <button class="btn small" id="dataBtn" title="Back up, restore or clear your data">Back up</button>
     <button class="btn small" id="shareBtn" title="Create a read-only link to show someone part of your plan">Share</button>
     <!-- Ships visible and signed-out at its final width (min-width in CSS), so
          the header doesn't reflow when the Firebase SDK arrives; the module
@@ -910,14 +923,34 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   <p class="sub muted" style="margin-top:14px">First time here? Run <code>import_xlsx.py</code>
     (in the repo) against the Numbers export on your Mac, then Restore the file it produces.
     Restoring replaces everything currently in this browser — you'll be asked to confirm first.</p>
-  <fieldset class="formpanel">
-    <legend>Start Over</legend>
-    <p class="sub" style="margin:0 0 10px" id="wipeNote">Wipes every year, goal, trip and
-      table from this browser. There is no undo beyond a backup file you exported earlier.</p>
-    <button class="btn" id="wipeBtn">🗑 Delete all data</button>
-  </fieldset>
+  <details class="danger-zone">
+    <summary>Start Again</summary>
+    <p class="sub muted" style="margin-top:10px" id="wipeNote">Deletes every year, goal, trip and
+      table in this browser. Your theme is kept.</p>
+    <div class="row" style="margin-top:10px">
+      <button class="btn danger" id="wipeBtn" type="button">Delete all data</button>
+    </div>
+  </details>
   <div class="row" style="justify-content:flex-end;margin-top:18px">
     <button class="btn primary" id="dataCloseBtn">Close</button>
+  </div>
+</dialog>
+
+<!-- ── Confirming a delete-all ───────────────────────────────────────────────
+     Its own dialog rather than a pair of confirm()s: this is the one action with
+     no way back, so it gets room to say exactly how much is going, whether it
+     reaches the synced copy, and to offer the backup that is the only route
+     back. Same shape as the sibling apps. -->
+<dialog id="clearDialog" aria-labelledby="clearTitle">
+  <h3 id="clearTitle">Delete All Data?</h3>
+  <p class="sub" id="clearBody"></p>
+  <p class="warn" id="clearSyncWarn" role="status"></p>
+  <div class="row spread" style="margin-top:18px">
+    <button class="btn" id="clearBackupBtn" type="button">⬇ Export a backup first</button>
+    <span class="row">
+      <button class="btn" id="clearCancel" type="button">Cancel</button>
+      <button class="btn danger" id="clearConfirm" type="button">Delete everything</button>
+    </span>
   </div>
 </dialog>
 
@@ -8474,33 +8507,10 @@ const dataDialog = F('dataDialog');
 F('dataBtn').onclick = () => dataDialog.showModal();
 F('dataCloseBtn').onclick = () => dataDialog.close();
 
-/* Delete everything. Two deliberate confirms — this is the one action in the
-   app with no way back (short of a backup file), so it must never ride on a
-   single misclick. When the sync module is signed in it registers
-   window.cloudWipe, and the wipe removes the cloud copy too — otherwise the
-   next sign-in would just pour the old data straight back. */
-F('wipeBtn').onclick = async () => {
-  const nYears = yearKeys().length;
-  if (!confirm(`Delete ALL data from this browser${window.cloudWipe ? ' AND the synced copy' : ''}?`
-    + (nYears ? ` That's ${nYears} year(s) of budgets, plus goals, trips and tables.` : '')
-    + ' There is no undo.')) return;
-  if (!confirm('Last check — really delete everything? An exported backup file is the only way back.')) return;
-  try {
-    if (window.cloudWipe) await window.cloudWipe();
-  } catch (e) {
-    console.warn('cloud wipe failed', e);
-    toast('⚠️ Could not remove the synced copy — local data was kept. Try again.');
-    return;
-  }
-  localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(UPDATED_KEY);
-  state = blankState();
-  dataDialog.close();
-  render();
-  toast('Everything deleted — a fresh start');
-};
-
-F('exportBtn').onclick = () => {
+/* Its own function because the delete-all dialog offers the same download as its
+   safety net — one press away from losing everything is exactly when a backup is
+   worth taking. */
+function downloadBackup() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -8513,6 +8523,61 @@ F('exportBtn').onclick = () => {
      event loop settles it. A silent empty backup is the worst outcome here. */
   setTimeout(() => URL.revokeObjectURL(url), 0);
   toast('Exported');
+}
+F('exportBtn').onclick = downloadBackup;
+
+/* ── Delete everything ──────────────────────────────────────────────────────
+   Folded behind "Start again" in the backup dialog and confirmed in a dialog of
+   its own — this is the one action in the app with no way back (short of a
+   backup file), so it must never ride on a single misclick, and the dialog is
+   where the export that IS the way back is offered. It replaces a pair of
+   stacked confirm()s, which asked twice without ever saying how much was going.
+   Same shape as Sprint Predictability, Flow Metrics, PAPTrack and Golf Handicap.
+
+   When the sync module is signed in it registers window.cloudWipe, and the wipe
+   removes the cloud copy too — otherwise the next sign-in would just pour the
+   old data straight back. */
+const clearDialog = F('clearDialog');
+
+F('wipeBtn').onclick = () => {
+  /* Closed first rather than stacked: a confirmation is the whole screen's
+     business, and backing out of it should not drop you into the dialog you
+     started from as though nothing had been asked. */
+  dataDialog.close();
+  const nYears = yearKeys().length;
+  const nGoals = (state.goals || []).length;
+  const n = (v, w) => `${v} ${w}${v === 1 ? '' : 's'}`;
+  F('clearBody').textContent =
+    `This deletes ${n(nYears, 'year')} of budgets, ${n(nGoals, 'goal')}, and every trip, `
+    + `holding and table in this browser. Your theme is kept. There is no undo — an exported `
+    + `backup is the only way to get any of it back.`;
+  /* Said plainly, because "clear this browser" and "clear every device I own"
+     are very different acts and the button looks identical either way. */
+  F('clearSyncWarn').textContent = window.cloudWipe
+    ? 'You are signed in, so this also deletes the synced copy and signs you out.'
+    : '';
+  clearDialog.showModal();
+};
+
+F('clearBackupBtn').onclick = downloadBackup;
+F('clearCancel').onclick = () => clearDialog.close();
+F('clearConfirm').onclick = async () => {
+  /* The cloud copy goes FIRST and a failure stops the whole thing: deleting
+     locally and then failing up there leaves the account holding the only copy,
+     which the next sign-in would pour straight back in. */
+  try {
+    if (window.cloudWipe) await window.cloudWipe();
+  } catch (e) {
+    console.warn('cloud wipe failed', e);
+    toast('⚠️ Could not remove the synced copy — local data was kept. Try again.');
+    return;
+  }
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(UPDATED_KEY);
+  state = blankState();
+  clearDialog.close();
+  render();
+  toast('Everything deleted — a fresh start');
 };
 
 F('importBtn').onclick = () => F('importFile').click();
@@ -8578,7 +8643,7 @@ function closeOnBackdropClick(dlg) {
 }
 /* syncChoiceDialog is deliberately excluded: "which copy of your data?" has no
    safe default, so it must be answered rather than dismissed. */
-['dataDialog', 'rowDialog', 'cellDialog', 'helpDialog', 'shareDialog'].forEach(id =>
+['dataDialog', 'clearDialog', 'rowDialog', 'cellDialog', 'helpDialog', 'shareDialog'].forEach(id =>
   closeOnBackdropClick(F(id)));
 
 /* ═════════════════════════════ Theme & chrome ═════════════════════════════ */
