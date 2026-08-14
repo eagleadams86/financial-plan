@@ -793,6 +793,20 @@ because a dash already means "projected" on the bars and in the key beneath
 them. Its legend is `reverse: true` for the reason the Giving chart's is:
 `order` puts the line in front when it draws, and the legend follows the same
 ordering unless told otherwise.
+**The hovered bar fills SOLID (`hoverBackgroundColor`), and that is a fix, not a
+flourish.** The tooltip is about five bars wide against 41px of bar spacing, and
+Chart.js flips it to whichever side of the year it fits on — so from the middle
+of the chart onwards it sits to the LEFT of the bar it describes, covers four or
+five others and stops just short of its own. It was reported as the chart showing
+the previous year's figures; the figures were right every time, hover-tested
+across the row (2023 → title "2023", box spanning x 380–577, i.e. over 2018–2022).
+The box cannot be narrower than its own sentence, so the BAR carries the
+association: nothing else on the chart is solid, and `caretSize: 8` makes the one
+part of the box that points at its year hold its own. Watch for this whenever a
+tooltip grows a second line — the flip is silent and the chart looks fine in a
+screenshot taken at the left-hand end. On a projected bar the fill hides the
+dashed edge for as long as the pointer is on it, which is acceptable only because
+the tooltip says "(projected)" in words at that moment.
 Charts get a `summary` argument: a `<canvas>` announces nothing to a screen
 reader, and a chart that can't be drawn shouldn't render an empty one. Chart.js
 4's BAR element ignores `borderDash` (only lines and arcs honour it), so the
