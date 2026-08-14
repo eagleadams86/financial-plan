@@ -1201,6 +1201,23 @@ const accountsOf = (st) => (st.settings.accounts || []);
 const accountById = (st, id) => accountsOf(st).find(a => a.id === id);
 const accountName = (st, id) => accountById(st, id)?.name || id;
 const hubAccount = (st) => accountsOf(st).find(a => a.hub) || accountsOf(st)[0];
+/* Move the hub. Exactly one account carries the flag and the whole engine reads
+   it — `normal` rows land on the hub and nowhere else, `transfer` and
+   `passthrough` are both defined against it, and it is the one account with no
+   start date because it is always running. So this CLEARS the flag everywhere
+   before setting it, rather than trusting the caller: two hubs would silently
+   send every ordinary row's money to whichever the engine's `find` reached
+   first, and none would send it to the first account in the list.
+   Returns what moved, or null when there was nothing to do. */
+function nominateHub(st, id) {
+  const accounts = (st.settings && st.settings.accounts) || [];
+  const target = accounts.find(a => a.id === id);
+  if (!target || target.hub) return null;
+  const from = accounts.find(a => a.hub);
+  for (const a of accounts) delete a.hub;
+  target.hub = true;
+  return { from: from ? from.name : null, to: target.name };
+}
 
 /* ── The household ────────────────────────────────────────────────────────
    A plan can name the people in it, and then say whose each account is. The
@@ -5988,13 +6005,20 @@ const EDITORS = {
           + 'it arrives in.' },
       ...(ds.bal ? [] : [{ key: 'seed', label: 'Balance right now', type: 'money',
         hint: 'What the account holds today — the figure every later month builds on.' }]),
+      /* Only on an account that already exists: nominating the hub while
+         creating one would move every budget row's money as a side effect of
+         adding a savings account, which is not what anybody means by "add". */
+      ...(ds.bal ? [{ key: 'hub', label: 'Main account', type: 'check', fill: true,
+        hint: 'Everything ordinary lands here — pay in, bills out, anything not marked as a '
+            + 'transfer. Only one account can be it, so ticking this moves it from whichever '
+            + 'holds it now, and every year the plan works out changes with it.' }] : []),
     ],
     get: (ds) => {
       const a = accountById(state, ds.bal) || {};
       return { name: a.name, owner: a.owner || '', rate: a.rate || 0,
                creditTo: a.creditTo || a.id,
                divRate: a.divRate || 0, divTo: a.divTo || a.id,
-               divEvery: String(a.divEvery || 3) };
+               divEvery: String(a.divEvery || 3), hub: !!a.hub };
     },
     blank: () => ({ rate: 0, divRate: 0, divEvery: '3',
                     creditTo: hubAccount(state)?.id, divTo: hubAccount(state)?.id }),
@@ -6022,16 +6046,31 @@ const EDITORS = {
            behind your back — and it reports what moved, because a merge that
            silently swallowed four years of balances would be indistinguishable
            from losing them. A month claimed by both refuses instead. */
+        /* A plan without a hub has nowhere to put an ordinary row, so the flag
+           is moved, never simply removed. Unticking is refused rather than
+           obeyed: the way to change it is to nominate the account you DO want,
+           which leaves no moment where none is nominated. The rest of the edit
+           is kept — the reader corrected a rate and a name too, and throwing
+           those away to punish one bad tick would be its own surprise. */
+        let hubMoved = '';
+        if (v.hub && !a.hub) {
+          const moved = nominateHub(state, a.id);
+          hubMoved = `${moved.to} is the main account now — every ordinary row lands there `
+            + `instead of ${moved.from}, in every year the plan works out. `;
+        } else if (!v.hub && a.hub) {
+          hubMoved = `A plan needs one main account, so ${a.name} stays as it is — `
+            + 'tick the box on the account you want instead. ';
+        }
         const done = mergeAccountsByName(state).filter(r => r.name === a.name);
         const refused = done.find(r => r.refused);
         /* No esc(): a returned string is toasted through textContent, and
            escaping here would put "M&amp;T Checking" on screen. */
-        if (refused) return `Kept "${a.name}" separate — ${plural(refused.refused, 'month')} `
-          + 'would have had a balance in both. Nothing was changed.';
+        if (refused) return hubMoved + `Kept "${a.name}" separate — ${plural(refused.refused, 'month')} `
+          + 'would have had a balance in both. Nothing else was changed.';
         const did = done.find(r => r.absorbed && r.absorbed.length);
-        if (did) return `Merged ${plural(did.absorbed.length + 1, 'account')} named `
+        if (did) return hubMoved + `Merged ${plural(did.absorbed.length + 1, 'account')} named `
           + `"${a.name}" into one — ${plural(did.moved, 'figure')} moved across.`;
-        return;
+        return hubMoved || undefined;
       }
       let id = slugJs(v.name), n = 2;
       while (accountById(state, id)) id = `${slugJs(v.name)}-${n++}`;
@@ -8562,7 +8601,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
   reconcileNote,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  mergeAccountsByName,
+  mergeAccountsByName, nominateHub, hubAccount,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
   normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,

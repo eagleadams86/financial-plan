@@ -122,7 +122,20 @@ family names as well as balances.
   `{id, name, rate, creditTo, hub?, since?}`. The ids `cash/mid/long/bank`
   stay reserved (seeds, `overrides`, goal sources and the dividends rule key
   off them). `hub` is the one account ordinary money flows through — do not
-  generalize that. An account earns twice over: `rate` compounds into
+  generalize that. **It is nominated through `nominateHub(st, id)`**, never by
+  setting the flag directly: it CLEARS `hub` from every account before setting
+  it, because two hubs would send every ordinary row's money to whichever the
+  engine's `find` reached first, and none would send it to whatever happens to
+  be first in the list. The account editor offers it as "Main account" on an
+  account that already EXISTS — nominating one while creating an account would
+  move every budget row's money as a side effect of adding a savings account.
+  Unticking is refused rather than obeyed (there is no moment where a plan has
+  no hub; you nominate the one you want instead), while the rest of that edit is
+  kept — throwing away a rate correction to punish one bad tick is its own
+  surprise. Moving it is a big, retroactive change: `normal` rows land on the
+  hub and nowhere else, so every live year recomputes. The save reports what
+  moved for that reason. `coerceShape` still promotes `accounts[0]` when a
+  restored file has none, which is a backstop and not a nomination. An account earns twice over: `rate` compounds into
   `creditTo` (usually itself), and `divRate` is earned the same way but paid
   into `divTo` on a calendar beat (`divEvery`: 1/3/6/12 months, quarterly by
   default) — the brokerage sweep. A payment carries the whole period, so the

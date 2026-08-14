@@ -2037,6 +2037,46 @@ t('anything else is genuinely not tracked yet', () => {
      'no month to measure against — say the least, not the wrong thing');
 });
 
+group('Nominating the main account');
+/* The hub is one boolean the whole engine reads: `normal` rows land on it and
+   nowhere else, transfer and pass-through are both defined against it, and it
+   is the only account with no start date. */
+const threeAccounts = () => ({ settings: { accounts: [
+  { id: 'cash', name: 'Cash (SPAXX)', hub: true, creditTo: 'cash', divTo: 'cash' },
+  { id: 'chase', name: 'Chase Checking', creditTo: 'chase', divTo: 'chase' },
+  { id: 'mt', name: 'M&T Checking', creditTo: 'mt', divTo: 'mt' }] }, years: {} });
+t('nominating one moves it, and leaves exactly one', () => {
+  const st = threeAccounts();
+  const moved = H.nominateHub(st, 'chase');
+  eq(moved, { from: 'Cash (SPAXX)', to: 'Chase Checking' }, 'it says what moved');
+  eq(st.settings.accounts.filter(a => a.hub).length, 1, 'exactly one, always');
+  eq(H.hubAccount(st).id, 'chase');
+  eq(st.settings.accounts[0].hub, undefined, 'and the old one is properly cleared');
+});
+t('nominating the one that already holds it does nothing', () => {
+  const st = threeAccounts();
+  eq(H.nominateHub(st, 'cash'), null, 'nothing to report');
+  eq(H.hubAccount(st).id, 'cash');
+});
+t('an unknown account cannot take it away from the one that has it', () => {
+  const st = threeAccounts();
+  eq(H.nominateHub(st, 'nope'), null);
+  eq(H.hubAccount(st).id, 'cash', 'the plan is never left without one');
+});
+t('a plan that somehow had two ends up with one', () => {
+  /* Two would send every ordinary row to whichever the engine found first. */
+  const st = threeAccounts();
+  st.settings.accounts[1].hub = true;
+  H.nominateHub(st, 'mt');
+  eq(st.settings.accounts.filter(a => a.hub).length, 1);
+  eq(H.hubAccount(st).id, 'mt');
+});
+t('the shape check always leaves a hub to find', () => {
+  const st = H.coerceShape({ settings: { accounts: [
+    { id: 'a', name: 'A' }, { id: 'b', name: 'B' }] }, years: {} });
+  eq(st.settings.accounts.filter(x => x.hub).length, 1, 'one is chosen rather than none');
+});
+
 group('Accounts sharing a name are one account');
 /* The history import made an account per distinct row NAME per sheet, so one
    real brokerage account arrived as four ids as the spreadsheet's wording
