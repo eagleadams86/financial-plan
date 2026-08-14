@@ -573,6 +573,35 @@ move you'd otherwise make by hand across two fields, like the trip line's
 nothing commits until Save; `type="button"` keeps it from submitting. The CSS
 puts it UNDER its input, because alongside it shortens that one box and leaves
 the row ragged against its neighbours.
+**Budget rows drag into place within their section** (`wireRowDrag`), the same
+gesture as the tab bar and for the same reason — pointer events, not HTML5
+drag-and-drop, which does nothing on a touchscreen. It takes three lessons from
+the tabs: the capture goes on a container that never moves (`tbody`), because
+`insertBefore` detaches the dragged element and a captured element leaving the
+document loses its capture; the row is only picked up after 6px of travel, so an
+ordinary click still opens its editor; and only the LABEL cell is a handle,
+since every month cell already opens a cell editor of its own.
+**One thing it does differently on purpose: the capture is taken when the drag
+STARTS, not on pointerdown.** The tab bar owns its own clicks, but a row label
+is routed by the delegated `data-edit` listener on `#views`, and a captured
+container swallows the click that listener needs — capturing up front meant a
+label that no longer opened its editor. For the same reason the trailing click
+cannot be swallowed on the tbody: `render()` replaces that element before the
+click arrives, so `rowDragEndedAt` tells the delegated listener to skip one.
+`data-sec` is stamped on the row and is the whole permission model: no stamp, no
+drag. It is absent under `rowSort === 'alpha'` (a display sort over an untouched
+stored order — a row dragged there would spring back on the next render) and in
+`viewOnly`. `moveRowBefore(yrs, id, beforeId)` is the persistence, and it is NOT
+`swapRows`: a drag lands a row anywhere, which two neighbours trading places
+cannot express. It matches by ID against each year's own list, never by index —
+the years ahead are a rollover snapshot and a row can sit at a different
+position in each — and it finds the destination AFTER removing the row, because
+taking it out shifts everything below it up by one.
+**Touch scrolls rather than drags, deliberately.** No `touch-action` is set on
+the label, so a finger still scrolls the grid; the ↑↓ buttons in the row editor
+remain the touch and keyboard path. Blocking `touch-action` on the pinned label
+column would have cost vertical scrolling to gain a gesture that already has a
+working alternative.
 Deleting a budget category also deletes its orphaned cells — keep that.
 
 Budget rows carry `section` (income/expense/transfer — display grouping,

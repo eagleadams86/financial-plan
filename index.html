@@ -422,6 +422,23 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
   font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
   color: var(--text-secondary); font-weight: 700; padding-top: 8px; padding-bottom: 5px; }
 .grid tr.sechead th.lbl { background: var(--bg-card-alt); }
+/* Reorderable rows. The label is the handle — grab it and the row follows —
+   so it says so with a cursor. Only rows the drag will actually accept get it:
+   an alphabetical grid renders a sort over an untouched stored order, and a
+   shared view is nobody's to rearrange, so neither stamps data-sec. */
+.grid tr[data-sec] > th.lbl { cursor: grab; }
+.grid tbody.rowdragging tr[data-sec] > th.lbl { cursor: grabbing; }
+/* The row being carried. Lifted with the app's own shadow and a touch of
+   transparency rather than a colour: the grid already spends colour on what a
+   figure is MADE of, and a dragged row is a state of the gesture, not of the
+   money. */
+.grid tr.rowdrag > th, .grid tr.rowdrag > td {
+  opacity: .55; background: var(--bg-card-alt);
+}
+/* While a drag is in flight, nothing else in the grid should look clickable or
+   catch a selection under the pointer. */
+.grid tbody.rowdragging { user-select: none; }
+.grid tbody.rowdragging td.cell { cursor: grabbing; }
 .grid tr.subtotal td, .grid tr.subtotal th { font-weight: 600;
   color: var(--text-secondary); border-top: 1px solid var(--border);
   font-size: 12.5px; }
@@ -3075,8 +3092,14 @@ function gridCard(y, yr) {
        switching back to manual restores the order you arranged. */
     if (state.settings.rowSort === 'alpha')
       cats = cats.slice().sort((a, b) => a.name.localeCompare(b.name));
+    /* `data-sec` on the row, not inferred from the DOM: a drag has to know
+       which rows it may land between, and the section headers and subtotals
+       sitting among them are not rows it can ask. Only when the order is the
+       reader's own — alphabetical is a display sort over an untouched stored
+       order, so dragging there would move a row that then springs back. */
+    const drag = state.settings.rowSort === 'alpha' || viewOnly ? '' : ` data-sec="${sec}"`;
     return secheadRow(SECTION_LABEL[sec])
-      + cats.map(cat => `<tr>${catTh(cat)}${
+      + cats.map(cat => `<tr data-cat="${esc(cat.id)}"${drag}>${catTh(cat)}${
           months.map(m => cellTd(cat, m)).join('')}${
           rowTotalTd(catTotal(cat), false, catTotalKind(cat))}</tr>`).join('')
       /* One row is its own subtotal — repeating it just adds a line to read. */
@@ -5825,6 +5848,30 @@ function swapRows(yrs, a, b) {
   }
 }
 
+/* Drop a row in front of another one. `swapRows` above is the ↑↓ buttons'
+   operation — two neighbours trading places — and it cannot express a drag,
+   which lands a row anywhere in its section. `beforeId` null means the end.
+
+   Ordered by ID against each year's OWN list, never by index: the years ahead
+   were a snapshot taken at rollover, so a row can sit at a different position
+   in each, and moving by index would shuffle a year that merely happens to be
+   shorter. A year missing either row is left alone — the same rule the swap
+   already follows. Pure over a list of years, so it can be tested. */
+function moveRowBefore(yrs, id, beforeId) {
+  for (const yr of yrs) {
+    const cats = yr.categories;
+    const from = cats.findIndex(c => c.id === id);
+    if (from < 0) continue;
+    if (beforeId !== null && !cats.some(c => c.id === beforeId)) continue;
+    const [row] = cats.splice(from, 1);
+    /* Found AFTER the removal: taking the row out shifts everything below it
+       up by one, and an index read before that is off by one whenever the row
+       is moving downwards. */
+    const to = beforeId === null ? cats.length : cats.findIndex(c => c.id === beforeId);
+    cats.splice(to, 0, row);
+  }
+}
+
 /* "2027", "2027 and 2028", "2027, 2028 and 2029" — for saying which. */
 const andList = (xs) => xs.length < 2 ? xs.join('')
   : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
@@ -7087,9 +7134,18 @@ function slugJs(name) {
   return s || 'row';
 }
 
+/* When a row drag last finished. Declared above its reader deliberately —
+   this file has been bitten by a `let` sitting below one. */
+let rowDragEndedAt = 0;
+
 /* One delegated listener routes every row click and add button. Attached
    once — it survives every re-render of #views. */
 F('views').addEventListener('click', (e) => {
+  /* The click that follows a row drag is not a click on anything — it is the
+     tail of the gesture that just finished, and acting on it would open the
+     editor of whichever row was dropped. A moment's window, because the two
+     arrive together; a longer one would start swallowing real clicks. */
+  if (Date.now() - rowDragEndedAt < 300) { rowDragEndedAt = 0; return; }
   /* Info dots first: they sit inside clickable rows, and asking what a number
      means shouldn't open that row's editor. */
   const help = e.target.closest('[data-help]');
@@ -7122,6 +7178,97 @@ const cellDialog = F('cellDialog');
 let editing = null;   // { yearKey, type: 'cat'|'bal'|'pay', id, m }
 ['cellValue', 'cellInterest', 'cellDividend'].forEach(id => asMoneyInput(F(id)));
 
+/* Dragging a budget row into place, the same gesture that reorders the tabs:
+   pick it up, move it, drop it. POINTER events, not HTML5 drag-and-drop, which
+   does nothing at all on a touchscreen.
+
+   Three things it takes from the tab bar, all learned the hard way there:
+   the capture goes on a container that never moves (reordering means
+   `insertBefore`, which detaches the dragged element, and a captured element
+   leaving the document loses its capture — so the drag died after one hop);
+   the row is only picked up after a few pixels of travel, so an ordinary click
+   still edits it; and what happens on release depends on which of the two it
+   turned out to be.
+
+   One thing it does DIFFERENTLY, and deliberately: the capture is taken when
+   the drag actually starts, not on pointerdown. The tab bar could capture
+   immediately because it owns its own clicks, but the grid's row labels are
+   handled by the delegated `data-edit` listener on #views — and a captured
+   container swallows the click that listener needs, so capturing up front
+   would have meant a row label that no longer opened its editor.
+
+   Only the LABEL cell is a handle. The month cells each open their own editor,
+   and a gesture that started on one would be competing with that. */
+function wireRowDrag(grid) {
+  const body = grid.querySelector('tbody');
+  if (!body) return;
+  let row = null, sec = '', startY = 0, startX = 0, dragging = false, captured = 0;
+
+  const rowAt = (x, y) => {
+    const el = document.elementFromPoint(x, y);
+    const tr = el && el.closest('tr[data-cat][data-sec]');
+    /* Same section only. The grid is drawn grouped, so a row that hopped into
+       Expenses from Income would land somewhere its own subtotal doesn't add
+       up, and the render would put it back where it belongs — a move that
+       visibly undoes itself. */
+    return tr && tr.dataset.sec === sec && tr.parentElement === body ? tr : null;
+  };
+  const stop = () => {
+    if (row) row.classList.remove('rowdrag');
+    body.classList.remove('rowdragging');
+    if (captured) { try { body.releasePointerCapture(captured); } catch (e) {} }
+    row = null; dragging = false; captured = 0;
+  };
+
+  body.addEventListener('pointerdown', (e) => {
+    if (e.button) return;                       // right/middle click is not a drag
+    const th = e.target.closest('th.lbl');
+    const tr = th && th.closest('tr[data-cat][data-sec]');
+    if (!tr || tr.parentElement !== body) return;
+    row = tr; sec = tr.dataset.sec;
+    startX = e.clientX; startY = e.clientY; dragging = false;
+  });
+
+  body.addEventListener('pointermove', (e) => {
+    if (!row) return;
+    if (!dragging) {
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return;
+      dragging = true;
+      row.classList.add('rowdrag');
+      body.classList.add('rowdragging');
+      /* Now, not earlier — see above. From here the whole gesture comes to the
+         tbody even when the pointer wanders off the table. */
+      try { body.setPointerCapture(e.pointerId); captured = e.pointerId; } catch (err) {}
+    }
+    const over = rowAt(e.clientX, e.clientY);
+    if (!over || over === row) return;
+    const box = over.getBoundingClientRect();
+    body.insertBefore(row, e.clientY > box.top + box.height / 2 ? over.nextSibling : over);
+  });
+
+  body.addEventListener('pointerup', () => {
+    if (!row || !dragging) { stop(); return; }
+    /* Read the order back off the DOM the drag has already arranged, rather
+       than tracking it in a variable through every insertBefore. */
+    const after = row.nextElementSibling;
+    const before = after && after.matches('tr[data-cat][data-sec]')
+      && after.dataset.sec === sec ? after.dataset.cat : null;
+    const id = row.dataset.cat, y = activeYearKey();
+    stop();
+    /* The browser fires a click after the drag, and it would open the editor
+       for whatever row the pointer finished on. It cannot be swallowed on the
+       tbody, because the render below replaces that element before the click
+       arrives — so the delegated listener is told to skip one instead. */
+    rowDragEndedAt = Date.now();
+    moveRowBefore([state.years[y], ...projectionsAfter(y).map(k => state.years[k])],
+      id, before);
+    save();
+    render();   // the subtotals and the notes list are drawn from the same order
+  });
+  body.addEventListener('pointercancel', stop);
+  body.addEventListener('lostpointercapture', stop);
+}
+
 function wireBudget() {
   pinnedShift = -1;  // fresh cells, so force a write
   pinGridHeader();   // a render starts with the header wherever the page is
@@ -7138,6 +7285,7 @@ function wireBudget() {
      reading, not editing, and Enter simply opens nothing now that the click
      listener above was never attached. */
   if (grid) wireGridKeys(grid);
+  if (grid && !viewOnly) wireRowDrag(grid);
   /* The gathered notes sit outside the table, so the grid's own listener can't
      reach them — but a note you can't get back to the cell of is only half
      useful. Row notes route through the ordinary #views editor listener. */
@@ -8916,7 +9064,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears,
-  projectionYearsAfter, applyToRow, dropRow, swapRows, andList, tabOrder, VIEWS,
+  projectionYearsAfter, applyToRow, dropRow, swapRows, moveRowBefore, andList, tabOrder, VIEWS,
   /* Share links: the pure pieces, plus the three tables that decide what
      travels. The tables are here so a test can fail the moment a tab is added
      without one — a missing entry ships an empty tab, and a missing owner ships

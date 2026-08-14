@@ -80,6 +80,11 @@ included — treat those the way you treat the figures.
   exact percentage in Preferences (50–200%). It belongs to the device you set
   it on: never synced, never in a backup, so a laptop and a desk monitor can
   each have the size that suits them.
+- **Budget rows drag into place** — grab a row's name and move it up or down
+  within its own section, the same way the tabs rearrange. The order follows
+  into the years you've built ahead, so two grids stay readable side by side.
+  (Sorting alphabetically turns dragging off, since that order isn't yours to
+  arrange; the ↑↓ buttons in a row's editor still work everywhere.)
 - **The tabs are yours to arrange** — drag one anywhere along the bar (with a
   mouse or a finger), or hold Alt and use the arrow keys. The order is saved and
   follows you to your other devices.
