@@ -5560,16 +5560,21 @@ function linkBonusPct(which, base, moneyKey) {
 
 /* Show/hide the fields whose spec carries showIf, reading the form's current
    values rather than the saved ones — the dialog reacts as you change it. */
-/* A field marked `fill` stretches to the end of whatever row it lands on, so a
-   dialog whose fields come and go never strands one in a third of a row with
-   empty space beside it. It has to be WORKED OUT rather than declared: which
-   row a field lands on depends on how many optional fields above it are showing
-   at that moment, and that changes under you as you pick a different rule.
-   Declaring it `wide` instead was the previous attempt, and it made the problem
-   worse — a full-width field forces a break, so the one optional setting above
-   it was left alone on a line of its own. */
+/* No dialog ever leaves a gap in a row. The LAST field on any row that came up
+   short is stretched to the end of it, so a setting is never stranded in a
+   third of a row with empty space beside it.
+
+   This is automatic rather than something each field opts into, and that is the
+   whole point: the gap appeared twice from the same innocent act — adding a
+   full-width field, which forces a line break and strands whatever narrow field
+   was above it. Anything that has to be remembered field by field will be
+   forgotten the next time somebody adds one. Nothing here needs to know which
+   fields exist.
+
+   It has to be WORKED OUT rather than declared, too: which row a field lands on
+   depends on how many optional fields above it are showing at that moment, and
+   that changes under the reader as they pick a different rule. */
 function applyFieldSpans(fields) {
-  if (!fields.some(f => f.fill)) return;
   const wrap = F('rowFields');
   /* A closed <dialog> is display:none, and getComputedStyle on that hands back
      the SPECIFIED grid ("repeat(2, minmax(0, 1fr))") rather than resolved
@@ -5577,17 +5582,28 @@ function applyFieldSpans(fields) {
      a laid-out grid; openRowEditor runs this again once the dialog is up. */
   if (!wrap.getBoundingClientRect().width) return;
   const cols = getComputedStyle(wrap).gridTemplateColumns.split(' ').filter(Boolean).length;
-  let pos = 0;
+  if (cols < 2) return;                       // one column: every row is full
+  const cells = [];
   for (const f of fields) {
     const cell = wrap.querySelector(`[data-field="${CSS.escape(f.key)}"]`);
-    if (!cell || cell.hidden) continue;
-    /* A wide field is a row to itself: it ends whatever row was in progress. */
-    if (cell.classList.contains('wide')) { pos = 0; continue; }
-    if (!f.fill) { cell.style.gridColumn = ''; pos = (pos + 1) % cols; continue; }
-    const span = cols - pos;
-    cell.style.gridColumn = span > 1 ? `span ${span}` : '';
-    pos = 0;
+    if (cell && !cell.hidden) cells.push(cell);
   }
+  /* Cleared first: a field that was stretched while another was hidden must
+     not stay stretched once that one comes back. */
+  for (const c of cells) c.style.gridColumn = '';
+  let row = [];
+  const closeRow = () => {
+    if (row.length && row.length < cols)
+      row[row.length - 1].style.gridColumn = `span ${cols - row.length + 1}`;
+    row = [];
+  };
+  for (const cell of cells) {
+    /* A wide field is a row to itself: it ends whatever row was in progress. */
+    if (cell.classList.contains('wide')) { closeRow(); continue; }
+    row.push(cell);
+    if (row.length === cols) row = [];        // full, nothing to stretch
+  }
+  closeRow();
 }
 
 function applyFieldVisibility(fields) {
@@ -5830,7 +5846,7 @@ const EDITORS = {
          or "Stipend" got a dash and the only cure was renaming your budget to
          suit the code. Offered on income rows only — an expense is never pay —
          and it overrides the guess in both directions. */
-      { key: 'isPay', label: 'This is my pay', type: 'check', fill: true,
+      { key: 'isPay', label: 'This is my pay', type: 'check',
         showIf: (v) => v.section === 'income',
         hint: 'Counts this row as take-home for the giving percentages. Tick it for pay '
             + 'the app hasn\u2019t recognised; untick it for income that only looks like '
@@ -5846,7 +5862,7 @@ const EDITORS = {
         ['normal', `Ordinary ${hubAccount(state)?.name || 'cash'} money — the usual`],
         ['transfer', `Moves ${hubAccount(state)?.name || 'cash'} into another account`],
         ['pass', `Never touches ${hubAccount(state)?.name || 'cash'} — another account pays it`],
-      ], fill: true,
+      ],
         /* Fills the rest of its row rather than claiming a whole one: on an
            ordinary row it pairs with the rule above it, and where a rule has
            brought its own setting along it takes the half that setting left
@@ -5868,7 +5884,7 @@ const EDITORS = {
       { key: 'creditTiming', label: 'Counted against that account', type: 'select', options: [
         ['pre', 'Before its monthly interest'],
         ['post', 'After its monthly interest'],
-      ], showIf: (v) => v.role === 'pass', fill: true },
+      ], showIf: (v) => v.role === 'pass' },
       noteField,
     ],
     get(ds) {
@@ -6026,8 +6042,7 @@ const EDITORS = {
       { key: 'midTermRateAnnual', label: 'Dividend row interest %/yr', type: 'percent',
         hint: 'Used by a dividend row with no rate of its own.' },
       { key: 'retirementReturnAnnual', label: 'Retirement return %/yr', type: 'percent',
-        /* Takes the third of the row the two rates would otherwise leave bare. */
-        fill: true, hint: 'What the retirement projection assumes.' },
+        hint: 'What the retirement projection assumes.' },
       { key: 'priceApiKey', label: 'Twelve Data key', type: 'text', wide: true,
         hint: 'For holding-price lookups — shares, ETFs and mutual funds. Free from '
             + 'twelvedata.com. Stays on this device — never synced, never in a backup.' },
@@ -6133,7 +6148,7 @@ const EDITORS = {
         hint: 'The last month this account held anything. After it the account is closed: '
             + 'out of Total, out of the transfer list, and no longer carrying its final '
             + 'balance forward. Leave empty for an account still in use.' }] : []),
-      ...(ds.bal ? [{ key: 'hub', label: 'Main account', type: 'check', fill: true,
+      ...(ds.bal ? [{ key: 'hub', label: 'Main account', type: 'check',
         hint: 'Everything ordinary lands here — pay in, bills out, anything not marked as a '
             + 'transfer. Only one account can be it, so ticking this moves it from whichever '
             + 'holds it now, and every year the plan works out changes with it.' }] : []),

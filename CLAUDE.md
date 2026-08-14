@@ -491,21 +491,24 @@ did nothing.
 computed from. `coerceShape` deletes both keys on load so they stop riding
 along in every backup; don't reintroduce them. (`side.retirementAccounts` is
 the real retirement list and is unrelated despite the near-identical name.)
-A field spec may carry **`fill: true`** — stretch to the end of whatever row it
-lands on. It exists because a dialog whose fields come and go cannot be tiled by
-declaration: which row a field lands on depends on how many optional fields
-above it are showing *at that moment*, and that changes under the reader as they
-pick a different rule. `applyFieldSpans` walks the VISIBLE cells, counts the
-grid's resolved columns and sets `grid-column: span N`; `applyFieldVisibility`
-calls it last, because spans are only right once visibility has settled. Two
-traps: a **closed `<dialog>` is `display:none`**, and `getComputedStyle` on that
-returns the SPECIFIED grid (`repeat(2, minmax(0, 1fr))`) rather than resolved
-tracks — counting words in that gives nonsense, so it bails on a zero-width grid
-and `openRowEditor` runs it again after `showModal()`. And a `wide` field ends
-whatever row was in progress, so it resets the count rather than consuming a
-column. Declaring `wide` instead was the previous attempt and it made things
-worse: a full-width field forces a break, which left the one optional setting
-above it stranded alone on a line.
+**No dialog leaves a gap in a row, and nothing has to remember to ask.**
+`applyFieldSpans` stretches the LAST field on any row that came up short to the
+end of it. It is automatic, not opt-in, and that is the point: the same gap was
+reported twice, both times from the innocent act of adding a full-width field —
+which forces a line break and strands whatever narrow field sat above it. An
+opt-in flag would be forgotten by whoever adds the next field. Nothing in it
+knows which fields exist.
+It has to be WORKED OUT rather than declared: which row a field lands on depends
+on how many optional fields above it are showing *at that moment*, and that
+changes under the reader as they pick a different rule. `applyFieldVisibility`
+calls it last, because spans are only right once visibility has settled, and it
+CLEARS previous spans first — a field stretched while its neighbour was hidden
+must not stay stretched when that neighbour comes back. Two traps: a closed
+`<dialog>` is `display:none`, and `getComputedStyle` on that returns the
+SPECIFIED grid (`repeat(2, minmax(0, 1fr))`) rather than resolved tracks, so it
+bails on a zero-width grid and `openRowEditor` runs it again after
+`showModal()`; and a `wide` field ends whatever row was in progress, so it
+closes the row rather than consuming a column.
 The **category dialog is `cols: 2`** for the same reason its role field fills:
 every option in it is a whole sentence ("Repeat on a cycle (every N months)")
 and a third of a 640px dialog cut them off mid-word. Half fits all but the
