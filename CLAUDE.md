@@ -1012,6 +1012,19 @@ the calendar year rather than `yearIsProjected` — what matters there is that t
 DONATIONS are partial, not that the grid is. `dashedBarEdge` skips non-bar
 datasets: a line's points have no `base` or `width`, and `strokeRect` would be
 handed NaN on every frame.
+**A projection is marked per MONTH, not per year — `enteredThroughOf(st, y)` is
+the one boundary and `yearIsProjected` is now just a question asked of it.**
+The Goals tab's "Where the Total Is Heading" line dashed whole years built ahead
+and drew the live year solid to December, so next August — a figure chained off
+eleven months of estimated category cells — was drawn exactly like last January.
+That is the same lie the `kindAt` rule exists to prevent one level down, and the
+chart was the last place still telling it. `goalChartPoints()` is pure so the
+boundary is pinned by tests, and `renderGoals` reads its caption ("Entered
+through Jul 26 — everything after that…") off the SAME points the chart is drawn
+from, so the sentence and the curve cannot drift apart. A pinned or summary year
+returns `${y}-12`, which is what keeps history solid all the way through. The
+tooltip still distinguishes "(estimate)" from "(year built ahead)" — both are
+projections, but they are not the same news.
 **A paragraph explaining a section is a `.note info`, never a `.card`.** A card
 promises figures underneath it; one holding nothing but prose leaves the reader
 waiting for a table that never comes, which is what the Donations intro was.

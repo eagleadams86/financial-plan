@@ -3790,6 +3790,21 @@ function renderGoals() {
       <span class="pill ${behind ? 'warn' : 'good'}">${behind ? '!' : '✓'} ${fmtYrMo(gapMonths)} ${behind ? 'behind' : 'ahead'}</span></p>`;
   }
 
+  /* Where the line goes dashed, said in words — and read off the SAME points
+     the chart is drawn from, so the sentence and the curve can't disagree.
+     Naming the month is the point: the line runs a year or two past the last
+     real figure, and without it the curve reads as a record of months that
+     haven't been lived. */
+  const chartPts = goalChartPoints(state, C, liveKey, previewYears());
+  const firstEstimate = chartPts.findIndex(p => p.ahead);
+  const chartDashNote = firstEstimate < 0
+    ? 'Every month here has been entered.'
+    : firstEstimate === 0
+    ? `Nothing has been entered yet, so the whole line is the plan's own estimate,
+       drawn dashed.`
+    : `Entered through <strong>${esc(monthLabel(chartPts[firstEstimate - 1].m))}</strong> —
+       everything after that is the plan's own estimate, drawn dashed.`;
+
   const yearsWithEoy = yearKeys().filter(y => state.years[y].eoyCash !== undefined);
   const eoyRows = [...yearsWithEoy.slice(-3).map(y => ({ y, v: state.years[y].eoyCash })),
     ...(eoyThis !== undefined ? [{ y: liveKey, v: eoyThis, est: true }] : []),
@@ -3831,7 +3846,7 @@ function renderGoals() {
       <h2>Where the Total Is Heading</h2>
       <p class="sub">Computed total liquidity, month by month, across ${esc(liveKey)}${
         previewYears().length ? ` and the ${esc(previewYears().join(', '))} plan${
-          previewYears().length > 1 ? 's' : ''} you've built ahead (dashed)` : ''}.</p>
+          previewYears().length > 1 ? 's' : ''} you've built ahead` : ''}. ${chartDashNote}</p>
       <div class="chartbox"><canvas id="goalChart"></canvas></div>
     </div>
     <div class="card">
@@ -4999,13 +5014,24 @@ function yearSpending(yr, computed, y) {
   return round2(-out);
 }
 
+/* The last month of a year that is a RECORD rather than a projection. Only a
+   live grid has a moving marker: a pinned or summary year is history right
+   through December, and a year that isn't a grid at all has nothing to draw.
+   One helper because two different questions are asked of the same boundary —
+   is this whole year projected, and is THIS MONTH — and they were drifting
+   apart, which is how the goal chart came to draw a solid line through months
+   that haven't happened. */
+function enteredThroughOf(st, y) {
+  const yr = st.years[y];
+  if (!yr || yr.kind !== 'grid' || yr.model !== 'live') return `${y}-12`;
+  return yr.enteredThrough || '';
+}
+
 /* True where a year's bars include figures the plan worked out rather than
    ones that happened — this year past the entered marker, and every year
    built ahead of it. */
 function yearIsProjected(y) {
-  const yr = state.years[y];
-  if (!yr || yr.kind !== 'grid' || yr.model !== 'live') return false;
-  return (yr.enteredThrough || '') < `${y}-12`;
+  return enteredThroughOf(state, y) < `${y}-12`;
 }
 
 function renderHistory() {
@@ -5573,21 +5599,40 @@ function chartAxes() {
   };
 }
 
+/* The points behind the goal chart, pure so a test can pin where the line
+   stops being a record. The line runs through the current year and then
+   through every year built ahead of it, so the whole plan reads as one curve,
+   and everything the plan WORKED OUT is dashed — the same signal the History
+   chart uses.
+
+   The boundary is the entered marker, not the year: it used to dash whole
+   years built ahead and draw the live year solid all the way to December, so
+   next August's balance — which is a projection off eleven months of estimated
+   category cells — was drawn in the same unbroken line as last January's. That
+   is the one thing this chart must never say, and it is the same rule the grid
+   has always applied to a cell: a figure is only settled once its month has
+   been entered. `built` is kept separate because a month past the marker in
+   THIS year and a month of a year you've built ahead are both estimates but
+   not the same news. */
+function goalChartPoints(st, computed, liveKey, aheadKeys) {
+  const pts = [];
+  for (const key of [liveKey, ...aheadKeys]) {
+    const c = computed[key];
+    if (!c) continue;
+    const entered = enteredThroughOf(st, key);
+    for (const m of c.months)
+      pts.push({ m, v: c.balances[`total|${m}`],
+                 ahead: m > entered, built: key !== liveKey });
+  }
+  return pts;
+}
+
 function buildGoalChart() {
   const liveKey = latestGridYear();
   if (!liveKey) return;
-  /* The line runs through the current year and then through every year built
-     ahead of it, so the whole plan reads as one curve. The years that haven't
-     arrived are dashed — the same signal the History chart uses — because a
-     projection should never look like a record. */
-  const pts = [];
-  for (const key of [liveKey, ...previewYears()]) {
-    const c = C[key];
-    if (!c) continue;
-    for (const m of c.months)
-      pts.push({ m, v: c.balances[`total|${m}`], ahead: key !== liveKey });
-  }
+  const pts = goalChartPoints(state, C, liveKey, previewYears());
   if (!pts.length) return;
+  const firstAhead = pts.find(p => p.ahead);
   newChart('goalChart', {
     type: 'line',
     data: { labels: pts.map(p => monthLabel(p.m)), datasets: [{
@@ -5600,8 +5645,9 @@ function buildGoalChart() {
     }]},
     options: {
       plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: (t) =>
-          fmtMoney(t.parsed.y) + (pts[t.dataIndex].ahead ? ' (year built ahead)' : '') } } },
+        tooltip: { callbacks: { label: (t) => fmtMoney(t.parsed.y)
+          + (!pts[t.dataIndex].ahead ? ''
+             : pts[t.dataIndex].built ? ' (year built ahead)' : ' (estimate)') } } },
       scales: {
         x: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
           maxRotation: 0, autoSkipPadding: 14 } }),
@@ -5611,8 +5657,9 @@ function buildGoalChart() {
     },
   }, `Total liquidity month by month, ${monthLabel(pts[0].m)} to ${
     monthLabel(pts[pts.length - 1].m)}: from ${fmtMoney(pts[0].v || 0)} to ${
-    fmtMoney(pts[pts.length - 1].v || 0)}.${
-    pts.some(p => p.ahead) ? ' The later years are projections.' : ''}`);
+    fmtMoney(pts[pts.length - 1].v || 0)}.${firstAhead
+      ? ` ${firstAhead === pts[0] ? 'Every month' : `${monthLabel(firstAhead.m)} onwards`
+        } is the plan's own projection.` : ''}`);
 }
 
 function buildRothChart() {
@@ -9699,7 +9746,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   ownerSubtotals, validOwner, accountOption, suggestedTargetDate,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,
-  yearStarted, startedGridYears,
+  yearStarted, startedGridYears, enteredThroughOf, goalChartPoints,
   projectionYearsAfter, applyToRow, dropRow, swapRows, moveRowBefore, moveInList,
   andList, tabOrder, VIEWS,
   /* Share links: the pure pieces, plus the three tables that decide what

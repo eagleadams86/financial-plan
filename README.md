@@ -119,7 +119,10 @@ included — treat those the way you treat the figures.
   its accounts up to the target, in full, or only what another goal hasn't
   already claimed. Plus progress, target dates, required monthly saving,
   end-of-year liquidity, and a pace check that follows whichever goal is next:
-  the soonest deadline you haven't met yet.
+  the soonest deadline you haven't met yet. Its **Where the Total Is Heading**
+  line goes **dashed the moment it passes the month you've entered through** —
+  so a month the plan has merely worked out never reads as one that happened,
+  whether it's next month or a year you've built ahead.
 - **Household** — who the plan is for: a partner, your children. Each person
   has a role, an optional birth month and (for an adult) a retirement age, and
   their age, retirement year and the month a child turns 18 are all **worked
