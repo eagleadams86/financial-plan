@@ -45,6 +45,10 @@ family names as well as balances.
   costs VERTICAL space — wrapping the paragraph to a comfortable measure pushed
   the grid down the screen, and the grid is the thing you came for. Don't
   re-add a `max-width` there on typographic principle.
+  **`.empty` is the deliberate exception** (80ch, centred): an empty state has
+  no table under it to push down, so the vertical cost is nil, and its lines are
+  CENTRED — both ends move, leaving the eye nothing to return to on the way
+  back. The rule is where the line sits, not house style.
 - **The tab bar is draggable**, and its order lives in `state.ui.tabOrder` —
   synced and backed up, because a deliberate arrangement should follow you (the
   set of folded boxes in `ui.collapsed` travels for the same reason). Dragging uses
