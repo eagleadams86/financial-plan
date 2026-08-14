@@ -442,6 +442,26 @@ did nothing.
 computed from. `coerceShape` deletes both keys on load so they stop riding
 along in every backup; don't reintroduce them. (`side.retirementAccounts` is
 the real retirement list and is unrelated despite the near-identical name.)
+A field spec may carry **`fill: true`** — stretch to the end of whatever row it
+lands on. It exists because a dialog whose fields come and go cannot be tiled by
+declaration: which row a field lands on depends on how many optional fields
+above it are showing *at that moment*, and that changes under the reader as they
+pick a different rule. `applyFieldSpans` walks the VISIBLE cells, counts the
+grid's resolved columns and sets `grid-column: span N`; `applyFieldVisibility`
+calls it last, because spans are only right once visibility has settled. Two
+traps: a **closed `<dialog>` is `display:none`**, and `getComputedStyle` on that
+returns the SPECIFIED grid (`repeat(2, minmax(0, 1fr))`) rather than resolved
+tracks — counting words in that gives nonsense, so it bails on a zero-width grid
+and `openRowEditor` runs it again after `showModal()`. And a `wide` field ends
+whatever row was in progress, so it resets the count rather than consuming a
+column. Declaring `wide` instead was the previous attempt and it made things
+worse: a full-width field forces a break, which left the one optional setting
+above it stranded alone on a line.
+The **category dialog is `cols: 2`** for the same reason its role field fills:
+every option in it is a whole sentence ("Repeat on a cycle (every N months)")
+and a third of a 640px dialog cut them off mid-word. Half fits all but the
+dividends rule, whose label interpolates two account names and is long by
+nature.
 A field spec may be **`type: 'readout'`** — a figure the dialog WORKS OUT and
 the reader never types. It renders as a `<p class="field-readout">` rather than
 an input, so `readFields` skips it (a `<p>` has no `.value` and asking for one

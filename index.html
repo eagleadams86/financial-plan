@@ -5470,8 +5470,38 @@ function linkBonusPct(which, base, moneyKey) {
 
 /* Show/hide the fields whose spec carries showIf, reading the form's current
    values rather than the saved ones — the dialog reacts as you change it. */
+/* A field marked `fill` stretches to the end of whatever row it lands on, so a
+   dialog whose fields come and go never strands one in a third of a row with
+   empty space beside it. It has to be WORKED OUT rather than declared: which
+   row a field lands on depends on how many optional fields above it are showing
+   at that moment, and that changes under you as you pick a different rule.
+   Declaring it `wide` instead was the previous attempt, and it made the problem
+   worse — a full-width field forces a break, so the one optional setting above
+   it was left alone on a line of its own. */
+function applyFieldSpans(fields) {
+  if (!fields.some(f => f.fill)) return;
+  const wrap = F('rowFields');
+  /* A closed <dialog> is display:none, and getComputedStyle on that hands back
+     the SPECIFIED grid ("repeat(2, minmax(0, 1fr))") rather than resolved
+     tracks — counting words in that gives a column count of nonsense. Wait for
+     a laid-out grid; openRowEditor runs this again once the dialog is up. */
+  if (!wrap.getBoundingClientRect().width) return;
+  const cols = getComputedStyle(wrap).gridTemplateColumns.split(' ').filter(Boolean).length;
+  let pos = 0;
+  for (const f of fields) {
+    const cell = wrap.querySelector(`[data-field="${CSS.escape(f.key)}"]`);
+    if (!cell || cell.hidden) continue;
+    /* A wide field is a row to itself: it ends whatever row was in progress. */
+    if (cell.classList.contains('wide')) { pos = 0; continue; }
+    if (!f.fill) { cell.style.gridColumn = ''; pos = (pos + 1) % cols; continue; }
+    const span = cols - pos;
+    cell.style.gridColumn = span > 1 ? `span ${span}` : '';
+    pos = 0;
+  }
+}
+
 function applyFieldVisibility(fields) {
-  if (!fields.some(f => f.showIf)) return;
+  if (!fields.some(f => f.showIf)) { applyFieldSpans(fields); return; }
   const now = {};
   for (const f of fields) {
     const el = F(`rf-${f.key}`);
@@ -5483,6 +5513,9 @@ function applyFieldVisibility(fields) {
     const cell = F('rowFields').querySelector(`[data-field="${CSS.escape(f.key)}"]`);
     if (cell) cell.hidden = !f.showIf(now);
   }
+  /* After, never before: which row each field lands on depends on what is
+     showing, so the spans are only right once visibility has settled. */
+  applyFieldSpans(fields);
 }
 
 function readFields(fields) {
@@ -5535,6 +5568,9 @@ function openRowEditor(section, ds, isNew) {
   const canMove = ed.move && !(section === 'category' && state.settings.rowSort === 'alpha');
   F('rowUpBtn').hidden = F('rowDownBtn').hidden = isNew || !canMove;
   rowDialog.showModal();
+  /* Only now is the grid laid out and its columns measurable — see the guard
+     in applyFieldSpans. */
+  applyFieldSpans(spec);
 }
 
 /* A section that did something the reader can't see on the page in front of
@@ -5656,6 +5692,12 @@ const EDITORS = {
   /* Budget category rows (the grid's left column) */
   category: {
     title: (ds, isNew) => isNew ? 'Add a Budget Row' : 'Budget Row',
+    /* Two columns, not the three auto-fit would choose. Every option here is a
+       whole sentence — "Repeat on a cycle (every N months)" — and a third of a
+       640px dialog cut them off mid-word. Half is enough for nearly all of
+       them, and it also means the optional per-rule setting pairs with the rule
+       that summoned it instead of starting a row of its own. */
+    cols: 2,
     sub: () => 'Type picks the section it appears under. The rule fills future months automatically. '
       + 'Money leaving Cash is negative everywhere — a transfer of −$200 moves $200 into the other account.',
     fields: (ds) => [
@@ -5700,12 +5742,12 @@ const EDITORS = {
         ['normal', `Ordinary ${hubAccount(state)?.name || 'cash'} money — the usual`],
         ['transfer', `Moves ${hubAccount(state)?.name || 'cash'} into another account`],
         ['pass', `Never touches ${hubAccount(state)?.name || 'cash'} — another account pays it`],
-      ], wide: true,
-        /* Wide for two reasons, both visible the moment it isn't: the options
-           are whole sentences and a third-width select truncated them mid-word
-           ("Ordinary Cash (SPAXX"), and the hint below wrapped to ten lines in
-           that column while the two fields beside it — which only appear for a
-           transfer — left the rest of the row empty. */
+      ], fill: true,
+        /* Fills the rest of its row rather than claiming a whole one: on an
+           ordinary row it pairs with the rule above it, and where a rule has
+           brought its own setting along it takes the half that setting left
+           over. Either way nothing sits alone, and its options — the longest
+           sentences in the dialog — get as much room as there is going. */
         hint: `The last is money kept somewhere else — a Venmo balance you spend straight `
           + `out of, or an account you keep only for something ${
             hubAccount(state)?.name || 'cash'} can't do, like Zelle.` },
@@ -5722,7 +5764,7 @@ const EDITORS = {
       { key: 'creditTiming', label: 'Counted against that account', type: 'select', options: [
         ['pre', 'Before its monthly interest'],
         ['post', 'After its monthly interest'],
-      ], showIf: (v) => v.role === 'pass' },
+      ], showIf: (v) => v.role === 'pass', fill: true },
       noteField,
     ],
     get(ds) {
@@ -5857,7 +5899,8 @@ const EDITORS = {
       { key: 'midTermRateAnnual', label: 'Dividend row interest %/yr', type: 'percent',
         hint: 'Used by a dividend row with no rate of its own.' },
       { key: 'retirementReturnAnnual', label: 'Retirement return %/yr', type: 'percent',
-        hint: 'What the retirement projection assumes.' },
+        /* Takes the third of the row the two rates would otherwise leave bare. */
+        fill: true, hint: 'What the retirement projection assumes.' },
       { key: 'priceApiKey', label: 'Twelve Data key', type: 'text', wide: true,
         hint: 'For holding-price lookups — shares, ETFs and mutual funds. Free from '
             + 'twelvedata.com. Stays on this device — never synced, never in a backup.' },
