@@ -75,6 +75,15 @@ included — treat those the way you treat the figures.
   balances as figures you stated at the time rather than a chain to recompute,
   and an account you've since closed stops at its last month instead of
   following you into later years.
+- **The years run across the top** — the way the sheet tabs did in Numbers,
+  newest first, with the one you're reading drawn as a filled pill. Drag or
+  swipe the strip sideways, or use the ‹ › arrows at its right end, which grey
+  out once you reach an end and vanish altogether when every year already fits.
+  Click a year to open it; from the keyboard, one Tab lands on the strip and
+  the left and right arrow keys walk along it (Home for the newest year, End
+  for the oldest). A year kept as a yearly summary is set in italics, one built
+  before it has started is underlined with dots, and hovering either says which
+  in words.
 - **Zoom** — scale the whole app from the header in quarter steps, or type an
   exact percentage in Preferences (50–200%). It belongs to the device you set
   it on: never synced, never in a backup, so a laptop and a desk monitor can

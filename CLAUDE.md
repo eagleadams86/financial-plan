@@ -50,6 +50,28 @@ family names as well as balances.
   re-append the tabs when the order actually differs** — appending blurs the
   element, and doing it every render threw focus away the moment a tab was
   activated by keyboard, killing arrow navigation.
+- **The year strip is NOT a second tab bar** (`yearPickerHtml` /
+  `wireYearStrip`, replacing the old `<select>`). It picks a year INSIDE the
+  Budget, so it must not wear the tabs' clothes: pill instead of rectangle,
+  `--accent` on `--accent-bg` (the fold-away headings' pairing) instead of
+  `--unit-active-bg`, hairlines instead of gaps. Fill AND weight carry the
+  choice, and the two unusual years are typography, not hue — italics for a
+  summary, a dotted underline for one built before it started, with the words
+  in `title` and `aria-label`. Four things it must keep doing:
+  (1) a **radiogroup**, not a nested tablist — these buttons redraw the panel
+  the view tab already labels rather than revealing one of their own;
+  (2) **scroll the chosen year into view only when it's off an end**, measured
+  with `getBoundingClientRect` against the rail — `offsetLeft` is relative to
+  the PAGE here, so comparing it with `scrollLeft` shuffles the strip on a year
+  that was in plain sight;
+  (3) **wait for the rail to have a width** before doing either job — the first
+  layout after a reload can measure zero, and a zero-wide rail says every year
+  is off the end, parking the strip against its right edge;
+  (4) **no smooth scrolling** — an animated scroll is a silent no-op in some
+  engines (it was in the pane this was built in), and the arrows must land.
+  A keyboard move sets `yearKeyMove` so the redraw can hand focus back: picking
+  a year rebuilds the view, which blurs the chip, and without it the second
+  arrow key goes nowhere — the same trap the tab bar hit.
 - **`VIEWS` and `tabOrder()` sit near the top of the file, above `let state =
   load()`** — and `tabOrder` is a function DECLARATION. `coerceShape` calls it,
   `coerceShape` runs inside `load()`, and `load()` catches everything and

@@ -163,6 +163,66 @@ select.ctl:hover { border-color: var(--text-muted); }
 .tab { touch-action: pan-y; }
 .tab.dragging { opacity: .5; cursor: grabbing; }
 
+/* ── Year strip ─────────────────────────────────────────────────────────────
+   The Budget's years laid out the way the Numbers spreadsheet this app
+   replaces laid them out: one row across the top, scrolled sideways, with
+   arrows for the years that don't fit.
+
+   It is deliberately NOT a `.tab`. These pick a year INSIDE a view, not a
+   view, and wearing the same clothes as the bar above would say the two were
+   peers. So: pill instead of rectangle, no border until you hover, hairlines
+   between the years instead of gaps, and the pack's `--accent` on
+   `--accent-bg` for the chosen one rather than the tabs' `--unit-active-bg`.
+   No new colour is invented — that pairing is the same contrast-checked one
+   the fold-away card headings use. The fill and the WEIGHT both say "this
+   one", so the mark doesn't rest on a hue. */
+.yearstrip { display: flex; align-items: center; margin-bottom: 14px;
+  border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+/* No `scroll-behavior: smooth`, and the arrows don't ask for one either: an
+   animated scroll is silently a no-op in some engines — it was one in the
+   browser this was built in — and an arrow that does nothing is worse than an
+   arrow that lands in one step. The step is instant on purpose.
+
+   Padding and a matching negative margin, because `overflow-x: auto` forces
+   the vertical axis to `auto` as well: without the room, a focus ring on a
+   chip is sliced off top and bottom by the scrollport it sits in. */
+.yearrail { flex: 1 1 auto; min-width: 0; display: flex; align-items: center;
+  overflow-x: auto; overflow-y: hidden; padding: 4px 0; margin: -4px 0;
+  scrollbar-width: none; }
+.yearrail::-webkit-scrollbar { display: none; }
+.yearchip { position: relative; flex: 0 0 auto; margin: 0 2px;
+  background: none; border: 0; border-radius: var(--radius-pill);
+  padding: 6px 16px; cursor: pointer; color: var(--text-secondary);
+  font: inherit; font-weight: var(--fw-medium); font-variant-numeric: tabular-nums;
+  white-space: nowrap; user-select: none; -webkit-user-select: none; }
+/* The hairline belongs to the year on its RIGHT, which is what lets it vanish
+   on both sides of the chosen one — a divider running into a pill reads as a
+   crack in it. */
+.yearchip + .yearchip::before { content: ''; position: absolute; left: -3px;
+  top: 26%; bottom: 26%; width: 1px; background: var(--border-strong); }
+.yearchip[aria-checked="true"]::before,
+.yearchip[aria-checked="true"] + .yearchip::before { display: none; }
+.yearchip:hover:not([aria-checked="true"]) { background: var(--bg-card-alt);
+  color: var(--text-primary); }
+.yearchip[aria-checked="true"] { background: var(--accent-bg); color: var(--accent);
+  font-weight: var(--fw-semibold); box-shadow: inset 0 0 0 1px var(--border-control); }
+.yearchip:focus-visible { outline: 2px solid var(--focus-border); outline-offset: 2px; }
+/* Typography, not colour, for the two years that aren't ordinary — the same
+   rule the estimate kinds follow. The full words are in the title and the
+   accessible name, because an italic tells you something is different without
+   telling you what. */
+.yearchip.y-summary { font-style: italic; }
+.yearchip.y-future { text-decoration: underline dotted; text-underline-offset: 3px; }
+.yearnav { flex: 0 0 auto; display: flex; align-items: center;
+  padding-left: 6px; margin-left: 4px; border-left: 1px solid var(--border); }
+.yearnav[hidden] { display: none; }
+.ynav { background: none; border: 0; border-radius: var(--radius-sm);
+  padding: 4px 8px; cursor: pointer; color: var(--text-secondary);
+  font: inherit; font-size: 15px; line-height: 1.2; }
+.ynav:hover:not(:disabled) { background: var(--bg-card-alt); color: var(--text-primary); }
+.ynav:disabled { opacity: .35; cursor: default; }
+.ynav:focus-visible { outline: 2px solid var(--focus-border); outline-offset: 2px; }
+
 /* ── Cards, tiles ───────────────────────────────────────────────────────── */
 .card {
   background: var(--bg-card); border: 1px solid var(--border);
@@ -3015,15 +3075,112 @@ function startFresh() {
    and it's the kind styling and the tooltip that tell them apart. */
 const fmtCell = (v) => (v === 0 ? '·' : fmtMoney(v));
 
+/* Newest first, left to right — the same order the dropdown this replaced
+   offered, and the order the spreadsheet's own sheet tabs were in.
+
+   A radiogroup rather than a second tablist: these buttons don't reveal a
+   panel of their own, they redraw the one the view tab already labels, and
+   nesting a tablist inside that panel is exactly the shape screen readers
+   read wrong. Arrow keys and a single tab stop come with the role either way. */
 function yearPickerHtml(active) {
-  const opts = yearKeys().slice().reverse().map(y => {
+  const chips = yearKeys().slice().reverse().map(y => {
     const yr = state.years[y];
-    const tag = yr.kind === 'summary' ? ' (summary)'
-      : !yearStarted(state, y) ? ' (not started yet)' : '';
-    return `<option value="${esc(y)}" ${y === active ? 'selected' : ''}>${esc(y)}${tag}</option>`;
+    const summary = yr.kind === 'summary';
+    const future = !summary && !yearStarted(state, y);
+    const label = y + (summary ? ' (summary)' : future ? ' (not started yet)' : '');
+    const on = y === active;
+    return `<button type="button" role="radio" data-year="${esc(y)}"
+      class="yearchip${summary ? ' y-summary' : ''}${future ? ' y-future' : ''}"
+      aria-checked="${on ? 'true' : 'false'}" tabindex="${on ? 0 : -1}"
+      aria-label="${esc(label)}" title="${esc(label)}">${esc(y)}</button>`;
   }).join('');
-  return `<label class="sr-only" for="yearSel">Year</label>
-    <select id="yearSel" class="ctl" title="Which year you're looking at">${opts}</select>`;
+  return `<div class="yearstrip">
+    <div class="yearrail" id="yearRail" role="radiogroup"
+      aria-label="Which year you're looking at">${chips}</div>
+    <div class="yearnav" id="yearNav" hidden>
+      <button type="button" class="ynav" id="yearPrev"
+        aria-label="Scroll to later years" title="Later years">&#8249;</button>
+      <button type="button" class="ynav" id="yearNext"
+        aria-label="Scroll to earlier years" title="Earlier years">&#8250;</button>
+    </div>
+  </div>`;
+}
+
+/* Whether either end of the strip is off-screen is a fact about the WINDOW,
+   not about the plan, so it's measured rather than stored — and re-measured
+   when the window changes, since the strip itself is only rebuilt by a redraw. */
+function syncYearNav() {
+  const rail = F('yearRail'), nav = F('yearNav');
+  if (!rail || !nav || !rail.clientWidth) return;
+  const over = rail.scrollWidth - rail.clientWidth;
+  nav.hidden = over <= 1;
+  F('yearPrev').disabled = rail.scrollLeft <= 1;
+  F('yearNext').disabled = rail.scrollLeft >= over - 1;
+}
+window.addEventListener('resize', syncYearNav);
+
+/* Set by a keyboard move so the redraw can hand focus back. Choosing a year
+   rebuilds the whole view, which blurs whatever you were on — without this the
+   second arrow key press goes nowhere, the same trap the tab bar hit. */
+let yearKeyMove = false;
+
+function wireYearStrip() {
+  const rail = F('yearRail');
+  if (!rail) return;
+  const chips = [...rail.querySelectorAll('.yearchip')];
+  const pick = (chip, byKey) => {
+    if (!chip || chip.getAttribute('aria-checked') === 'true') return;
+    yearKeyMove = byKey;
+    state.ui.activeYear = chip.dataset.year;
+    save(); render();
+  };
+  rail.onclick = (e) => pick(e.target.closest('.yearchip'), false);
+  rail.onkeydown = (e) => {
+    const step = { ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last' }[e.key];
+    if (step === undefined) return;
+    e.preventDefault();
+    const i = chips.indexOf(e.target.closest('.yearchip'));
+    if (i < 0) return;
+    pick(step === 'first' ? chips[0]
+      : step === 'last' ? chips[chips.length - 1]
+      : chips[(i + step + chips.length) % chips.length], true);
+  };
+  rail.onscroll = syncYearNav;
+  /* Most of a screenful, so something you were looking at stays on it to tell
+     you where you've got to, and never less than one year's width. */
+  const nudge = (dir) => {
+    rail.scrollLeft += dir * Math.max(140, rail.clientWidth * 0.7);
+    syncYearNav();
+  };
+  F('yearPrev').onclick = () => nudge(-1);
+  F('yearNext').onclick = () => nudge(1);
+  const on = chips.find(c => c.getAttribute('aria-checked') === 'true');
+  /* Bring the chosen year into view, then say which arrows are live — both of
+     which need the rail to have a WIDTH. The first layout after a reload can
+     measure zero, and a zero-wide rail says every year is off the end, which
+     parks the strip against its right edge with the newest year already
+     scrolled out of sight. A frame later the real number is there. */
+  const settle = () => {
+    if (!rail.isConnected) return;
+    if (!rail.clientWidth) { requestAnimationFrame(settle); return; }
+    /* Centred by hand rather than by scrollIntoView: that method is free to
+       scroll the PAGE as well to satisfy the vertical axis, and jumping the
+       reader down the page on a year change is not what was asked for. Only
+       when the year is actually off an end, though — a strip that re-centres
+       on a year you can already see would shuffle on every redraw, and the
+       years would never be where you left them. Measured against the rail's
+       own box, not `offsetLeft`: the chips' offsetParent is the PAGE, so those
+       numbers and `scrollLeft` are in different frames and comparing them
+       scrolls a year that was in plain sight. */
+    if (on) {
+      const chip = on.getBoundingClientRect(), box = rail.getBoundingClientRect();
+      if (chip.left < box.left || chip.right > box.right)
+        rail.scrollLeft += chip.left - box.left - (box.width - chip.width) / 2;
+    }
+    syncYearNav();
+  };
+  settle();
+  if (yearKeyMove) { yearKeyMove = false; on?.focus({ preventScroll: true }); }
 }
 
 function renderBudget() {
@@ -3034,7 +3191,7 @@ function renderBudget() {
      and an empty grid must say so rather than throw and blank the page. */
   if (!yr) return `<div class="card"><div class="empty"><h2>No Budget Year Here</h2>
     <p>This link doesn't carry a budget year.</p></div></div>`;
-  const picker = `<div class="row" style="margin-bottom:14px">${yearPickerHtml(y)}</div>`;
+  const picker = yearPickerHtml(y);
   /* The notes are their own box UNDER the budget, not a panel inside it — see
      yearNotes(). They return '' for a year with none, so nothing empty is drawn. */
   if (yr.kind === 'summary') return picker + summaryCard(y, yr) + yearNotes(y);
@@ -5226,11 +5383,7 @@ function wireView(view) {
   if (sumBtn) sumBtn.onclick = () => convertYearToSummary(activeYearKey());
   const btn = F('welcomeRestoreBtn');
   if (btn) btn.onclick = () => F('dataDialog').showModal();
-  const yearSel = F('yearSel');
-  if (yearSel) yearSel.onchange = (e) => {
-    state.ui.activeYear = e.target.value;
-    save(); render();
-  };
+  wireYearStrip();
   if (view === 'budget') wireBudget();
   if (view === 'goals') buildGoalChart();
   if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
