@@ -273,14 +273,54 @@ the script never does it for you.)
 python3 migrate_local_data.py financial-plan-data.json
 ```
 
+### Installing It as an App
+
+The page can live in the Dock or the Applications folder instead of a tab.
+Nothing is downloaded and there is no separate version to keep updated — it is
+the same page in a window of its own, so it updates when the site does.
+
+- **Chrome** — ⋮ → Cast, Save and Share → **Install page as app…**
+- **Safari** (macOS 14+) — **File → Add to Dock**
+
+**The two are not equivalent, and the difference is your data.** Chrome's
+installed app shares storage with the browser, so the plan you already have is
+simply there. **A Safari web app gets its own storage container**: it shares no
+localStorage with Safari, so it opens EMPTY, and the way to fill it is to sign
+in and let sync pull the plan down. Treat the Safari one as another device, not
+as a shortcut to the tab you already had.
+
+Installing is a window, not a sandbox — an installed app can reach exactly what
+any tab on this origin could already reach, no more and no less. The one real
+difference is Safari's, and it runs in the safer direction: its separate
+container cannot see the sibling apps' data at all.
+
+`manifest.webmanifest` is what makes the install a real app rather than a bare
+shortcut, and two things in it are deliberate. **`scope` is `"./"`** — every one
+of these apps is served from one origin, and a scope of `/` would swallow the
+sibling apps into this app's window; relative keeps it right on the local server
+too, where the app sits at the root rather than under `/financial-plan/`. And it
+carries **no `file_handlers`, `protocol_handlers` or `share_target`**: those hand
+outside data to a page on a shared origin, and nothing here needs them. The CSP
+gained exactly one directive for all this, `manifest-src 'self'`.
+
+There is deliberately **no service worker**, so the app does not open offline.
+A worker is a resident process on an origin that holds work data, its caches are
+origin-wide rather than per app, and a caching bug serves stale code to a
+planner whose data schema moves — none of which is worth trading for launching
+without wifi.
+
 ## Architecture
 
 The icon is drawn by `make_favicon.py` (Pillow): the inline SVG in the page is
 what browsers use, `favicon.ico` is the fallback a browser fetches on its own,
-and the script keeps the two the same picture rather than leaving a binary
-nobody can review in a diff. Re-running it means bumping the `?v=` on every
-`favicon.ico` reference — two in `index.html`, one in `privacy.html` — or the
-old icon stays cached for months.
+and the install icons (`icon-192`, `icon-512`, `icon-512-maskable`,
+`apple-touch-icon`) are files because a manifest icon cannot be a data URI. One
+script draws all of them from one set of coordinates rather than leaving
+binaries nobody can review in a diff. The three shapes differ on purpose:
+rounded where nothing will mask them, full-bleed with the mark inset where the
+platform crops to a circle, and square for Apple, which applies its own corners.
+Re-running it means bumping the `?v=` on every `favicon.ico` reference — two in
+`index.html`, one in `privacy.html` — or the old icon stays cached for months.
 
 One file — `index.html` — no build step, alongside `theme.css` (byte-copy
 from the private claude-theme-pack, the palette source of truth for all apps)

@@ -18,8 +18,14 @@
      If a feature ever needs a new endpoint it must be added here in the same
      commit (family rule). form-action is 'self' rather than 'none' because
      dialogs submit with method="dialog", which some browsers historically
-     checked against it. frame-ancestors is ignored in a meta tag. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://api.github.com https://api.twelvedata.com; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
+     checked against it. frame-ancestors is ignored in a meta tag.
+     manifest-src is 'self' for the install manifest: it falls back to
+     default-src, which is 'none', so without it the browser fetches
+     manifest.webmanifest, is refused, and installing silently degrades to a
+     plain shortcut with the wrong name and icon. It permits one same-origin
+     JSON file and nothing else — a manifest executes nothing and reads no
+     storage, which is why this is the whole security cost of installing. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://api.github.com https://api.twelvedata.com; manifest-src 'self'; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Financial Plan</title>
 <meta name="description" content="A personal financial planner: monthly budget with projections, savings goals, retirement, vacations and giving.">
@@ -29,6 +35,27 @@
      as the fallback for anything that can't read an SVG icon. -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'> <defs><linearGradient id='g' x1='10' y1='52' x2='54' y2='12' gradientUnits='userSpaceOnUse'> <stop offset='0' stop-color='%23818cf8'/><stop offset='1' stop-color='%23a5b4fc'/></linearGradient></defs> <rect width='64' height='64' rx='14' fill='%230a0e1a'/> <circle cx='14' cy='52' r='20' fill='%23141c33'/> <path d='M11 47 L24 34 L34 41 L53 17' fill='none' stroke='url(%23g)' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/> <circle cx='53' cy='17' r='6.5' fill='%23a5b4fc'/> <circle cx='53' cy='17' r='2.4' fill='%230a0e1a'/> </svg>">
 <link rel="alternate icon" href="favicon.ico?v=2">
+<!-- Installing the app. The manifest is what turns Chrome's "Install page as
+     app" into a real app window with this name and icon rather than a bare
+     shortcut, and Safari's File > Add to Dock reads it too. Both need FILES:
+     the SVG data URI above and favicon.ico are no use to either, which is why
+     make_favicon.py emits PNGs of the same mark. apple-touch-icon is Safari's
+     own preference and is listed separately from the manifest's icons.
+     scope is the manifest's own directory (it is "./" in the file), and that
+     matters more here than it looks: every one of these apps is served from the
+     SAME origin, and a scope of "/" would capture Sprint Velocity and Flow
+     Metrics into this app's window. Nothing here changes what any page on the
+     origin can already reach — an installed app shares the browser's storage —
+     so installing is a window, not a sandbox. -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<!-- The installed window's title bar takes its colour from here. It holds the
+     manifest's midnight to start with, because that is the default theme and
+     this has to be right before any script runs; applyTheme() rewrites it from
+     the theme pack's own --bg whenever the theme changes, so a Light window
+     doesn't keep a midnight bar above it. No colour is invented — it is read
+     back out of theme.css. -->
+<meta name="theme-color" content="#0a0e1a">
 <script>
   /* Apply the saved theme before first paint so there's no light flash. The list
      is repeated here rather than shared with THEMES below because this has to run
@@ -8568,6 +8595,14 @@ function applyTheme() {
   const t = themeId();
   document.documentElement.setAttribute('data-theme', t);
   F('themeSel').value = t;
+  /* Keep the installed app window's title bar with the theme. Read back out of
+     the pack's --bg rather than listed here, so a palette change in the theme
+     pack carries without a second place to remember. Only the installed window
+     and mobile browser chrome read it; in a tab it does nothing. */
+  const bar = document.querySelector('meta[name="theme-color"]');
+  const bg = getComputedStyle(document.documentElement)
+    .getPropertyValue('--bg').trim();
+  if (bar && bg) bar.setAttribute('content', bg);
 }
 F('themeSel').onchange = (e) => {
   localStorage.setItem(THEME_KEY, e.target.value);

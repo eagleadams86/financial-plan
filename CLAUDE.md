@@ -1346,6 +1346,51 @@ the matching test in the same commit, re-run the import, and make the local
 cross-check pass again. CI: `.github/workflows/tests.yml` (Playwright
 Chromium against `python3 -m http.server 8016`).
 
+## Installing it as an app
+
+`manifest.webmanifest` + the PNG install icons + `manifest-src 'self'` in the
+CSP. That is the whole feature; it adds no runtime code beyond one line in
+`applyTheme`.
+
+- **`scope` is `"./"`, and it is the security-relevant line.** All the family's
+  apps share ONE origin, so a scope of `/` would capture Sprint Velocity and
+  Flow Metrics into this app's installed window. Relative also keeps it correct
+  on the local server, where the app is at the root rather than under
+  `/financial-plan/` — an absolute scope would simply be invalid there and the
+  browser would fall back, which is a bug you cannot see locally. `id` is
+  absolute (`/financial-plan/`) because an id resolves against the ORIGIN, not
+  the manifest's directory: `"./"` there would resolve to `/` and collide with
+  every sibling app.
+- **No `file_handlers`, `protocol_handlers` or `share_target`.** They deliver
+  outside data into a page on an origin holding work figures. Nothing needs them.
+- **NO SERVICE WORKER, deliberately** — so the app does not open offline, and
+  that is the accepted cost. There are none anywhere in the family. A worker is
+  a resident process on the shared origin; its caches are ORIGIN-wide, not
+  per app, so this app's worker could read a future SV/TD one's; and a caching
+  bug serves stale code to an app whose data schema moves, which is the failure
+  mode this repo can least afford. (One structural comfort if it is ever
+  reconsidered: widening a worker's scope past its own directory needs the
+  `Service-Worker-Allowed` header, and GitHub Pages cannot set headers, so a
+  worker here could never reach the sibling apps.)
+- **Installing is a window, not a sandbox.** Chrome's installed app shares the
+  browser's profile storage — it reads `sv-state` and `td-state` exactly like
+  any tab on the origin already can. Don't describe it as isolation anywhere.
+  **Safari's Add to Dock is the exception and the trap**: a macOS web app gets
+  its own storage container, shares no localStorage with Safari, and so opens
+  EMPTY — sync is how a plan gets into it. Say so wherever it's documented; it
+  reads as data loss otherwise.
+- `<meta name="theme-color">` is rewritten by `applyTheme()` from the pack's
+  `--bg`, so an installed window's title bar follows the theme instead of
+  sitting at midnight above a Light page. Read back from the token, never
+  listed here — no new colour, and a pack palette change carries automatically.
+- `make_favicon.py` draws every icon from the one set of coordinates, at
+  `k=1.0` for the ordinary ones and `MASKABLE_SCALE` for the maskable. The
+  maskable is drawn by SCALING THE GEOMETRY, not by pasting the finished tile
+  smaller: the first version pasted, and the glow disc — which is drawn to bleed
+  off the bottom-left corner — came back with the pasted tile's straight edges
+  cut through it. Its `favicon.ico` output is byte-identical to before that
+  refactor, which is the check to re-run if the drawing code is ever touched.
+
 ## Working rules
 
 - Browser-test locally first (`.claude/launch.json` → port 8016, or
