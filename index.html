@@ -5090,6 +5090,60 @@ let charts = [];
 /* Every chart takes a `summary`: a canvas is a picture to a screen reader and
    announces nothing at all without one. The summary carries the figures the
    chart is drawn from, so the information is available without seeing it. */
+/* ── The fourth thing that breaks under zoom, and the worst of them ─────────
+   A chart's HIT-TESTING was off by the zoom factor, so on a zoomed page you
+   hovered one bar and were told about a different one — reported, correctly, as
+   "the previous year's info was shown". Above 100% it reads to the right and
+   runs off the end of the chart entirely; below 100% it reads to the LEFT, and
+   that is the direction that says nothing and looks like an off-by-one bug in
+   the data. It applies to every chart in the app, and to clicks as much as to
+   tooltips.
+
+   Chart.js resolves a pointer ONCE, in its DOM platform, as (roughly)
+   `event.offsetX` measured against `canvas.clientWidth`. Chrome reports
+   `offsetX` WITH the CSS zoom applied and `clientWidth` WITHOUT it — measured
+   at 125%: offsetX 623 against a clientWidth of 569 for a canvas whose
+   getBoundingClientRect is 711 wide. So the pointer lands `zoom` times too far
+   from the left edge, and the error grows across the chart, which is why the
+   left-hand years feel fine and the right-hand ones are hopeless.
+
+   The correction goes in at that one normalising step: `addEventListener` on
+   the platform hands its listener an object carrying `native` plus a resolved
+   `x`/`y`, and everything downstream — active elements, tooltip, click routing —
+   reads those two numbers. Dividing them by the scale fixes the lot in one
+   place, and it is the only place, which is why this is done here rather than
+   per chart. The object is mutated rather than copied because Chart.js holds on
+   to it as `_lastEvent` and compares it by identity.
+
+   The scale is MEASURED off the canvas (rect width against clientWidth), never
+   taken from `zoomScale` — the same lesson pinGridHeader learned. It is then
+   exactly 1 on an unzoomed page, so this is a no-op there rather than a second
+   thing to keep in step, and it would equally cover a transform scale if one
+   ever appeared above a chart. Chart.js is vendored and must never be
+   hand-edited, so it is patched from here at load. */
+function fixChartZoomHitTesting() {
+  const dom = typeof Chart !== 'undefined' && Chart.platforms && Chart.platforms.DomPlatform;
+  if (!dom || dom.prototype.__zoomFixed) return;
+  const add = dom.prototype.addEventListener;
+  dom.prototype.addEventListener = function (chart, type, listener) {
+    return add.call(this, chart, type, (e) => {
+      /* attach/detach/resize come through here too and carry no position —
+         only a resolved pointer event has both `native` and a numeric x. */
+      if (e && e.native && typeof e.x === 'number' && chart.canvas) {
+        const w = chart.canvas.clientWidth;
+        const scale = w ? chart.canvas.getBoundingClientRect().width / w : 1;
+        if (scale && Math.abs(scale - 1) > 0.001) {
+          e.x = Math.round(e.x / scale);
+          if (typeof e.y === 'number') e.y = Math.round(e.y / scale);
+        }
+      }
+      return listener(e);
+    });
+  };
+  dom.prototype.__zoomFixed = true;
+}
+fixChartZoomHitTesting();
+
 function newChart(id, config, summary) {
   const el = F(id);
   if (!el || typeof Chart === 'undefined') return;

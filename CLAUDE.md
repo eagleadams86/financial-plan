@@ -193,7 +193,7 @@ family names as well as balances.
   page paints at 100% and jumps a frame later. Quarter steps in the header
   picker, an exact percentage in Preferences; a custom figure is injected into
   the picker as its own option so the two can never disagree.
-  **Three things break under zoom, and all three are the same root cause — CSS
+  **Four things break under zoom, and all four are the same root cause — CSS
   pixels and screen pixels stop being the same unit:**
   - `getBoundingClientRect()` reports SCREEN pixels (zoom included) while a
     `transform: translateY()` is in the element's own pre-zoom pixels, which the
@@ -211,6 +211,30 @@ family names as well as balances.
     200% and went soft while the text around it stayed sharp. `newChart` passes
     `devicePixelRatio × zoomScale`, and `applyZoom` re-renders (guarded by
     `booted`, since it also runs before the first render) so charts rebuild.
+  - **Chart.js HIT-TESTING was off by the whole zoom factor** — the worst of the
+    four, because it is silent and it lies rather than merely looking wrong.
+    `fixChartZoomHitTesting()` is the fix and the long comment above it is the
+    explanation. Chrome reports `event.offsetX` WITH the zoom applied and
+    `canvas.clientWidth` WITHOUT it (measured at 125%: offsetX 623 against a
+    clientWidth of 569 on a canvas whose rect is 711 wide), and Chart.js resolves
+    a pointer as one against the other — so the pointer lands `zoom` times too
+    far from the left edge and the error GROWS across the chart. Above 100% you
+    hover a bar and are told about one to its right, or run off the end and get
+    nothing; below 100% you are told about one to its LEFT, which is the case
+    that reads as an off-by-one bug in the data rather than as a broken pointer.
+    It was reported that way, twice, and the first fix (the solid hover fill)
+    addressed a real but SEPARATE legibility problem and left this untouched —
+    a good reminder to reproduce a pointer complaint at the reporter's own zoom
+    before believing you have understood it. Note the DPR trick above does not
+    help here: `canvas.width / currentDevicePixelRatio` cancels back to
+    `chart.width` whatever is passed. Measured before and after over every bar of
+    both bar charts and every point of the line chart at 75/80/90/100/125/140/150%
+    — with the correction disabled, hovering 2024 at 75% reports 2020 and
+    hovering 2021 at 125% reports 2024; with it, all correct at every zoom.
+    It is patched at the DOM PLATFORM, which normalises each event exactly once
+    into `{native, x, y}` that every later step reads, so one correction covers
+    tooltips, hover, clicks and all eight charts. Chart.js is vendored and must
+    never be hand-edited, which is why the patch lives in `index.html`.
   `zoomScale` is declared beside `pinnedShift`, with the other scroll-handler
   state, rather than beside the zoom controls further down — this file has been
   bitten before by a `let` sitting below its first reader, and it is read on
