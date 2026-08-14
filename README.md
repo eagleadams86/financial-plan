@@ -63,10 +63,9 @@ included — treat those the way you treat the figures.
   the interest or add a dividend — correct either and the balance recomputes
   around it, in whichever account the money is paid into, for that month and
   every month after. **Every note you've written anywhere in a year is gathered
-  into one collapsible list at the foot of it** — cells, split parts, balances
-  and rows — each one clickable to jump back to what it was about; the list
-  isn't there at all in a year you haven't annotated, and it stays open or shut
-  the way you left it, on this device, across years and refreshes. They're
+  into a box of its own under the budget** — cells, split parts, balances
+  and rows — each one clickable to jump back to what it was about; the box
+  isn't there at all in a year you haven't annotated. They're
   grouped by month and laid out across the width of the card, so a year's worth
   reads at a glance instead of running down one long strip. Mark a month "entered" to freeze its
   estimates into numbers, like overtyping formulas in Numbers. A finished year
@@ -90,6 +89,13 @@ included — treat those the way you treat the figures.
 - **The tabs are yours to arrange** — drag one anywhere along the bar (with a
   mouse or a finger), or hold Alt and use the arrow keys. The order is saved and
   follows you to your other devices.
+- **Every box folds up** — click any card's heading (the shaded strip across
+  the top of it) and the card collapses to that strip, so a tab can be trimmed
+  down to the parts you actually read. What you fold is remembered across
+  refreshes and, if you're signed in, follows you to your other devices. The
+  welcome card is the one exception: hiding the page that explains what the app
+  is would be a poor greeting. A box you fold in one year stays folded in the
+  next, and anything new is open until you say otherwise.
 - **Everything is editable, everywhere** — click any row (budget categories,
   accounts, goals, holdings, retirement accounts, trips and their line items,
   PTO entries, donations, the old yearly summaries) to change, annotate, or

@@ -34,7 +34,7 @@ family names as well as balances.
   changes in the family, mirror it here.
 - **The tab bar is draggable**, and its order lives in `state.ui.tabOrder` —
   synced and backed up, because a deliberate arrangement should follow you (the
-  panel-open set in `fin-open` is device-local; this isn't). Dragging uses
+  set of folded boxes in `ui.collapsed` travels for the same reason). Dragging uses
   POINTER events, not HTML5 drag-and-drop, which does nothing on a touchscreen;
   a tab is only picked up after 6px of travel measured with `Math.hypot` (the
   bar WRAPS, so a drag between rows is mostly vertical). `touch-action: pan-y`
@@ -59,7 +59,7 @@ family names as well as balances.
   says otherwise. Anything else coerceShape reaches for has to obey the same
   rule. It's a `console.warn`, not an error, so a console check filtered to
   errors will not show it.
-- localStorage keys: `fin-state`, `fin-theme`, `fin-updated`, `fin-open`. `save()` is the
+- localStorage keys: `fin-state`, `fin-theme`, `fin-updated`, `fin-zoom`. `save()` is the
   single write chokepoint (and where a future sync layer would hook in, SV
   style). `blankState()`/`coerceShape()`/`migrate()` guard every entry point;
   Restore shape-checks the RAW parse before coercing, so a wrong file is
@@ -1037,18 +1037,76 @@ written, which collapsing it to a paragraph destroyed. A multi-line note puts
 its label on a line of its own (`li.multiline`); a one-liner keeps the label
 inline after an em dash, because giving every short note two lines doubles the
 list for nothing.
-**A collapsible panel stays as you left it**: tag it `data-keep="<name>"` and
-`restoreOpenSections()` (called from `wireView`, so it re-applies after every
-render) does the rest. The set of open names lives in `fin-open`, its own
-localStorage key beside `fin-theme` — NOT a field on the state, because opening
-a panel is not an edit and must not push a new version of the plan to the cloud
-or ride along in every backup. `parseOpen`/`withSection` hold the logic away
-from storage so tests can pin them without writing to the real page's own keys;
-a corrupt value leaves everything closed rather than throwing mid-render. The
-notes panel is one preference across all years rather than one per year —
-re-opening it on every year change is the annoyance this removes. The changelog
-box is deliberately NOT remembered: it fetches the GitHub API when opened, and
-remembering it would fire that request on every page load. The Venmo and large-purchase ledgers are gone entirely, entries
+**The notes are their own BOX under the budget**, not a panel inside it: they
+answer a different question from the grid, and a box nested in a box gives the
+reader two headers to fold and no way to guess which one they shut. `renderBudget`
+appends `yearNotes(y)` after the grid or summary card; both fold through the one
+mechanism below.
+
+## Folding a box up
+
+**Every card on every tab collapses to its heading, and the renderers know
+nothing about it.** `wireBoxes(view)` walks the freshly drawn markup at the end
+of `wireView` and builds the shape: the heading becomes a shaded band carrying a
+`.box-toggle` button, everything under it moves into a `.card-body`. That is the
+bargain `applyFieldSpans` strikes in the dialogs and for the same reason — an
+opt-in flag is the one whoever adds the next card forgets, and "this box doesn't
+fold and every other one does" arrives months later.
+- **A card with no heading of its own is left alone**, which is what keeps the
+  welcome card out of it: its `<h2>` sits inside `.empty`, as every empty
+  state's does. Folding "Welcome to Financial Plan" would leave a first-time
+  reader looking at a title bar that explains nothing.
+- **`.card-body` is listed beside `.card` in every `.card > x` rule.** The wrap
+  reparents a card's second `<h2>` and every one of its `.sub` lines, so a rule
+  written only against `.card >` silently stops applying to them — which is
+  exactly what happened to `.sub` the first time round, on every tab at once.
+- **The set of folded boxes is `state.ui.collapsed`**, beside `ui.tabOrder`, so
+  it syncs and follows you to the phone — a deliberate reversal of the old
+  `fin-open` localStorage key. The argument for keeping it local was that
+  folding a box is not an edit and shouldn't push a new version of your
+  finances; that is still true, and it pushes one anyway, because "the boxes I
+  never look at stay shut wherever I open this" is worth a debounced write.
+  Being in `ui` keeps it out of share links (which send `ui: {}`).
+- **Stored SHUT, never open.** A card that doesn't exist yet — one added in a
+  later version, a year's Notes box appearing the first time a note is written —
+  opens by default, and a corrupt list means everything visible rather than
+  everything hidden. `cleanBoxKeys`/`isBoxShut`/`withBox` are pure and pinned by
+  tests; `coerceShape` runs the list through `cleanBoxKeys`, and they are
+  function DECLARATIONS for the temporal-dead-zone reason at the top of this file.
+- **`boxKey(view, heading)` strips the DIGITS out of the heading**, so "2026
+  Budget" and "2025 Budget" are one box: folding it in one year and finding it
+  open in the next is the annoyance that avoids. Same for the count in "Notes
+  for 2026 (5)". A renamed heading gets a new key and so re-opens, which is the
+  harmless direction to fail.
+- **A tab that draws the same heading several times writes `data-box` itself** —
+  a donations table per year, a PTO year, a 401(k) check per earner, a portfolio
+  pane, a trip. The tie-break for a collision is an ORDINAL, and an ordinal
+  moves: fold 2024's donations, add one dated 2026, and a different year is
+  folded. It is an OVERRIDE, never an opt-in — a card that says nothing still
+  folds, so nothing is forgotten, only occasionally keyed loosely.
+- **Two things measure themselves and must be told when a box opens**: a chart
+  in a `display:none` card sizes its canvas to nothing, and the grid's pinned
+  month header positions off a rectangle that was zero high. `setBoxShut` calls
+  `resize()` on the charts inside the card and re-runs `pinGridHeader`, on the
+  way open only. For the same reason `wireBoxes` runs LAST in `wireView`, after
+  the chart builders — a chart drawn before its box is folded is already the
+  right size when the box comes back.
+- **The heading's own buttons stay OUTSIDE the toggle** (a trip's ✎ Edit, an
+  info dot): a `<button>` inside a `<button>` is invalid and the inner one stops
+  being clickable. The toggle does not stretch across the band either, or those
+  buttons get shoved out to the far edge of the card instead of sitting beside
+  the words where they always have. The whole band is still the hit area — the
+  click handler is on the `<h2>` and ignores anything landing on a control.
+- **The hover mark is a band shade, a colour and an underline, and the
+  underline is not belt-and-braces**: in Dark and Sepia the theme pack's
+  `--accent` is essentially `--text-primary`, so the colour change is a no-op
+  there. No new colour is invented — `--accent` on `--accent-bg` is the pack's
+  own contrast-checked pairing — and open-or-shut is carried by the ANGLE of the
+  chevron, never by hue.
+- The changelog box is deliberately NOT part of this: it fetches the GitHub API
+  when opened, and remembering it would fire that request on every page load.
+
+The Venmo and large-purchase ledgers are gone entirely, entries
 included; `coerceShape` also strips the copies an earlier version folded into
 `extraNotes`, matching on `where`, leaving the import's own notes alone.
 Investment panes are `side.portfolios` — `{id, name, rows}` each, add/rename/

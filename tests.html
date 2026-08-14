@@ -1347,28 +1347,46 @@ t('the retirement data that matters is untouched', () => {
   eq(Object.keys(d.side.limits), ['2025']);
 });
 
-group('Sections stay as you left them');
-t('a section you opened is remembered, and one you closed is forgotten', () => {
-  eq(H.withSection(null, 'notes', true), '["notes"]');
-  eq(H.withSection('["notes"]', 'imported', true), '["notes","imported"]');
-  eq(H.withSection('["notes","imported"]', 'notes', false), '["imported"]');
-  eq(H.withSection('["notes"]', 'notes', false), '[]');
+group('Boxes stay as you left them');
+t('a box you folded is remembered, and one you opened is forgotten', () => {
+  eq(H.withBox(null, 'budget/budget', true), ['budget/budget']);
+  eq(H.withBox(['budget/budget'], 'budget/notes-for', true),
+    ['budget/budget', 'budget/notes-for']);
+  eq(H.withBox(['budget/budget', 'budget/notes-for'], 'budget/budget', false),
+    ['budget/notes-for']);
+  eq(H.withBox(['budget/budget'], 'budget/budget', false), []);
 });
-t('opening the same section twice records it once', () => {
-  eq(H.withSection('["notes"]', 'notes', true), '["notes"]');
+t('folding the same box twice records it once', () => {
+  eq(H.withBox(['budget/budget'], 'budget/budget', true), ['budget/budget']);
 });
-t('closing one that was never open is not an error', () => {
-  eq(H.withSection('[]', 'notes', false), '[]');
+t('opening one that was never folded is not an error', () => {
+  eq(H.withBox([], 'budget/budget', false), []);
 });
-t('a corrupt setting leaves everything closed rather than throwing', () => {
-  /* It is written by the page but read back from storage another tab, an
-     extension or a stray hand could have touched. Drawing the page must not
-     depend on it being well formed. */
-  for (const junk of ['not json', '{"notes":true}', 'null', '5', '""'])
-    eq([...H.parseOpen(junk)], [], junk);
-  eq([...H.parseOpen('["notes",5,{"x":1},"imported"]')], ['notes', 'imported'],
-    'and a list part rubbish keeps only the names');
-  eq([...H.parseOpen(null)], []);
+t('the list is stored shut, so an unknown box opens by default', () => {
+  eq(H.isBoxShut(['budget/budget'], 'giving/giving-fund'), false,
+    'a box added in a later version is open, not hidden');
+  eq(H.isBoxShut(['budget/budget'], 'budget/budget'), true);
+});
+t('a corrupt setting leaves every box open rather than throwing', () => {
+  /* It rides in the state, so it comes back from a hand-edited backup, a share
+     link and the cloud. Drawing the page must not depend on it being well
+     formed, and the safe failure is everything visible. */
+  for (const junk of ['not json', { budget: true }, null, 5, ''])
+    eq(H.cleanBoxKeys(junk), [], JSON.stringify(junk));
+  eq(H.cleanBoxKeys(['budget/budget', 5, { x: 1 }, 'giving/giving']),
+    ['budget/budget', 'giving/giving'], 'and a list part rubbish keeps only the names');
+  eq(H.coerceShape({ ui: { collapsed: 'nope' } }).ui.collapsed, []);
+});
+t('a box key survives the year picker and the note count', () => {
+  /* Folding the budget in 2026 and finding it open in 2025 is the annoyance
+     stripping the digits removes — same box to the reader, same key. */
+  eq(H.boxKey('budget', '2026 Budget'), H.boxKey('budget', '2025 Budget'));
+  eq(H.boxKey('budget', 'Notes for 2026 (5)'), H.boxKey('budget', 'Notes for 2025 (12)'));
+  eq(H.boxKey('budget', '2026 Budget'), 'budget/budget');
+  eq(H.boxKey('history', 'Money in vs Money Out'), 'history/money-in-vs-money-out');
+  eq(H.boxKey('budget', '2026'), 'budget/box', 'a heading of nothing but digits still has a key');
+  eq(H.boxKey('goals', 'Goals') === H.boxKey('history', 'Goals'), false,
+    'the same heading on two tabs is two boxes');
 });
 
 group('The order of the tabs');
