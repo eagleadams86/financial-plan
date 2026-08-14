@@ -15,7 +15,7 @@ opening one both upload nothing. **Optional sync**: "Sign in to sync" (Google) m
 your data to a private Firestore document in the `financialplan-60c6e`
 Firebase project — security rules confine every account to its own document,
 sign-in uses Google Identity Services (works on corporate networks that block
-firebaseapp.com), and "Delete all data" removes the synced copy too. See
+firebaseapp.com), and "Delete all data" empties the synced copy too. See
 [privacy.html](privacy.html). The import files (`financial-plan-data.json`,
 `expected-2026.json`) are gitignored from the very first commit; `git status`
 must never show them. Since the Household tab arrived, a backup file or a
@@ -264,10 +264,18 @@ Folded away at the foot of that same dialog, under **Start again**, is
 in the app shouldn't sit a mis-click away from Export. Pressing it opens a
 confirmation of its own that says exactly how much is going ("This deletes 8
 years of budgets, 3 goals…"), says out loud when you're signed in that the
-synced copy goes too and you'll be signed out, and offers the same JSON export
-as a last chance to keep any of it. The cloud copy is deleted first: failing up
-there after deleting locally would leave the account holding the only copy, and
-the next sign-in would pour it straight back.
+copy in your Google account goes too, and offers the same JSON export as a last
+chance to keep any of it.
+
+**You stay signed in, and the deletion reaches your other devices.** The
+emptied plan goes out through the normal save path, so the phone sees it land
+and asks *"another device has cleared its data — clear this one too?"*;
+cancelling keeps the phone's copy and restores it everywhere. Until 2026-08-14
+this button deleted the Firestore document and signed you out instead, which
+looked tidier and was worse: your other devices were never told, so the next
+edit on the phone re-created the document and signing back in poured the whole
+plan back. The surviving document holds `{ json: "<blank plan>", updatedAt }` —
+no name, no month and no figure in it.
 
 `migrate_local_data.py` does the one thing the app deliberately won't do to
 your data by itself: it takes the next year back out of the live grid. The

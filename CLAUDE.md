@@ -1304,9 +1304,24 @@ module keeps: localStorage is the source of truth and the cloud only mirrors
 it; the first-sign-in "which copy?" dialog is load-bearing; **an empty copy
 never silently beats one with data**; sync failures surface in the button and
 privacy note, with no retry button by design; `save()` is the one chokepoint
-that calls `cloudPush()`; Delete-all calls `window.cloudWipe` (registered only
-while signed in) so a wipe removes the cloud copy too. `privacy.html` must be
+that calls `cloudPush()`. `privacy.html` must be
 updated in the same commit as any change to what sync stores.
+
+**Delete-all goes through `save()` + `window.cloudFlush`, NOT a document
+deletion — `window.cloudWipe` is gone and must not come back.** It called
+`deleteDoc()`, forgot `fin-sync-uid` and signed you out, and the sign-out was
+load-bearing: staying signed in would have re-created the document on the next
+save a second later. What it never did was tell the OTHER devices. The phone
+kept every year, goal and balance, and its next edit re-created the document
+from its own copy — so signing back in on the laptop poured the whole plan
+back, which is the opposite of what the button says. Pushing an emptied plan
+instead lands on the listener's "another device has cleared its data — clear
+this one too?" branch, which already existed here and was simply unused by the
+wipe path. The surviving document is `{ json: "<blankState>", updatedAt }` —
+no name, no month, no figure — so deleting it outright bought appearance rather
+than privacy. Same behaviour as Sprint Predictability, Flow Metrics, PAPTrack
+and Golf Handicap. (Charlie asked for this on 2026-08-14; the sign-out was the
+complaint, the silent phone was the real fault.)
 
 ## The import script
 

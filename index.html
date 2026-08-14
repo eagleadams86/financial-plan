@@ -8534,9 +8534,10 @@ F('exportBtn').onclick = downloadBackup;
    stacked confirm()s, which asked twice without ever saying how much was going.
    Same shape as Sprint Predictability, Flow Metrics, PAPTrack and Golf Handicap.
 
-   When the sync module is signed in it registers window.cloudWipe, and the wipe
-   removes the cloud copy too — otherwise the next sign-in would just pour the
-   old data straight back. */
+   It goes out through save() like every other change, which is what makes the
+   deletion REACH the other devices: they see an emptied plan land, and their
+   listener asks before following suit. See the note where window.cloudWipe used
+   to be registered for why deleting the cloud document outright was worse. */
 const clearDialog = F('clearDialog');
 
 F('wipeBtn').onclick = () => {
@@ -8553,28 +8554,22 @@ F('wipeBtn').onclick = () => {
     + `backup is the only way to get any of it back.`;
   /* Said plainly, because "clear this browser" and "clear every device I own"
      are very different acts and the button looks identical either way. */
-  F('clearSyncWarn').textContent = window.cloudWipe
-    ? 'You are signed in, so this also deletes the synced copy and signs you out.'
+  const signedIn = typeof window.finSignedIn === 'function' && window.finSignedIn();
+  F('clearSyncWarn').textContent = signedIn
+    ? 'You are signed in, so this also clears the copy in your Google account. Your other devices will ask before clearing themselves.'
     : '';
   clearDialog.showModal();
 };
 
 F('clearBackupBtn').onclick = downloadBackup;
 F('clearCancel').onclick = () => clearDialog.close();
-F('clearConfirm').onclick = async () => {
-  /* The cloud copy goes FIRST and a failure stops the whole thing: deleting
-     locally and then failing up there leaves the account holding the only copy,
-     which the next sign-in would pour straight back in. */
-  try {
-    if (window.cloudWipe) await window.cloudWipe();
-  } catch (e) {
-    console.warn('cloud wipe failed', e);
-    toast('⚠️ Could not remove the synced copy — local data was kept. Try again.');
-    return;
-  }
-  localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(UPDATED_KEY);
+F('clearConfirm').onclick = () => {
   state = blankState();
+  save();                 // the one write path, so this pushes to the cloud too
+  /* …but save() debounces its push, and a delete must not sit in that window:
+     clearing then closing the tab inside 1.2s would leave the cloud copy intact,
+     to resurrect everything on the next sign-in. */
+  if (window.cloudFlush) window.cloudFlush();
   clearDialog.close();
   render();
   toast('Everything deleted — a fresh start');
@@ -9806,6 +9801,11 @@ if (FIREBASE_CONFIG && !window.finViewOnly && !inTestHarness) {
 
 let A, Fs, auth, db, user = null, unsub = null, pushTimer = null, tokenClient = null;
 
+/* The classic script above can't see `user` (this is a module), and the
+   delete-all dialog has to tell the truth about whether deleting reaches the
+   user's other devices. Same hook as Golf Handicap's ghSignedIn. */
+window.finSignedIn = () => !!user;
+
 /* Google's sign-in client is a classic script, not a module. */
 function loadGis() {
   return new Promise((resolve, reject) => {
@@ -9842,17 +9842,24 @@ async function init() {
   A.onAuthStateChanged(auth, (u) => {
     user = u;
     syncError = null;
-    /* The wipe hook only exists while signed in — Delete-all reads its
-       presence to know whether a cloud copy needs removing too. */
-    if (u) {
-      window.cloudWipe = async () => {
-        await Fs.deleteDoc(docRef());
-        localStorage.removeItem('fin-sync-uid');
-        await A.signOut(auth);
-      };
-    } else {
-      delete window.cloudWipe;
-    }
+    /* window.cloudWipe is GONE, and the reason is worth keeping. It deleted the
+       Firestore document, forgot fin-sync-uid and signed you out — and the sign
+       out was load-bearing, because staying signed in would have re-created the
+       document on the very next save a second later.
+
+       What it never did was tell the other devices. The phone kept every year,
+       goal and balance, and the next edit on it re-created the document from its
+       own copy — so signing back in on the laptop poured the whole plan back.
+       "Delete all data" really meant "delete here and log out".
+
+       Delete-all now goes through save() like every other change, pushing the
+       emptied plan, which the listener below turns into the "another device has
+       cleared its data — clear this one too?" question on every other device.
+       That is the family behaviour (Sprint Predictability, Flow Metrics,
+       PAPTrack, Golf Handicap). The document survives holding a blank plan:
+       `{ json: "<blankState>", updatedAt }` carries no name, no month and no
+       figure, so deleting it outright bought appearance rather than privacy —
+       and cost the one thing the button is for. */
     updateUI();
     if (unsub) { unsub(); unsub = null; }
     if (u) startSync().catch((e) => setSyncError(e));
@@ -10104,6 +10111,16 @@ window.cloudPush = () => {
   if (!user) return;
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => { pushTimer = null; pushNow().catch(setSyncError); }, 1200);
+};
+
+/* Skips the debounce. "Delete all data" calls this so the emptied plan reaches
+   the cloud before the tab can be closed — otherwise the next sign-in would pour
+   everything straight back. */
+window.cloudFlush = () => {
+  if (!user) return;
+  clearTimeout(pushTimer);
+  pushTimer = null;
+  pushNow().catch(setSyncError);
 };
 
 /* Flush a pending push the moment the page hides, so "edit then close the
