@@ -21,7 +21,7 @@
      checked against it. frame-ancestors is ignored in a meta tag. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://api.github.com https://api.twelvedata.com; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Financial Plan · Charlie’s Epic Money Map</title>
+<title>Financial Plan</title>
 <meta name="description" content="A personal financial planner: monthly budget with projections, savings goals, retirement, vacations and giving.">
 <!-- The icon is an inline SVG (PapTrack does the same with a PNG): a rounded
      midnight tile with the plan's line climbing across it and a map marker at
@@ -631,8 +631,11 @@ details.section table th, details.section table td { padding: 4px 6px; }
          and without it the header would keep showing whatever icon it cached
          the first time. Bump it whenever make_favicon.py is re-run — here, on
          the <link> above, and on privacy.html's, which is easy to forget. -->
+    <!-- The subtitle is the reader's own (Preferences), empty by default and
+         filled in by render(). It used to be one person's name in the markup,
+         which every copy of the app and every shared link then carried. -->
     <h1 class="brand"><img src="favicon.ico?v=2" width="22" height="22" alt=""
-      >Financial&nbsp;Plan <span>· Charlie’s Epic Money Map</span></h1>
+      >Financial&nbsp;Plan <span id="brandTag" hidden></span></h1>
     <label class="sr-only" for="themeSel">Theme</label>
     <!-- The four unified themes, listed alphabetically (matches the other apps).
          Midnight is pre-selected to match the theme the boot script in <head> has
@@ -1201,6 +1204,30 @@ const accountsOf = (st) => (st.settings.accounts || []);
 const accountById = (st, id) => accountsOf(st).find(a => a.id === id);
 const accountName = (st, id) => accountById(st, id)?.name || id;
 const hubAccount = (st) => accountsOf(st).find(a => a.hub) || accountsOf(st)[0];
+/* Which accounts a dividends row earns on. A list on the ROW, because "the
+   money that earns this" is a fact about the row and not about the app — the
+   two ids it used to assume were simply the two the first plan happened to
+   have. An empty list is a real answer (earn on nothing, stay blank), which is
+   why absent and empty must not be conflated: coerceShape fills in the absent
+   case once, and never touches a list the reader has emptied on purpose. */
+const dividendAccounts = (cat) => Array.isArray(cat.accounts) ? cat.accounts : [];
+/* Months in which an account still states a balance after a given month. What
+   stands between "I closed this in June" and quietly hiding July's figure:
+   closing an account takes it out of Total and stops it carrying forward, so a
+   balance recorded later would vanish from the screen while staying in the
+   file — the worst of both. Pure, so the refusal can be tested. */
+function statedAfter(st, id, month) {
+  const out = [];
+  for (const yr of Object.values(st.years || {}))
+    for (const k of Object.keys(yr.overrides || {})) {
+      const bar = k.indexOf('|');
+      if (k.slice(0, bar) !== id) continue;
+      const m = k.slice(bar + 1);
+      if (m > month) out.push(m);
+    }
+  return out.sort();
+}
+
 /* Move the hub. Exactly one account carries the flag and the whole engine reads
    it — `normal` rows land on the hub and nowhere else, `transfer` and
    `passthrough` are both defined against it, and it is the one account with no
@@ -1329,8 +1356,8 @@ function blankState() {
     schema: 5,
     settings: {
       midTermRateAnnual: 0.03,   // dividend estimate: rate/12 × prior (cash+mid)
-      longTermRateAnnual: 0.07,  // legacy: seeds the Investments rate on old data
       ptoAllowance: 32,
+      tagline: '',   // the reader's own subtitle (Preferences); shown beside the name
       /* Every tracked account, in grid order. id is permanent (seeds,
          overrides and goal sources key off it); rate is annual growth applied
          as rate/12 each month; creditTo says which account that interest
@@ -1461,6 +1488,11 @@ function coerceShape(data) {
   }
   if (!d.settings.accounts.some(a => a.hub) && d.settings.accounts.length)
     d.settings.accounts[0].hub = true;
+  /* Read once above to seed an old plan's Investments rate, then dropped: it
+     has had no other reader since accounts became a list, and a setting that
+     nothing consults has no business riding along in every backup. Same
+     treatment `side.retirement` and `side.rothLimit` got. */
+  delete d.settings.longTermRateAnnual;
   d.years = obj(d.years);
   for (const y of Object.keys(d.years)) {
     const yr = obj(d.years[y]);
@@ -1486,6 +1518,15 @@ function coerceShape(data) {
         const looksLikeTransfer = ['bankTransfer', 'midTransfer', 'longTransfer',
           'zelle', 'transfer'].includes(cat.role);
         Object.assign(cat, normRole(cat));   // one-time role → role + target
+        /* A dividends row written before the accounts were nameable earns on
+           the two the engine used to assume — but only the ones that still
+           exist, and only where the row says nothing yet. Absent means "never
+           asked"; an empty list is a decision, and re-filling it would argue
+           with the reader every time the app loaded. */
+        if (cat.rule === 'dividends' && !Array.isArray(cat.accounts))
+          cat.accounts = ['cash', 'mid'].filter(id => acctIds.has(id));
+        if (Array.isArray(cat.accounts))
+          cat.accounts = cat.accounts.filter(id => acctIds.has(id));
         /* Whose row it is — a second earner's paycheck, tagged so take-home
            can be read per person. Only ever a label; the engine sums the
            household's rows regardless. */
@@ -2287,14 +2328,29 @@ const RULES = {
     return Math.round(cell.v);
   },
 
-  /* Dividends: monthly interest on last month's cash + savings balances,
-     at the row's own rate (falling back to the old global setting). */
+  /* Dividends: monthly interest on last month's balances in the accounts the
+     ROW names, at the row's own rate (falling back to the old global setting).
+     It used to read the ids `cash` and `mid` literally, which was invisible
+     until somebody who wasn't the author renamed or deleted them — the rule
+     then returned null and the row simply went blank, with nothing on screen
+     saying why. `dividendAccounts()` is the one reader; coerceShape fills the
+     list in for rows written before it existed. */
   dividends(cat, m, ctx) {
     const prev = monthAdd(m, -1);
-    const cash = ctx.balances[`cash|${prev}`], mid = ctx.balances[`mid|${prev}`];
-    if (cash === undefined) return null;
+    const ids = dividendAccounts(cat);
+    /* Nothing to earn on is a blank month, not a zero: zero is a claim that
+       the balances were nil, and that is a different statement. */
+    if (!ids.length) return null;
+    let base = 0, seen = false;
+    for (const id of ids) {
+      const b = ctx.balances[`${id}|${prev}`];
+      if (b === undefined) continue;
+      seen = true;
+      base += b || 0;
+    }
+    if (!seen) return null;
     const rate = cat.rate ?? ctx.st.settings.midTermRateAnnual ?? 0;
-    return rate / 12 * ((cash || 0) + (mid || 0));
+    return rate / 12 * base;
   },
 
   /* Paycheck: per-check amount × that month's paycheck count. */
@@ -2709,6 +2765,14 @@ function allowedViews() {
 }
 
 function render() {
+  /* textContent, not markup: this is the one string the reader names the whole
+     app with, and it goes in the browser tab as well as the header. A shared
+     link carries no settings (see SECTION_NEEDS), so a recipient sees their own
+     subtitle or none — never the sender's. */
+  const tag = (state.settings.tagline || '').trim();
+  const brandTag = F('brandTag');
+  if (brandTag) { brandTag.textContent = tag ? `· ${tag}` : ''; brandTag.hidden = !tag; }
+  document.title = tag ? `Financial Plan · ${tag}` : 'Financial Plan';
   const allowed = allowedViews();
   const view = allowed.includes(state.ui.activeTab) ? state.ui.activeTab
     : (allowed[0] || 'budget');
@@ -3271,7 +3335,7 @@ const RULE_LABEL = {
   avg: 'average of the months so far',
   avglastyear: 'average of last year',
   samemonth: 'same month last year',
-  dividends: 'interest on the cash + savings balances',
+  dividends: 'interest on the chosen account balances',
   paycheck: 'per-check amount × paychecks',
 };
 
@@ -3283,9 +3347,11 @@ function ruleDesc(cat) {
     return `${fmtMoney(cat.perCheck || 0)} per check × that month's paychecks`;
   if (r === 'quarterly')
     return `repeats every ${Math.max(1, Math.round(cat.every || 3))} months`;
-  if (r === 'dividends')
+  if (r === 'dividends') {
+    const on = dividendAccounts(cat).map(id => accountName(state, id));
     return `${round2(((cat.rate ?? state.settings.midTermRateAnnual) || 0) * 100)}%/yr interest on ${
-      accountName(state, 'cash')} + ${accountName(state, 'mid')}`;
+      on.length ? andList(on) : 'nothing yet — pick the accounts in Row settings'}`;
+  }
   return RULE_LABEL[r] || RULE_LABEL.none;
 }
 
@@ -4220,7 +4286,14 @@ function grossIncome(st, y) {
    (whose rows carry no rule) work too. */
 const PAY_SLUGS = new Set(['paycheck', 'paychecks', 'pay', 'net-pay', 'take-home',
   'take-home-pay', 'takehome', 'salary', 'wages']);
-function isPayRow(name, rule) {
+/* `isPay` on the row is the answer when it is there, and it is the only one
+   that works for somebody whose income row is called "Income", "Stipend" or
+   anything that isn't English — the slug list below is a GUESS, kept so a plan
+   that predates the tick keeps reading as it did. A stored `false` is as much
+   an answer as a stored `true`: a row called "Salary" that is really a
+   reimbursement has to be able to say so. */
+function isPayRow(name, rule, isPay) {
+  if (typeof isPay === 'boolean') return isPay;
   return rule === 'paycheck' || PAY_SLUGS.has(slugJs(name || ''));
 }
 
@@ -4241,7 +4314,7 @@ function takeHomePay(st, computed, y, personId) {
       ? round2(rows.reduce((t, it) => t + (it.total || 0), 0)) : null;
   }
   const ids = new Set((yr.categories || [])
-    .filter(c => isPayRow(c.name, c.rule))
+    .filter(c => isPayRow(c.name, c.rule, c.isPay))
     .filter(c => !personId || c.person === personId).map(c => c.id));
   if (!ids.size) return null;
   /* The COMPUTED cells, not just the stored ones — the same reason yearFlows
@@ -5739,8 +5812,7 @@ const EDITORS = {
         ['avg', 'Average of the months so far'],
         ['avglastyear', 'Average of last year'],
         ['samemonth', 'Same month last year'],
-        ['dividends', `Interest on the ${accountName(state, 'cash')} + ${
-          accountName(state, 'mid')} balances`],
+        ['dividends', 'Interest on chosen account balances'],
         ...(state.settings.paycheckRule
           ? [['paycheck', 'Per-check amount × paychecks']] : []),
       ]},
@@ -5753,6 +5825,21 @@ const EDITORS = {
         showIf: (v) => v.rule === 'quarterly' },
       { key: 'rate', label: 'Interest %/yr', type: 'percent',
         showIf: (v) => v.rule === 'dividends' },
+      /* Which rows count as pay, for the Giving tab's share-of-take-home. It
+         guessed from the row's NAME against an English word list, so "Income"
+         or "Stipend" got a dash and the only cure was renaming your budget to
+         suit the code. Offered on income rows only — an expense is never pay —
+         and it overrides the guess in both directions. */
+      { key: 'isPay', label: 'This is my pay', type: 'check', fill: true,
+        showIf: (v) => v.section === 'income',
+        hint: 'Counts this row as take-home for the giving percentages. Tick it for pay '
+            + 'the app hasn\u2019t recognised; untick it for income that only looks like '
+            + 'pay \u2014 a refund, a reimbursement.' },
+      { key: 'accounts', label: 'Earned on these accounts', type: 'checks', wide: true,
+        options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
+        showIf: (v) => v.rule === 'dividends',
+        hint: 'Last month\u2019s balances in these are what the rate is applied to. '
+            + 'Pick none and the row stays blank rather than reading as zero.' },
       /* Behaviour is two questions, not one long list: what the money does,
          and (only then) which account it does it with. */
       { key: 'role', label: 'Behaves as', type: 'select', options: [
@@ -5788,8 +5875,15 @@ const EDITORS = {
       const yr = state.years[ds.year];
       const cat = yr.categories.find(c => c.id === ds.id);
       const r = normRole(cat);
+      /* isPay opens on the EFFECTIVE answer, not the stored one. A row named
+         "Paycheck" counts as pay by its name alone, and if the box opened
+         unticked, saving a row you only came to rename would store `false` and
+         quietly stop it counting — the guess overridden by an answer nobody
+         gave. Shown as it currently behaves, so agreeing with it changes
+         nothing. */
       return { ...cat, role: r.role === 'passthrough' ? 'pass' : r.role,
-        transferTo: r.transferTo, creditTiming: r.creditTiming || 'pre' };
+        transferTo: r.transferTo, creditTiming: r.creditTiming || 'pre',
+        isPay: isPayRow(cat.name, cat.rule, cat.isPay) };
     },
     blank: () => ({ rule: 'none', role: 'normal', section: 'expense',
                     creditTiming: 'pre' }),
@@ -5830,6 +5924,17 @@ const EDITORS = {
         if (v.rule === 'dividends' && v.rate !== null && v.rate !== undefined)
           cat.rate = v.rate;
         else delete cat.rate;
+        /* Kept only while it is a dividends row, and stored even when empty:
+           an empty list is the reader saying "earn on nothing", which reads
+           differently from never having been asked — coerceShape backfills the
+           second and must leave the first alone. */
+        if (v.rule === 'dividends')
+          cat.accounts = (v.accounts || []).filter(id => accountById(state, id));
+        else delete cat.accounts;
+        /* Stored only while the box was on the form, and stored as `false`
+           too — "this is not pay" is an answer, not an absence. */
+        if (section === 'income') cat.isPay = !!v.isPay;
+        else delete cat.isPay;
       };
       const ahead = projectionsAfter(ds.year);
       const yrs = [yr, ...ahead.map(y => state.years[y])];
@@ -5901,6 +6006,11 @@ const EDITORS = {
           hint: 'That tab is one salary history. A second earner’s pay is tracked as a '
             + 'budget income row instead.' },
       ] : []),
+      /* First, because it is the one setting that names the whole app — and
+         the one a second reader most wants to change. */
+      { key: 'tagline', label: 'Subtitle', type: 'text', wide: true,
+        hint: 'Shown beside "Financial Plan" in the header and the browser tab. '
+            + 'Yours alone — it is never part of a shared link. Leave it empty for none.' },
       { key: 'currency', label: 'Currency', type: 'text',
         hint: 'Three-letter code — USD, EUR, GBP, CAD. Changes how figures read, not what they are.' },
       { key: 'ptoAllowance', label: 'PTO days a year', type: 'number', step: 1,
@@ -5922,7 +6032,8 @@ const EDITORS = {
         hint: 'For holding-price lookups — shares, ETFs and mutual funds. Free from '
             + 'twelvedata.com. Stays on this device — never synced, never in a backup.' },
     ],
-    get: () => ({ currency: state.settings.currency || 'USD',
+    get: () => ({ tagline: state.settings.tagline || '',
+                  currency: state.settings.currency || 'USD',
                   filingStatus: state.settings.filingStatus || 'single',
                   compPerson: compPersonId(state),
                   ptoAllowance: state.settings.ptoAllowance,
@@ -5948,6 +6059,10 @@ const EDITORS = {
         return;
       }
       state.settings.currency = code;
+      /* Capped: it sits in an <h1> and a browser tab, both of which a long
+         string wrecks. Escaped at the sink like every other typed string —
+         here that sink is textContent in render(), which escapes by nature. */
+      state.settings.tagline = String(v.tagline || '').trim().slice(0, 60);
       if (['single', 'joint', 'separate'].includes(v.filingStatus))
         state.settings.filingStatus = v.filingStatus;
       if (personById(state, v.compPerson)?.role === 'adult')
@@ -6008,6 +6123,16 @@ const EDITORS = {
       /* Only on an account that already exists: nominating the hub while
          creating one would move every budget row's money as a side effect of
          adding a savings account, which is not what anybody means by "add". */
+      /* Closing an account was previously reachable only through the
+         spreadsheet importer, which meant anybody else's closed account carried
+         its last balance forward for ever and quietly inflated Total — exactly
+         the bug `until` was invented to fix. `since` stays out: moving the
+         start would either blank months that hold figures or invent months
+         that never did, and it is derived from the data anyway. */
+      ...(ds.bal ? [{ key: 'until', label: 'Stopped using it', type: 'month',
+        hint: 'The last month this account held anything. After it the account is closed: '
+            + 'out of Total, out of the transfer list, and no longer carrying its final '
+            + 'balance forward. Leave empty for an account still in use.' }] : []),
       ...(ds.bal ? [{ key: 'hub', label: 'Main account', type: 'check', fill: true,
         hint: 'Everything ordinary lands here — pay in, bills out, anything not marked as a '
             + 'transfer. Only one account can be it, so ticking this moves it from whichever '
@@ -6018,7 +6143,7 @@ const EDITORS = {
       return { name: a.name, owner: a.owner || '', rate: a.rate || 0,
                creditTo: a.creditTo || a.id,
                divRate: a.divRate || 0, divTo: a.divTo || a.id,
-               divEvery: String(a.divEvery || 3), hub: !!a.hub };
+               divEvery: String(a.divEvery || 3), hub: !!a.hub, until: a.until || '' };
     },
     blank: () => ({ rate: 0, divRate: 0, divEvery: '3',
                     creditTo: hubAccount(state)?.id, divTo: hubAccount(state)?.id }),
@@ -6052,25 +6177,51 @@ const EDITORS = {
            which leaves no moment where none is nominated. The rest of the edit
            is kept — the reader corrected a rate and a name too, and throwing
            those away to punish one bad tick would be its own surprise. */
-        let hubMoved = '';
+        /* What to tell the reader afterwards: a save here can move the main
+           account, close one, refuse either, and merge two by name — silence
+           on any of those would be indistinguishable from losing something. */
+        let said = '';
         if (v.hub && !a.hub) {
           const moved = nominateHub(state, a.id);
-          hubMoved = `${moved.to} is the main account now — every ordinary row lands there `
+          said = `${moved.to} is the main account now — every ordinary row lands there `
             + `instead of ${moved.from}, in every year the plan works out. `;
         } else if (!v.hub && a.hub) {
-          hubMoved = `A plan needs one main account, so ${a.name} stays as it is — `
+          said = `A plan needs one main account, so ${a.name} stays as it is — `
             + 'tick the box on the account you want instead. ';
+        }
+        /* Closing, and the two things it must never quietly do: shut the one
+           account every ordinary row lands in, or hide a figure recorded after
+           the closing month. Both refuse and say why; neither undoes the rest
+           of the edit. */
+        const wantUntil = /^\d{4}-\d{2}$/.test(v.until || '') ? v.until : '';
+        if (wantUntil !== (a.until || '')) {
+          const later = wantUntil ? statedAfter(state, a.id, wantUntil) : [];
+          if (wantUntil && a.hub)
+            said += `${a.name} is the main account, so it can't be closed — `
+              + 'everything ordinary lands there. Nominate another one first. ';
+          else if (later.length)
+            said += `Kept ${a.name} open — it still states a balance in `
+              + `${monthLabelFull(later[later.length - 1])}. Clear the later figures first, `
+              + 'or close it from a later month. ';
+          else if (wantUntil) {
+            a.until = wantUntil;
+            said += `${a.name} is closed after ${monthLabelFull(wantUntil)} — out of Total `
+              + 'from then on, and no longer carrying its last balance forward. ';
+          } else {
+            delete a.until;
+            said += `${a.name} is open again. `;
+          }
         }
         const done = mergeAccountsByName(state).filter(r => r.name === a.name);
         const refused = done.find(r => r.refused);
         /* No esc(): a returned string is toasted through textContent, and
            escaping here would put "M&amp;T Checking" on screen. */
-        if (refused) return hubMoved + `Kept "${a.name}" separate — ${plural(refused.refused, 'month')} `
+        if (refused) return said + `Kept "${a.name}" separate — ${plural(refused.refused, 'month')} `
           + 'would have had a balance in both. Nothing else was changed.';
         const did = done.find(r => r.absorbed && r.absorbed.length);
-        if (did) return hubMoved + `Merged ${plural(did.absorbed.length + 1, 'account')} named `
+        if (did) return said + `Merged ${plural(did.absorbed.length + 1, 'account')} named `
           + `"${a.name}" into one — ${plural(did.moved, 'figure')} moved across.`;
-        return hubMoved || undefined;
+        return said || undefined;
       }
       let id = slugJs(v.name), n = 2;
       while (accountById(state, id)) id = `${slugJs(v.name)}-${n++}`;
@@ -8601,7 +8752,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
   reconcileNote,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  mergeAccountsByName, nominateHub, hubAccount,
+  mergeAccountsByName, nominateHub, hubAccount, dividendAccounts, statedAfter,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
   normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,

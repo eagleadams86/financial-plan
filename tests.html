@@ -141,8 +141,13 @@ t('migrate passes a current-schema state through untouched', () => {
 t('blankState carries the spreadsheet constants', () => {
   const s = H.blankState();
   approx(s.settings.midTermRateAnnual, 0.03);
-  approx(s.settings.longTermRateAnnual, 0.07);
+  eq(s.settings.longTermRateAnnual, undefined,
+     'gone: nothing has read it since accounts became a list, and a setting no '
+     + 'code consults should not ride along in every backup');
+  approx((s.settings.accounts.find(a => a.id === 'long') || {}).rate, 0.07,
+     'the 7% lives on the Investments account itself, where it is editable');
   eq(s.settings.ptoAllowance, 32);
+  eq(s.settings.tagline, '', 'and a fresh plan is nobody’s in particular');
   eq(Array.isArray(s.people), true, 'a fresh plan has an empty household');
   eq(s.people.length, 0);
   eq(s.settings.filingStatus, 'single',
@@ -575,6 +580,10 @@ t('the interest rule takes a per-row rate, falling back to the old setting', () 
   const s = H.coerceShape(fixtureState());
   s.years['2030'].categories.push({ id: 'divs2', name: 'HYSA interest',
     role: 'normal', rule: 'dividends', rate: 0.12, section: 'income' });
+  /* Back through the shape check, which is what fills in the accounts a
+     dividends row earns on — the app never computes over a row that hasn't
+     been through it, and the row editor writes the list itself. */
+  H.coerceShape(s);
   const c = H.computeAll(s, TODAY_FIX)['2030'];
   const base = c.balances['cash|2030-03'] + c.balances['mid|2030-03'];
   approx(c.cells['divs2|2030-04'].v, H.round2(0.12 / 12 * base), 'row rate wins', 0.02);
@@ -2035,6 +2044,88 @@ t('anything else is genuinely not tracked yet', () => {
      'long since started, just empty this month');
   eq(H.noBalanceReason({ until: '2022-12' }, null), 'not tracked yet',
      'no month to measure against — say the least, not the wrong thing');
+});
+
+group('Which rows count as pay');
+/* It guessed from the row's NAME against an English word list, so "Income" or
+   "Stipend" got a dash on the Giving tab and the only cure was renaming your
+   budget to suit the code. */
+t('the guess still works for a plan that predates the tick', () => {
+  eq(H.isPayRow('Paycheck', 'none', undefined), true);
+  eq(H.isPayRow('Salary', 'none', undefined), true);
+  eq(H.isPayRow('Stipend', 'none', undefined), false, 'the guess is only a guess');
+  eq(H.isPayRow('Anything', 'paycheck', undefined), true, 'the per-check rule always counts');
+});
+t('the row can say so itself, and is believed', () => {
+  eq(H.isPayRow('Stipend', 'none', true), true, 'pay the word list never knew');
+  eq(H.isPayRow('Income', 'none', true), true);
+});
+t('and can say it is NOT pay, which the guess cannot express', () => {
+  eq(H.isPayRow('Salary', 'none', false), false,
+     'a row called Salary that is really a reimbursement must be able to say so');
+  eq(H.isPayRow('Anything', 'paycheck', false), false, 'an answer beats the rule too');
+});
+
+group('Closing an account');
+/* Until now `until` could only be written by the spreadsheet importer, so
+   anybody else's closed account carried its last balance forward for ever. */
+const withBalances = (months) => ({ settings: { accounts: [
+    { id: 'cash', name: 'Cash', hub: true }, { id: 'old', name: 'Old Bank' }] },
+  years: { '2026': { kind: 'grid', startMonth: '2026-01', monthCount: 12, categories: [],
+    cells: {}, seeds: {}, overrides: Object.fromEntries(
+      months.map(m => [`old|${m}`, { v: 10 }])) } } });
+t('a figure recorded after the closing month is what blocks it', () => {
+  const st = withBalances(['2026-03', '2026-09']);
+  eq(H.statedAfter(st, 'old', '2026-06'), ['2026-09'],
+     'September would be hidden by closing in June');
+  eq(H.statedAfter(st, 'old', '2026-12'), [], 'closing after everything is safe');
+});
+t('the closing month itself is not "after" it', () => {
+  const st = withBalances(['2026-06']);
+  eq(H.statedAfter(st, 'old', '2026-06'), [],
+     'an account closed in the month of its last balance keeps that balance');
+});
+t('it only ever looks at the account being closed', () => {
+  const st = withBalances(['2026-09']);
+  st.years['2026'].overrides['cash|2026-11'] = { v: 500 };
+  eq(H.statedAfter(st, 'old', '2026-10'), [], 'another account’s figures are not in the way');
+});
+
+group('A dividends row names the accounts it earns on');
+/* It used to read the ids `cash` and `mid` literally — invisible until someone
+   who wasn't the author renamed or deleted them, whereupon the row went blank
+   with nothing on screen saying why. */
+const divState = (cat) => H.coerceShape({
+  settings: { accounts: [
+    { id: 'cash', name: 'Cash', hub: true, creditTo: 'cash', divTo: 'cash' },
+    { id: 'mid', name: 'Savings', creditTo: 'mid', divTo: 'mid' },
+    { id: 'pot', name: 'Pot', creditTo: 'pot', divTo: 'pot' }] },
+  years: { '2026': { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 12,
+    seeds: { cash: 1000, mid: 2000, pot: 5000 }, overrides: {}, cells: {},
+    categories: [Object.assign({ id: 'div', name: 'Dividends', role: 'normal',
+      section: 'income', rule: 'dividends', rate: 0.12 }, cat)] } },
+});
+const divCell = (st) => H.computeAll(st)['2026'].cells['div|2026-02'];
+t('a row written before the setting existed keeps earning on the old two', () => {
+  const st = divState({});
+  eq(H.dividendAccounts(st.years['2026'].categories[0]), ['cash', 'mid'],
+     'backfilled once, from the ids the engine used to assume');
+  eq(H.round2(divCell(st).v), 30, '12%/yr on 1000 + 2000 = 30 a month');
+});
+t('and it can be pointed at any accounts instead', () => {
+  const st = divState({ accounts: ['pot'] });
+  eq(H.round2(divCell(st).v), 50, '12%/yr on the 5000 pot');
+});
+t('naming none leaves the month blank rather than claiming zero', () => {
+  const st = divState({ accounts: [] });
+  eq(divCell(st).kind, 'missing', 'blank — “nothing earned” is not the same claim as $0');
+  eq(H.dividendAccounts(st.years['2026'].categories[0]), [],
+     'and an empty list is never re-filled behind the reader');
+});
+t('an account that no longer exists is dropped, not counted as zero', () => {
+  const st = divState({ accounts: ['pot', 'deleted-account'] });
+  eq(H.dividendAccounts(st.years['2026'].categories[0]), ['pot']);
+  eq(H.round2(divCell(st).v), 50);
 });
 
 group('Nominating the main account');

@@ -38,7 +38,11 @@ included — treat those the way you treat the figures.
   into one of them moves the start back. One account is the **main account** —
   everything ordinary lands there, and transfers and pass-throughs are both
   described against it. Open an account to nominate a different one if your
-  banking moves; only one can hold it, so ticking the box moves it. Giving two accounts **exactly the same
+  banking moves; only one can hold it, so ticking the box moves it. An account
+  you stop using can be **closed** from the month it last held anything, so it
+  drops out of Total instead of carrying its final balance forward for ever.
+  A row that earns interest **names the accounts it earns on**, and any income
+  row can be marked as pay so the giving percentages count it. Giving two accounts **exactly the same
   name** says they are the same account under different labels — years of
   history imported under drifting names fold into one row, carrying every
   balance with them. It refuses if both hold a figure in the same month, since

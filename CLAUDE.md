@@ -182,6 +182,42 @@ family names as well as balances.
   accounts standing alone in the list. `until <= month` counts as closed: the
   only way to reach the check in the closing month itself is to have no figure
   in it. Months compare as strings, which `YYYY-MM` is built for.
+- **Nothing in the app is one person's.** It shipped with a name in the markup —
+  `<title>` and the `<h1>` both said whose plan it was, so every copy and every
+  shared link carried it. `settings.tagline` replaces it: empty by default,
+  capped at 60 chars, written by `render()` into both the header and
+  `document.title` through textContent. It is NOT in `SECTION_NEEDS`, so a
+  recipient sees their own subtitle or none. When adding anything that names the
+  app, ask whose name it is.
+- **A dividends row names the accounts it earns on** (`cat.accounts`, read only
+  through `dividendAccounts()`). The rule used to read the ids `cash` and `mid`
+  literally — invisible to the author, and for anybody else who renamed or
+  deleted them the row returned null and went blank with nothing saying why.
+  **Absent and empty are different answers**: coerceShape backfills the absent
+  case once (from `['cash','mid']`, filtered to accounts that exist) and never
+  touches a list the reader has emptied, because an empty list means "earn on
+  nothing" and re-filling it would argue with them on every load. Earning on
+  nothing is a BLANK month, not a zero — zero claims the balances were nil.
+- **`until` is editable** ("Stopped using it"), which it wasn't: it could only
+  be written by the spreadsheet importer, so anybody else's closed account
+  carried its last balance forward for ever — the exact bug `until` exists to
+  fix. Two refusals, both of which say why and neither of which undoes the rest
+  of the edit: the **hub can't be closed** (everything ordinary lands there),
+  and an account that **still states a balance after that month** can't be,
+  because closing takes it out of Total and the figure would vanish from the
+  screen while staying in the file. `statedAfter()` is the pure test.
+  `since` deliberately stays uneditable — see above.
+- **A budget row can declare itself pay** (`cat.isPay`, income rows only).
+  `isPayRow(name, rule, isPay)` believes a stored boolean in BOTH directions and
+  falls back to the `PAY_SLUGS` guess, which is kept only for plans that predate
+  the tick — it is an English word list, so "Income" or "Stipend" got a dash on
+  the Giving tab and the only cure was renaming your budget to suit the code.
+  The editor opens the box on the EFFECTIVE answer, never the raw stored one:
+  opening a row called "Paycheck" to rename it and saving would otherwise store
+  `false` and quietly stop it counting.
+- **`settings.longTermRateAnnual` is gone.** coerceShape still reads it to seed
+  an old plan's Investments rate, then deletes it — nothing else has consulted
+  it since accounts became a list. Same treatment `side.retirement` got.
 - **Accounts sharing an exact name are ONE account told over the years**
   (`mergeAccountsByName`). The history import made an account per distinct row
   NAME per sheet, so one real brokerage account arrived as four ids —
