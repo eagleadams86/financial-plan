@@ -32,6 +32,15 @@ family names as well as balances.
   default, anti-flash boot script, Back up dialog, privacy footer, Recent
   changes box) is the family pattern from Sprint Velocity — if a chrome rule
   changes in the family, mirror it here.
+- **Page width is the ONE deliberate divergence from the family** (`--page-w`,
+  2400px, against SV / Flow Metrics' 1500px) — don't "restore" it. This app's
+  main object is a spreadsheet: twelve months, a year total and forty-odd rows,
+  and at 1500px December was under the right-hand edge on a screen with room to
+  spare. Charts and short tables don't grow with the window, so the family width
+  is right for the apps that only have those. The cap is high rather than absent
+  so the page still has a shape on an ultrawide, and prose is separately held to
+  a reading measure (`.sub`, `.note p`) — the tables are meant to fill the
+  window, the sentences above them are not.
 - **The tab bar is draggable**, and its order lives in `state.ui.tabOrder` —
   synced and backed up, because a deliberate arrangement should follow you (the
   set of folded boxes in `ui.collapsed` travels for the same reason). Dragging uses
