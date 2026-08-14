@@ -38,9 +38,13 @@ family names as well as balances.
   and at 1500px December was under the right-hand edge on a screen with room to
   spare. Charts and short tables don't grow with the window, so the family width
   is right for the apps that only have those. The cap is high rather than absent
-  so the page still has a shape on an ultrawide, and prose is separately held to
-  a reading measure (`.sub`, `.note p`) — the tables are meant to fill the
-  window, the sentences above them are not.
+  so the page still has a shape on an ultrawide. **Prose runs the full width
+  too, and that is a decision, not an oversight**: `.sub` and `.note p` were
+  briefly held to a 110ch reading measure and it was reverted the same day. A
+  card's explanation sits between its heading and its table, so a long line
+  costs VERTICAL space — wrapping the paragraph to a comfortable measure pushed
+  the grid down the screen, and the grid is the thing you came for. Don't
+  re-add a `max-width` there on typographic principle.
 - **The tab bar is draggable**, and its order lives in `state.ui.tabOrder` —
   synced and backed up, because a deliberate arrangement should follow you (the
   set of folded boxes in `ui.collapsed` travels for the same reason). Dragging uses
