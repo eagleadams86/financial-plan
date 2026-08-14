@@ -182,6 +182,39 @@ family names as well as balances.
   accounts standing alone in the list. `until <= month` counts as closed: the
   only way to reach the check in the closing month itself is to have no figure
   in it. Months compare as strings, which `YYYY-MM` is built for.
+- **Zoom scales the whole app** — `applyZoom(pct)`, whole percents, CSS `zoom`
+  on the root. `zoom` and NOT `transform: scale()` (which scales what is painted
+  but not the layout, leaving fixed elements misplaced and a `<dialog>` centred
+  on the old box) and not a root font-size (this app is laid out in pixels, so
+  scaling type alone stretches text out of its boxes). Stored in its own
+  localStorage key `fin-zoom` beside the theme, never in state: it describes a
+  screen, not a plan, so it must not sync or ride along in a backup. Applied in
+  the head boot script as well, for the same reason the theme is — otherwise the
+  page paints at 100% and jumps a frame later. Quarter steps in the header
+  picker, an exact percentage in Preferences; a custom figure is injected into
+  the picker as its own option so the two can never disagree.
+  **Three things break under zoom, and all three are the same root cause — CSS
+  pixels and screen pixels stop being the same unit:**
+  - `getBoundingClientRect()` reports SCREEN pixels (zoom included) while a
+    `transform: translateY()` is in the element's own pre-zoom pixels, which the
+    zoom then multiplies. `pinGridHeader` measured one and wrote the other, so
+    the sticky month header landed short of the app header by exactly the
+    difference — 172px out at 150%. It divides by `zoomScale` now. Measured, not
+    assumed: at 150%, `translateY(100px)` moves an element 150 screen pixels.
+  - **Viewport units ignore zoom entirely.** `100vh` still resolves to the whole
+    screen, in pixels the zoom then multiplies, so the dialog's
+    `max-height: calc(100vh - 32px)` came out half as tall again as the screen
+    and its title scrolled off the top with no way back. `--zoom` is set on the
+    root and the calc divides by it. Any new viewport-unit size needs the same.
+  - **Chart.js sizes its bitmap from `devicePixelRatio`**, which knows nothing
+    about zoom, so a retina chart dropped to one device pixel per CSS pixel at
+    200% and went soft while the text around it stayed sharp. `newChart` passes
+    `devicePixelRatio × zoomScale`, and `applyZoom` re-renders (guarded by
+    `booted`, since it also runs before the first render) so charts rebuild.
+  `zoomScale` is declared beside `pinnedShift`, with the other scroll-handler
+  state, rather than beside the zoom controls further down — this file has been
+  bitten before by a `let` sitting below its first reader, and it is read on
+  every scroll event, which is no place to open localStorage.
 - **Nothing in the app is one person's.** It shipped with a name in the markup —
   `<title>` and the `<h1>` both said whose plan it was, so every copy and every
   shared link carried it. `settings.tagline` replaces it: empty by default,

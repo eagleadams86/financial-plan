@@ -76,6 +76,10 @@ included — treat those the way you treat the figures.
   balances as figures you stated at the time rather than a chain to recompute,
   and an account you've since closed stops at its last month instead of
   following you into later years.
+- **Zoom** — scale the whole app from the header in quarter steps, or type an
+  exact percentage in Preferences (50–200%). It belongs to the device you set
+  it on: never synced, never in a backup, so a laptop and a desk monitor can
+  each have the size that suits them.
 - **The tabs are yours to arrange** — drag one anywhere along the bar (with a
   mouse or a finger), or hold Alt and use the arrow keys. The order is saved and
   follows you to your other devices.

@@ -38,6 +38,12 @@
     var ok = ['light','dark','midnight','sepia'];
     document.documentElement.setAttribute('data-theme',
       ok.indexOf(t) === -1 ? 'midnight' : t);
+    /* Zoom goes on before first paint for the same reason the theme does: at
+       150% the page would otherwise draw at 100% and jump a frame later.
+       Clamped here too — this runs before the main script parses, so it cannot
+       borrow zoomPct(); keep the bounds in step with it. */
+    var z = Math.round(Number(localStorage.getItem('fin-zoom')));
+    if (z >= 50 && z <= 200 && z !== 100) document.documentElement.style.zoom = z + '%';
   } catch (e) {}
 </script>
 <link rel="stylesheet" href="theme.css">
@@ -124,13 +130,13 @@ select.ctl {
 }
 select.ctl:hover { border-color: var(--text-muted); }
 
-#themeSel {
+#themeSel, #zoomSel {
   background: var(--bg-card-alt); color: var(--text-primary);
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
   padding: 4px 9px; font-size: 13px; font-weight: inherit; cursor: pointer;
   min-height: var(--chrome-h);
 }
-#themeSel:hover { border-color: var(--text-muted); }
+#themeSel:hover, #zoomSel:hover { border-color: var(--text-muted); }
 
 /* Holds the signed-out label's width: signing in swaps "Sign in to sync" for a
    first name, which is shorter — without this the whole header slides the
@@ -208,8 +214,14 @@ dialog {
   border: 1px solid var(--border-strong); border-radius: var(--radius);
   background: var(--bg-card); color: var(--text-primary);
   padding: 20px; max-width: 640px; width: calc(100% - 32px); box-shadow: var(--shadow);
-  /* vh, not dvh: dvh resolves to 0 in some embedded engines. */
-  max-height: calc(100vh - 32px); overflow: auto;
+  /* vh, not dvh: dvh resolves to 0 in some embedded engines.
+     Divided by --zoom because a viewport unit does NOT shrink under a zoomed
+     root: at 150% the browser still resolves 100vh to the full screen height,
+     in pixels that are then multiplied by 1.5 — so the dialog came out half as
+     tall again as the screen and its title scrolled off the top with no way
+     back to it. --zoom is 1 unless the app is scaled, so this is the same
+     calculation it always was at normal size. */
+  max-height: calc((100vh - 32px) / var(--zoom, 1)); overflow: auto;
 }
 dialog::backdrop { background: rgba(0,0,0,.55); }
 dialog h3 { margin: 0 0 12px; font-size: 17px; }
@@ -646,6 +658,19 @@ details.section table th, details.section table td { padding: 4px 6px; }
       <option value="midnight" selected>✦ Midnight</option>
       <option value="sepia">📜 Sepia</option>
     </select>
+    <!-- Quarter steps here for the everyday change; Preferences takes an exact
+         percentage, and whatever it is appears in this list as its own option
+         so the picker never disagrees with what is on screen. -->
+    <label class="sr-only" for="zoomSel">Zoom</label>
+    <select id="zoomSel" title="Scale the whole app — Preferences takes an exact percentage">
+      <option value="50">50%</option>
+      <option value="75">75%</option>
+      <option value="100" selected>100%</option>
+      <option value="125">125%</option>
+      <option value="150">150%</option>
+      <option value="175">175%</option>
+      <option value="200">200%</option>
+    </select>
     <button class="btn small" id="prefsBtn" title="Currency, row order, rates and other app-wide settings">Preferences</button>
     <button class="btn small" id="dataBtn" title="Back up or restore your data">Back up</button>
     <button class="btn small" id="shareBtn" title="Create a read-only link to show someone part of your plan">Share</button>
@@ -934,6 +959,11 @@ function tabOrder(ui) {
 const STORAGE_KEY = 'fin-state';
 const UPDATED_KEY = 'fin-updated';   // written by save(); the hook a future sync layer keys off
 const THEME_KEY   = 'fin-theme';
+/* How big this device draws the app. Beside the theme rather than in the state
+   for the same reason: it describes a screen, not a plan. A laptop and a desk
+   monitor want different answers, so it must NOT sync or ride along in a backup
+   — restoring last week's file should not resize the app you are looking at. */
+const ZOOM_KEY    = 'fin-zoom';
 /* Which collapsible sections you left open. Its own key, beside the theme,
    rather than a field on the state: this is how one device is set up to look,
    not part of the plan. Keeping it out of the state also keeps it out of every
@@ -4909,8 +4939,15 @@ function newChart(id, config, summary) {
     if (!document.body.contains(ch.canvas)) { ch.destroy(); return false; }
     return true;
   });
+  /* devicePixelRatio × the page zoom. Chart.js sizes its bitmap from the
+     device ratio alone, which knows nothing about CSS zoom — so at 200% the
+     canvas kept its old bitmap and was stretched to twice the size, dropping a
+     retina chart to one device pixel per CSS pixel and visibly softening it
+     while every label around it stayed sharp. applyZoom re-renders, which
+     rebuilds these at the new scale. */
   config.options = Object.assign({ responsive: true, maintainAspectRatio: false,
-    animation: false }, config.options || {});
+    animation: false,
+    devicePixelRatio: (window.devicePixelRatio || 1) * zoomScale }, config.options || {});
   charts.push(new Chart(el.getContext('2d'), config));
 }
 
@@ -6043,6 +6080,13 @@ const EDITORS = {
         hint: 'Used by a dividend row with no rate of its own.' },
       { key: 'retirementReturnAnnual', label: 'Retirement return %/yr', type: 'percent',
         hint: 'What the retirement projection assumes.' },
+      /* The exact figure. The header's picker does quarter steps for the
+         everyday change; this is here for the one percent that suits your
+         screen. Like the API key it is NOT part of the plan — it lives in its
+         own localStorage key and never syncs. */
+      { key: 'zoom', label: 'Zoom %', type: 'number', step: 1,
+        hint: `Scales the whole app, ${ZOOM_MIN}–${ZOOM_MAX}%. Set to this device only — `
+            + 'never synced, never in a backup. The header picker does quarter steps.' },
       { key: 'priceApiKey', label: 'Twelve Data key', type: 'text', wide: true,
         hint: 'For holding-price lookups — shares, ETFs and mutual funds. Free from '
             + 'twelvedata.com. Stays on this device — never synced, never in a backup.' },
@@ -6057,6 +6101,7 @@ const EDITORS = {
                   givingFund: !!state.settings.givingFund,
                   midTermRateAnnual: state.settings.midTermRateAnnual ?? 0.03,
                   retirementReturnAnnual: state.settings.retirementReturnAnnual ?? 0.07,
+                  zoom: savedZoom(),
                   priceApiKey: priceKey() }),
     save(ds, v) {
       const code = (v.currency || 'USD').trim().toUpperCase();
@@ -6090,6 +6135,10 @@ const EDITORS = {
       if (v.retirementReturnAnnual !== null)
         state.settings.retirementReturnAnnual = v.retirementReturnAnnual;
       setPriceKey(v.priceApiKey);
+      /* Applied, not just stored — the whole point of typing it is to see it.
+         An empty box means "leave it alone" rather than "shrink to 50": a
+         cleared number field is a blank, not a request. */
+      if (v.zoom !== null && v.zoom !== undefined) applyZoom(v.zoom);
     },
   },
 
@@ -7318,6 +7367,16 @@ function ownerSubtotals(st, c, month, accounts) {
    block for the sticky label column inside it and break its sideways pinning;
    transforming a sticky element itself just moves it, which is what we want. */
 let pinnedShift = -1;   // reset by wireBudget: a new grid starts unpinned
+/* The page scale, as a live number beside the shift it corrects. Declared HERE,
+   with the other scroll-handler state, rather than down beside the zoom
+   controls: pinGridHeader reads it, and this file has been bitten before by a
+   `let` sitting below its first reader. It is also read per scroll event, which
+   is no place to be opening localStorage. */
+let zoomScale = 1;
+/* Whether the app has drawn once. applyZoom re-renders so charts come back at
+   the new scale, and it also runs at boot — before there is anything to draw,
+   and before the shared-view path has decided what to put on screen. */
+let booted = false;
 function pinGridHeader() {
   const wrap = document.querySelector('.gridwrap');
   const table = wrap && wrap.querySelector('table.grid');
@@ -7328,8 +7387,17 @@ function pinGridHeader() {
   const stop = document.querySelector('header').getBoundingClientRect().bottom;
   const box = table.getBoundingClientRect();
   const headH = cells[0].getBoundingClientRect().height;
+  /* Two coordinate spaces, and they are not the same one under zoom.
+     getBoundingClientRect() reports what is on SCREEN — it already includes the
+     page zoom — while a transform's translateY is in the element's own
+     untransformed pixels, which the zoom then multiplies. Measured: at 150%,
+     translateY(100px) moves an element 150 screen pixels. So the distance
+     worked out above has to be divided back down before it is written, or the
+     header lands short of the app header by exactly the difference (172px out
+     at 150%, which is what this looked like). At 100% the divisor is 1 and the
+     line behaves as it always did. */
   const shift = Math.round(
-    Math.max(0, Math.min(stop - box.top, box.height - headH)));
+    Math.max(0, Math.min(stop - box.top, box.height - headH)) / zoomScale);
   /* Runs straight off the scroll event rather than through rAF — the writes
      only happen when the number actually changes, and rAF is starved to a
      standstill in a background tab, which is exactly when a queued update
@@ -7818,6 +7886,74 @@ F('themeSel').onchange = (e) => {
   applyTheme();
   render();   // charts resolve their colours at construction, so rebuild them
 };
+
+/* ── Zoom ───────────────────────────────────────────────────────────────────
+   Whole percentages, applied as CSS `zoom` on the root element. `zoom` and not
+   a transform: `transform: scale()` scales what is painted but not the layout
+   around it, which leaves fixed elements pinned to the wrong place, the page
+   scrollable to somewhere it cannot draw, and a <dialog> centred on the old
+   box. `zoom` reflows instead, so everything — dialogs, the sticky month
+   header, the tab bar — lands where it belongs.
+   Nor a root font-size with rem units: this app is laid out in pixels
+   throughout (grid columns, the 40px input height, the chrome), so scaling the
+   font alone would stretch the text out of its own boxes. */
+const ZOOM_MIN = 50, ZOOM_MAX = 200;
+/* Anything unreadable is not an option worth offering. Below 50% the grid's
+   figures stop being legible on any screen, and above 200% a month column no
+   longer fits one. */
+function zoomPct(raw) {
+  /* A blank is not a number, and this is the guard that matters: `Number('')`
+     is 0, which the clamp below would turn into the smallest legal zoom — so an
+     empty stored value, or a number box cleared before saving, would shrink the
+     whole app to half size instead of leaving it alone. */
+  if (raw === null || raw === undefined || String(raw).trim() === '') return 100;
+  const n = Math.round(Number(raw));
+  return Number.isFinite(n) ? Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n)) : 100;
+}
+function savedZoom() {
+  try {
+    const raw = localStorage.getItem(ZOOM_KEY);
+    return raw === null ? 100 : zoomPct(raw);
+  } catch (e) { return 100; }   // private mode: the app draws, just not scaled
+}
+function applyZoom(z) {
+  const pct = zoomPct(z);
+  try { localStorage.setItem(ZOOM_KEY, String(pct)); } catch (e) {}
+  /* Cleared rather than set to 100%: `zoom` establishes a containing block, and
+     the default should behave exactly as it did before any of this existed. */
+  document.documentElement.style.zoom = pct === 100 ? '' : `${pct}%`;
+  zoomScale = pct / 100;
+  /* Anything sized against the VIEWPORT has to be told, because viewport units
+     ignore the zoom entirely — see the dialog's max-height. */
+  document.documentElement.style.setProperty('--zoom', String(zoomScale));
+  /* The pinned header caches its last shift to avoid pointless writes, and that
+     figure is in the OLD scale — force it to recompute, then re-pin at once so
+     the header doesn't sit wrong until the next scroll. */
+  pinnedShift = -1;
+  pinGridHeader();
+  /* Charts bake their bitmap size in at construction, so they have to be built
+     again to come back sharp — same reason the theme picker re-renders. Only
+     once the app has something to draw: applyZoom also runs at boot, before
+     the first render. */
+  if (booted) render();
+  const sel = F('zoomSel');
+  /* An exact percentage typed in Preferences becomes an option of its own, so
+     the picker can never show a figure the page isn't drawn at. */
+  let custom = sel.querySelector('option[data-custom]');
+  if ([...sel.options].some(o => !o.dataset.custom && +o.value === pct)) {
+    if (custom) custom.remove();
+  } else {
+    if (!custom) {
+      custom = document.createElement('option');
+      custom.dataset.custom = '1';
+      sel.appendChild(custom);
+    }
+    custom.value = String(pct);
+    custom.textContent = `${pct}%`;
+  }
+  sel.value = String(pct);
+}
+F('zoomSel').onchange = (e) => applyZoom(e.target.value);
 
 F('prefsBtn').onclick = () => openRowEditor('prefs', {}, false);
 
@@ -8719,6 +8855,9 @@ F('shareOpenBtn').onclick = () => {
 
 /* ── Boot ───────────────────────────────────────────────────────────────── */
 applyTheme();
+/* The head script has already scaled the page; this re-applies the same figure
+   to bring the picker into line with it. */
+applyZoom(savedZoom());
 
 /* Pasting a link into a tab that already has the app open changes only the
    fragment, which browsers handle without reloading — so the page would sit
@@ -8751,6 +8890,7 @@ if (viewOnly) {
 } else {
   render();
 }
+booted = true;
 
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
@@ -8758,7 +8898,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   afterRaise, bonusBase, bonusShare, yearFlows, summaryRowIsFlow, notesOfYear,
   givenOutOfPocket, grossIncome, takeHomePay, givingStats, givingCeiling, isPayRow,
   hasNote,
-  parseOpen, withSection,
+  parseOpen, withSection, zoomPct, ZOOM_MIN, ZOOM_MAX,
   /* Price lookup: the pure predicates only. What the free tier is spent on and
      which of a run's complaints are still true are both decided here, and both
      were got wrong in ways that only showed up a day later. */
