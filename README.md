@@ -148,8 +148,13 @@ included — treat those the way you treat the figures.
   (that limit is per person) and a **Roth
   IRA income (MAGI) calculator** that counts both incomes when you file jointly;
   both recompute as you change the figures;
+  a **"Traditional vs Roth at Retirement"** card — the same split as the bar at
+  the top of the tab but worked out for the month the pot starts paying, since
+  that is the date the mix decides how much of your spending is taxable;
   a **"Where the IRAs Land"** table — each IRA's balance now, what is still to
   go in, and what it is worth by the month the paying-in stops;
+  **a growth rate per account** (leave it empty to follow Preferences) so a
+  bond-heavy rollover and an all-equity Roth don't have to compound alike;
   and a projection of where the balances are heading — counting **both** the
   IRA contribution rows you type and the **401(k) cards' own percentages**,
   carried forward in today's money until each of you retires and pro-rated

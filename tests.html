@@ -3170,6 +3170,88 @@ t('the accumulation curve grows by exactly what the rates say', () => {
   eq(withRates, [100000, 106000, 112000, 118000, 124000, 129000],
     '6,000 a year on top — and 5,000 in 2035, the year they go in November');
 });
+/* An account may assume its own real return — a bond-heavy rollover and an
+   all-equity Roth do not compound alike, and growing one summed pot at one
+   rate averaged them by accident. */
+t('an account can grow at its own rate, and an empty one follows Preferences', () => {
+  const s = deferralFixture({ settings: { retirementReturnAnnual: 0.05 },
+    people: [], side: { comp: {}, bonuses: {}, limits: {}, retirementAccounts: [
+      { name: 'Steady', type: '401k', amount: 100000, rate: 0.02 },
+      { name: 'Racy', type: 'roth-401k', amount: 100000 }], drawdown: { income: [] } } });
+  eq(H.accountRate(s, s.side.retirementAccounts[0]), 0.02, 'its own');
+  eq(H.accountRate(s, s.side.retirementAccounts[1]), 0.05, 'and the plan\'s otherwise');
+  const rows = H.drawdownYears(s, RET_FIX, 3);
+  /* Each pot compounds on its own, and the chart shows the sum. */
+  let a = 100000, b = 100000;
+  for (let i = 1; i <= 3; i++) { a *= 1.02; b *= 1.05; }
+  approx(rows[3].close, H.round2(a + b), 'two rates, one line', 0.02);
+});
+t('a zero rate is a real statement, and absent is a different one', () => {
+  const s = deferralFixture({ settings: { retirementReturnAnnual: 0.07 }, people: [],
+    side: { comp: {}, bonuses: {}, limits: {}, retirementAccounts: [
+      { name: 'Cash', type: 'other', amount: 50000, rate: 0 }], drawdown: { income: [] } } });
+  eq(H.accountRate(s, s.side.retirementAccounts[0]), 0, 'not the 7% in Preferences');
+  eq(H.drawdownYears(s, RET_FIX, 5)[5].close, 50000, 'so it does not grow at all');
+  const blank = H.coerceShape({ side: { retirementAccounts: [
+    { name: 'X', type: '401k', amount: 1, rate: 'nonsense' }] } });
+  eq(blank.side.retirementAccounts[0].hasOwnProperty('rate'), false,
+    'a rate that is not a figure is dropped, never defaulted to the global');
+});
+t('the split says what is Traditional and what is Roth, now and at retirement', () => {
+  const s = deferralFixture({ settings: { retirementReturnAnnual: 0 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 }],
+    side: { comp: {}, bonuses: {}, limits: {}, retirementAccounts: [
+      { name: 'Pre-tax', type: '401k', amount: 60000 },
+      { name: 'Roth IRA', type: 'roth-ira', owner: 'sam', amount: 40000,
+        contribs: { '2031': 1000 } }], drawdown: { income: [] } } });
+  const sp = H.retirementSplit(s, RET_FIX);
+  eq(sp.at, '2035-11', 'measured at the month the pot starts paying out');
+  eq([sp.now.traditional, sp.now.roth, sp.now.total], [60000, 40000, 100000]);
+  /* No growth, so the only movement is five years of Roth contributions —
+     2031..2035, the last at ten twelfths. */
+  eq(sp.then.traditional, 60000, 'the pre-tax side stands still');
+  eq(sp.then.roth, H.round2(40000 + 1000 * 4 + 1000 * 10 / 12), 'the Roth side grows');
+});
+t('a Roth account growing faster pulls the split its way', () => {
+  const mk = (rothRate) => deferralFixture({ settings: { retirementReturnAnnual: 0.02 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 }],
+    side: { comp: {}, bonuses: {}, limits: {}, retirementAccounts: [
+      { name: 'Pre-tax', type: '401k', amount: 50000 },
+      { name: 'Roth', type: 'roth-401k', amount: 50000, rate: rothRate }],
+      drawdown: { income: [] } } });
+  const even = H.retirementSplit(mk(0.02), RET_FIX);
+  const fast = H.retirementSplit(mk(0.09), RET_FIX);
+  approx(even.then.roth / even.then.total, 0.5, 'matching rates keep it at half', 1e-9);
+  /* Five years of 9% against 2%: 50,000 becomes 76,931 beside 55,204. */
+  approx(fast.then.roth / fast.then.total, 0.5822,
+    'and seven points of difference moves it eight points in five years', 0.0005);
+  ok(fast.then.roth / fast.then.total > even.then.roth / even.then.total);
+  eq(fast.now.roth, 50000, 'while today is untouched either way');
+});
+t('the 401(k) percentages count as Traditional, because those fields are pre-tax', () => {
+  const s = deferralFixture({ settings: { retirementReturnAnnual: 0 } });   // Sam, 5%+10%
+  const sp = H.retirementSplit(s, RET_FIX);
+  eq(sp.now.traditional, 100000, 'the 401(k) balance');
+  eq(sp.now.roth, 0);
+  /* 6,000 a year 2031..2034 and ten twelfths of it in 2035. */
+  eq(sp.then.traditional, H.round2(100000 + 6000 * 4 + 5000));
+  eq(sp.then.roth, 0, 'none of the deferral lands on the Roth side');
+});
+t('the split adds up to the pot the chart draws', () => {
+  /* Two views of one projection. If these ever disagree, one of them is lying
+     about somebody's retirement. */
+  const s = deferralFixture({ settings: { retirementReturnAnnual: 0.06 },
+    side: { comp: { '2030': { salary: 100000, raisePct: 0 } }, bonuses: { '2030': 10000 },
+      limits: { '2030': { pretaxPct: 0.05, bonusPct: 0.10 } }, retirementAccounts: [
+        { name: 'Pre-tax', type: '401k', amount: 120000, rate: 0.03 },
+        { name: 'Roth IRA', type: 'roth-ira', amount: 40000, contribs: { '2030': 7000 } }],
+      drawdown: { income: [] } } });
+  const sp = H.retirementSplit(s, RET_FIX);
+  const rows = H.drawdownYears(s, RET_FIX, H.retirementHorizon(s, RET_FIX));
+  const atStop = rows.find(t => t.y === +sp.at.slice(0, 4));
+  approx(sp.then.total, H.round2(atStop.open + atStop.growth + atStop.contrib),
+    'the split totals the same money the chart has that year', 0.05);
+});
 t('a mid-year retirement only spends the months that are left', () => {
   const s = potFixture({ settings: { retirementReturnAnnual: 0 },
     /* born November, retiring at 65 on their birthday → 2035-11 */

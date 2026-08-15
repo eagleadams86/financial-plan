@@ -1665,6 +1665,23 @@ const DEFAULT_ACCOUNTS = [
   { id: 'bank', name: 'Other bank',  rate: 0,   creditTo: 'bank' },
 ];
 
+/* Retirement account types, and which side of the Traditional / Roth split
+   each one falls on. UP HERE, above `let state = load()`, because coerceShape
+   reads it to settle an account that arrived without a `kind` — and a const
+   declared below that line is in its temporal dead zone at load time, where
+   the ReferenceError is swallowed and the whole workbook comes up empty. The
+   file has been bitten by that before; see the note at the top of CLAUDE.md. */
+const RET_TYPES = [
+  ['401k',      '401(k) pre-tax',  'traditional'],
+  ['roth-401k', '401(k) Roth',     'roth'],
+  ['trad-ira',  'Traditional IRA', 'traditional'],
+  ['roth-ira',  'Roth IRA',        'roth'],
+  ['hsa',       'HSA',             'traditional'],
+  ['other',     'Other',           'traditional'],
+];
+const RET_TYPE_LABEL = Object.fromEntries(RET_TYPES.map(([v, l]) => [v, l]));
+const retKind = (a) => a.kind === 'roth' ? 'roth' : 'traditional';
+
 function blankState() {
   return {
     schema: 5,
@@ -1946,12 +1963,21 @@ function coerceShape(data) {
      Give every row a type, then fold that map into the first Roth IRA. */
   for (const a of s.retirementAccounts) {
     a.contribs = obj(a.contribs);
-    if (a.type) continue;
-    const n = String(a.name || '').toLowerCase();
-    a.type = n.includes('roth ira') ? 'roth-ira'
-      : n.includes('ira') ? 'trad-ira'
-      : n.includes('hsa') ? 'hsa'
-      : a.kind === 'roth' ? 'roth-401k' : '401k';
+    if (!a.type) {
+      const n = String(a.name || '').toLowerCase();
+      a.type = n.includes('roth ira') ? 'roth-ira'
+        : n.includes('ira') ? 'trad-ira'
+        : n.includes('hsa') ? 'hsa'
+        : a.kind === 'roth' ? 'roth-401k' : '401k';
+    }
+    /* `kind` is derived from `type` by the editor and never set on its own, so
+       filling it in where it is ABSENT settles a hand-built or imported account
+       rather than overruling anybody — and without it a `roth-ira` with no kind
+       counts as Traditional in the split, which is a wrong answer given quietly.
+       An account that HAS a kind keeps it: type and kind disagreeing is the
+       reader's business, not this function's. */
+    if (a.kind !== 'roth' && a.kind !== 'traditional')
+      a.kind = (RET_TYPES.find(t => t[0] === a.type) || [])[2] || 'traditional';
   }
   if (Object.keys(obj(s.rothContribs)).length) {
     let target = s.retirementAccounts.find(a => a.type === 'roth-ira');
@@ -1969,6 +1995,20 @@ function coerceShape(data) {
      unescaped fields above: coerce on the way in. */
   for (const a of s.retirementAccounts) {
     a.amount = num(a.amount);
+    /* An account may assume its OWN real return — a bond-heavy rollover and an
+       all-equity Roth do not grow at one rate. ABSENT means "use the one in
+       Preferences", so a non-number is deleted rather than defaulted: storing
+       the global here would freeze today's figure into the account and stop it
+       following the setting it was copied from. */
+    /* Read strictly, NOT through num(): num turns anything it cannot parse
+       into 0, and 0 here is a real statement ("this pot doesn't grow") that
+       must not be manufactured out of a corrupt field. Absent is the answer
+       for anything that isn't a figure. */
+    const raw = a.rate;
+    const parsed = (typeof raw === 'number' && Number.isFinite(raw)) ? raw
+      : (typeof raw === 'string' && raw.trim() !== ''
+         && Number.isFinite(parseFloat(raw))) ? parseFloat(raw) : undefined;
+    if (parsed === undefined) delete a.rate; else a.rate = parsed;
     for (const y of Object.keys(a.contribs || {})) a.contribs[y] = num(a.contribs[y]);
     /* Whose retirement account it is — the same owner field the budget
        accounts carry, and the one place "spouses have different retirement
@@ -3069,6 +3109,17 @@ const HELP = {
       + 'is a real one — growth after inflation. There is no tax in any of it, and no '
       + 'required minimum distributions; this app keeps no tax tables and will not grow '
       + 'any.' },
+  splitAtRetirement: { title: 'Traditional vs Roth at Retirement',
+    body: 'The same split as the bar at the top of this tab, but worked out for the month '
+      + 'the pot starts paying out rather than for today — which is the date the mix '
+      + 'actually matters on, since it decides how much of what you spend is taxable. '
+      + 'Every account grows at its own rate (set one on the account itself, or leave it '
+      + 'following Preferences) and takes its own contributions, so pots invested '
+      + 'differently pull the split apart over the years. The 401(k) cards\' percentages '
+      + 'count as Traditional because those fields are pre-tax; a Roth 401(k) contribution '
+      + 'typed as a row against that account lands on the Roth side. Everything is in '
+      + 'today\'s money and before tax — this app keeps no tax tables, so it says how much '
+      + 'is on each side and not what either is worth after tax.' },
   iraProjection: { title: 'Where the IRAs Land',
     body: 'Each IRA\'s balance today, plus what goes in every year between now and the '
       + 'month the paying-in stops, all grown at the real return in Preferences. The '
@@ -4068,16 +4119,6 @@ function holdingsTable(rows, list) {
 /* Retirement accounts carry a tax treatment (which the Traditional/Roth split
    reads) and a type (which is what "how much can I still put in?" turns on).
    RET_TYPES is the one list both the editor and the labels read. */
-const RET_TYPES = [
-  ['401k',      '401(k) pre-tax',  'traditional'],
-  ['roth-401k', '401(k) Roth',     'roth'],
-  ['trad-ira',  'Traditional IRA', 'traditional'],
-  ['roth-ira',  'Roth IRA',        'roth'],
-  ['hsa',       'HSA',             'traditional'],
-  ['other',     'Other',           'traditional'],
-];
-const RET_TYPE_LABEL = Object.fromEntries(RET_TYPES.map(([v, l]) => [v, l]));
-const retKind = (a) => a.kind === 'roth' ? 'roth' : 'traditional';
 /* Contributions to every account of a type, keyed by year. Takes its state as
    an argument rather than reaching for the global, because the drawdown
    projection is pure and reads this — the same reason `yearFlows` takes its
@@ -4319,6 +4360,7 @@ function renderRetirement() {
       ${iraAccts.length ? `<div class="addbar"><button class="btn small" data-add="contrib"
         >＋ Add a contribution</button></div>` : ''}
     </div>
+    ${accts.length ? splitAtRetirementCard() : ''}
     ${iraAccts.length ? iraProjectionCard() : ''}
     ${limitEarners(state).map(id => `<div class="card" data-box="k401-${esc(id || 'all')}">
       <h2>401(k) Limit Check${id ? ` — ${esc(personById(state, id).name)}` : ''}${
@@ -4431,6 +4473,60 @@ function costsCard() {
     </div>
     ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-edit="drawdown"
       >✎ Edit the figures</button></div>`}
+  </div>`;
+}
+
+/* Traditional against Roth at the moment the money starts being spent — the
+   split bar at the top of the tab, but for the date that actually matters. */
+function splitAtRetirementCard() {
+  const thisYear = new Date().getFullYear();
+  const sp = retirementSplit(state, thisYear);
+  const pct = (part, whole) => whole ? part / whole : 0;
+  const bar = (t, label) => {
+    const p = pct(t.traditional, t.total);
+    return `<div class="split" role="img" aria-label="${esc(label)}: Traditional ${
+      (p * 100).toFixed(0)} percent, Roth ${((1 - p) * 100).toFixed(0)} percent">
+      <i style="width:${(p * 100).toFixed(1)}%"></i><i class="b" style="flex:1"></i></div>`;
+  };
+  if (!sp.at) return `<div class="card">
+    <h2>Traditional vs Roth at Retirement${helpBtn('splitAtRetirement', 'the projected split')}</h2>
+    <p class="sub">Give somebody a birth month and a retirement age on the Household tab
+      and this works out how the split looks by the time you start spending it.</p>
+  </div>`;
+  const row = (label, key) => {
+    const n = sp.now[key], t = sp.then[key];
+    return `<tr><th scope="row">${label}</th>
+      <td>${fmtMoney(n)}</td><td>${(pct(n, sp.now.total) * 100).toFixed(1)}%</td>
+      <td>${fmtMoney(t)}</td><td><strong>${(pct(t, sp.then.total) * 100).toFixed(1)}%</strong></td></tr>`;
+  };
+  const drift = round2((pct(sp.then.traditional, sp.then.total)
+    - pct(sp.now.traditional, sp.now.total)) * 100);
+  return `<div class="card">
+    <h2>Traditional vs Roth at Retirement${helpBtn('splitAtRetirement', 'the projected split')}</h2>
+    <p class="sub">Where the split lands by <strong>${esc(monthLabelFull(sp.at))}</strong>, when the
+      pot starts paying out — each account grown at its own rate, with what you pay in
+      between now and then.${Math.abs(drift) < 0.05 ? ' It barely moves from where it is today.'
+        : ` Traditional ${drift > 0 ? 'grows' : 'shrinks'} by ${Math.abs(drift).toFixed(1)}
+            points on the way.`}</p>
+    ${bar(sp.then, 'At retirement')}
+    <div class="splitlegend">
+      <span><span class="sw"></span>Traditional ${fmtMoney(sp.then.traditional)} (${
+        (pct(sp.then.traditional, sp.then.total) * 100).toFixed(0)}%)</span>
+      <span><span class="sw b"></span>Roth ${fmtMoney(sp.then.roth)} (${
+        (pct(sp.then.roth, sp.then.total) * 100).toFixed(0)}%)</span>
+    </div>
+    <div class="tablewrap" style="margin-top:12px"><table>
+      <thead><tr><th style="text-align:left"></th><th>Now</th><th>Now %</th>
+        <th>${esc(monthLabelFull(sp.at))}</th><th>Then %</th></tr></thead>
+      <tbody>${row('Traditional', 'traditional')}${row('Roth', 'roth')}</tbody>
+      <tfoot><tr><th scope="row">Total</th><td>${fmtMoney(sp.now.total)}</td><td></td>
+        <td><strong>${fmtMoney(sp.then.total)}</strong></td><td></td></tr></tfoot>
+    </table></div>
+    <p class="sub" style="margin-top:10px">In today's money and <strong>before tax</strong> —
+      a Traditional dollar and a Roth dollar are not worth the same once it comes out, and
+      this app keeps no tax tables. The 401(k) percentages count as Traditional, since
+      that card's figures are pre-tax; type a Roth 401(k) contribution as a row against
+      that account and it lands on the Roth side instead.</p>
   </div>`;
 }
 
@@ -5005,24 +5101,46 @@ function plannedDeferral(st, personId, upTo) {
    rules follow — without a retirement month there is nothing to stop
    contributing at, and a projection that had somebody paying in at 95 would be
    worse than one that had them paying in never. */
-function plannedContribs(st, thisYear, span) {
-  const out = {};
-  const add = (y, v) => { if (v) out[String(y)] = round2((out[String(y)] || 0) + v); };
-  for (const [y, v] of Object.entries(contribYears(st))) add(y, v);
-  for (const a of iraAccountsOf(st)) {
-    const rate = latestContrib(a);
-    const stop = contribStopMonth(st, a);
-    if (!rate || !stop) continue;
-    for (let i = 1; i <= span; i++) {
-      const y = thisYear + i;
-      const working = 1 - retiredShareOf(y, stop);
-      if (working <= 0) break;
-      /* Only where the reader has said nothing. Their own figure for a year is
-         the last word on it, in both directions. */
-      if ((a.contribs || {})[String(y)] !== undefined) continue;
-      add(y, round2(rate * working));
+const accountRate = (st, a) => typeof a.rate === 'number'
+  ? a.rate : (st.settings.retirementReturnAnnual ?? 0.07);
+
+/* Every pot the projection grows, each with its OWN rate and its own share of
+   what goes in. One per retirement account, plus one for the 401(k) deferral.
+
+   The projection used to grow a single summed balance, which was fine while
+   one rate covered everything and became wrong the moment an account could
+   assume its own: a bond-heavy rollover and an all-equity Roth do not compound
+   alike, and averaging them by accident is the sort of error that only shows
+   up as a number nobody can reconcile fifteen years out.
+
+   THE DEFERRAL IS ITS OWN POT because the app does not know which account it
+   lands in — a household with five 401(k)s has never been asked. What it does
+   know is the tax treatment: the card's fields are `pretaxPct` and `bonusPct`
+   and the MAGI check already subtracts both as pre-tax, so it counts as
+   Traditional and grows at the plan's own rate. Type it as contribution rows
+   against a named account and those win, at that account's rate. */
+function retirementPots(st, thisYear, span) {
+  const pots = (st.side.retirementAccounts || []).map((a, idx) => {
+    const contribs = {};
+    const add = (y, v) => { if (v) contribs[String(y)] = round2((contribs[String(y)] || 0) + v); };
+    for (const [y, v] of Object.entries(a.contribs || {})) add(y, v);
+    if (isIra(a)) {
+      const carried = latestContrib(a);
+      const stop = contribStopMonth(st, a);
+      if (carried && stop) for (let i = 1; i <= span; i++) {
+        const y = thisYear + i;
+        const working = 1 - retiredShareOf(y, stop);
+        if (working <= 0) break;
+        /* Only where the reader has said nothing. Their own figure for a year
+           is the last word on it, in both directions. */
+        if ((a.contribs || {})[String(y)] !== undefined) continue;
+        add(y, round2(carried * working));
+      }
     }
-  }
+    return { key: `a${idx}`, idx, label: a.name, kind: retKind(a),
+             rate: accountRate(st, a), balance: round2(a.amount || 0), contribs };
+  });
+  const deferral = {};
   for (const id of limitEarners(st)) {
     const person = id === undefined ? null : personById(st, id);
     const stop = person ? retirementMonthOf(person) : null;
@@ -5030,11 +5148,27 @@ function plannedContribs(st, thisYear, span) {
     const rate = plannedDeferral(st, id, thisYear);
     if (!rate) continue;
     for (let i = 1; i <= span; i++) {
-      const working = 1 - retiredShareOf(thisYear + i, stop);
+      const y = thisYear + i;
+      const working = 1 - retiredShareOf(y, stop);
       if (working <= 0) break;
-      add(thisYear + i, round2(rate * working));
+      deferral[String(y)] = round2((deferral[String(y)] || 0) + round2(rate * working));
     }
   }
+  if (Object.keys(deferral).length)
+    pots.push({ key: 'deferral', idx: null, label: '401(k) contributions',
+                kind: 'traditional', rate: st.settings.retirementReturnAnnual ?? 0.07,
+                balance: 0, contribs: deferral });
+  return pots;
+}
+
+/* What goes in each year, household-wide — the pots' streams merged. Derived
+   from them rather than worked out again, so the chart and every per-account
+   view are reading one arithmetic. */
+function plannedContribs(st, thisYear, span) {
+  const out = {};
+  for (const p of retirementPots(st, thisYear, span))
+    for (const [y, v] of Object.entries(p.contribs))
+      if (v) out[y] = round2((out[y] || 0) + v);
   return out;
 }
 
@@ -5049,7 +5183,6 @@ function plannedContribs(st, thisYear, span) {
    and there is a test that the contribution stream here is the same one the
    household projection counts. */
 function iraOutlook(st, thisYear) {
-  const r = st.settings.retirementReturnAnnual ?? 0.07;
   /* A retirement account has NO id — the whole tab addresses one by its INDEX
      in this list (`data-idx`, `list[+ds.idx]`, `splice`). Carrying an `id` here
      handed every record `undefined`, and a renderer that looked an account up
@@ -5061,6 +5194,7 @@ function iraOutlook(st, thisYear) {
     const stop = contribStopMonth(st, a);
     const rate = latestContrib(a);
     const typed = a.contribs || {};
+    const r = accountRate(st, a);   // its own, or the one in Preferences
     let bal = round2(a.amount || 0), paid = 0, years = 0, projected = 0;
     if (stop) {
       const stopYear = +stop.slice(0, 4);
@@ -5091,25 +5225,28 @@ function iraOutlook(st, thisYear) {
    the engine already worked out. */
 function drawdownYears(st, thisYear, span) {
   const dd = st.side.drawdown || {};
-  const r = st.settings.retirementReturnAnnual ?? 0.07;
-  const contribs = plannedContribs(st, thisYear, span);
   const fromMonth = drawdownFromMonth(st, thisYear);
   const target = dd.spend || 0;
+  const pots = retirementPots(st, thisYear, span);
   const rows = [];
-  let open = round2((st.side.retirementAccounts || [])
-    .reduce((t, a) => t + (a.amount || 0), 0));
+  /* Each pot is rounded to the cent every year, because that is what an
+     account holds — and because with ONE pot it makes this loop bit-for-bit
+     the single balance the projection used to carry, which is what the
+     accumulation guard pins. */
+  let bal = pots.map(p => p.balance);
   for (let i = 0; i <= span; i++) {
     const y = thisYear + i;
     /* Year zero is today's balance untouched — no growth, no contribution.
        That is what the chart has always drawn at its left-hand end, and it is
        the figure the reader recognises as "what I have". */
-    const growth = i ? round2(open * r) : 0;
-    const contrib = i ? (contribs[String(y)] || 0) : 0;
-    /* Growth on the OPENING balance, then contributions — bit for bit the old
-       `bal * (1 + r) + contribs[y]`. The accumulation half of this chart must
-       not move by a cent: a reader who knows their 2045 figure would find it
-       changed by a feature that was supposed to be about 2060. There is a test
-       that recomputes the old formula and compares. */
+    const open = round2(bal.reduce((t, v) => t + v, 0));
+    const grown = bal.map((v, j) => i ? round2(v * pots[j].rate) : 0);
+    const put = pots.map((p, j) => i ? (p.contribs[String(y)] || 0) : 0);
+    /* Growth on the OPENING balance, then contributions — per pot now, but the
+       arithmetic is unchanged where one rate covers everything, and a test
+       recomputes the old single-pot formula and compares. */
+    const growth = round2(grown.reduce((t, v) => t + v, 0));
+    const contrib = round2(put.reduce((t, v) => t + v, 0));
     const income = incomeIn(dd.income, y);
     /* Pro-rated in the year they actually go, whole thereafter. Income is NOT
        pro-rated with it: an income row carries the year it starts arriving and
@@ -5123,12 +5260,52 @@ function drawdownYears(st, thisYear, span) {
        what the plan could not pay — a negative balance would be a debt the app
        has no way to model and no business inventing. */
     const draw = Math.min(want, Math.max(0, pot));
+    /* Taken PRO RATA across the pots, in proportion to what each holds. That
+       is deliberately not a strategy: which account you would spend first is a
+       tax decision, this app models no tax and must not grow one, and drawing
+       proportionally is the only split that expresses no opinion — it leaves
+       the Traditional/Roth mix exactly where it was. */
+    const before = bal.map((v, j) => round2(v + grown[j] + put[j]));
+    const gross = before.reduce((t, v) => t + v, 0);
+    bal = before.map(v => gross > 0 ? round2(v - draw * (v / gross)) : v);
     rows.push({ y, open, growth, contrib, income, spend, draw, share,
                 short: round2(want - draw), close: round2(pot - draw),
                 phase: spend > 0 ? 'drawing' : 'saving' });
-    open = round2(pot - draw);
   }
   return rows;
+}
+
+/* Traditional against Roth, today and at the month the pot starts paying out —
+   the one figure that decides how much of a retirement is taxable, and the one
+   the split bar above could only ever show for today.
+
+   Measured at the FIRST retirement in the household, because that is when the
+   money starts being spent and therefore when the mix matters. Each pot grows
+   at its own rate and takes its own contributions, so a Roth growing at 7% and
+   a rollover at 3% pull the split apart over fifteen years exactly as they
+   would in life — which is the whole reason the per-account rate exists.
+
+   Nothing here is a tax calculation and it must not become one: it says how
+   much sits on each side, not what either would be worth after tax. */
+function retirementSplit(st, thisYear) {
+  const at = drawdownFromMonth(st, thisYear);
+  const span = retirementHorizon(st, thisYear);
+  const pots = retirementPots(st, thisYear, span);
+  const sumNow = (kind) => round2(pots
+    .filter(p => p.kind === kind).reduce((t, p) => t + p.balance, 0));
+  const now = { traditional: sumNow('traditional'), roth: sumNow('roth') };
+  now.total = round2(now.traditional + now.roth);
+  if (!at) return { at: null, now, then: null };
+  const stopYear = +at.slice(0, 4);
+  const bal = pots.map(p => p.balance);
+  for (let y = thisYear + 1; y <= stopYear; y++)
+    for (let j = 0; j < pots.length; j++)
+      bal[j] = bal[j] * (1 + pots[j].rate) + (pots[j].contribs[String(y)] || 0);
+  const sumThen = (kind) => round2(pots
+    .reduce((t, p, j) => t + (p.kind === kind ? bal[j] : 0), 0));
+  const then = { traditional: sumThen('traditional'), roth: sumThen('roth') };
+  then.total = round2(then.traditional + then.roth);
+  return { at, now, then };
 }
 
 /* What arrives from everything other than the pot in a given year. A row with
@@ -8314,6 +8491,14 @@ const EDITORS = {
       { key: 'type', label: 'Type', type: 'select',
         options: RET_TYPES.map(([v, label]) => [v, label]) },
       { key: 'amount', label: 'Balance', type: 'money' },
+      /* Blank, not prefilled with the global: absent means "follow Preferences",
+         and a copy of today's figure sitting in the account would stop doing
+         that the moment the setting changed. */
+      { key: 'rate', label: 'Real return %/yr', type: 'percent',
+        hint: `What THIS account is assumed to grow at after inflation. Leave it empty to
+          follow the ${round2((state.settings.retirementReturnAnnual ?? 0.07) * 100)}% in
+          Preferences — worth setting only where a pot is invested differently from the
+          rest.` },
       /* A retirement account is one person's — there is no joint 401(k) or
          joint IRA — so the shared bucket is deliberately not offered here. */
       ...(adultsOf(state).length ? [{ key: 'owner', label: 'Whose', type: 'select',
@@ -8330,6 +8515,9 @@ const EDITORS = {
       const row = { name: v.name || '?', type,
         kind: (RET_TYPES.find(t => t[0] === type) || [])[2] || 'traditional',
         amount: v.amount ?? 0, contribs: { ...(old?.contribs || {}) } };
+      /* Empty DELETES rather than storing 0: a 0% account is a real statement
+         (cash, say) and "follow Preferences" is a different one. */
+      if (v.rate !== null && v.rate !== undefined) row.rate = v.rate;
       /* Only when the field was on the form, and only a real adult — same rule
          as an account's owner. */
       const owner = adultsOf(state).length
@@ -10897,6 +11085,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   retirementMonthOf, RETIRE_WHEN, retiredShareOf, drawdownFromMonth,
   limitsForIn, plannedDeferral, plannedContribs,
   isIra, iraAccountsOf, latestContrib, contribStopMonth, iraOutlook,
+  accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,

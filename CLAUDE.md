@@ -1096,6 +1096,32 @@ Things that are load-bearing and will look arbitrary later:
   different years instead of quietly showing one under the other's label. The
   year-by-year table's age column reads December, not mid-year, so the row where
   somebody retires at 55 doesn't say 54.
+- **The projection grows POTS, not one balance** (`retirementPots`). Each
+  retirement account is a pot with its own `rate` (`accountRate` — the account's
+  own, else Preferences; **absent means follow Preferences, and a 0 is a real
+  statement**, so `coerceShape` reads it strictly rather than through `num()`,
+  which would turn a corrupt field into a deliberate-looking 0%). One extra pot
+  carries the 401(k) deferral, which no account owns: the app has never asked
+  which of five 401(k)s it lands in, but it knows the tax treatment, because
+  the fields are `pretaxPct`/`bonusPct` and the MAGI check already subtracts
+  both as pre-tax. So it counts as Traditional at the plan's own rate; a typed
+  row against a named account wins, at that account's rate.
+  **Each pot is rounded to the cent every year** — with one pot that makes the
+  loop bit-for-bit the single balance it used to carry, which is what the
+  accumulation guard pins.
+  **The withdrawal is taken PRO RATA across the pots** and that is deliberate:
+  which account you would spend first is a tax decision, this app models no tax,
+  and proportional drawing is the only split that expresses no opinion. Do not
+  "improve" it into a withdrawal-order strategy.
+  `retirementSplit(st, thisYear)` is Traditional against Roth today AND at the
+  month the pot starts paying — the mix being what decides how much of a
+  retirement is taxable, and the top-of-tab bar only ever showing today. There
+  is a test that its total equals the pot the chart draws that year; if those
+  ever disagree, one of them is lying about somebody's retirement.
+- **`RET_TYPES` lives ABOVE `let state = load()`** because `coerceShape` reads it
+  to settle an account that arrived with no `kind`. A const below that line is
+  in its temporal dead zone at load time and the ReferenceError is swallowed —
+  the whole workbook comes up empty. It was moved for exactly this reason.
 - **Contributions come from BOTH places the app records them.**
   `plannedContribs(st, thisYear, span)` is the one source the projection reads:
   the per-year IRA rows (`contribYears`), an IRA's latest figure CARRIED into
