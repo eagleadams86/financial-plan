@@ -1100,12 +1100,24 @@ Things that are load-bearing and will look arbitrary later:
   retirement account is a pot with its own `rate` (`accountRate` — the account's
   own, else Preferences; **absent means follow Preferences, and a 0 is a real
   statement**, so `coerceShape` reads it strictly rather than through `num()`,
-  which would turn a corrupt field into a deliberate-looking 0%). One extra pot
-  carries the 401(k) deferral, which no account owns: the app has never asked
-  which of five 401(k)s it lands in, but it knows the tax treatment, because
-  the fields are `pretaxPct`/`bonusPct` and the MAGI check already subtracts
-  both as pre-tax. So it counts as Traditional at the plan's own rate; a typed
-  row against a named account wins, at that account's rate.
+  which would turn a corrupt field into a deliberate-looking 0%). Two extra pots
+  carry the 401(k) deferral, which no account owns: the app has never asked
+  which of five 401(k)s it lands in, and nominating one would invent an answer.
+  **BALANCES follow each account's own type** — the accounts have distinguished
+  a pre-tax 401(k) from a Roth one since the day they had types, and saying the
+  deferral "counts as Traditional" over the top of that was rightly called
+  confusing. The one thing that could not say which was the LIMIT CHECK, which
+  holds a single percentage; **`limits[year].rothShare`** (and `.by[personId]`)
+  settles it, splitting the deferral into a Roth pot and a pre-tax one.
+  **It is 0 unless set — exactly the old behaviour** — and is clamped to 0–1 in
+  `limitsForIn`, the single read point, so a hand-edited 500% cannot drive the
+  pre-tax side negative. It changes two things and deliberately not the third:
+  the Roth part lands on the Roth side of the split, and it does NOT come off
+  the MAGI (a Roth contribution is made from income already counted, and
+  subtracting it would understate that check in the direction that says "you're
+  fine"). The yearly 401(k) limit is untouched — it covers both together, which
+  is why "You put in" adds them up. A typed contribution row against a named
+  account still wins, at that account's rate.
   **Each pot is rounded to the cent every year** — with one pot that makes the
   loop bit-for-bit the single balance it used to carry, which is what the
   accumulation guard pins.

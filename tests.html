@@ -3228,14 +3228,55 @@ t('a Roth account growing faster pulls the split its way', () => {
   ok(fast.then.roth / fast.then.total > even.then.roth / even.then.total);
   eq(fast.now.roth, 50000, 'while today is untouched either way');
 });
-t('the 401(k) percentages count as Traditional, because those fields are pre-tax', () => {
+t('401(k) contributions are all pre-tax until you say what share is Roth', () => {
+  /* The accounts have said which is a pre-tax 401(k) and which is a Roth one
+     since the day they had types. The LIMIT CHECK holds a single percentage
+     and could not, so it treated the lot as pre-tax; `rothShare` is what
+     settles it, and 0 is the old behaviour exactly. */
   const s = deferralFixture({ settings: { retirementReturnAnnual: 0 } });   // Sam, 5%+10%
   const sp = H.retirementSplit(s, RET_FIX);
   eq(sp.now.traditional, 100000, 'the 401(k) balance');
   eq(sp.now.roth, 0);
   /* 6,000 a year 2031..2034 and ten twelfths of it in 2035. */
   eq(sp.then.traditional, H.round2(100000 + 6000 * 4 + 5000));
-  eq(sp.then.roth, 0, 'none of the deferral lands on the Roth side');
+  eq(sp.then.roth, 0, 'nothing on the Roth side while the share is unset');
+});
+t('the Roth share splits the ongoing 401(k) contributions between the two sides', () => {
+  const s = deferralFixture({ settings: { retirementReturnAnnual: 0 },
+    side: { comp: { '2030': { salary: 100000, raisePct: 0 } }, bonuses: { '2030': 10000 },
+      limits: { '2030': { pretaxPct: 0.05, bonusPct: 0.10, rothShare: 0.25 } },
+      retirementAccounts: [{ name: '401(k)', type: '401k', amount: 100000, contribs: {} }],
+      drawdown: { income: [] } } });
+  eq(H.limitsForIn(s, '2030', 'sam').rothShare, 0.25);
+  const sp = H.retirementSplit(s, RET_FIX);
+  const paid = H.round2(6000 * 4 + 5000);         // 2031..2035, the last part-year
+  eq(sp.then.roth, H.round2(paid * 0.25), 'a quarter of it lands on the Roth side');
+  eq(sp.then.traditional, H.round2(100000 + paid * 0.75), 'and three quarters pre-tax');
+  eq(H.round2(sp.then.roth + sp.then.traditional), sp.then.total, 'with nothing lost');
+});
+t('the Roth share is held to a share, however the file arrived', () => {
+  const mk = (v) => H.coerceShape({ people: [{ id: 'sam', name: 'Sam', role: 'adult' }],
+    side: { limits: { '2030': { salary: 100000, pretaxPct: 0.1, rothShare: v } } } });
+  eq(H.limitsForIn(mk(5), '2030', 'sam').rothShare, 1, 'a 500% share is all of it');
+  eq(H.limitsForIn(mk(-2), '2030', 'sam').rothShare, 0, 'and a negative one is none');
+  eq(H.limitsForIn(mk(undefined), '2030', 'sam').rothShare, 0, 'absent is none');
+});
+t('a Roth 401(k) contribution does not come off the Roth IRA income check', () => {
+  /* It is made out of income that has already been counted. Subtracting it
+     would understate the figure — in the direction that says "you're fine". */
+  const base = { people: [{ id: 'sam', name: 'Sam', role: 'adult' }],
+    side: { limits: { '2030': { salary: 200000, bonus: 0, pretaxPct: 0.10,
+                                bonusPct: 0, hsaPretax: 0 } } } };
+  const allPretax = H.coerceShape(JSON.parse(JSON.stringify(base)));
+  const halfRoth = H.coerceShape(JSON.parse(JSON.stringify(base)));
+  halfRoth.side.limits['2030'].rothShare = 0.5;
+  const magi = (st) => {
+    const L = H.limitsForIn(st, '2030', 'sam');
+    return H.round2(L.salary + L.bonus
+      - (L.salary * L.pretaxPct + L.bonus * L.bonusPct) * (1 - L.rothShare) - L.hsaPretax);
+  };
+  eq(magi(allPretax), 180000, 'all pre-tax: the whole 20,000 comes off');
+  eq(magi(halfRoth), 190000, 'half Roth: only half of it does');
 });
 t('the split adds up to the pot the chart draws', () => {
   /* Two views of one projection. If these ever disagree, one of them is lying

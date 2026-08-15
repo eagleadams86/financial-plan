@@ -3115,9 +3115,12 @@ const HELP = {
       + 'actually matters on, since it decides how much of what you spend is taxable. '
       + 'Every account grows at its own rate (set one on the account itself, or leave it '
       + 'following Preferences) and takes its own contributions, so pots invested '
-      + 'differently pull the split apart over the years. The 401(k) cards\' percentages '
-      + 'count as Traditional because those fields are pre-tax; a Roth 401(k) contribution '
-      + 'typed as a row against that account lands on the Roth side. Everything is in '
+      + 'differently pull the split apart over the years. Balances follow each account\'s '
+      + 'own type — your accounts have said which is a pre-tax 401(k) and which is a Roth '
+      + 'one since the day they had types. What could not say so was the 401(k) Limit '
+      + 'Check, which holds ONE percentage for your ongoing contributions and cannot know '
+      + 'which of your 401(k)s it goes into; its "Of that, Roth %" is what settles that, '
+      + 'and it is 0 unless you say otherwise. Everything is in '
       + 'today\'s money and before tax — this app keeps no tax tables, so it says how much '
       + 'is on each side and not what either is worth after tax.' },
   iraProjection: { title: 'Where the IRAs Land',
@@ -4524,9 +4527,10 @@ function splitAtRetirementCard() {
     </table></div>
     <p class="sub" style="margin-top:10px">In today's money and <strong>before tax</strong> —
       a Traditional dollar and a Roth dollar are not worth the same once it comes out, and
-      this app keeps no tax tables. The 401(k) percentages count as Traditional, since
-      that card's figures are pre-tax; type a Roth 401(k) contribution as a row against
-      that account and it lands on the Roth side instead.</p>
+      this app keeps no tax tables. Balances follow each account's own type. Your ongoing
+      401(k) contributions follow the <strong>Roth %</strong> on the 401(k) Limit Check,
+      because that card holds one percentage and cannot otherwise know which of your
+      401(k)s it goes into.</p>
   </div>`;
 }
 
@@ -4715,6 +4719,13 @@ function limitsForIn(st, year, personId) {
     bonus: own.bonus ?? (borrows ? ((state.side.bonuses || {})[year] || 0) : 0),
     pretaxPct: own.pretaxPct ?? 0,
     bonusPct: own.bonusPct ?? 0,
+    /* How much of that 401(k) contribution is ROTH rather than pre-tax. The
+       accounts have said which is which since the day they had types — this is
+       the one place that couldn't, so the deferral was treated as entirely
+       pre-tax and landed wholly on the Traditional side of the split. Absent
+       is 0, which is exactly that old behaviour, so nobody's figures move
+       until they say otherwise. */
+    rothShare: Math.min(1, Math.max(0, own.rothShare ?? 0)),
     hsaPretax: own.hsaPretax ?? 0,
     k401Limit: stored.k401Limit ?? LIMIT_DEFAULTS.k401Limit,
     magiLimit: stored.magiLimit ?? LIMIT_DEFAULTS.magiLimit,
@@ -4749,6 +4760,9 @@ function limitsCard(year, personId) {
     <tr><th scope="row">Salary × ${(L.pretaxPct * 100).toFixed(1)}%</th><td>${fmtMoney(fromSalary)}</td></tr>
     <tr><th scope="row">Bonus × ${(L.bonusPct * 100).toFixed(1)}%</th><td>${fmtMoney(fromBonus)}</td></tr>
     <tr><th scope="row">You put in</th><td>${fmtMoney(put)}</td></tr>
+    ${!L.rothShare ? '' : `<tr><td style="padding-left:16px" class="muted">of which Roth
+      (${(L.rothShare * 100).toFixed(0)}%)</td>
+      <td class="muted">${fmtMoney(round2(put * L.rothShare))}</td></tr>`}
     <tr><th scope="row">${esc(year)} limit</th><td>${fmtMoney(L.k401Limit)}</td></tr>
     <tr><th scope="row">${over ? 'Over by' : 'Room left'}</th>
       <td>${fmtMoney(Math.abs(headroom))}</td></tr>
@@ -4778,7 +4792,14 @@ function magiCard(year) {
   const L = limitsFor(year, compPersonId(state));
   const sum = (f) => round2(each.reduce((t, x) => t + f(x), 0));
   const gross = sum(x => x.salary + x.bonus);
-  const pretax = sum(x => x.salary * x.pretaxPct + x.bonus * x.bonusPct);
+  /* Only the PRE-TAX part of the 401(k) contribution comes off. A Roth 401(k)
+     contribution is made out of income that has already been counted, so
+     subtracting it here would understate the figure this check turns on — and
+     understating it in the direction that says "you're fine". `rothShare` is
+     0 unless the reader has said otherwise, so a plan that never touched it
+     gets exactly the arithmetic it always got. */
+  const pretax = sum(x =>
+    (x.salary * x.pretaxPct + x.bonus * x.bonusPct) * (1 - (x.rothShare || 0)));
   const hsa = sum(x => x.hsaPretax);
   const magi = round2(gross - pretax - hsa);
   const band = L.magiLimit + L.magiPhaseOut;
@@ -5113,12 +5134,13 @@ const accountRate = (st, a) => typeof a.rate === 'number'
    alike, and averaging them by accident is the sort of error that only shows
    up as a number nobody can reconcile fifteen years out.
 
-   THE DEFERRAL IS ITS OWN POT because the app does not know which account it
-   lands in — a household with five 401(k)s has never been asked. What it does
-   know is the tax treatment: the card's fields are `pretaxPct` and `bonusPct`
-   and the MAGI check already subtracts both as pre-tax, so it counts as
-   Traditional and grows at the plan's own rate. Type it as contribution rows
-   against a named account and those win, at that account's rate. */
+   THE DEFERRAL IS ITS OWN POT — two, in fact — because the app does not know
+   which ACCOUNT it lands in: a household with five 401(k)s has never been
+   asked, and nominating one would be inventing an answer. What it does know is
+   the tax treatment, because the 401(k) card now says what share of the
+   contribution is Roth. That share is a Roth pot and the rest a Traditional
+   one, both at the plan's own rate. Type it as contribution rows against a
+   named account instead and those win, at that account's own rate. */
 function retirementPots(st, thisYear, span) {
   const pots = (st.side.retirementAccounts || []).map((a, idx) => {
     const contribs = {};
@@ -5140,24 +5162,32 @@ function retirementPots(st, thisYear, span) {
     return { key: `a${idx}`, idx, label: a.name, kind: retKind(a),
              rate: accountRate(st, a), balance: round2(a.amount || 0), contribs };
   });
-  const deferral = {};
+  const deferral = { traditional: {}, roth: {} };
   for (const id of limitEarners(st)) {
     const person = id === undefined ? null : personById(st, id);
     const stop = person ? retirementMonthOf(person) : null;
     if (!stop) continue;
     const rate = plannedDeferral(st, id, thisYear);
     if (!rate) continue;
+    const rothShare = limitsForIn(st, String(thisYear), id).rothShare || 0;
     for (let i = 1; i <= span; i++) {
       const y = thisYear + i;
       const working = 1 - retiredShareOf(y, stop);
       if (working <= 0) break;
-      deferral[String(y)] = round2((deferral[String(y)] || 0) + round2(rate * working));
+      const put = round2(rate * working);
+      const toRoth = round2(put * rothShare);
+      const add = (bucket, v) => { if (v) bucket[String(y)] = round2((bucket[String(y)] || 0) + v); };
+      add(deferral.roth, toRoth);
+      add(deferral.traditional, round2(put - toRoth));
     }
   }
-  if (Object.keys(deferral).length)
-    pots.push({ key: 'deferral', idx: null, label: '401(k) contributions',
-                kind: 'traditional', rate: st.settings.retirementReturnAnnual ?? 0.07,
-                balance: 0, contribs: deferral });
+  const globalRate = st.settings.retirementReturnAnnual ?? 0.07;
+  for (const kind of ['traditional', 'roth'])
+    if (Object.keys(deferral[kind]).length)
+      pots.push({ key: `deferral-${kind}`, idx: null,
+                  label: kind === 'roth' ? '401(k) contributions — Roth'
+                                         : '401(k) contributions — pre-tax',
+                  kind, rate: globalRate, balance: 0, contribs: deferral[kind] });
   return pots;
 }
 
@@ -8713,6 +8743,14 @@ const EDITORS = {
       { key: 'bonus', label: 'Bonus', type: 'money' },
       { key: 'pretaxPct', label: '401(k) % of salary', type: 'percent' },
       { key: 'bonusPct', label: '401(k) % of bonus', type: 'percent' },
+      { key: 'rothShare', label: 'Of that, Roth %', type: 'percent', wide: true,
+        hint: 'Your accounts already say which is a pre-tax 401(k) and which is a Roth '
+          + 'one; this is what says how you split your own contributions between them. '
+          + 'Leave it at 0 if it all goes in pre-tax. It changes two things and not the '
+          + 'third: the Roth part lands on the Roth side of the retirement split, and it '
+          + 'does NOT come off the income the Roth IRA check is judged on. The yearly '
+          + '401(k) limit above is unchanged either way — it covers both together, which '
+          + 'is why "You put in" adds them up.' },
       { key: 'hsaPretax', label: 'Pre-tax HSA', type: 'money' },
       { key: 'k401Limit', label: '401(k) limit this year', type: 'money',
         hint: 'One figure for the year — the same limit applies to each of you separately.' },
@@ -8726,6 +8764,9 @@ const EDITORS = {
       const rec = state.side.limits[ds.year] || (state.side.limits[ds.year] = {});
       const own = { salary: v.salary ?? 0, bonus: v.bonus ?? 0,
         pretaxPct: v.pretaxPct ?? 0, bonusPct: v.bonusPct ?? 0,
+        /* Held to 0–100%: a share outside that isn't a share, and it would put
+           a negative figure on one side of the split. */
+        rothShare: Math.min(1, Math.max(0, v.rothShare ?? 0)),
         hsaPretax: v.hsaPretax ?? 0 };
       /* The limits are a fact about the YEAR, so they stay on the flat record
          whichever earner's card you opened. */
