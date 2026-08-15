@@ -907,6 +907,7 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
     <button class="tab" role="tab" id="tab-goals"      aria-controls="views" data-view="goals"      aria-selected="false" tabindex="-1">Goals</button>
     <button class="tab" role="tab" id="tab-household"  aria-controls="views" data-view="household"  aria-selected="false" tabindex="-1">Household</button>
     <button class="tab" role="tab" id="tab-retirement" aria-controls="views" data-view="retirement" aria-selected="false" tabindex="-1">Retirement</button>
+    <button class="tab" role="tab" id="tab-tax"        aria-controls="views" data-view="tax"        aria-selected="false" tabindex="-1">Tax</button>
     <button class="tab" role="tab" id="tab-comp"       aria-controls="views" data-view="comp"       aria-selected="false" tabindex="-1">Compensation</button>
     <button class="tab" role="tab" id="tab-investments" aria-controls="views" data-view="investments" aria-selected="false" tabindex="-1">Investments</button>
     <button class="tab" role="tab" id="tab-vacations"  aria-controls="views" data-view="vacations"  aria-selected="false" tabindex="-1">Vacations</button>
@@ -1180,7 +1181,7 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
    load()` further down — a const declared after that point would still be in
    its temporal dead zone, load() would catch the ReferenceError, and the whole
    workbook would silently come up blank. */
-const VIEWS = ['budget', 'goals', 'household', 'retirement', 'comp', 'investments',
+const VIEWS = ['budget', 'goals', 'household', 'retirement', 'tax', 'comp', 'investments',
   'vacations', 'giving', 'history'];
 
 /* Anything stored that is no longer a view is dropped and anything missing is
@@ -1191,6 +1192,19 @@ function tabOrder(ui) {
   const kept = stored.filter((v, i) => VIEWS.includes(v) && stored.indexOf(v) === i);
   return kept.concat(VIEWS.filter(v => !kept.includes(v)));
 }
+
+/* The three filing statuses, written out ONCE. `settings.filingStatus` is
+   validated against them, and they are also the innermost key of a bracket
+   table — a table typed for a status you have since left is kept, not deleted,
+   so the two lists could never be allowed to drift apart. UP HERE for the same
+   temporal-dead-zone reason as VIEWS: coerceShape reads it. */
+const FILING_STATUSES = ['single', 'joint', 'separate'];
+
+/* Federal and state, and nothing else. Outermost key of `side.tax` because the
+   two move on different clocks — a state rewrites its schedule in a year the
+   federal one is untouched — so the carry-forward has to be per jurisdiction.
+   Read by coerceShape, so it lives up here as well. */
+const TAX_JURISDICTIONS = ['federal', 'state'];
 
 const STORAGE_KEY = 'fin-state';
 const UPDATED_KEY = 'fin-updated';   // written by save(); the hook a future sync layer keys off
@@ -1747,11 +1761,90 @@ function blankState() {
          a flat line down from the first retirement. NOT in `settings` — that
          branch rides in every share link, and what a household spends is
          among the most sensitive figures in the file. */
-      drawdown: { income: [] }
+      drawdown: { income: [] },
+      /* The bracket tables the reader types, and NOTHING ELSE — no default, no
+         placeholder, no realistic-looking starting point. The app may compute
+         tax; it may not know a tax figure. A year with no table means no tax,
+         which is what makes that promise true by construction rather than by
+         good intentions.
+
+         EXACTLY `{federal:{}, state:{}}`, with no string fields: `looksEmpty`
+         returns false for ANY string, so an empty `stateLabel` sitting here
+         would make every untouched plan look as though it had tax data and
+         offer a Tax link to somebody who has never typed a bracket. */
+      tax: { federal: {}, state: {} }
     },
     vacations: { trips: [], pto: {} },
     ui: { activeYear: null, activeTab: 'budget', collapsed: [] }
   };
+}
+
+/* ── One bracket table's bands, made safe to compute with ───────────────────
+   A function DECLARATION, and standalone rather than folded into coerceShape's
+   `arr()` loop, because a band needs deeper work than "is it an object" and
+   because the tests pin it directly.
+
+   Four rules here are load-bearing rather than tidy:
+
+   · **Objects only.** `arr()`'s filter is repeated rather than reused because
+     the failure it prevents is the quiet one: a hand-edited
+     `bands: [23850, 0.10]` would empty SILENTLY, leaving a table that reads
+     "no tax" on screen while looking perfectly full in the backup it came from.
+
+   · **`upTo` is read STRICTLY, never through `num()`.** num() turns anything it
+     can't read into 0, which is right for an amount and a disaster for a band
+     edge — a 0 top edge is a band that taxes nothing, and it would look like a
+     figure somebody typed. That is the same trap that already bit
+     `account.rate` and an income row's `from`. Unreadable drops the band.
+
+   · **`upTo: null` is the open top band, never `Infinity`** — which round-trips
+     to null through JSON anyway, so storing it would mean two spellings of one
+     idea and only one of them surviving a backup.
+
+   · **`rate` is CLAMPED to 0–1, and that clamp is the gross-up solver's
+     precondition** (see the tax plan), not a nicety: the bisection relies on
+     net'(G) = 1 − m·tradShare staying ≥ 0, which holds only while every
+     marginal rate does. A hand-edited 500% would hand it a function that runs
+     backwards, and it would converge on nonsense rather than fail.
+
+   Bands are then sorted with the open band last and overlaps dropped, so a
+   table typed out of order still reads as a progressive schedule. */
+function coerceTaxBands(list) {
+  const out = [];
+  for (const b of (Array.isArray(list) ? list : [])) {
+    if (!b || typeof b !== 'object' || Array.isArray(b)) continue;
+    const raw = b.upTo;
+    const upTo =
+      /* Absent, null and Infinity all mean the same thing — the open top band —
+         and it is stored as null. Infinity is here because a table built in
+         memory can carry one even though a stored one never does: JSON turns it
+         into null on the way out, so accepting only null would drop the band on
+         the way IN and leave the top of somebody's schedule untaxed. */
+      (raw === null || raw === undefined || raw === '' || raw === Infinity) ? null
+      : (typeof raw === 'number' && Number.isFinite(raw)) ? raw
+      : (typeof raw === 'string' && /^-?\d+(\.\d+)?$/.test(raw.trim()))
+        ? parseFloat(raw.trim())
+        : undefined;
+    if (upTo === undefined) continue;
+    const rate = typeof b.rate === 'number' ? b.rate : parseFloat(b.rate);
+    if (!Number.isFinite(rate)) continue;
+    out.push({ upTo: upTo === null ? null : Math.max(0, upTo),
+               rate: Math.min(1, Math.max(0, rate)) });
+  }
+  /* The open band sorts last whatever order it was typed in. */
+  out.sort((a, b) => (a.upTo === null) - (b.upTo === null)
+    || (a.upTo === null ? 0 : a.upTo - b.upTo));
+  const kept = [];
+  let last = -Infinity;
+  for (const b of out) {
+    /* An open band ENDS the table: everything above it is already covered, and
+       a second one could only be a duplicate of the same claim. */
+    if (b.upTo === null) { kept.push(b); break; }
+    if (b.upTo <= last) continue;   // an overlapping edge says nothing new
+    kept.push(b);
+    last = b.upTo;
+  }
+  return kept;
 }
 
 /* Shapes from outside are not trusted: a hand-edited backup, a truncated file.
@@ -2092,6 +2185,77 @@ function coerceShape(data) {
     if (!ownerOk(r.person)) delete r.person;
   }
 
+  /* ── The bracket tables ───────────────────────────────────────────────────
+     JURISDICTION → YEAR → FILING STATUS → { bands, deduction?, source? }.
+     Its own block rather than a line in the `arr()` loop above, because a band
+     list needs per-band work that loop cannot do (see coerceTaxBands).
+
+     Nothing here is ever defaulted or backfilled. `LIMIT_DEFAULTS` is the one
+     pre-existing exception in this file and is deliberately NOT extended: a
+     wrong limit is one card reading wrong, whereas a wrong bracket table is
+     forty years of projection quietly reshaped. **A year with no table means no
+     tax** — which is the whole reason the app can compute tax without ever
+     knowing a tax figure.
+
+     A table filed under a status the reader has since left is KEPT. Filing
+     status is a thing that changes; the schedule you typed for the year you
+     were single is still the truth about that year. */
+  const tax = obj(s.tax); s.tax = tax;
+  /* The branch has a CLOSED set of keys, and anything else is deleted rather
+     than carried. A third "jurisdiction" typed into a hand-edited backup would
+     otherwise ride along in every future backup and every share link while
+     nothing ever read it — and `looksEmpty` says false to a string, so a junk
+     key holding one would go on claiming the plan had tax data. */
+  for (const k of Object.keys(tax))
+    if (!TAX_JURISDICTIONS.includes(k) && k !== 'stateLabel' && k !== 'check')
+      delete tax[k];
+  for (const j of TAX_JURISDICTIONS) {
+    const byYear = obj(tax[j]);
+    tax[j] = byYear;
+    for (const y of Object.keys(byYear)) {
+      if (!/^\d{4}$/.test(y)) { delete byYear[y]; continue; }
+      const byFiling = obj(byYear[y]);
+      byYear[y] = byFiling;
+      for (const f of Object.keys(byFiling)) {
+        if (!FILING_STATUSES.includes(f)) { delete byFiling[f]; continue; }
+        const t = obj(byFiling[f]);
+        byFiling[f] = t;
+        t.bands = coerceTaxBands(t.bands);
+        /* Where the reader says they got it — free text, shown back to them and
+           escaped at the sink like every other typed string. */
+        if (typeof t.source === 'string' && t.source.trim())
+          t.source = t.source.trim().slice(0, 200);
+        else delete t.source;
+        /* Absent means no deduction, which is a real answer for a flat-rate
+           state; a negative one is not, and `taxableAfter` floors at 0 anyway,
+           so it is clamped here rather than left to surprise the solver. */
+        const ded = num(t.deduction);
+        if (typeof ded === 'number') t.deduction = Math.max(0, ded);
+        else delete t.deduction;
+        /* A table with no readable band is NOT a table. Dropping the record is
+           what keeps "no table means no tax" honest: half a table left standing
+           would tax at rates the reader never managed to enter. */
+        if (!t.bands.length) delete byFiling[f];
+      }
+      if (!Object.keys(byFiling).length) delete byYear[y];
+    }
+  }
+  /* Which state, in the reader's own words — for the headings only; the app
+     derives nothing from it. DELETED when empty rather than kept as '', because
+     `looksEmpty` returns false for any string and an empty one here would offer
+     a Tax link to every plan in existence. */
+  if (typeof tax.stateLabel === 'string' && tax.stateLabel.trim())
+    tax.stateLabel = tax.stateLabel.trim().slice(0, 60);
+  else delete tax.stateLabel;
+  /* The calculator's own typed figure. A scratch input, not a table — which is
+     why `BRANCH_HAS_DATA` judges the tab on its TABLES and this cannot make an
+     empty plan look shareable. Deleted outright when it is not a number, so a
+     blank plan carries no `check` key at all. */
+  const chk = obj(tax.check);
+  chk.income = num(chk.income);
+  if (typeof chk.income === 'number') tax.check = chk;
+  else delete tax.check;
+
   /* "Other money" used to be a standalone list of balances on the Retirement
      tab — money that existed but sat outside the plan's arithmetic. Each one
      becomes a real account instead, tracked monthly in the grid and counted in
@@ -2298,7 +2462,7 @@ function coerceShape(data) {
   /* Defaulted from absence rather than migrated: a `??`-style fill can run on
      every load without ever overwriting a choice, so it belongs here and not
      in `migrate`. 'single' is what the old fixed MAGI figure already encoded. */
-  if (!['single', 'joint', 'separate'].includes(d.settings.filingStatus))
+  if (!FILING_STATUSES.includes(d.settings.filingStatus))
     d.settings.filingStatus = 'single';
   /* The worse and better real returns the projection can also be drawn at.
      ABSENT by default and deleted when unreadable — one line is what the chart
@@ -3330,7 +3494,7 @@ function render() {
   C = computeAll(state, todayISO());
   const fn = {
     budget: renderBudget, goals: renderGoals, household: renderHousehold,
-    retirement: renderRetirement,
+    retirement: renderRetirement, tax: renderTax,
     comp: renderComp, investments: renderInvestments,
     vacations: renderVacations, giving: renderGiving, history: renderHistory
   }[view];
@@ -5784,6 +5948,40 @@ function retChartSummary(rows, out, r, labels, data, markers) {
   }
   bits.push('A straight-line projection, not a forecast, and it models no tax.');
   return bits.join(' ');
+}
+
+/* ═══════════════════════════════ Tax view ═════════════════════════════════ */
+
+/* The tab's cards — the two bracket tables, the years you've stored, the
+   calculator and the bridge card that reads the drawdown — are steps 5 and 6 of
+   the tax plan. What stands here now is the plumbing's landing place and the
+   one paragraph that has to be true before any of them exist: the app ships no
+   bracket, and a year with no table means no tax.
+
+   It renders SOMETHING deliberately. A tab that draws an empty div reads as
+   broken rather than unbuilt, and the point of doing the plumbing on its own is
+   to be able to open the tab and see that it works.
+
+   When the cards land, `SECTION_NEEDS.tax` grows with them — see the note on
+   that table. */
+function renderTax() {
+  return `
+  <div class="note info">
+    <p><strong>Nothing here ships with the app.</strong> This app holds no
+      bracket, no rate and no deduction of its own — you type the tables, the
+      same way you type the contribution limits on Retirement. It may work tax
+      out; it may not know what the tax is.</p>
+    <p><strong>A year with no table means no tax.</strong> Until you enter one,
+      every figure on Retirement is exactly what it has always been.</p>
+    <p>What it deliberately will not do: required minimum distributions, a
+      Roth-versus-traditional withdrawal order, the Social Security
+      provisional-income formula, itemising, capital gains, NIIT or IRMAA.
+      Every one of those is a figure with a year attached, and it would be
+      quietly wrong within twelve months while looking authoritative.</p>
+    <p class="muted">The tables and the calculator are still being built. The
+      brackets you enter are stored with the rest of your plan and go nowhere
+      else.</p>
+  </div>`;
 }
 
 /* ═══════════════════════════ Compensation view ════════════════════════════ */
@@ -8287,7 +8485,7 @@ const EDITORS = {
          string wrecks. Escaped at the sink like every other typed string —
          here that sink is textContent in render(), which escapes by nature. */
       state.settings.tagline = String(v.tagline || '').trim().slice(0, 60);
-      if (['single', 'joint', 'separate'].includes(v.filingStatus))
+      if (FILING_STATUSES.includes(v.filingStatus))
         state.settings.filingStatus = v.filingStatus;
       if (personById(state, v.compPerson)?.role === 'adult')
         state.settings.compPerson = v.compPerson;
@@ -10793,6 +10991,16 @@ const SECTION_NEEDS = {
      that sentence is the thing that's gated instead. */
   retirement:  ['people', 'side.retirementAccounts', 'side.limits',
                 'side.drawdown', 'side.comp', 'side.bonuses'],
+  /* Its OWN branch and nothing else, for as long as the tab draws nothing else.
+     The bridge card planned for this tab — what the pot has to pay, read
+     straight off `drawdownYears` — will need Retirement's whole set alongside
+     it, and it MUST be added here in the same commit as that card. Adding it
+     now would ship somebody's retirement accounts inside a link whose Tax tab
+     shows nothing of them, which is the leak this table exists to stop; the
+     opposite mistake, adding the card and forgetting the branches, shows the
+     recipient blanks. Neither is silent for long, and only one of them is a
+     privacy bug. */
+  tax:         ['side.tax'],
   comp:        ['people', 'side.comp', 'side.bonuses'],
   investments: ['side.portfolios', 'side.taxable'],
   /* No people: the trips and PTO tables name nobody — checked, not assumed. */
@@ -10815,6 +11023,7 @@ const BRANCH_OWNERS = {
   'side.donations': ['giving'], 'side.daf': ['giving'],
   'side.retirementAccounts': ['retirement'], 'side.limits': ['retirement'],
   'side.drawdown': ['retirement'],
+  'side.tax': ['tax'],
 };
 
 /* Deliberately not one label per branch: salary and bonus are one idea to a
@@ -10837,6 +11046,9 @@ const BRANCH_LABEL = {
   'side.retirementAccounts': 'your retirement accounts and what is in them',
   'side.limits': 'your contribution limits',
   'side.drawdown': 'what you plan to spend in retirement',
+  /* "the brackets you typed in", never "your tax": nothing in this branch is a
+     return, an assessment, or a figure the reader has actually paid. */
+  'side.tax': 'the tax brackets you have typed in',
 };
 
 const readBranch = (d, b) => b.startsWith('side.') ? (d.side || {})[b.slice(5)] : d[b];
@@ -10858,6 +11070,15 @@ function looksEmpty(v) {
    Investments to everyone. */
 const BRANCH_HAS_DATA = {
   'side.portfolios': (v) => (v || []).some(p => p && !looksEmpty(p.rows)),
+  /* Tax has data when it holds a TABLE. Two things it is guarding against, and
+     `blankState` is already careful about both — this is the belt to that
+     braces, because the branch has string-shaped fields and `looksEmpty` says
+     false to any string at all:
+       · `stateLabel`, if one ever survives empty, would offer a Tax link to
+         every plan in existence;
+       · `check.income` is the calculator's scratch figure, and a number typed
+         into a calculator is not a reason to send anybody anything. */
+  'side.tax': (v) => TAX_JURISDICTIONS.some(j => !looksEmpty((v || {})[j])),
 };
 
 /* A tab is worth sending when at least one of ITS OWN branches has something in
@@ -10913,6 +11134,12 @@ function shareYearUniverse(st) {
     ...Object.keys(side.limits || {}), ...Object.keys(side.donations || {}),
     ...(side.retirementAccounts || []).flatMap(a => Object.keys(a.contribs || {})),
     ...Object.keys((st.vacations || {}).pto || {}),
+    /* `side.tax` is deliberately NOT counted. The window is measured over the
+       years the plan RECORDS, and a bracket table is an assumption about a year
+       rather than a record of one — letting a table dated 2028 into the count
+       would quietly stretch what "the last 3 years" means for the budget grid
+       beside it. What that leaves — a table sitting outside the window — is
+       handled where it belongs, in trimTaxYearMap. */
   ]);
   return [...all].filter(y => /^\d{4}$/.test(y)).sort();
 }
@@ -10975,6 +11202,33 @@ function trimShareYearMap(map, cutoff, ceiling) {
   return out;
 }
 
+/* Bracket tables are year-keyed too, and they are trimmed DIFFERENTLY. Not a
+   special case for the sake of one: both differences follow from the same fact,
+   that a table is an ASSUMPTION about a year rather than a record of one.
+
+   · **The CUTOFF applies; the CEILING does not.** A table dated ahead of the
+     newest started year is a projection assumption exactly like the assumed
+     return, and the projections box is about the plans built on top of the
+     history, not about what the arithmetic is allowed to know. Dropping it
+     would change the recipient's FIGURES rather than shorten their link, which
+     is the opposite of the trade this window exists to make.
+
+   · **The newest table always travels, whatever the window.** Every projected
+     year reads the newest table at or before it — that is the carry-forward the
+     whole feature turns on — so a reader whose only table is dated 2024 and who
+     sends "the last 1 year" would otherwise hand over a plan with no table in
+     it at all, i.e. a silently tax-free retirement, in the one direction nobody
+     would check. Older tables below the cutoff still go: they are superseded,
+     and nothing on a projected year reads them. */
+function trimTaxYearMap(map, cutoff) {
+  const keys = Object.keys(map || {}).filter(y => /^\d{4}$/.test(y)).sort();
+  const newest = keys[keys.length - 1];
+  const out = {};
+  for (const k of keys)
+    if (k === newest || keepShareYear(k, cutoff, null)) out[k] = map[k];
+  return out;
+}
+
 /* Applies the window to everything year-keyed that isn't the grid itself. Runs
    on the CLONE, after the branches have been picked, so a tab left out of the
    link costs nothing here and a branch that travelled is trimmed exactly once. */
@@ -10985,6 +11239,9 @@ function trimShareYearMaps(data, cutoff, ceiling) {
     if (s[k]) s[k] = trimShareYearMap(s[k], cutoff, ceiling);
   for (const a of s.retirementAccounts || [])
     if (a.contribs) a.contribs = trimShareYearMap(a.contribs, cutoff, ceiling);
+  /* Cutoff only, and never the newest — see trimTaxYearMap. */
+  for (const j of TAX_JURISDICTIONS)
+    if (s.tax && s.tax[j]) s.tax[j] = trimTaxYearMap(s.tax[j], cutoff);
   const v = data.vacations || {};
   if (v.pto) v.pto = trimShareYearMap(v.pto, cutoff, ceiling);
   /* A trip with no year can't be placed at either end, so it stays: "unknown" is
@@ -11605,7 +11862,10 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
-  adultsOf, compPersonId, limitEarners, FILING_LABEL,
+  adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
+  /* Tax: step 1 is the shape only — the bands a stored table is allowed to
+     have, and the two lists that key it. taxOn and the gross-up land next. */
+  coerceTaxBands, TAX_JURISDICTIONS,
   JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears, enteredThroughOf, goalChartPoints,
   projectionYearsAfter, applyToRow, dropRow, swapRows, moveRowBefore, moveInList,
@@ -11617,7 +11877,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   SECTION_NEEDS, BRANCH_OWNERS, BRANCH_LABEL, SHARE_PREFIX, SHARE_FORMAT,
   parseShareScope, shareYearUniverse, shareCutoffYear, shareCeilingYear,
   shareStartedYear, shareFutureYears, keepShareYear,
-  trimShareYearMap, trimShareYearMaps, stripNotes, anonymisePeople,
+  trimShareYearMap, trimShareYearMaps, trimTaxYearMap, stripNotes, anonymisePeople,
   looksEmpty, sectionHasData, shareRangeNote, shareFutureNote, shareScopeNote,
   encodeShare, decodeShare };
 

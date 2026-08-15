@@ -3696,6 +3696,176 @@ t('converting warns when next year looks back into this one', () => {
   eq(H.rulesNeedingYear(s, '2030'), [], 'nothing after 2030 to break');
 });
 
+group('Tax — the shape of a table you typed');
+
+/* EVERY figure in this group is invented, on round thousands, at rates nobody
+   would mistake for a real schedule (10/20/30%). That is a rule, not a habit:
+   a realistic-looking bracket in a fixture is a shipped tax figure, and
+   somebody copies it out of here eventually. */
+
+t('a plan that has never typed a bracket carries no tax data at all', () => {
+  const s = H.coerceShape({});
+  eq(s.side.tax, { federal: {}, state: {} },
+    'exactly two empty maps — no stateLabel, no check, no placeholder year');
+  eq(H.sectionHasData(s, 'tax'), false, 'and so the Tax tab is not worth sending');
+  /* The trap this pins: looksEmpty says FALSE to any string at all, so a
+     stateLabel left as '' would offer everybody a Tax link. */
+  eq(H.looksEmpty(s.side.tax), true);
+});
+
+t('a bracket table is jurisdiction, then year, then filing status', () => {
+  const s = H.coerceShape({ side: { tax: {
+    federal: { '2026': { single: { bands: [{ upTo: 10000, rate: 0.10 },
+                                           { upTo: null, rate: 0.30 }],
+                                   deduction: 5000, source: '  a letter  ' } } },
+    state: { '2026': { joint: { bands: [{ upTo: null, rate: 0.05 }] } } } } } });
+  const fed = s.side.tax.federal['2026'].single;
+  eq(fed.bands, [{ upTo: 10000, rate: 0.10 }, { upTo: null, rate: 0.30 }]);
+  eq(fed.deduction, 5000);
+  eq(fed.source, 'a letter', 'trimmed, and kept as the reader wrote it');
+  eq(s.side.tax.state['2026'].joint.bands.length, 1, 'a flat state is one open band');
+  eq(H.sectionHasData(s, 'tax'), true);
+});
+
+t('a table filed under a status you have left is kept, not deleted', () => {
+  /* Filing status changes; the schedule you typed for the year you were single
+     is still the truth about that year. */
+  const s = H.coerceShape({ settings: { filingStatus: 'joint' }, side: { tax: {
+    federal: { '2026': {
+      single: { bands: [{ upTo: null, rate: 0.10 }] },
+      joint:  { bands: [{ upTo: null, rate: 0.20 }] } } } } } });
+  eq(Object.keys(s.side.tax.federal['2026']).sort(), ['joint', 'single']);
+});
+
+t('anything that is not a year, a status or a table is dropped', () => {
+  const s = H.coerceShape({ side: { tax: {
+    federal: { '2026': { single: { bands: [{ upTo: null, rate: 0.10 }] } },
+               'nope': { single: { bands: [{ upTo: null, rate: 0.10 }] } },
+               '26':   { single: { bands: [{ upTo: null, rate: 0.10 }] } },
+               '2025': { widowed: { bands: [{ upTo: null, rate: 0.10 }] } },
+               '2024': { single: { bands: [] } } },
+    state: {},
+    /* Neither is a jurisdiction, and neither may become one by being typed. */
+    local: { '2026': { single: { bands: [{ upTo: null, rate: 0.10 }] } } } } } });
+  eq(Object.keys(s.side.tax.federal), ['2026'],
+    'a non-YYYY key, an unknown filing status and a bandless record all go');
+  eq(s.side.tax.local, undefined, 'the jurisdictions are the two named ones');
+  eq(H.coerceShape({ side: { tax: { federal: 7, state: 'x' } } }).side.tax,
+    { federal: {}, state: {} }, 'a primitive where a map belongs empties');
+});
+
+t('bands must be objects, or a full-looking table would read as no tax', () => {
+  /* THE quiet failure: a hand-edited `bands: [23850, 0.10]` empties in silence,
+     leaving a table that taxes nothing while looking complete in the backup it
+     came from. */
+  eq(H.coerceTaxBands([23850, 0.10]), []);
+  eq(H.coerceTaxBands('10%'), []);
+  eq(H.coerceTaxBands(undefined), []);
+  eq(H.coerceTaxBands([[{ upTo: null, rate: 0.1 }]]), [], 'nor an array of arrays');
+});
+
+t('a band edge is read strictly, never through num()', () => {
+  /* num() turns what it cannot read into 0 — right for an amount, a disaster
+     for a band edge, because a 0 top edge is a band that taxes nothing and it
+     looks exactly like a figure somebody typed. Same trap as account.rate and
+     an income row's `from`. */
+  eq(H.coerceTaxBands([{ upTo: 'twenty thousand', rate: 0.1 },
+                       { upTo: null, rate: 0.2 }]),
+     [{ upTo: null, rate: 0.2 }], 'the unreadable band is dropped, not zeroed');
+  eq(H.coerceTaxBands([{ upTo: '10000', rate: 0.1 }, { upTo: null, rate: 0.2 }]),
+     [{ upTo: 10000, rate: 0.1 }, { upTo: null, rate: 0.2 }],
+     'a plainly numeric string is still a number');
+  eq(H.coerceTaxBands([{ upTo: 10000 }]), [], 'a band with no rate is not a band');
+  eq(H.coerceTaxBands([{ upTo: 10000, rate: 'x' }]), []);
+  eq(H.coerceTaxBands([{ rate: 0.2 }]), [{ upTo: null, rate: 0.2 }],
+     'an absent edge IS the open top band');
+});
+
+t('the open band is null, never Infinity', () => {
+  /* Infinity round-trips to null through JSON anyway, so storing it would mean
+     two spellings of one idea and only one of them surviving a backup. */
+  const [b] = H.coerceTaxBands([{ upTo: Infinity, rate: 0.3 }]);
+  eq(b, { upTo: null, rate: 0.3 });
+  eq(JSON.parse(JSON.stringify(H.coerceTaxBands([{ upTo: null, rate: 0.3 }]))),
+     [{ upTo: null, rate: 0.3 }], 'and it survives the trip');
+});
+
+t('a rate is clamped to 0–1, which is the gross-up solver’s precondition', () => {
+  /* Not tidiness. The bisection relies on net'(G) = 1 − m·tradShare staying
+     ≥ 0, which holds only while every marginal rate does; a hand-edited 500%
+     would hand it a function that runs backwards and it would converge on
+     nonsense rather than fail. */
+  eq(H.coerceTaxBands([{ upTo: 10000, rate: 5 }, { upTo: null, rate: -0.2 }]),
+     [{ upTo: 10000, rate: 1 }, { upTo: null, rate: 0 }]);
+  for (const b of H.coerceTaxBands([{ upTo: 1000, rate: 99 }, { upTo: null, rate: 3 }]))
+    ok(b.rate >= 0 && b.rate <= 1, 'every stored rate is a fraction of a dollar');
+});
+
+t('bands are sorted, de-overlapped, and the open band ends the table', () => {
+  eq(H.coerceTaxBands([{ upTo: null, rate: 0.3 }, { upTo: 20000, rate: 0.2 },
+                       { upTo: 10000, rate: 0.1 }]),
+     [{ upTo: 10000, rate: 0.1 }, { upTo: 20000, rate: 0.2 }, { upTo: null, rate: 0.3 }],
+     'typed out of order, stored in order');
+  eq(H.coerceTaxBands([{ upTo: 10000, rate: 0.1 }, { upTo: 10000, rate: 0.2 }]),
+     [{ upTo: 10000, rate: 0.1 }], 'a repeated edge says nothing new');
+  eq(H.coerceTaxBands([{ upTo: null, rate: 0.3 }, { upTo: null, rate: 0.4 }]),
+     [{ upTo: null, rate: 0.3 }], 'one open band, and it is the last thing in the table');
+  eq(H.coerceTaxBands([{ upTo: -5000, rate: 0.1 }, { upTo: null, rate: 0.2 }]),
+     [{ upTo: 0, rate: 0.1 }, { upTo: null, rate: 0.2 }], 'no band ends below zero');
+});
+
+t('a deduction is optional and never negative; a source is optional too', () => {
+  const one = (t) => H.coerceShape({ side: { tax: { federal: { '2026': { single:
+    Object.assign({ bands: [{ upTo: null, rate: 0.1 }] }, t) } } } } })
+    .side.tax.federal['2026'].single;
+  eq(one({}).deduction, undefined, 'absent is a real answer — a flat state has none');
+  eq(one({ deduction: 0 }).deduction, 0, 'and a typed zero is a statement');
+  eq(one({ deduction: -500 }).deduction, 0, 'taxableAfter floors at 0 either way');
+  eq(one({ source: '   ' }).source, undefined, 'a blank source is no source');
+  eq(one({ source: 'IRS Rev. Proc.' }).source, 'IRS Rev. Proc.');
+});
+
+t('the calculator’s scratch figure is not a reason to send anybody anything', () => {
+  const s = H.coerceShape({ side: { tax: { check: { income: 90000 } } } });
+  eq(s.side.tax.check, { income: 90000 }, 'it is kept — it is what you last asked');
+  eq(H.sectionHasData(s, 'tax'), false,
+    'but a number typed into a calculator is not a table');
+  eq(H.coerceShape({ side: { tax: { check: {} } } }).side.tax.check, undefined,
+    'and an empty one leaves no key behind');
+});
+
+t('an empty state label never survives, or every plan looks taxed', () => {
+  const label = (v) => H.coerceShape({ side: { tax: { stateLabel: v } } })
+    .side.tax.stateLabel;
+  eq(label(''), undefined);
+  eq(label('   '), undefined);
+  eq(label(42), undefined, 'nor anything that is not a string');
+  eq(label('  New York  '), 'New York');
+  const s = H.coerceShape({ side: { tax: { stateLabel: 'New York' } } });
+  eq(H.sectionHasData(s, 'tax'), false, 'a label on its own is still no table');
+});
+
+t('the two key lists are written out once', () => {
+  /* A table is keyed by filing status, and settings.filingStatus is validated
+     against the same list — the two drifting apart would file a table under a
+     status the app then refuses to select. */
+  eq(H.FILING_STATUSES, ['single', 'joint', 'separate']);
+  eq(H.TAX_JURISDICTIONS, ['federal', 'state']);
+  eq(Object.keys(H.blankState().side.tax), H.TAX_JURISDICTIONS);
+});
+
+t('the Tax tab is plumbed through everywhere a tab has to be', () => {
+  /* Step 1 of the tax plan is exactly this: the tab exists end to end before
+     anything is drawn on it. The VIEWS-loop tests above cover the share tables;
+     these are the sites they cannot see. */
+  ok(H.VIEWS.includes('tax'), 'it is a view');
+  eq(H.tabOrder({ tabOrder: ['giving'] }).includes('tax'), true,
+    'and a reader who dragged their tabs before it existed still gets it');
+  eq(H.BRANCH_OWNERS['side.tax'], ['tax']);
+  eq(H.SECTION_NEEDS.tax, ['side.tax'],
+    'its own branch only, for as long as the tab draws nothing else');
+});
+
 group('Share links — what travels');
 
 /* A fixture that has something on every tab, so "which branches went in the
@@ -3738,7 +3908,17 @@ function shareFixture() {
                                   '2026': [{ foundation: 'New', cash: 200 }] },
             limits: { '2026': {} },
             retirementAccounts: [{ name: '401(k)', kind: 'traditional', type: '401k',
-              owner: 'p1', balance: 1000, contribs: { '2020': 15000, '2026': 20000 } }] },
+              owner: 'p1', balance: 1000, contribs: { '2020': 15000, '2026': 20000 } }],
+            /* Invented rates on round thousands, never a real bracket — a
+               realistic-looking figure in a fixture is a shipped figure
+               somebody will copy out of here one day. */
+            tax: { federal: { '2020': { single: { bands: [{ upTo: 10000, rate: 0.10 },
+                                                          { upTo: null, rate: 0.20 }],
+                                                  deduction: 5000 } },
+                              '2026': { single: { bands: [{ upTo: 20000, rate: 0.10 },
+                                                          { upTo: null, rate: 0.30 }],
+                                                  deduction: 10000 } } },
+                   state: { '2026': { single: { bands: [{ upTo: null, rate: 0.05 }] } } } } },
     vacations: { trips: [{ id: 't0', name: 'Old', year: '2020', nights: 3, cost: 500,
                            note: 'Trip note' },
                          { id: 't1', name: 'Soon', year: '2026', nights: 4, cost: 900 },
@@ -3813,6 +3993,34 @@ t('the window reaches the salary history, the donations and the PTO too', () => 
   eq(Object.keys(d.vacations.pto), ['2026']);
   eq(d.vacations.trips.map(t => t.name), ['Soon', 'Booked ahead', 'No year'],
     'the old trip goes; one booked ahead and one with no year stay');
+  eq(Object.keys(d.side.tax.federal), ['2026'], 'a superseded table goes with the rest');
+});
+
+t('a bracket table is an assumption, so the window treats it differently', () => {
+  /* Two rules, and both are about the recipient's FIGURES rather than the
+     length of their link. Getting either wrong hands somebody a retirement
+     that quietly pays no tax. */
+  const s = shareFixture();
+
+  /* 1. The CEILING does not apply. A table dated past the newest started year
+        is a projection assumption, exactly like the assumed return. */
+  s.side.tax.federal['2028'] = { single: { bands: [{ upTo: null, rate: 0.40 }] } };
+  const ahead = H.trimShareYearMaps(JSON.parse(JSON.stringify(s)), null, '2026');
+  eq(Object.keys(ahead.side.tax.federal).sort(), ['2020', '2026', '2028'],
+    'the ceiling holds back the projections, never the tables they are computed with');
+  eq(Object.keys(ahead.side.limits), ['2026'], 'while the ceiling still bites elsewhere');
+
+  /* 2. The NEWEST table always travels, whatever the cutoff. Somebody whose
+        only table is dated 2020 and who sends "the last 1 year" must not hand
+        over a plan with no table in it at all. */
+  const old = { federal: { '2018': { single: { bands: [{ upTo: null, rate: 0.10 }] } },
+                           '2020': { single: { bands: [{ upTo: null, rate: 0.20 }] } } } };
+  eq(Object.keys(H.trimTaxYearMap(old.federal, '2026')), ['2020'],
+    'nothing survives the cutoff, so the newest is kept anyway');
+  eq(Object.keys(H.trimTaxYearMap(old.federal, '2019')), ['2020'],
+    'a superseded table below the cutoff is dropped');
+  eq(H.trimTaxYearMap(undefined, '2025'), {});
+  eq(H.trimTaxYearMap({}, '2025'), {}, 'no tables is not the same as one to rescue');
 });
 
 /* The fixture's 2026 is entered right through December, which would make a 2027

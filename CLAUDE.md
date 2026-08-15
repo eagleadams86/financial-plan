@@ -469,10 +469,17 @@ suite passed while the card was wrong.
   filled in. `by` is the one key in that record that isn't money — coerceShape
   must not let `num()` flatten it to 0. The 401(k) limit is per person; the Roth
   MAGI check is per household. **Filing status decides whose income is counted
-  and NOTHING else** — it deliberately sets no threshold, because those move
+  and NOTHING else here** — it deliberately sets no threshold, because those move
   every year and a figure shipped here would be quietly wrong within twelve
-  months while looking authoritative. The app has no tax model and must not grow
-  one.
+  months while looking authoritative. (Filing status has a second job since the
+  Tax tab arrived: it is the innermost key of a bracket table. Same principle —
+  it selects between tables the reader typed, and still sets no figure itself.)
+  **The rule this used to state as "the app has no tax model and must not grow
+  one" was two rules wearing one coat, and only one of them was ever the
+  point** — see "Tax" below. No shipped FIGURE is the real rule and it is
+  unchanged. Tax ARITHMETIC was never the point and was never obeyed: `magiCard`
+  has always computed a MAGI, measured it against a phase-out band and rendered
+  a verdict. What it does not do is *know* the threshold.
 - A row's `role` is `normal` / `transfer` (+ `transferTo`) / `passthrough`
   (+ `transferTo` + `creditTiming`). The old fixed names (midTransfer, zelle,
   charitable…) still arrive from backups and hand-built fixtures, so every
@@ -1272,10 +1279,12 @@ Things that are load-bearing and will look arbitrary later:
 - **Not in `settings`.** `buildSharePayload` sends `settings: state.settings`
   unconditionally, so anything there rides in EVERY link, including a
   holidays-only one. What a household spends is not that.
-- **No tax, no RMDs, no Roth-vs-traditional withdrawal order, ever.** Same rule
-  as the MAGI threshold and for the same reason. The honest substitute is the
-  `.note info` above the chart, which says the pot is one pot and to read the
-  target as pre-tax if the money is pre-tax.
+- **No RMDs and no Roth-vs-traditional withdrawal order, ever.** Same rule as the
+  MAGI threshold and for the same reason: every one of them is a figure with a
+  year attached. **Tax itself is no longer on that list** — the drawdown is
+  growing a gross-up off the bracket tables the reader types (see "Tax" below).
+  Until a table exists the projection is exactly what it always was, and the
+  `.note info` above the chart still says the pot is one pot.
 - **`SAFE_RATE_DEFAULT` is where the box starts, not advice.** 4% assumes a
   particular mix, a particular length of retirement and one country's history,
   none of which this app checks, and the hint says exactly that.
@@ -1363,6 +1372,97 @@ answer a different question from the grid, and a box nested in a box gives the
 reader two headers to fold and no way to guess which one they shut. `renderBudget`
 appends `yearNotes(y)` after the grid or summary card; both fold through the one
 mechanism below.
+
+## Tax
+
+**The principle: the app may COMPUTE tax; it may not KNOW a tax figure.** That
+is the rule the old "no tax model" line was reaching for and stating too widely.
+Brackets you type are the same shape as `magiLimit`/`k401Limit` — year-keyed and
+reader-owned — and the arithmetic over them is the same arithmetic `magiCard`
+has always done.
+
+Honoured concretely, and this is the part to hold the line on: **no bracket
+amount, rate or deduction is a literal ANYWHERE** — not a default, not a
+placeholder, not a realistic-looking fixture. The tests use 10/20/30% on round
+thousands, because a realistic figure in a fixture is a shipped figure somebody
+copies out one day. `LIMIT_DEFAULTS` is the one pre-existing exception and is
+deliberately NOT extended: a wrong limit is one card reading wrong, a wrong
+bracket table is forty years quietly reshaped. **A year with no table means no
+tax**, which is what makes the no-brackets promise true by construction rather
+than by good intentions.
+
+Still forbidden, for the original reason — each is a figure with a year
+attached: RMDs, a Roth-vs-traditional withdrawal order, the Social Security
+provisional-income formula, SALT/itemising, capital gains, NIIT, IRMAA.
+
+**Built so far (step 1 of the plan): the state, its coercion, the share tables
+and the tab. No calculator, no gross-up, no editors** — `renderTax` is one
+`.note info` saying what the tab will hold. `taxOn`/`grossUpDraw` and the wiring
+into `drawdownYears` come next, and the guard on that step is that **`the
+accumulation half is exactly what it always was` must pass UNEDITED**.
+
+```js
+side.tax = {
+  federal: { "2026": { joint: { bands: [{upTo, rate}, … {upTo: null, rate}],
+                                deduction?, source? } } },
+  state:   { "2026": { … } },
+  stateLabel?,          // absent by default — see the looksEmpty trap
+  check?: { income }    // the calculator's scratch figure
+}
+```
+
+- **Jurisdiction outermost** — federal and state move on different clocks, so
+  the carry-forward is per jurisdiction. **Year next**, so one trim does each.
+  **Filing status innermost**, keyed to `FILING_STATUSES` (written out once, and
+  the same list `settings.filingStatus` is validated against — the two drifting
+  would file a table under a status the app then refuses to select). **A table
+  for a status you have left is KEPT**: filing status changes, and the schedule
+  you typed for the year you were single is still the truth about that year.
+- **`bands` must be OBJECTS.** `arr()` filters to objects, so a hand-edited
+  `bands: [23850, 0.10]` empties SILENTLY — a table that reads "no tax" on
+  screen while looking perfectly full in the backup it came from. That is why
+  `coerceTaxBands` is its own function with its own tests rather than a line in
+  coerceShape's `arr()` loop.
+- **`upTo` is read STRICTLY, never through `num()`** — the trap that already bit
+  `account.rate` and an income row's `from`. num() turns garbage into a
+  deliberate-looking 0, and a 0 top edge is a band that taxes nothing.
+  **`upTo: null` is the open band, never `Infinity`** (which round-trips to null
+  through JSON anyway); `Infinity` is *accepted* on the way in for that exact
+  reason, so a table built in memory doesn't lose its top band.
+- **`rate` is CLAMPED to 0–1, and the clamp is the gross-up solver's
+  PRECONDITION, not tidiness** — the bisection relies on
+  `net'(G) = 1 − m·tradShare ≥ 0`, which holds only while every marginal rate
+  does. Pin it with its own test when the solver lands.
+- Bands are sorted with the open band last and overlaps dropped. **A record with
+  no readable band is deleted**, and so is a year left empty by that — half a
+  table standing would tax at rates the reader never managed to enter.
+- **`blankState().side.tax` is EXACTLY `{federal:{}, state:{}}` with no string
+  fields.** `looksEmpty` returns false for *any* string, so an empty
+  `stateLabel` would offer a Tax link to every plan in existence. coerceShape
+  deletes an empty one rather than keeping `''`, the branch has a CLOSED key set
+  (anything else is deleted), and `BRANCH_HAS_DATA['side.tax']` judges the tab
+  on its TABLES as belt to that braces — a number typed into the calculator is
+  not a reason to send anybody anything.
+- **`SECTION_NEEDS.tax` is `['side.tax']` and nothing more, for as long as the
+  tab draws nothing else.** The planned bridge card ("what the pot has to pay",
+  read off `drawdownYears`) needs Retirement's whole set, and it MUST be added
+  in the same commit as that card. Adding it early ships somebody's retirement
+  accounts inside a link whose Tax tab shows nothing of them.
+- **`trimTaxYearMap`, not `trimShareYearMap`** — and both differences follow
+  from a table being an ASSUMPTION about a year rather than a record of one.
+  The **CUTOFF applies, the CEILING does not** (a table dated ahead is a
+  projection assumption like the assumed return; dropping it would change the
+  recipient's figures rather than shorten their link — omitting this is a
+  privacy bug in reverse). And **the newest table always travels**, whatever the
+  window: every projected year reads the newest table at or before it, so a
+  reader whose only table is dated 2020 sending "the last 1 year" would
+  otherwise hand over a silently tax-free retirement. `side.tax` is deliberately
+  **out of `shareYearUniverse`** for the same reason — a table dated 2028 must
+  not stretch what "the last 3 years" means for the budget grid beside it.
+- **`VIEWS`, `FILING_STATUSES` and `TAX_JURISDICTIONS` all sit ABOVE `let state
+  = load()`** — the temporal-dead-zone rule at the top of this file. coerceShape
+  reads all three, `load()` swallows the ReferenceError, and the whole workbook
+  comes up blank.
 
 ## Folding a box up
 

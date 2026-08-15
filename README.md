@@ -188,12 +188,27 @@ included — treat those the way you treat the figures.
   **rate you call safe** — 4% is only where the box starts, not a figure this
   app endorses.
   **Everything on the tab is in today's money**, which is what makes the return
-  setting a *real* one (growth after inflation). There is deliberately **no tax
-  in any of it** and no required minimum distributions: the app keeps no tax
-  tables and won't grow any, and the tab says so rather than pretending.
+  setting a *real* one (growth after inflation). There is currently **no tax in
+  any of it** and no required minimum distributions, and the tab says so rather
+  than pretending — a pre-tax 401(k) has to pay out more than you spend, so this
+  projection is optimistic by whatever your rate turns out to be. The Tax tab
+  below is the beginning of fixing that.
   Contributions are rows you click to edit, one per year and account.
   The thresholds stay figures **you** type: they move every year and differ by
-  filing status, and the app deliberately keeps no tax tables.
+  filing status, and the app ships none of them.
+- **Tax** *(being built)* — a place to keep the bracket tables **you** type,
+  federal and state, so the retirement projection can eventually work out what a
+  withdrawal has to be *before* tax in order to leave you what you planned to
+  spend. **Nothing ships with the app**: no bracket, no rate, no deduction, not
+  even as a placeholder. A year with no table means no tax, so until you enter
+  one every figure on Retirement is exactly what it has always been. The app may
+  work tax out; it deliberately does not know what the tax is — the same rule
+  the contribution limits have always followed. It will not do required minimum
+  distributions, a Roth-versus-traditional withdrawal order, the Social Security
+  provisional-income formula, itemising, capital gains, NIIT or IRMAA; each is a
+  figure with a year attached that would be quietly wrong within twelve months
+  while looking authoritative. *Today the tab explains itself and stores what you
+  type; the tables, the calculator and the gross-up are still being built.*
 - **Compensation** — where comp stands, raises over time (the raise in dollars
   and how the salary actually moved since last year, which differ whenever
   something lands mid-year), and bonuses by year — one figure per year, editable
