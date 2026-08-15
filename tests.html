@@ -3197,6 +3197,38 @@ t('a zero rate is a real statement, and absent is a different one', () => {
   eq(blank.side.retirementAccounts[0].hasOwnProperty('rate'), false,
     'a rate that is not a figure is dropped, never defaulted to the global');
 });
+/* A retirement account can list what is inside it, the same {ticker, shares,
+   price} rows an investment pane holds. Its balance then FOLLOWS those rows. */
+t('an account with holdings takes its balance from them, one without keeps its own', () => {
+  const s = H.coerceShape({ side: { retirementAccounts: [
+    { name: 'Listed', type: '401k', amount: 999999,
+      rows: [{ ticker: 'AAA', shares: 10, price: 100 },
+             { ticker: 'BBB', shares: 5, price: 20.5 }] },
+    { name: 'Typed', type: '401k', amount: 12345 },
+    { name: 'Emptied', type: '401k', amount: 500, rows: [] }] } });
+  const [listed, typed, emptied] = s.side.retirementAccounts;
+  eq(H.retAcctBalance(listed), 1102.5, 'shares × price, added up — not the stale 999,999');
+  eq(H.retAcctBalance(typed), 12345, 'and a plain account is untouched');
+  eq(H.retAcctBalance(emptied), 500, 'an empty list is not a zero balance');
+  /* Editing a holding moves the balance with it, because nothing is stored. */
+  listed.rows[0].price = 110;
+  eq(H.retAcctBalance(listed), 1202.5);
+});
+t('holdings reach the projection, the split and the price lookup', () => {
+  const s = H.coerceShape({ settings: { retirementReturnAnnual: 0 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 }],
+    side: { retirementAccounts: [
+      { name: 'Pre-tax', type: '401k', amount: 0,
+        rows: [{ ticker: 'AAA', shares: 100, price: 60 }] },
+      { name: 'Roth', type: 'roth-401k', amount: 0,
+        rows: [{ ticker: 'BBB', shares: 100, price: 40 }] }],
+      drawdown: { income: [] } } });
+  eq(H.retirementPots(s, RET_FIX, 5).map(p => p.balance), [6000, 4000],
+    'each pot opens on what its holdings come to');
+  eq(H.drawdownYears(s, RET_FIX, 3)[0].open, 10000, 'and the chart starts on the sum');
+  const sp = H.retirementSplit(s, RET_FIX);
+  eq([sp.now.traditional, sp.now.roth], [6000, 4000], 'the split reads them too');
+});
 t('the split says what is Traditional and what is Roth, now and at retirement', () => {
   const s = deferralFixture({ settings: { retirementReturnAnnual: 0 },
     people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 }],

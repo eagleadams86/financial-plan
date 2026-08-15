@@ -155,6 +155,9 @@ included — treat those the way you treat the figures.
   go in, and what it is worth by the month the paying-in stops;
   **a growth rate per account** (leave it empty to follow Preferences) so a
   bond-heavy rollover and an all-equity Roth don't have to compound alike;
+  **the holdings inside each account** — the same ticker/shares/price rows an
+  investment pane takes, priced by the same lookup, and once an account lists
+  them its balance follows the holdings instead of a figure you typed;
   and a projection of where the balances are heading — counting **both** the
   IRA contribution rows you type and the **401(k) cards' own percentages**,
   carried forward in today's money until each of you retires and pro-rated

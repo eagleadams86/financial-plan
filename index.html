@@ -2009,6 +2009,11 @@ function coerceShape(data) {
       : (typeof raw === 'string' && raw.trim() !== ''
          && Number.isFinite(parseFloat(raw))) ? parseFloat(raw) : undefined;
     if (parsed === undefined) delete a.rate; else a.rate = parsed;
+    /* What is actually inside the account — the same {ticker, shares, price}
+       rows an investment pane holds, coerced the same way, so the whole price
+       lookup works on them without knowing where they live. */
+    a.rows = arr(a.rows);
+    a.rows.forEach(numHolding);
     for (const y of Object.keys(a.contribs || {})) a.contribs[y] = num(a.contribs[y]);
     /* Whose retirement account it is — the same owner field the budget
        accounts carry, and the one place "spouses have different retirement
@@ -4098,8 +4103,24 @@ function holdingList(key) {
     const pf = (state.side.portfolios || []).find(p => p.id === key.slice(3));
     return pf ? pf.rows : [];
   }
+  /* A retirement account's own holdings. Keyed by INDEX rather than an id
+     because that is the only handle these accounts have — the same `data-idx`
+     every editor on that tab uses. The key is stamped into freshly rendered
+     markup and read back on the click, so a reorder can't strand one. */
+  if (key && key.startsWith('ra:')) {
+    const a = (state.side.retirementAccounts || [])[+key.slice(3)];
+    return a ? (a.rows = a.rows || []) : [];
+  }
   return state.side[key] || [];
 }
+
+/* What an account is worth: the holdings inside it if it has any, otherwise the
+   balance typed on it. Derived, never stored — the moment a row is edited the
+   total has to follow, and a copy of it sitting in `amount` would be the stale
+   figure every other total on the tab was quietly adding up. `amount` stays as
+   what it always was for an account nobody has listed the contents of. */
+const retAcctBalance = (a) => (a && a.rows && a.rows.length)
+  ? holdingsValue(a.rows) : round2((a && a.amount) || 0);
 
 function holdingsTable(rows, list) {
   const body = rows.map((h, idx) => `<tr class="editrow" data-edit="holding"
@@ -4264,9 +4285,9 @@ function renderRetirement() {
 
   /* Traditional vs Roth, from the account list */
   const trad = round2(accts.filter(a => retKind(a) !== 'roth')
-    .reduce((t, a) => t + (a.amount || 0), 0));
+    .reduce((t, a) => t + retAcctBalance(a), 0));
   const roth = round2(accts.filter(a => retKind(a) === 'roth')
-    .reduce((t, a) => t + (a.amount || 0), 0));
+    .reduce((t, a) => t + retAcctBalance(a), 0));
   const total = round2(trad + roth);
   const tradPct = total ? trad / total : 0;
   /* The split PER PERSON is a table, not a second bar and not a chart line.
@@ -4280,9 +4301,9 @@ function renderRetirement() {
         const mine = accts.filter(a => (a.owner || '') === id);
         if (!mine.length) return '';
         const t = round2(mine.filter(a => retKind(a) !== 'roth')
-          .reduce((s, a) => s + (a.amount || 0), 0));
+          .reduce((s, a) => s + retAcctBalance(a), 0));
         const r = round2(mine.filter(a => retKind(a) === 'roth')
-          .reduce((s, a) => s + (a.amount || 0), 0));
+          .reduce((s, a) => s + retAcctBalance(a), 0));
         return `<tr><th scope="row">${esc(label)}</th><td>${fmtMoney(t)}</td>
           <td>${fmtMoney(r)}</td><td>${fmtMoney(round2(t + r))}</td></tr>`;
       }).join('');
@@ -4314,7 +4335,7 @@ function renderRetirement() {
         ${showOwner ? `<td style="text-align:left">${
           esc(ownerLabel(state, a.owner)) || '<span class="muted">—</span>'}</td>` : ''}
         <td style="text-align:left">${esc(RET_TYPE_LABEL[a.type] || 'Other')}</td>
-        <td>${fmtMoney(a.amount || 0)}</td>
+        <td>${fmtMoney(retAcctBalance(a))}</td>
         <td>${(a.contribs || {})[year] ? fmtMoney(a.contribs[year]) : ''}</td></tr>`).join('')}</tbody>
       <tfoot><tr><th>Total</th>${showOwner ? '<td></td>' : ''}<td></td>
         <td>${fmtMoney(total)}</td><td></td></tr></tfoot>
@@ -4363,6 +4384,7 @@ function renderRetirement() {
       ${iraAccts.length ? `<div class="addbar"><button class="btn small" data-add="contrib"
         >＋ Add a contribution</button></div>` : ''}
     </div>
+    ${accts.length ? retHoldingsPanes() : ''}
     ${accts.length ? splitAtRetirementCard() : ''}
     ${iraAccts.length ? iraProjectionCard() : ''}
     ${limitEarners(state).map(id => `<div class="card" data-box="k401-${esc(id || 'all')}">
@@ -4477,6 +4499,36 @@ function costsCard() {
     ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-edit="drawdown"
       >✎ Edit the figures</button></div>`}
   </div>`;
+}
+
+/* What is actually inside each retirement account. The same holdings table the
+   Investments tab draws for a brokerage pane, keyed `ra:<index>` — one table,
+   one editor, one price lookup, wherever the rows happen to live.
+
+   An account with holdings takes its BALANCE from them (`retAcctBalance`), so
+   the figure on the split, in the projection and in every total follows the
+   rows the moment one is edited. An account with none keeps the balance typed
+   on it, which is what every account did before this existed. */
+function retHoldingsPanes() {
+  const accts = state.side.retirementAccounts || [];
+  const panes = accts.map((a, idx) => {
+    const rows = a.rows || [];
+    return `<div class="card" data-box="ra-${idx}">
+      <h2>${esc(retAcctLabel(a))}${viewOnly ? '' : ` <button class="h-edit"
+        data-edit="retAcct" data-idx="${idx}"
+        title="Edit this account's type, balance or growth rate">✎ Edit</button>`}</h2>
+      <p class="sub">${rows.length
+        ? `Value is shares × price — <strong>${fmtMoney(retAcctBalance(a))}</strong>, which is
+           the balance the rest of this tab uses for it.`
+        : `Using the balance typed on it — <strong>${fmtMoney(retAcctBalance(a))}</strong> —
+           until you list what's inside, after which the balance follows the holdings.`}</p>
+      ${holdingsTable(rows, 'ra:' + idx)}
+    </div>`;
+  }).join('');
+  /* A plain grid cell rather than a card wrapping cards: `wireBoxes` folds
+     anything with `.card` and its own heading, and a card with neither would
+     be furniture pretending to be content. */
+  return `<div style="grid-column:1/-1"><div class="cards2">${panes}</div></div>`;
 }
 
 /* Traditional against Roth at the moment the money starts being spent — the
@@ -5160,7 +5212,7 @@ function retirementPots(st, thisYear, span) {
       }
     }
     return { key: `a${idx}`, idx, label: a.name, kind: retKind(a),
-             rate: accountRate(st, a), balance: round2(a.amount || 0), contribs };
+             rate: accountRate(st, a), balance: retAcctBalance(a), contribs };
   });
   const deferral = { traditional: {}, roth: {} };
   for (const id of limitEarners(st)) {
@@ -5225,7 +5277,7 @@ function iraOutlook(st, thisYear) {
     const rate = latestContrib(a);
     const typed = a.contribs || {};
     const r = accountRate(st, a);   // its own, or the one in Preferences
-    let bal = round2(a.amount || 0), paid = 0, years = 0, projected = 0;
+    let bal = retAcctBalance(a), paid = 0, years = 0, projected = 0;
     if (stop) {
       const stopYear = +stop.slice(0, 4);
       for (let y = thisYear + 1; y <= stopYear; y++) {
@@ -5244,7 +5296,7 @@ function iraOutlook(st, thisYear) {
        stored `kind` field rather than `type` — so an unused copy of it here is
        a field that can be quietly wrong for as long as nobody looks. */
     return { idx, name: a.name, owner: a.owner,
-             stop, balanceNow: round2(a.amount || 0), yearly: rate,
+             stop, balanceNow: retAcctBalance(a), yearly: rate,
              years, paid, projected, atStop: bal };
   });
 }
@@ -6927,6 +6979,10 @@ const noQuoteFresh = (q) => !!q && q.noQuote === true
 /* Every ticker across the three holdings tables, deduplicated. */
 const priceLists = () => [
   ...(state.side.portfolios || []).map(pf => pf.rows),
+  /* Retirement holdings are quoted like any other — one list, so the refresh,
+     the staleness count and the six-hour cache all cover them without knowing
+     which tab they are shown on. */
+  ...(state.side.retirementAccounts || []).map(a => a.rows || []),
   state.side.daf || [],
 ];
 function allTickers() {
@@ -8520,7 +8576,17 @@ const EDITORS = {
       { key: 'name', label: 'Account', type: 'text' },
       { key: 'type', label: 'Type', type: 'select',
         options: RET_TYPES.map(([v, label]) => [v, label]) },
-      { key: 'amount', label: 'Balance', type: 'money' },
+      /* Once an account lists what is inside it, its balance is the sum of
+         those rows and this box must stop being typeable — a figure you can
+         edit and that is then ignored is worse than no figure at all. It
+         becomes a readout, which `readFields` skips, so `save` keeps whatever
+         was stored rather than reading `undefined` and zeroing it. */
+      ...((ds.idx !== undefined
+           && ((state.side.retirementAccounts[+ds.idx] || {}).rows || []).length)
+        ? [{ key: 'amountRead', label: 'Balance', type: 'readout',
+             hint: 'Shares × price, added up from the holdings listed for this account. '
+               + 'Edit a holding to change it.' }]
+        : [{ key: 'amount', label: 'Balance', type: 'money' }]),
       /* Blank, not prefilled with the global: absent means "follow Preferences",
          and a copy of today's figure sitting in the account would stop doing
          that the moment the setting changed. */
@@ -8536,15 +8602,25 @@ const EDITORS = {
         hint: 'Retirement accounts belong to one person — there is no joint one.' }] : []),
     ],
     get: (ds) => ({ ...state.side.retirementAccounts[+ds.idx],
+                    amountRead: fmtMoney(retAcctBalance(state.side.retirementAccounts[+ds.idx])),
                     owner: state.side.retirementAccounts[+ds.idx].owner || '' }),
     blank: () => ({ type: '401k' }),
     save(ds, v) {
       const list = state.side.retirementAccounts;
       const old = ds.idx !== undefined ? list[+ds.idx] : null;
       const type = RET_TYPE_LABEL[v.type] ? v.type : 'other';
+      /* `contribs` and `rows` are NOT on this form, so they are carried across
+         by hand — this save rebuilds the row from scratch and anything it
+         doesn't name is gone. That is the trap every new per-account field
+         falls into; see the note in CLAUDE.md. */
       const row = { name: v.name || '?', type,
         kind: (RET_TYPES.find(t => t[0] === type) || [])[2] || 'traditional',
-        amount: v.amount ?? 0, contribs: { ...(old?.contribs || {}) } };
+        /* `v.amount` is undefined when the box was a readout, which is not the
+           same as an empty box: keep what was stored, so listing holdings and
+           later clearing them leaves the old typed balance intact. */
+        amount: v.amount ?? (old?.amount ?? 0),
+        contribs: { ...(old?.contribs || {}) },
+        rows: [...(old?.rows || [])] };
       /* Empty DELETES rather than storing 0: a 0% account is a real statement
          (cash, say) and "follow Preferences" is a different one. */
       if (v.rate !== null && v.rate !== undefined) row.rate = v.rate;
@@ -10359,7 +10435,10 @@ const BRANCH_LABEL = {
   'side.taxable': 'your investment holdings',
   'side.donations': 'your donations',
   'side.daf': 'your giving fund',
-  'side.retirementAccounts': 'your retirement accounts',
+  /* The holdings inside them travel with them, which is right — an account's
+     balance IS its holdings once they are listed, so sending the account
+     without them would send a figure the recipient couldn't see the basis of. */
+  'side.retirementAccounts': 'your retirement accounts and what is in them',
   'side.limits': 'your contribution limits',
   'side.drawdown': 'what you plan to spend in retirement',
 };
@@ -11127,6 +11206,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   limitsForIn, plannedDeferral, plannedContribs,
   isIra, iraAccountsOf, latestContrib, contribStopMonth, iraOutlook,
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
+  retAcctBalance, holdingsValue,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,

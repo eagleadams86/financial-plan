@@ -157,7 +157,23 @@ family names as well as balances.
   `ruleDesc()` renders a rule with its
   row's own numbers — use it, not RULE_LABEL, wherever a rule is named next
   to a specific row.
-- **A RETIREMENT account has no id — it is addressed by its INDEX**, unlike a
+- **A retirement account can list its HOLDINGS**, the same `{ticker, shares,
+price}` rows an investment pane holds, keyed `ra:<index>` through the existing
+`holdingList()`. One table, one editor, one price lookup, wherever the rows
+live — `priceLists()` includes them, so the refresh, the staleness count and the
+six-hour cache cover them for free.
+**`retAcctBalance(a)` is the one balance reader**: the holdings if there are
+any, otherwise the `amount` typed on it. Derived, never stored — a copy in
+`amount` would be the stale figure every total on the tab was quietly adding
+up. `amount` is kept untouched underneath as the fallback, so listing holdings
+and later clearing them restores the typed figure. The editor's Balance box
+becomes a `readout` once holdings exist (a figure you can edit and that is then
+ignored is worse than none), and because `readFields` skips a readout, `save`
+falls back to the stored `amount` rather than reading `undefined` and zeroing
+it. **`retAcct.save` rebuilds the row from scratch, so `rows` is carried across
+by hand exactly like `contribs`** — that is the trap every new per-account field
+falls into.
+**A RETIREMENT account has no id — it is addressed by its INDEX**, unlike a
 budget account, whose `id` is permanent and load-bearing. `retAcct.save` builds
 `{name, type, kind, amount, contribs, owner?}` and nothing anywhere adds an id;
 every editor, delete and move keys off `data-idx`. So **never match a retirement
