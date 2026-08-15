@@ -2183,6 +2183,18 @@ function coerceShape(data) {
     if (r.from === undefined) delete r.from;
     if (r.to === undefined) delete r.to;
     if (!ownerOk(r.person)) delete r.person;
+    /* How much of this row the brackets see. **Absent is a different answer
+       from 0** and must stay one: absent is "nobody has said", which the card
+       shows as an em dash and counts out loud, while a stored 0 is the reader
+       saying this money is untaxed. Read strictly for the same reason
+       `account.rate` is — num() would turn a corrupt field into a
+       deliberate-looking 0% and quietly wipe the bill. Clamped to 0–1, since a
+       share of a payment is what it is. */
+    for (const k of ['taxPct', 'stateTaxPct']) {
+      const v = r[k];
+      if (typeof v === 'number' && Number.isFinite(v)) r[k] = Math.min(1, Math.max(0, v));
+      else delete r[k];
+    }
   }
 
   /* ── The bracket tables ───────────────────────────────────────────────────
@@ -5652,14 +5664,233 @@ function iraOutlook(st, thisYear) {
   });
 }
 
+/* ── What the brackets you typed actually say ───────────────────────────────
+   Pure over a table, never over state, so every one of these is pinned by a
+   test with invented rates. NOTHING here knows a tax figure: a table is
+   something the reader entered, and no table means no tax.
+
+   Two layers on purpose. `taxRaw`/`taxableAfterRaw` are UNROUNDED and exist for
+   the solver below; the rounded pair is what everything else uses. Rounding
+   inside the solver turns a strictly increasing function into a staircase, and
+   a bisection chasing a staircase lands wherever it happens to stop. */
+
+function taxRaw(taxable, table) {
+  const bands = (table && table.bands) || [];
+  const t = Math.max(0, taxable || 0);
+  if (!bands.length || t <= 0) return 0;
+  let owed = 0, from = 0;
+  for (const b of bands) {
+    const top = (b.upTo === null || b.upTo === undefined) ? Infinity : b.upTo;
+    if (t <= from) break;
+    owed += (Math.min(t, top) - from) * b.rate;
+    from = top;
+  }
+  /* THE CLIFF, and the one failure this could not afford. A table typed only as
+     far as somebody bothered to read it has a FINITE top band, and income above
+     that band must be taxed at its rate rather than falling to zero — a
+     schedule entered up to 100,000 must not make the 100,001st dollar free.
+     Unreachable when the table ends in an open band, which is the normal case:
+     `from` is Infinity by then. */
+  if (t > from) owed += (t - from) * bands[bands.length - 1].rate;
+  return owed;
+}
+const taxOn = (taxable, table) => round2(taxRaw(taxable, table));
+
+/* What the brackets are applied TO. Floors at 0: a deduction bigger than the
+   income is not a negative tax, it is nothing owed. */
+const taxableAfterRaw = (income, table) =>
+  Math.max(0, (income || 0) - ((table && table.deduction) || 0));
+const taxableAfter = (income, table) => round2(taxableAfterRaw(income, table));
+
+/* NULL, never 0, when there is nothing to measure — the house rule `impliedRate`
+   already follows. A 0% reads as "you pay no tax"; the truth in both these cases
+   is that the question has not been asked. */
+function effectiveRateOn(income, table) {
+  const base = Math.max(0, income || 0);
+  if (!base || !((table && table.bands) || []).length) return null;
+  return taxOn(taxableAfter(base, table), table) / base;
+}
+
+/* The rate the NEXT dollar meets. Shown by the calculator beside the effective
+   rate, because the two answer different questions and a reader who knows one
+   figure usually knows that one. */
+function marginalRateOn(taxable, table) {
+  const bands = (table && table.bands) || [];
+  if (!bands.length) return null;
+  const t = Math.max(0, taxable || 0);
+  let from = 0;
+  for (const b of bands) {
+    const top = (b.upTo === null || b.upTo === undefined) ? Infinity : b.upTo;
+    if (t < top) return b.rate;
+    from = top;
+  }
+  /* Above a truncated table's top band — the same cliff rule as taxRaw. */
+  return bands[bands.length - 1].rate;
+}
+
+/* The newest table at or before a year, per jurisdiction, FOR THE CURRENT
+   FILING STATUS ONLY. Returns `{table, fromYear}` rather than a bare table so
+   the tab can say "2045 is using your 2026 federal table" — carrying one forty
+   years forward in silence would be putting words in the reader's mouth.
+
+   A table filed under a status they have left is deliberately skipped rather
+   than borrowed: the schedules genuinely differ, and quietly taxing a married
+   couple on a single filer's brackets is a wrong answer wearing a right one's
+   clothes. `taxStatusGap` below is what says so out loud instead. */
+function taxTableFor(st, jurisdiction, year, filing) {
+  const byYear = ((st.side || {}).tax || {})[jurisdiction] || {};
+  const status = filing || (st.settings || {}).filingStatus || 'single';
+  let out = null;
+  for (const y of Object.keys(byYear).filter(k => /^\d{4}$/.test(k)).sort()) {
+    if (y > String(year)) break;
+    const t = byYear[y][status];
+    if (t && (t.bands || []).length) out = { table: t, fromYear: y };
+  }
+  return out;
+}
+
+/* Both jurisdictions at once — what the projection reads for a given year. */
+const taxTablesFor = (st, year, filing) => ({
+  federal: taxTableFor(st, 'federal', year, filing),
+  state: taxTableFor(st, 'state', year, filing),
+});
+
+/* Which jurisdictions hold tables that the CURRENT filing status can't read.
+   Somebody who typed a single-filer schedule and later married would otherwise
+   see their tax silently drop to nothing, which is the most flattering possible
+   way to be wrong. */
+function taxStatusGap(st, year, filing) {
+  const status = filing || (st.settings || {}).filingStatus || 'single';
+  const out = [];
+  for (const j of TAX_JURISDICTIONS) {
+    const byYear = ((st.side || {}).tax || {})[j] || {};
+    const years = Object.keys(byYear).filter(k => /^\d{4}$/.test(k) && k <= String(year));
+    if (!years.length) continue;
+    if (!taxTableFor(st, j, year, status)) out.push(j);
+  }
+  return out;
+}
+
+/* The tax owed, and the taxable income it is measured on, for a GIVEN
+   withdrawal. Separate from the solver because the answer is needed twice and
+   for different reasons: the solver asks it repeatedly while searching, and the
+   projection asks it once more at the end about the draw it actually took —
+   which is not the same figure when the pot ran dry. Accepts either a bare
+   table or a `{table, fromYear}` from `taxTableFor`. */
+/* UNROUNDED, and that matters: this is what the solver calls on every step, and
+   rounding to the cent inside it turns a strictly increasing function into a
+   staircase the bisection would chase. Everything user-facing goes through
+   `taxAtDraw` below, which rounds once at the end. */
+function taxBillRaw(G, opts) {
+  const o = opts || {};
+  const fedT = o.federal && (o.federal.table || o.federal);
+  const stT = o.state && (o.state.table || o.state);
+  const share = Math.min(1, Math.max(0, o.tradShare || 0));
+  const g = Math.max(0, G || 0);
+  const fedOther = Math.max(0, o.taxableOther || 0);
+  const stOther = Math.max(0, o.stateTaxableOther || 0);
+  return (fedT ? taxRaw(taxableAfterRaw(fedOther + g * share, fedT), fedT) : 0)
+       + (stT ? taxRaw(taxableAfterRaw(stOther + g * share, stT), stT) : 0);
+}
+
+function taxAtDraw(G, opts) {
+  const o = opts || {};
+  const fedT = o.federal && (o.federal.table || o.federal);
+  const stT = o.state && (o.state.table || o.state);
+  const share = Math.min(1, Math.max(0, o.tradShare || 0));
+  const g = Math.max(0, G || 0);
+  /* NO TABLE, NOTHING TAXABLE — not "nothing taxed on an income of X". With no
+     brackets there is no measure, so reporting a taxable figure would be the
+     app describing a quantity nobody defined; the projection's record would
+     then carry a taxable income beside a tax of zero, which reads as a bug and
+     is the wrong kind of confident. */
+  if (!fedT && !stT) return { tax: 0, taxable: 0 };
+  const other = Math.max(0, (fedT ? o.taxableOther : o.stateTaxableOther) || 0);
+  return { tax: round2(taxBillRaw(g, o)),
+           /* Measured BEFORE any deduction — on the federal basis where there
+              is one, since that is the figure a reader recognises as "my
+              taxable income". */
+           taxable: round2(other + g * share) };
+}
+
+/* ── The withdrawal that pays its own tax ───────────────────────────────────
+   Solves `income + G − tax(taxableOther + G·tradShare) ≥ spend` for G.
+
+   BY BISECTION, and chosen over the closed form deliberately. The function is
+   piecewise-linear and exactly solvable, but doing it that way needs four
+   special cases (which band the answer lands in, the deduction, a truncated
+   table, a zero denominator) that nobody gets right twice — and the test for
+   the bisection is stronger than the test for either: **net(G) ≥ spend and
+   net(G − 0.01) < spend**, which is the definition of the answer rather than a
+   re-derivation of the arithmetic.
+
+   It is well-behaved because `net'(G) = 1 − m·tradShare ≥ 0` — and THAT is why
+   coerceTaxBands clamps every rate to 0–1. The clamp is this function's
+   precondition, not tidiness; there is a test that says so.
+
+   Returns `{draw, tax, taxable, capped}`. `capped` rather than hanging is the
+   answer for a table that cannot reach the target at all. */
+function grossUpDraw(spend, income, opts) {
+  const o = opts || {};
+  const fed = o.federal || null;
+  const stt = o.state || null;
+  const inc = income || 0;
+  const target = spend || 0;
+  const plain = Math.max(0, round2(target - inc));
+
+  /* NO TABLES, NO TAX — and this returns the literal expression it replaces,
+     character for character, so a plan that has never typed a bracket draws
+     exactly what it always drew. The regression guard depends on it. */
+  if (!fed && !stt) return { draw: plain, tax: 0, taxable: 0, capped: false };
+  /* Nothing is being spent, so nothing is withdrawn. Without this a TAXABLE
+     income row would start draining the pot at 45 — net(0) would sit below a
+     target of 0 the moment tax was owed on money arriving while still working. */
+  if (!(target > 0)) return { draw: 0, tax: 0, taxable: 0, capped: false };
+
+  /* The solver's own net — unrounded end to end, for the reason on
+     `taxBillRaw`. `plain` above is the only rounded figure in here, and the
+     final answer is rounded exactly once, at the return. */
+  const net = (G) => inc + G - taxBillRaw(G, o);
+
+  const settle = (G, capped) =>
+    Object.assign({ draw: G, capped: !!capped }, taxAtDraw(G, o));
+
+  /* Already covered: the income alone, after its own tax, meets the target. */
+  if (net(0) >= target) return settle(0, false);
+
+  /* Bracket by doubling. 60 is far past any plan — it is the guard against a
+     table that can never reach the target (every dollar taxed at 100% with a
+     fully pre-tax pot), which must say so rather than loop for ever. */
+  let hi = Math.max(plain, 1), doubles = 0;
+  while (net(hi) < target) {
+    hi *= 2;
+    if (++doubles > 60) return settle(round2(hi), true);
+  }
+  /* Bisect on the INTERVAL, keeping `net(hi) ≥ target` as the invariant, so the
+     answer is approached from the side that meets the target. 60 halvings takes
+     any plan below a millionth of a cent. */
+  let lo = 0;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (net(mid) >= target) hi = mid; else lo = mid;
+  }
+  /* ROUNDED UP to the cent, the only rounding in here: the target must be met
+     and never missed by half a penny. */
+  return settle(Math.ceil(hi * 100) / 100, false);
+}
+
 /* One record a year: `{ y, open, growth, contrib, income, spend, draw, short,
-   close, phase }`. Money only — ages, names and whose retirement falls where
+   close, phase }`, plus `{tax, taxable, tradShare, want}` since the brackets
+   arrived. Money only — ages, names and whose retirement falls where
    are derived at render time, the way `ownerSubtotals` derives over balances
    the engine already worked out. */
 function drawdownYears(st, thisYear, span) {
   const dd = st.side.drawdown || {};
   const fromMonth = drawdownFromMonth(st, thisYear);
   const target = dd.spend || 0;
+  /* Read once: the tables are looked up per year (they carry forward), but
+     WHOSE tables never changes inside one projection. */
+  const filing = (st.settings || {}).filingStatus || 'single';
   const pots = retirementPots(st, thisYear, span);
   const rows = [];
   /* Each pot is rounded to the cent every year, because that is what an
@@ -5687,21 +5918,46 @@ function drawdownYears(st, thisYear, span) {
        by somebody else's retirement month. */
     const share = retiredShareOf(y, fromMonth);
     const spend = round2(target * share);
-    const want = Math.max(0, round2(spend - income));
     const pot = round2(open + growth + contrib);
-    /* Never more than there is. The pot floors at zero and `short` records
-       what the plan could not pay — a negative balance would be a debt the app
-       has no way to model and no business inventing. */
-    const draw = Math.min(want, Math.max(0, pot));
-    /* Taken PRO RATA across the pots, in proportion to what each holds. That
-       is deliberately not a strategy: which account you would spend first is a
-       tax decision, this app models no tax and must not grow one, and drawing
-       proportionally is the only split that expresses no opinion — it leaves
-       the Traditional/Roth mix exactly where it was. */
+    /* The pots AFTER this year's growth and contributions, worked out before
+       the draw rather than after it, because that is the money being drawn and
+       therefore the mix the taxman sees. */
     const before = bal.map((v, j) => round2(v + grown[j] + put[j]));
     const gross = before.reduce((t, v) => t + v, 0);
+    /* How much of a withdrawal is taxable. Read off `before`, and NOTHING FEEDS
+       BACK: drawing pro rata takes the same proportion out of each pot, so the
+       ratio is exactly where it started and the draw cannot change its own
+       taxable share. That is the strongest argument yet against ever making
+       this a withdrawal-order strategy — the moment it became one, this figure
+       would depend on the answer it is used to compute. */
+    const tradShare = gross > 0
+      ? before.reduce((t, v, j) => t + (pots[j].kind === 'traditional' ? v : 0), 0) / gross
+      : 0;
+    const tables = taxTablesFor(st, y, filing);
+    const bill = { federal: tables.federal, state: tables.state, tradShare,
+                   taxableOther: taxableIncomeIn(dd.income, y, 'federal'),
+                   stateTaxableOther: taxableIncomeIn(dd.income, y, 'state') };
+    /* What has to come out so that what is LEFT is what the reader planned to
+       spend. With no tables this is the literal `max(0, spend − income)` the
+       line used to be — see grossUpDraw's first early return. */
+    const want = grossUpDraw(spend, income, bill).draw;
+    /* Never more than there is. The pot floors at zero and `short` records
+       what the plan could not pay — a negative balance would be a debt the app
+       has no way to model and no business inventing. `short` stays GROSS: it is
+       what the pot could not produce, which is what `runsOutYear` keys off. */
+    const draw = Math.min(want, Math.max(0, pot));
+    /* Measured on what was ACTUALLY drawn, not on what was wanted. A pot that
+       ran dry pays tax on the smaller sum it managed, and saying otherwise
+       would invent a bill against money that never moved. */
+    const settled = taxAtDraw(draw, bill);
+    /* Taken PRO RATA across the pots, in proportion to what each holds. That
+       is deliberately not a strategy: which account you would spend first is a
+       tax decision this app deliberately holds no opinion on, and drawing
+       proportionally is the only split that expresses none — it leaves the
+       Traditional/Roth mix exactly where it was. */
     bal = before.map(v => gross > 0 ? round2(v - draw * (v / gross)) : v);
-    rows.push({ y, open, growth, contrib, income, spend, draw, share,
+    rows.push({ y, open, growth, contrib, income, spend, draw, share, want,
+                tax: settled.tax, taxable: settled.taxable, tradShare,
                 short: round2(want - draw), close: round2(pot - draw),
                 phase: spend > 0 ? 'drawing' : 'saving' });
   }
@@ -5786,6 +6042,29 @@ function incomeIn(list, y) {
     if (typeof r.from !== 'number' || y < r.from) continue;
     if (typeof r.to === 'number' && y > r.to) continue;
     out += r.amount || 0;
+  }
+  return round2(out);
+}
+
+/* How much of that income the brackets get to see. Each row carries its own
+   share — Social Security is taxed differently from a pension, and a state
+   often taxes neither the way the federal government does, which is why there
+   is a separate `stateTaxPct` that FALLS BACK to the federal figure rather than
+   to zero (defaulting a state share to nothing would quietly halve the bill).
+
+   **Absent is 0% and it is said out loud** rather than assumed — the card
+   counts the rows that have not answered and shows an em dash against each. A
+   silent 0 here is the difference between "this pension is untaxed" and "nobody
+   has said yet", and only one of those is something the app may decide. */
+function taxableIncomeIn(list, y, which) {
+  let out = 0;
+  for (const r of (list || [])) {
+    if (typeof r.from !== 'number' || y < r.from) continue;
+    if (typeof r.to === 'number' && y > r.to) continue;
+    const pct = which === 'state'
+      ? (typeof r.stateTaxPct === 'number' ? r.stateTaxPct : r.taxPct)
+      : r.taxPct;
+    out += (r.amount || 0) * Math.min(1, Math.max(0, pct || 0));
   }
   return round2(out);
 }
@@ -11863,9 +12142,13 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
-  /* Tax: step 1 is the shape only — the bands a stored table is allowed to
-     have, and the two lists that key it. taxOn and the gross-up land next. */
+  /* Tax. The shape a stored table is allowed to have, what the brackets say,
+     and the withdrawal that pays its own bill. All pure over a table, never
+     over a shipped figure. */
   coerceTaxBands, TAX_JURISDICTIONS,
+  taxOn, taxRaw, taxableAfter, taxableAfterRaw, effectiveRateOn, marginalRateOn,
+  taxTableFor, taxTablesFor, taxStatusGap, taxAtDraw, taxBillRaw, grossUpDraw,
+  taxableIncomeIn,
   JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears, enteredThroughOf, goalChartPoints,
   projectionYearsAfter, applyToRow, dropRow, swapRows, moveRowBefore, moveInList,

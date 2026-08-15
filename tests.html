@@ -3567,6 +3567,302 @@ t('a plan-to year exists exactly where a retirement year does', () => {
   eq(H.planToYearOf({ ...sam, role: 'child' }), null);
 });
 
+group('What the brackets say');
+
+/* Invented rates on round thousands throughout — 10/20/30% over 10k/20k bands.
+   A realistic bracket in a fixture is a shipped tax figure. */
+const T10_30 = { bands: [{ upTo: 10000, rate: 0.10 }, { upTo: 20000, rate: 0.20 },
+                         { upTo: null, rate: 0.30 }], deduction: 5000 };
+const FLAT20 = { bands: [{ upTo: null, rate: 0.20 }], deduction: 10000 };
+
+t('tax is a progressive sum over the bands', () => {
+  eq(H.taxOn(0, T10_30), 0);
+  eq(H.taxOn(5000, T10_30), 500, 'inside the first band');
+  eq(H.taxOn(10000, T10_30), 1000, 'exactly on a band edge — the lower rate still');
+  eq(H.taxOn(15000, T10_30), 2000, '1000 + 5000 at 20%');
+  eq(H.taxOn(20000, T10_30), 3000, 'the second edge');
+  eq(H.taxOn(30000, T10_30), 6000, '1000 + 2000 + 10000 at 30%');
+  eq(H.taxOn(-5000, T10_30), 0, 'a negative income owes nothing');
+  eq(H.taxOn(50000, { bands: [] }), 0, 'no bands, no tax');
+  eq(H.taxOn(50000, null), 0, 'and no table at all is no tax either');
+});
+
+t('income above a truncated table is taxed at its top band, never at zero', () => {
+  /* THE silent cliff, and the one failure this could not afford: a schedule
+     somebody typed only as far as they read must not make the next dollar
+     free. */
+  const cut = { bands: [{ upTo: 10000, rate: 0.10 }, { upTo: 20000, rate: 0.20 }] };
+  eq(H.taxOn(20000, cut), 3000, 'up to the end of the table, as normal');
+  eq(H.taxOn(30000, cut), 5000, '3000 + 10000 more at the top band’s 20%');
+  eq(H.taxOn(30000, cut) > H.taxOn(20000, cut), true, 'and it never goes backwards');
+  /* Against the open-ended sibling: identical below the cut, and the only
+     difference above it is which rate applies — not whether one does. */
+  eq(H.taxOn(9000, cut), H.taxOn(9000, T10_30));
+});
+
+t('what the brackets are applied to floors at zero', () => {
+  eq(H.taxableAfter(50000, T10_30), 45000);
+  eq(H.taxableAfter(3000, T10_30), 0, 'a deduction bigger than the income is not a refund');
+  eq(H.taxableAfter(50000, { bands: [] }), 50000, 'no deduction, nothing taken off');
+});
+
+t('a rate with nothing to measure is null, never 0', () => {
+  /* The house rule `impliedRate` already follows: 0% reads as "you pay no tax",
+     when the truth is that the question has not been asked. */
+  eq(H.effectiveRateOn(0, T10_30), null);
+  eq(H.effectiveRateOn(50000, { bands: [] }), null, 'nor with no table to read');
+  eq(H.effectiveRateOn(50000, null), null);
+  approx(H.effectiveRateOn(30000, FLAT20), 0.1333, 'measured on the WHOLE income', 0.0001);
+  eq(H.marginalRateOn(5000, T10_30), 0.10);
+  eq(H.marginalRateOn(15000, T10_30), 0.20);
+  eq(H.marginalRateOn(99000, T10_30), 0.30);
+  eq(H.marginalRateOn(10000, T10_30), 0.20, 'on an edge, the next dollar is the next band');
+  eq(H.marginalRateOn(5000, { bands: [] }), null);
+});
+
+t('a table carries forward, per jurisdiction and per filing status', () => {
+  const s = H.coerceShape({ settings: { filingStatus: 'single' }, side: { tax: {
+    federal: { '2026': { single: T10_30 }, '2030': { single: FLAT20 } },
+    state: { '2026': { single: { bands: [{ upTo: null, rate: 0.05 }] } } } } } });
+  eq(H.taxTableFor(s, 'federal', 2026).fromYear, '2026');
+  eq(H.taxTableFor(s, 'federal', 2029).fromYear, '2026', 'the newest at or before');
+  eq(H.taxTableFor(s, 'federal', 2030).fromYear, '2030', 'and it takes over in its year');
+  eq(H.taxTableFor(s, 'federal', 2045).fromYear, '2030', 'carried forward for ever after');
+  eq(H.taxTableFor(s, 'federal', 2020), null, 'nothing before the first table');
+  /* The two jurisdictions move on different clocks — that is why they nest
+     that way round. */
+  eq(H.taxTableFor(s, 'state', 2045).fromYear, '2026');
+  eq(H.taxTableFor(s, 'state', 2020), null);
+});
+
+t('a table for a filing status you have left is not quietly borrowed', () => {
+  /* Taxing a married couple on a single filer's schedule is a wrong answer
+     wearing a right one's clothes. It reads as no table, and taxStatusGap is
+     what says so out loud instead. */
+  const s = H.coerceShape({ settings: { filingStatus: 'joint' }, side: { tax: {
+    federal: { '2026': { single: T10_30 } } } } });
+  eq(H.taxTableFor(s, 'federal', 2030), null, 'joint cannot read a single table');
+  eq(H.taxTableFor(s, 'federal', 2030, 'single').fromYear, '2026', 'asked for by name it is there');
+  eq(H.taxStatusGap(s, 2030), ['federal'], 'and the gap is reported');
+  eq(H.taxStatusGap(s, 2030, 'single'), [], 'no gap for the status that has one');
+  eq(H.taxStatusGap(H.coerceShape({}), 2030), [], 'a plan with no tables has no gap');
+  eq(H.taxStatusGap(s, 2020), [], 'nor a year before any table was typed');
+});
+
+group('The withdrawal that pays its own tax');
+
+/* The property that DEFINES the answer, checked rather than re-derived: enough
+   comes out, and a penny less would not be.
+
+   Measured with the solver's own UNROUNDED bill (`taxBillRaw`). Rounding the
+   tax to the cent first is what the reader is shown, but it moves the net by up
+   to half a penny either way — enough to make "a cent less would not reach the
+   target" read as false when it is true. Round the measuring stick and you are
+   testing the rounding, not the answer. */
+function pinsGrossUp(spend, income, o, why) {
+  const g = H.grossUpDraw(spend, income, o);
+  const net = (G) => income + G - H.taxBillRaw(G, o);
+  ok(net(g.draw) >= spend, `${why}: net ${net(g.draw)} reaches ${spend}`);
+  if (g.draw > 0)
+    ok(net(g.draw - 0.01) < spend,
+      `${why}: a cent less (${net(g.draw - 0.01)}) would not`);
+  return g;
+}
+
+t('with no tables the gross-up is the expression it replaces', () => {
+  /* Character for character — this is what keeps a plan that never typed a
+     bracket drawing exactly what it always drew. */
+  for (const [spend, income] of [[40000, 0], [40000, 15000], [40000, 60000], [0, 0]])
+    eq(H.grossUpDraw(spend, income, {}).draw, Math.max(0, H.round2(spend - income)),
+      `${spend} spend against ${income} income`);
+  eq(H.grossUpDraw(40000, 0, {}).tax, 0);
+});
+
+t('nothing spent means nothing withdrawn, even with taxable income arriving', () => {
+  /* Without this a taxable income row starts draining the pot at 45. */
+  const g = H.grossUpDraw(0, 50000, { federal: T10_30, tradShare: 1, taxableOther: 50000 });
+  eq(g.draw, 0);
+  eq(g.tax, 0);
+});
+
+t('an all-Roth pot needs no gross-up at all', () => {
+  const g = pinsGrossUp(40000, 0,
+    { federal: T10_30, tradShare: 0, taxableOther: 0 }, 'all Roth');
+  eq(g.draw, 40000, 'none of it is taxable, so the draw is the shortfall exactly');
+  eq(g.tax, 0);
+});
+
+t('spending covered by taxed income STILL needs a withdrawal', () => {
+  /* The case that proves want ≠ max(0, spend − income), and the one nobody
+     predicts: 60,000 arrives, 55,000 is wanted, and the old line would have
+     drawn nothing while the tax bill went unpaid. */
+  const o = { federal: FLAT20, tradShare: 1, taxableOther: 60000 };
+  eq(Math.max(0, H.round2(55000 - 60000)), 0, 'the old expression says draw nothing');
+  const g = pinsGrossUp(55000, 60000, o, 'income covered but taxed');
+  eq(g.draw, 6250, 'net(6250) = 60000 + 6250 − 0.2×(60000 + 6250 − 10000) = 55000');
+  eq(H.round2(60000 + g.draw - g.tax), 55000, 'and it lands exactly on the target');
+});
+
+t('the gross-up crosses a band edge without losing the target', () => {
+  const o = { federal: T10_30, tradShare: 1, taxableOther: 0 };
+  const g = pinsGrossUp(40000, 0, o, 'across the bands');
+  ok(g.draw > 40000, 'more comes out than is spent');
+  ok(g.taxable > 20000, 'and the answer really does sit above the top edge');
+});
+
+t('a state table stacks on top of the federal one', () => {
+  const fedOnly = H.grossUpDraw(40000, 0, { federal: T10_30, tradShare: 1 });
+  const both = pinsGrossUp(40000, 0,
+    { federal: T10_30, state: { bands: [{ upTo: null, rate: 0.05 }] }, tradShare: 1 },
+    'federal and state');
+  ok(both.draw > fedOnly.draw, 'a second jurisdiction means a bigger withdrawal');
+  const stateOnly = pinsGrossUp(40000, 0,
+    { state: { bands: [{ upTo: null, rate: 0.05 }] }, tradShare: 1 }, 'state alone');
+  ok(stateOnly.draw > 40000, 'a state table alone is still a gross-up');
+});
+
+t('a rate the pot can never out-earn says so rather than hanging', () => {
+  /* Every dollar taxed at 100% against a fully pre-tax pot: no withdrawal ever
+     nets anything, and the honest answer is to stop and say so. */
+  const g = H.grossUpDraw(40000, 0,
+    { federal: { bands: [{ upTo: null, rate: 1 }] }, tradShare: 1 });
+  eq(g.capped, true);
+  ok(g.draw > 0, 'it still reports the figure it reached');
+});
+
+t('convergence holds as a property, over a grid', () => {
+  /* Stronger than any single worked example: for every combination the answer
+     meets the target and a penny less does not. */
+  for (const spend of [1000, 40000, 250000])
+    for (const income of [0, 20000, 60000])
+      for (const share of [0, 0.35, 1])
+        for (const table of [T10_30, FLAT20])
+          pinsGrossUp(spend, income, { federal: table, tradShare: share,
+            taxableOther: income }, `${spend}/${income}/${share}`);
+});
+
+t('the rate clamp is the solver’s precondition, not tidiness', () => {
+  /* net'(G) = 1 − m·tradShare stays ≥ 0 only while every marginal rate does.
+     coerceShape is what guarantees it, so this pins the two together. */
+  const wild = H.coerceShape({ side: { tax: { federal: { '2026': { single: {
+    bands: [{ upTo: 10000, rate: 5 }, { upTo: null, rate: -3 }] } } } } } });
+  const bands = wild.side.tax.federal['2026'].single.bands;
+  eq(bands.map(b => b.rate), [1, 0], 'clamped on the way in');
+  for (const b of bands) ok(b.rate >= 0 && b.rate <= 1);
+  pinsGrossUp(40000, 0, { federal: { bands }, tradShare: 0.5 }, 'a clamped table still solves');
+});
+
+group('Tax reaches the projection');
+
+t('with no tables the drawing half is what it always was, to the cent', () => {
+  /* The sibling of the accumulation guard, and the same discipline: the old
+     formula is recomputed here rather than quoted. */
+  const s = potFixture();
+  const rows = H.drawdownYears(s, RET_FIX, 25);
+  for (const r of rows) {
+    eq(r.want, Math.max(0, H.round2(r.spend - r.income)), `${r.y} want`);
+    eq(r.draw, Math.min(r.want, Math.max(0, H.round2(r.open + r.growth + r.contrib))),
+      `${r.y} draw`);
+    eq(r.short, H.round2(r.want - r.draw), `${r.y} short`);
+    eq(r.close, H.round2(r.open + r.growth + r.contrib - r.draw), `${r.y} close`);
+    eq(r.tax, 0, `${r.y} pays no tax`);
+    eq(r.taxable, 0, `${r.y} has nothing taxable`);
+  }
+});
+
+/* A pot half pre-tax and half Roth, with a federal table from 2026. */
+function taxedPotFixture(over) {
+  return potFixture(Object.assign({
+    side: {
+      retirementAccounts: [{ name: '401(k)', type: '401k-mixed', amount: 1000000,
+        contribs: {}, buckets: [
+          { label: 'Pre-tax', kind: 'traditional', amount: 500000 },
+          { label: 'Roth', kind: 'roth', amount: 500000 }] }],
+      drawdown: { spend: 40000, income: [] },
+      tax: { federal: { '2026': { single: T10_30 } }, state: {} },
+    },
+  }, over || {}));
+}
+
+t('a table makes the withdrawal bigger than the spending target', () => {
+  const plain = H.drawdownYears(potFixture({ side: {
+    retirementAccounts: [{ name: '401(k)', type: '401k-mixed', amount: 1000000,
+      contribs: {}, buckets: [{ label: 'Pre-tax', kind: 'traditional', amount: 500000 },
+                              { label: 'Roth', kind: 'roth', amount: 500000 }] }],
+    drawdown: { spend: 40000, income: [] } } }), RET_FIX, 25);
+  const taxed = H.drawdownYears(taxedPotFixture(), RET_FIX, 25);
+  const p = plain.find(r => r.phase === 'drawing');
+  const t = taxed.find(r => r.phase === 'drawing');
+  eq(p.draw, p.spend, 'without a table the draw is the target');
+  ok(t.draw > t.spend, 'with one, more has to come out');
+  ok(t.tax > 0, 'and the year owes something');
+  /* What is left is what was planned to be spent — met and never missed. The
+     draw is rounded UP to the cent deliberately, so it may land a penny over;
+     landing under is the failure this is here to catch. */
+  const left = H.round2(t.draw - t.tax);
+  ok(left >= t.spend && left <= t.spend + 0.01,
+    `left ${left} covers the ${t.spend} target without overshooting`);
+});
+
+t('the taxable share is the pot’s own mix, and the draw does not change it', () => {
+  /* Drawing pro rata takes the same proportion from every pot, so the ratio is
+     exactly where it started — which is the strongest argument against ever
+     making this a withdrawal-order strategy. */
+  const rows = H.drawdownYears(taxedPotFixture(), RET_FIX, 25);
+  const drawing = rows.filter(r => r.phase === 'drawing');
+  for (const r of drawing) approx(r.tradShare, 0.5, `${r.y} stays half pre-tax`, 1e-9);
+  const allTrad = H.drawdownYears(taxedPotFixture({ side: {
+    retirementAccounts: [{ name: '401(k)', type: '401k', amount: 1000000, contribs: {},
+      kind: 'traditional' }],
+    drawdown: { spend: 40000, income: [] },
+    tax: { federal: { '2026': { single: T10_30 } }, state: {} } } }), RET_FIX, 25);
+  const a = allTrad.find(r => r.phase === 'drawing');
+  const h = drawing[0];
+  eq(a.tradShare, 1, 'a wholly pre-tax pot is wholly taxable');
+  ok(a.draw > h.draw, 'and so it has to pay out more than the half-Roth one');
+});
+
+t('a year with no table for it pays no tax, even beside years that have one', () => {
+  const s = taxedPotFixture();
+  /* The table starts in 2026 and RET_FIX is 2030, so every projected year
+     reads it. Move it out of reach and the tax goes with it. */
+  const later = H.drawdownYears(H.coerceShape(Object.assign(JSON.parse(JSON.stringify(s)),
+    { side: Object.assign({}, s.side, { tax: { federal: { '2099': { single: T10_30 } } } }) })),
+    RET_FIX, 25);
+  eq(later.every(r => r.tax === 0), true, 'a table dated past the plan taxes nothing');
+  eq(later.find(r => r.phase === 'drawing').draw,
+     later.find(r => r.phase === 'drawing').spend, 'and the draw is the bare target');
+});
+
+t('the pot running dry pays tax on what it actually managed', () => {
+  const s = taxedPotFixture({ side: {
+    retirementAccounts: [{ name: '401(k)', type: '401k', kind: 'traditional',
+      amount: 30000, contribs: {} }],
+    drawdown: { spend: 200000, income: [] },
+    tax: { federal: { '2026': { single: T10_30 } }, state: {} } } });
+  const rows = H.drawdownYears(s, RET_FIX, 25);
+  const dry = rows.find(r => r.short > 0);
+  ok(dry, 'the pot does run out');
+  ok(dry.short > 0, 'and `short` is what it could not produce');
+  ok(dry.tax <= H.taxAtDraw(dry.draw, { federal: T10_30, tradShare: 1 }).tax + 0.01,
+    'the bill is measured on the draw it took, not the one it wanted');
+  eq(rows.every(r => r.close >= 0), true, 'and it never goes negative');
+});
+
+t('other income carries its own taxable share, federal and state apart', () => {
+  const list = [{ label: 'Social Security', amount: 30000, from: 2030, taxPct: 0.85,
+                  stateTaxPct: 0 },
+                { label: 'Pension', amount: 20000, from: 2030 }];
+  eq(H.taxableIncomeIn(list, 2030, 'federal'), 25500, '85% of the first, none of the second');
+  eq(H.taxableIncomeIn(list, 2030, 'state'), 0, 'a state share of 0 is a real answer');
+  eq(H.taxableIncomeIn(list, 2029, 'federal'), 0, 'before it starts, nothing');
+  /* An absent state share falls back to the FEDERAL figure rather than to
+     zero — defaulting it to nothing would quietly halve the bill. */
+  eq(H.taxableIncomeIn([{ amount: 10000, from: 2030, taxPct: 0.5 }], 2030, 'state'), 5000);
+  eq(H.taxableIncomeIn([{ amount: 10000, from: 2030 }], 2030, 'federal'), 0,
+    'and absent altogether is 0% — said out loud on the card, never guessed at');
+});
+
 group('Building next year early');
 t('a year built before it arrives is not the year the app reads', () => {
   const s = H.coerceShape(fixtureState());
