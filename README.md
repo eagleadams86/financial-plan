@@ -124,9 +124,12 @@ included — treat those the way you treat the figures.
   so a month the plan has merely worked out never reads as one that happened,
   whether it's next month or a year you've built ahead.
 - **Household** — who the plan is for: a partner, your children. Each person
-  has a role, an optional birth month and (for an adult) a retirement age and a
-  **plan-to age** — how far the retirement projection runs for them, a planning
-  horizon rather than a guess at a lifespan. Their age, retirement year and the
+  has a role, an optional birth month and (for an adult) a retirement age —
+  halves allowed, for anyone waiting until exactly 59½ — **which month of that
+  year it lands in** (their birthday, or the January before or after it, since
+  "retires at 55" is several different dates), and a **plan-to age**: how far
+  the retirement projection runs for them, a planning horizon rather than a
+  guess at a lifespan. Their age, retirement year and the
   month a child turns 18 are all **worked out rather than stored**, so none of
   it goes stale. Naming people unlocks the
   rest: every account can say whose it is — theirs, yours, **Joint**, or not
@@ -150,6 +153,9 @@ included — treat those the way you treat the figures.
   retirement age on the Household tab, and only for somebody who has both,
   since the alternative is a date you never gave.
   **Past the first of those retirements the line bends and the pot pays out.**
+  Retire mid-year and that first year only spends the months left in it, so the
+  figures on the card beside the chart describe the first **whole** year — a
+  withdrawal rate read off a two-month year would be a sixth of the real one.
   You set what the household spends a year and the pot covers whatever
   **other retirement income** — Social Security, a pension, a partner still
   working — doesn't; the drawing years are drawn in a tighter dash, a solid rule

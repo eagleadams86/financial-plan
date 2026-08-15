@@ -1063,6 +1063,27 @@ Things that are load-bearing and will look arbitrary later:
   leaves an untouched plan's projection climbing exactly as it always did; a
   stored 0 would be a claim that the household spends nothing. The editor
   DELETES on an empty box for the same reason.
+- **"Retires at 55" is four dates, and the reader picks one.** The first version
+  silently chose 1 January of the year you turn 55 — the only one of the four
+  nobody means — because `retirementYearOf` sliced the year off the birthday
+  month and the drawdown started at the top of it. `person.retireWhen` is
+  `birthday` (the default, and absent when it is), `jan-that-year` or
+  `jan-after`; `retirementMonthOf` is now the primitive and `retirementYearOf`
+  is its year, so every existing caller moved with it for free. `retireAge`
+  takes halves, because "not a day before 59½" is a real decision made for real
+  tax reasons and it only needs month resolution to express.
+- **The first year of retirement is usually a PART year, and is pro-rated.**
+  `retiredShareOf(y, fromMonth)` is `(13 - month)/12` in the year they go and 1
+  after it. Retiring in November is two months of spending; calling it twelve
+  overstated that first withdrawal six-fold. Income is deliberately NOT
+  pro-rated with it — an income row's start year is the reader's own statement,
+  not something to be second-guessed by somebody else's retirement month.
+  **The safe-rate check is measured on the first WHOLE year** (`outlook.rateYear`,
+  distinct from `firstDrawYear`), or it would call a plan safe on the strength
+  of a two-month year; `outlook.partYear` is what makes the card say the two are
+  different years instead of quietly showing one under the other's label. The
+  year-by-year table's age column reads December, not mid-year, so the row where
+  somebody retires at 55 doesn't say 54.
 - **The pot starts paying at the FIRST retirement in the household**, never a
   year in the past. Two people retiring in different years is a DATA question,
   not a branch: the one still working puts their pay in Other Retirement Income

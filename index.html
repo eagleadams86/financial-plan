@@ -1542,10 +1542,42 @@ function ageAt(person, month) {
   if (!person || !person.birth || !month) return null;
   return Math.floor(monthDiff(person.birth, month) / 12);
 }
-function retirementYearOf(person) {
+/* "Retires at 55" is at least four different dates, and the projection used to
+   pick one of them silently — 1 January of the year you turn 55, which is the
+   only one of the four nobody actually means. So the reader says which:
+
+     birthday    the month they reach the age. What the words plainly mean, and
+                 the default. It is also the only option that can express "not a
+                 day before 59½", which is a real decision people make for real
+                 tax reasons — a fractional age lands on the right MONTH.
+     jan-that-year   1 January of the year they reach it. Someone who wants a
+                 clean tax year and is happy to go a few months early.
+     jan-after   1 January after it. Work the year out, leave in the new one.
+
+   A MONTH, not a year, because the first year of retirement is usually a part
+   year: retiring in November means two months of spending in that year, not
+   twelve, and calling it twelve overstates the first withdrawal by a factor of
+   six. `drawdownYears` pro-rates it off this. Everything that only needs the
+   year takes `retirementYearOf` below and is untouched. */
+const RETIRE_WHEN = [
+  ['birthday', 'On their birthday'],
+  ['jan-that-year', 'January of that year'],
+  ['jan-after', 'The January after'],
+];
+function retirementMonthOf(person) {
   if (!person || person.role === 'child') return null;
   if (!person.birth || !person.retireAge) return null;
-  return +monthAdd(person.birth, Math.round(person.retireAge * 12)).slice(0, 4);
+  /* Rounded to the nearest MONTH, which is what makes 59.5 land in the month
+     they turn 59½ rather than needing a day-level model the rest of this app
+     hasn't got. */
+  const at = monthAdd(person.birth, Math.round(person.retireAge * 12));
+  if (person.retireWhen === 'jan-that-year') return `${at.slice(0, 4)}-01`;
+  if (person.retireWhen === 'jan-after') return `${+at.slice(0, 4) + 1}-01`;
+  return at;
+}
+function retirementYearOf(person) {
+  const m = retirementMonthOf(person);
+  return m ? +m.slice(0, 4) : null;
 }
 /* How far the retirement projection runs for somebody — a PLANNING HORIZON,
    not a guess at a lifespan: the whole point of the exercise is to find out
@@ -1728,6 +1760,10 @@ function coerceShape(data) {
        refuses instead, which is the discipline retireAge already follows —
        one place decides who has a date, not two. */
     p.planToAge = num(p.planToAge);
+    /* Where in the year that age lands. Only a value the app offers survives —
+       anything else is dropped rather than carried, so nothing downstream has
+       to re-check it, and absent means the default ('birthday'). */
+    if (!['jan-that-year', 'jan-after'].includes(p.retireWhen)) delete p.retireWhen;
     peopleIds.add(p.id);
   }
   /* An owner naming someone who has been deleted degrades to unassigned. The
@@ -3017,7 +3053,11 @@ const HELP = {
       + 'both of those gets a rule: the date would be a guess. '
       + 'From the FIRST of those retirements the line bends: the pot starts paying the '
       + 'spending target you set, less whatever arrives from elsewhere, and the drawing '
-      + 'years are drawn in a tighter dash. Everything is in today\'s money, so the return '
+      + 'years are drawn in a tighter dash. "Retires at 55" is several different dates, so '
+      + 'each person says which one they mean — their birthday month, or the January '
+      + 'before or after it. Retire mid-year and that first year only spends the months '
+      + 'left in it, which is why the figures on the card beside the chart describe the '
+      + 'first WHOLE year instead. Everything is in today\'s money, so the return '
       + 'is a real one — growth after inflation. There is no tax in any of it, and no '
       + 'required minimum distributions; this app keeps no tax tables and will not grow '
       + 'any.' },
@@ -3027,7 +3067,11 @@ const HELP = {
       + 'that figure is the one most often quoted, not one this app endorses. It assumes '
       + 'a particular mix of investments, a particular length of retirement and one '
       + 'country\'s history, and none of those are checked here. Set the rate you '
-      + 'believe, the same way you set the Roth income threshold.' },
+      + 'believe, the same way you set the Roth income threshold. '
+      + 'It is measured on the first WHOLE year of retirement, not on the year you '
+      + 'actually go: retire in November and that year takes two months of spending, so a '
+      + 'rate read there would be a sixth of the real one and would call a plan safe on '
+      + 'the strength of a year that never happens again.' },
   retIncome: { title: 'Other Retirement Income',
     body: 'Money that arrives in retirement without coming out of the pot — Social '
       + 'Security, a pension, part-time work. The pot only covers what these don\'t, so '
@@ -4047,11 +4091,14 @@ function renderHousehold() {
   const now = thisMonth();
   const rows = people.map((p, idx) => {
     const age = ageAt(p, now);
-    const retires = retirementYearOf(p);
+    const retires = retirementMonthOf(p);
     const major = majorityMonthOf(p);
     /* One "what's next" column rather than two mostly-empty ones: an adult has
-       a retirement year, a child has an 18th birthday, and neither has both. */
-    const ahead = retires ? `Retires in ${retires}`
+       a retirement month, a child has an 18th birthday, and neither has both.
+       The MONTH, because the projection starts drawing the pot down in it —
+       naming only the year would leave eleven months of ambiguity in the one
+       place the reader comes to check the date. */
+    const ahead = retires ? `Retires in ${esc(monthLabelFull(retires))}`
       : major ? `Turns 18 in ${esc(monthLabelFull(major))}`
       : '<span class="muted">—</span>';
     return `<tr class="editrow" data-edit="person" data-idx="${idx}"
@@ -4321,19 +4368,27 @@ function costsCard() {
   /* The rate is a PILL with a glyph and words, never a colour on its own. The
      pot it is measured against is the one the money came OUT of — the opening
      balance plus what that year added, which is what "a 4% withdrawal" means. */
-  const first = rows.find(t => t.phase === 'drawing');
   const rateFoot = out.impliedRate === null ? ''
-    : `${(out.impliedRate * 100).toFixed(2)}% of ${fmtMoney(
-        round2(first.open + first.growth + first.contrib))}
+    : `${(out.impliedRate * 100).toFixed(2)}% of ${fmtMoney(out.firstPot)}
        <span class="pill ${out.impliedRate > safe ? 'warn' : 'good'}">${
         out.impliedRate > safe ? '!' : '✓'} ${
         out.impliedRate > safe ? 'above' : 'within'} the ${
         (safe * 100).toFixed(2)}% you call safe</span>`;
+  /* The tiles describe the first WHOLE year, which is a different year from the
+     one the pot starts paying in whenever somebody retires mid-year. Say which
+     year they are, rather than letting "first year" quietly mean two things. */
+  const of = out.rateYear === null ? '' : ` in ${out.rateYear}`;
+  const start = drawdownFromMonth(state, new Date().getFullYear());
 
   return `<div class="card">
     <h2>What Retirement Costs${helpBtn('safeRate', 'the withdrawal rate')}</h2>
     <p class="sub">${out.firstDrawYear === null
       ? 'Nothing is being drawn down yet — either nobody has a retirement year on the Household tab, or no spending target has been set.'
+      : out.partYear
+      ? `The pot starts covering the household in <strong>${esc(monthLabelFull(start))}</strong>,
+         so ${out.firstDrawYear} takes only ${Math.round(
+           rows.find(t => t.phase === 'drawing').share * 12)} months of it. The figures below
+         are the first whole year.`
       : `The pot starts covering the household in <strong>${out.firstDrawYear}</strong>.`}</p>
     <div class="goalgrid">
       ${tile('Spending a year', dd.spend ? fmtMoney(dd.spend) : null,
@@ -4341,14 +4396,14 @@ function costsCard() {
           ? `In today's money.${seed ? ` Your ${esc(seed.year)} Expenses total is ${fmtMoney(seed.value)}.` : ''}`
           : `Type one in and the pot starts paying.${
               seed ? ` Your ${esc(seed.year)} Expenses total is ${fmtMoney(seed.value)}.` : ''}`)}
-      ${tile('Other income, first year',
+      ${tile(`Other income${of}`,
         out.firstIncome === null ? null : fmtMoney(out.firstIncome),
         out.firstIncome ? esc(andList((state.side.drawdown.income || [])
-            .filter(r => typeof r.from === 'number' && r.from <= out.firstDrawYear
-              && (typeof r.to !== 'number' || r.to >= out.firstDrawYear))
+            .filter(r => typeof r.from === 'number' && r.from <= out.rateYear
+              && (typeof r.to !== 'number' || r.to >= out.rateYear))
             .map(r => r.label || 'Unnamed')))
           : 'Nothing arriving that year — the pot covers all of it.')}
-      ${tile('Out of the pot, first year',
+      ${tile(`Out of the pot${of}`,
         out.firstDraw === null ? null : fmtMoney(out.firstDraw),
         out.firstDraw === null ? 'No withdrawal to measure yet.' : rateFoot)}
     </div>
@@ -4414,7 +4469,11 @@ function drawdownTable() {
      the moment it starts being spent rather than one row into it. */
   const shown = rows.filter(t => t.y >= out.firstDrawYear - 1);
   const people = adultsOf(state).filter(p => p.birth);
-  const ages = (y) => people.map(p => `${esc(p.name)} ${ageAt(p, `${y}-06`)}`).join(', ');
+  /* The age they REACH in that year, read at December rather than mid-year.
+     Sampled in June, the row where somebody retires at 55 said 54 whenever
+     their birthday fell in the second half of the year — the table arguing
+     with the retirement age two cards above it. */
+  const ages = (y) => people.map(p => `${esc(p.name)} ${ageAt(p, `${y}-12`)}`).join(', ');
   const body = shown.map(t => `<tr${t.short ? ' class="k-auto"' : ''}>
     <th scope="row">${t.y}</th>
     ${people.length ? `<td style="text-align:left">${ages(t.y)}</td>` : ''}
@@ -4422,7 +4481,9 @@ function drawdownTable() {
     <td>${t.contrib ? fmtMoney(t.contrib) : '<span class="muted">—</span>'}</td>
     <td>${t.income ? fmtMoney(t.income) : '<span class="muted">—</span>'}</td>
     <td>${fmtMoney(t.draw)}${t.short
-      ? ` <span class="muted">(${fmtMoney(t.short)} short)</span>` : ''}</td>
+      ? ` <span class="muted">(${fmtMoney(t.short)} short)</span>`
+      : t.share > 0 && t.share < 1
+      ? ` <span class="muted">(${Math.round(t.share * 12)} months)</span>` : ''}</td>
     <td>${fmtMoney(t.close)}</td></tr>`).join('');
   return `<div class="card" style="grid-column:1/-1">
     <h2>Year by Year in Retirement</h2>
@@ -4619,17 +4680,24 @@ function retMarkerNote() {
      is owed the reason, so the "nobody is dated" case says it out loud. */
   const from = drawdownFrom(state, thisYear);
   const target = (state.side.drawdown || {}).spend;
+  const startM = drawdownFromMonth(state, thisYear);
+  const when = startM ? monthLabelFull(startM) : '';
   const draws = from === null ? ''
     : !target ? `Nothing is drawn down yet — set a spending target below and the pot starts
-        paying from <strong>${from}</strong>, the first retirement here.`
+        paying from <strong>${esc(when)}</strong>, the first retirement here.`
     : from <= thisYear
     ? `The pot is already paying the household's spending, from the very first year on this
        chart.`
-    : `From <strong>${from}</strong> — the first of those — the pot starts covering the
-       household's spending, and the line bends.`;
+    : `From <strong>${esc(when)}</strong> — the first of those — the pot starts covering the
+       household's spending, and the line bends${startM.slice(5) === '01' ? ''
+        : `; that first year takes only ${13 - +startM.slice(5, 7)} months of it`}.`;
   return [
+    /* The MONTH, not just the year: "Charlie's retirement (2041)" beside a rule
+       that starts the drawdown in November 2041 is the exact ambiguity the
+       retire-when choice exists to settle, and repeating the bare year here
+       would put it straight back. */
     shown.length && `A dotted rule marks ${andList(shown.map(p =>
-      `${esc(p.name)}'s retirement (${yearOf(p)})`))}.`,
+      `${esc(p.name)}'s retirement (${esc(monthLabelFull(retirementMonthOf(p)))})`))}.`,
     behind.length && `${andList(behind.map(p => `${esc(p.name)} (${yearOf(p)})`))} already
       ${behind.length > 1 ? 'fall' : 'falls'} behind where this chart starts, so there is no
       rule for ${behind.length > 1 ? 'those' : 'that'}.`,
@@ -4760,16 +4828,39 @@ function retirementHorizon(st, thisYear) {
    and a more expensive one. */
 const SAFE_RATE_DEFAULT = 0.04;
 
-/* The year the pot starts paying: the FIRST retirement in the household, never
-   in the past. Two people retiring in different years is then a DATA question
+/* The MONTH the pot starts paying: the FIRST retirement in the household, never
+   in the past. Two people retiring at different times is then a DATA question
    rather than a branch in here — the one still working puts their pay in the
    Other Retirement Income table with an end year, which is a mechanism this
    already needed for a pension. The alternative, splitting the spending target
    by who has retired, needs a model of who pays for what share of a household,
-   and every household would disagree with whatever ratio shipped. */
-function drawdownFrom(st, thisYear) {
-  const years = peopleOf(st).map(retirementYearOf).filter(Boolean);
-  return years.length ? Math.max(thisYear, Math.min(...years)) : null;
+   and every household would disagree with whatever ratio shipped.
+
+   A month rather than a year so the first, part year can be pro-rated. Clamped
+   to the start of this year rather than to this MONTH: the projection's rows
+   are calendar years, and a household already six months into retirement is
+   drawing for the whole of the year it is standing in. */
+function drawdownFromMonth(st, thisYear) {
+  const months = peopleOf(st).map(retirementMonthOf).filter(Boolean).sort();
+  if (!months.length) return null;
+  return months[0] < `${thisYear}-01` ? `${thisYear}-01` : months[0];
+}
+const drawdownFrom = (st, thisYear) => {
+  const m = drawdownFromMonth(st, thisYear);
+  return m ? +m.slice(0, 4) : null;
+};
+
+/* How much of a calendar year somebody is retired for. Twelve twelfths from the
+   year after they go; in the year itself, one twelfth for each month from the
+   one they retire in — retiring in November is two months of spending, not
+   twelve, and calling it twelve overstated that first withdrawal by six times
+   and made the implied-rate check shout about a year that never happened. */
+function retiredShareOf(y, fromMonth) {
+  if (!fromMonth) return 0;
+  const fromY = +fromMonth.slice(0, 4);
+  if (y < fromY) return 0;
+  if (y > fromY) return 1;
+  return (13 - +fromMonth.slice(5, 7)) / 12;
 }
 
 /* One record a year: `{ y, open, growth, contrib, income, spend, draw, short,
@@ -4780,7 +4871,7 @@ function drawdownYears(st, thisYear, span) {
   const dd = st.side.drawdown || {};
   const r = st.settings.retirementReturnAnnual ?? 0.07;
   const contribs = contribYears(st);
-  const from = drawdownFrom(st, thisYear);
+  const fromMonth = drawdownFromMonth(st, thisYear);
   const target = dd.spend || 0;
   const rows = [];
   let open = round2((st.side.retirementAccounts || [])
@@ -4798,14 +4889,19 @@ function drawdownYears(st, thisYear, span) {
        changed by a feature that was supposed to be about 2060. There is a test
        that recomputes the old formula and compares. */
     const income = incomeIn(dd.income, y);
-    const spend = (from !== null && y >= from) ? target : 0;
+    /* Pro-rated in the year they actually go, whole thereafter. Income is NOT
+       pro-rated with it: an income row carries the year it starts arriving and
+       that is the reader's own statement, not something to be second-guessed
+       by somebody else's retirement month. */
+    const share = retiredShareOf(y, fromMonth);
+    const spend = round2(target * share);
     const want = Math.max(0, round2(spend - income));
     const pot = round2(open + growth + contrib);
     /* Never more than there is. The pot floors at zero and `short` records
        what the plan could not pay — a negative balance would be a debt the app
        has no way to model and no business inventing. */
     const draw = Math.min(want, Math.max(0, pot));
-    rows.push({ y, open, growth, contrib, income, spend, draw,
+    rows.push({ y, open, growth, contrib, income, spend, draw, share,
                 short: round2(want - draw), close: round2(pot - draw),
                 phase: spend > 0 ? 'drawing' : 'saving' });
     open = round2(pot - draw);
@@ -4827,21 +4923,34 @@ function incomeIn(list, y) {
   return round2(out);
 }
 
-/* The three figures the tiles and the summary read, so they can never disagree
-   with the chart: they are read off the same records. */
+/* The figures the tiles and the summary read, so they can never disagree with
+   the chart: they are read off the same records.
+
+   The rate is measured on the first FULL year, not the first year the pot pays
+   anything. Retiring in November means two months of spending in that first
+   year, so a rate taken there would be a sixth of the real one and the safety
+   check — the whole reason the figure is shown — would say "within the rate you
+   call safe" about a year that never happens twice. `partYear` is what the card
+   uses to say the two are different years, so the reader is never quietly shown
+   one while reading the label of the other. */
 function drawdownOutlook(rows) {
   const first = rows.find(t => t.phase === 'drawing');
+  const full = rows.find(t => t.phase === 'drawing' && t.share >= 1) || first;
   const gone = rows.find(t => t.short > 0);
+  const pot = full ? round2(full.open + full.growth + full.contrib) : 0;
   return {
     firstDrawYear: first ? first.y : null,
-    firstDraw: first ? first.draw : null,
-    firstIncome: first ? first.income : null,
+    partYear: !!(first && first.share < 1),
+    /* The year the tiles describe — the first whole one. */
+    rateYear: full ? full.y : null,
+    firstDraw: full ? full.draw : null,
+    firstIncome: full ? full.income : null,
+    firstPot: pot,
     /* Measured against the pot the money came OUT of — open plus what the year
        added, which is what "a 4% withdrawal" means. Null rather than 0 where
        nothing is drawn: a 0% would read as perfectly safe, when the truth is
        that the question hasn't been asked. */
-    impliedRate: (first && (first.open + first.growth + first.contrib) > 0)
-      ? first.draw / (first.open + first.growth + first.contrib) : null,
+    impliedRate: (full && pot > 0) ? full.draw / pot : null,
     runsOutYear: gone ? gone.y : null,
     endBalance: rows.length ? rows[rows.length - 1].close : 0,
   };
@@ -4935,8 +5044,11 @@ function retChartSummary(rows, out, r, labels, data, markers) {
     bits.push(`Nothing is drawn down, so it climbs to ${
       fmtMoney(data[data.length - 1])} by ${labels[labels.length - 1]}.`);
   } else {
-    bits.push(`From ${out.firstDrawYear} the pot pays out: ${fmtMoney(out.firstDraw)} that year${
-      out.impliedRate === null ? '' : `, ${(out.impliedRate * 100).toFixed(2)}% of it`}.`);
+    bits.push(`From ${out.partYear
+      ? monthLabelFull(drawdownFromMonth(state, rows[0].y)) : out.firstDrawYear
+      } the pot pays out: ${fmtMoney(out.firstDraw)} in its first whole year, ${
+      out.rateYear}${out.impliedRate === null ? ''
+        : `, which is ${(out.impliedRate * 100).toFixed(2)}% of it`}.`);
     bits.push(out.runsOutYear
       ? `It runs out in ${out.runsOutYear}, ${rows[rows.length - 1].y - out.runsOutYear
         } years before the end of the plan.`
@@ -7663,10 +7775,17 @@ const EDITORS = {
       { key: 'birth', label: 'Birth month', type: 'month',
         hint: 'Optional. It is what works out an age, a retirement year, and the month a '
           + 'child turns 18.' },
-      { key: 'retireAge', label: 'Retires at age', type: 'number', step: '1',
+      { key: 'retireAge', label: 'Retires at age', type: 'number', step: '0.5',
         showIf: (v) => v.role === 'adult',
         hint: 'Optional. It marks their retirement on the projection, and the FIRST '
-          + 'retirement in the household is where the pot starts paying out.' },
+          + 'retirement in the household is where the pot starts paying out. Halves are '
+          + 'allowed, for anyone waiting until exactly 59½.' },
+      { key: 'retireWhen', label: 'Which lands', type: 'select',
+        options: RETIRE_WHEN.map(([v, label]) => [v, label]),
+        showIf: (v) => v.role === 'adult',
+        hint: 'On their birthday is what the age plainly means, and the projection only '
+          + 'spends the months left in that first year. The two January options are for '
+          + 'leaving on a clean tax year — a little early, or a little late.' },
       { key: 'planToAge', label: 'Plan to age', type: 'number', step: '1',
         showIf: (v) => v.role === 'adult',
         hint: `How far the projection runs for them — ${PLAN_TO_AGE_DEFAULT} unless you say `
@@ -7674,8 +7793,13 @@ const EDITORS = {
           + 'the money runs out before the plan does is the point of the exercise.' },
       noteField,
     ],
-    get: (ds) => state.people[+ds.idx],
-    blank: () => ({ role: 'adult' }),
+    /* Opened on the EFFECTIVE answer, never the raw stored one: `retireWhen` is
+       absent on everybody who has never been asked, and a select showing blank
+       over a projection that is plainly using birthdays would be the dialog
+       disagreeing with the chart. Same rule the pay-row tick follows. */
+    get: (ds) => ({ ...state.people[+ds.idx],
+                    retireWhen: state.people[+ds.idx].retireWhen || 'birthday' }),
+    blank: () => ({ role: 'adult', retireWhen: 'birthday' }),
     save(ds, v) {
       if (!v.name) return;
       const role = v.role === 'child' ? 'child' : 'adult';
@@ -7683,6 +7807,11 @@ const EDITORS = {
       /* A child has no retirement age; keeping one from before the role was
          changed would show a retirement year for a nine-year-old. */
       const retireAge = role === 'adult' && v.retireAge ? v.retireAge : undefined;
+      /* Only a value the list actually offers, and only for an adult — a child
+         has no retirement to time. Undefined means the default, 'birthday'. */
+      const retireWhen = role === 'adult'
+        && RETIRE_WHEN.some(([k]) => k === v.retireWhen) && v.retireWhen !== 'birthday'
+        ? v.retireWhen : undefined;
       /* A plan that ends at or before the retirement it is planning for has no
          retirement in it at all. Refuse that one figure and say why, keeping
          the rest of the edit — throwing away a corrected name to punish a
@@ -7697,7 +7826,7 @@ const EDITORS = {
       }
       const p = ds.idx !== undefined ? state.people[+ds.idx] : null;
       if (p) {
-        Object.assign(p, { name: v.name, role, birth, retireAge, planToAge,
+        Object.assign(p, { name: v.name, role, birth, retireAge, retireWhen, planToAge,
                            note: v.note || undefined });
         return refused || undefined;
       }
@@ -7705,7 +7834,7 @@ const EDITORS = {
          space — so someone actually called Joint has to be pushed off it. */
       let id = slugJs(v.name), n = 2;
       while (id === JOINT_OWNER || personById(state, id)) id = `${slugJs(v.name)}-${n++}`;
-      state.people.push({ id, name: v.name, role, birth, retireAge, planToAge,
+      state.people.push({ id, name: v.name, role, birth, retireAge, retireWhen, planToAge,
                           note: v.note || undefined });
       return refused || undefined;
     },
@@ -10543,6 +10672,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   ownerSubtotals, validOwner, accountOption, suggestedTargetDate,
   retirementMarkers, retirementHorizon, RET_YEARS_MIN, RET_YEARS_MAX,
   planToYearOf, PLAN_TO_AGE_DEFAULT, SAFE_RATE_DEFAULT, contribYears,
+  retirementMonthOf, RETIRE_WHEN, retiredShareOf, drawdownFromMonth,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,

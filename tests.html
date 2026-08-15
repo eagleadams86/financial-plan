@@ -955,8 +955,39 @@ t('only a child reaches 18, and only an adult retires', () => {
   const kid = { id: 'k', name: 'Ellis', role: 'child', birth: '2015-09' };
   eq(H.majorityMonthOf(kid), '2033-09');
   eq(H.retirementYearOf(kid), null, 'a child has no retirement year');
+  eq(H.retirementMonthOf(kid), null);
   const adult = { id: 'a', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 };
   eq(H.majorityMonthOf(adult), null, 'and an adult has no 18th birthday to come');
+});
+/* "Retires at 55" is four different dates and the projection used to pick one
+   of them silently — 1 January of the year you turn 55, the only one nobody
+   actually means. */
+t('the reader chooses where in the year a retirement age lands', () => {
+  const p = (over) => Object.assign(
+    { id: 'c', name: 'Charlie', role: 'adult', birth: '1986-11', retireAge: 55 }, over);
+  eq(H.retirementMonthOf(p({})), '2041-11', 'their birthday month, the default');
+  eq(H.retirementMonthOf(p({ retireWhen: 'birthday' })), '2041-11', 'and said out loud');
+  eq(H.retirementMonthOf(p({ retireWhen: 'jan-that-year' })), '2041-01',
+    'a clean tax year, a little early');
+  eq(H.retirementMonthOf(p({ retireWhen: 'jan-after' })), '2042-01',
+    'work the year out, leave in the new one');
+  eq(H.retirementYearOf(p({ retireWhen: 'jan-after' })), 2042,
+    'and the year follows the month, so every marker moves with it');
+});
+t('a half year of age lands in the right month, for anyone waiting for 59 and a half', () => {
+  const p = { id: 'c', name: 'Charlie', role: 'adult', birth: '1986-11', retireAge: 59.5 };
+  eq(H.retirementMonthOf(p), '2046-05', 'November plus 59 years and six months');
+  eq(H.retirementMonthOf({ ...p, retireWhen: 'jan-that-year' }), '2046-01');
+});
+t('a part first year is a part year of spending, not a whole one', () => {
+  /* Retiring in November is two months of spending in that year. Calling it
+     twelve overstated the first withdrawal by six times. */
+  eq(H.retiredShareOf(2041, '2041-11'), 2 / 12);
+  eq(H.retiredShareOf(2041, '2041-01'), 1, 'January is the whole year');
+  eq(H.retiredShareOf(2041, '2041-12'), 1 / 12, 'December is one month');
+  eq(H.retiredShareOf(2042, '2041-11'), 1, 'and every year after it is whole');
+  eq(H.retiredShareOf(2040, '2041-11'), 0, 'nothing before it');
+  eq(H.retiredShareOf(2041, null), 0, 'and nothing at all with nobody to retire');
 });
 /* The retirement projection carries a dotted rule per person, and the two
    things that can go wrong with one are silent: a rule drawn from a date
@@ -2892,15 +2923,19 @@ t('somebody already retired is drawn on from the very first year', () => {
   eq(H.drawdownYears(s, RET_FIX, 25)[0].phase, 'drawing');
 });
 t('the pot covers only what the other income does not', () => {
+  /* The fixture's Sam is born in April, so 2035 is nine months of retirement —
+     the income is NOT pro-rated with the spending, because an income row's
+     start year is the reader's own statement. */
   const s = potFixture({ side: { retirementAccounts: [{ id: 'k', name: '401(k)',
     type: '401k', amount: 500000, contribs: {} }],
     drawdown: { spend: 60000, income: [
       { label: 'Social Security', amount: 24000, from: 2035 }] } } });
   const rows = H.drawdownYears(s, RET_FIX, 25);
   const at = (y) => rows.find(t => t.y === y);
-  eq(at(2035).income, 24000);
-  eq(at(2035).draw, 36000, '60,000 needed, 24,000 of it arriving');
-  eq(at(2036).draw, 36000, 'and it carries on');
+  eq(at(2036).income, 24000);
+  eq(at(2036).draw, 36000, 'a whole year: 60,000 needed, 24,000 of it arriving');
+  eq(at(2037).draw, 36000, 'and it carries on');
+  eq(at(2035).draw, 21000, 'the part year needs nine months of it, less the same income');
 });
 t('income arriving before the drawdown starts changes the pot by nothing', () => {
   /* It is recorded so the table can show it, but money you receive while still
@@ -2925,8 +2960,11 @@ t('an income source stops in the year it says, and an open-ended one never does'
     'a row with no start year never arrives at all');
 });
 t('the pot empties, stays empty, and says what it could not pay', () => {
+  /* jan-that-year so every year here is a whole one — the part-year arithmetic
+     has its own tests and would only obscure this one. */
   const s = potFixture({ settings: { retirementReturnAnnual: 0 },
-    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65 }],
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65,
+               retireWhen: 'jan-that-year' }],
     side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
               amount: 100000, contribs: {} }],
             drawdown: { spend: 40000, income: [] } } });
@@ -2942,18 +2980,60 @@ t('a contribution typed after the pot empties refills it', () => {
   /* Honest, not tidy: the reader typed that contribution and the app does not
      argue with an instruction. Pinned so nobody "fixes" it. */
   const s = potFixture({ settings: { retirementReturnAnnual: 0 },
-    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65 }],
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65,
+               retireWhen: 'jan-that-year' }],
     side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
               amount: 40000, contribs: { '2033': 50000 } }],
             drawdown: { spend: 40000, income: [] } } });
   const rows = H.drawdownYears(s, RET_FIX, 6);
-  eq(rows[1].close, 0, 'empty by the second year');
+  eq(rows[0].close, 0, 'one year of spending empties it');
   eq(rows[3].contrib, 50000);
   eq(rows[3].close, 10000, 'and it pays that year in full again');
 });
+t('a mid-year retirement only spends the months that are left', () => {
+  const s = potFixture({ settings: { retirementReturnAnnual: 0 },
+    /* born November, retiring at 65 on their birthday → 2035-11 */
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 }],
+    side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
+              amount: 1000000, contribs: {} }],
+            drawdown: { spend: 60000, income: [] } } });
+  eq(H.drawdownFromMonth(s, RET_FIX), '2035-11');
+  const rows = H.drawdownYears(s, RET_FIX, 10);
+  const at = (y) => rows.find(t => t.y === y);
+  eq(at(2034).draw, 0, 'nothing the year before');
+  eq(at(2035).draw, 10000, 'two months of a 60,000 year');
+  eq(at(2035).phase, 'drawing', 'it is still a drawing year');
+  eq(at(2036).draw, 60000, 'and the next one is whole');
+});
+t('the rate is measured on the first WHOLE year, never the part one', () => {
+  /* The safety check is the reason the figure is shown at all. Taken on a
+     two-month year it would be a sixth of the truth and would say "within the
+     rate you call safe" about a year that never happens twice. */
+  const s = potFixture({ settings: { retirementReturnAnnual: 0 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 }],
+    side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
+              amount: 1000000, contribs: {} }],
+            drawdown: { spend: 60000, income: [] } } });
+  const out = H.drawdownOutlook(H.drawdownYears(s, RET_FIX, 10));
+  eq(out.firstDrawYear, 2035, 'the pot starts paying in the part year');
+  eq(out.partYear, true, 'and the card is told to say so');
+  eq(out.rateYear, 2036, 'but the figures describe the first whole one');
+  eq(out.firstDraw, 60000);
+  approx(out.impliedRate, 60000 / 990000, 'over the pot at the start of THAT year', 1e-9);
+  /* A January retirement has no part year, so the two are the same year. */
+  const jan = potFixture({ settings: { retirementReturnAnnual: 0 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65,
+               retireWhen: 'jan-that-year' }],
+    side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
+              amount: 1000000, contribs: {} }],
+            drawdown: { spend: 60000, income: [] } } });
+  const o2 = H.drawdownOutlook(H.drawdownYears(jan, RET_FIX, 10));
+  eq([o2.firstDrawYear, o2.rateYear, o2.partYear], [2035, 2035, false]);
+});
 t('the implied rate is what came out over the pot it came out of', () => {
   const s = potFixture({ settings: { retirementReturnAnnual: 0 },
-    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65 }],
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65,
+               retireWhen: 'jan-that-year' }],
     side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
               amount: 1000000, contribs: {} }],
             drawdown: { spend: 40000, income: [] } } });
@@ -2970,7 +3050,8 @@ t('the projection does not touch the state it reads', () => {
 });
 t('the runs-out rule lands on its own year, or is not drawn at all', () => {
   const s = potFixture({ settings: { retirementReturnAnnual: 0 },
-    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65 }],
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65,
+               retireWhen: 'jan-that-year' }],
     side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
               amount: 100000, contribs: {} }],
             drawdown: { spend: 40000, income: [] } } });
