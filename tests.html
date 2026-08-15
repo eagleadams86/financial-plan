@@ -2990,6 +2990,87 @@ t('a contribution typed after the pot empties refills it', () => {
   eq(rows[3].contrib, 50000);
   eq(rows[3].close, 10000, 'and it pays that year in full again');
 });
+/* The 401(k) cards hold most people's contributions as a PERCENTAGE, and the
+   projection read only the per-year IRA rows — so a plan with its rates filled
+   in showed "Paid in —" for forty years and understated itself badly. */
+function deferralFixture(over) {
+  return H.coerceShape(Object.assign({
+    settings: { retirementReturnAnnual: 0 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 }],
+    side: { comp: { '2030': { salary: 100000, raisePct: 0 } },
+            bonuses: { '2030': 10000 },
+            limits: { '2030': { pretaxPct: 0.05, bonusPct: 0.10 } },
+            retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
+              amount: 100000, contribs: {} }],
+            drawdown: { income: [] } },
+  }, over || {}));
+}
+t('the 401(k) percentages reach the projection, not just the typed IRA rows', () => {
+  const s = deferralFixture();
+  eq(H.plannedDeferral(s, 'sam', RET_FIX), 6000, '5% of 100,000 plus 10% of a 10,000 bonus');
+  const c = H.plannedContribs(s, RET_FIX, 10);
+  eq(c['2031'], 6000);
+  eq(c['2034'], 6000, 'carried forward in today\'s money');
+  eq(c['2035'], 5000, 'ten months of the year they retire in November');
+  eq(c['2036'], undefined, 'and nothing at all once they have gone');
+  eq(c['2030'], undefined, 'year zero is the balance as it stands, untouched');
+});
+t('a typed IRA row and a 401(k) rate are different money and both count', () => {
+  const s = deferralFixture({ side: { comp: { '2030': { salary: 100000, raisePct: 0 } },
+    bonuses: { '2030': 10000 }, limits: { '2030': { pretaxPct: 0.05, bonusPct: 0.10 } },
+    retirementAccounts: [
+      { id: 'k', name: '401(k)', type: '401k', amount: 100000, contribs: {} },
+      { id: 'r', name: 'Roth IRA', type: 'roth-ira', amount: 0, contribs: { '2031': 7000 } }],
+    drawdown: { income: [] } } });
+  const c = H.plannedContribs(s, RET_FIX, 10);
+  eq(c['2031'], 13000, '6,000 from the rate plus the 7,000 typed row');
+  eq(c['2032'], 6000, 'and a year with no typed row is just the rate');
+});
+t('the latest year with a RATE is what carries, not the latest year of any kind', () => {
+  /* A comp year added ahead has a salary and no percentages. Reading the last
+     year of any kind would silently carry a zero and empty the projection. */
+  const s = deferralFixture({ side: { comp: { '2030': { salary: 100000, raisePct: 0 },
+      '2031': { salary: 120000, raisePct: 0 } },
+    bonuses: { '2030': 10000 },
+    limits: { '2030': { pretaxPct: 0.05, bonusPct: 0.10 }, '2031': { k401Limit: 25000 } },
+    retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k', amount: 100000,
+      contribs: {} }], drawdown: { income: [] } } });
+  eq(H.plannedDeferral(s, 'sam', RET_FIX), 6000,
+    'a later year that only raises the LIMIT changes nothing');
+  eq(H.plannedContribs(s, RET_FIX, 5)['2032'], 6000);
+});
+t('an earner the plan cannot date pays nothing in, and says nothing either way', () => {
+  const s = deferralFixture({ people: [
+    { id: 'sam', name: 'Sam', role: 'adult' }] });   // no birth month
+  eq(H.plannedDeferral(s, 'sam', RET_FIX), 6000, 'the rate is still readable');
+  eq(H.plannedContribs(s, RET_FIX, 10), {},
+    'but with nothing to stop contributing at, none of it is projected');
+});
+t('each earner pays in until their OWN retirement', () => {
+  const s = deferralFixture({ people: [
+    { id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 },
+    { id: 'robin', name: 'Robin', role: 'adult', birth: '1975-01', retireAge: 60 }],
+    side: { comp: { '2030': { salary: 100000, raisePct: 0 } }, bonuses: { '2030': 10000 },
+      limits: { '2030': { pretaxPct: 0.05, bonusPct: 0.10,
+        by: { robin: { salary: 80000, bonus: 0, pretaxPct: 0.10, bonusPct: 0 } } } },
+      retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k', amount: 100000,
+        contribs: {} }], drawdown: { income: [] } } });
+  eq(H.plannedDeferral(s, 'robin', RET_FIX), 8000, '10% of Robin\'s own 80,000');
+  const c = H.plannedContribs(s, RET_FIX, 10);
+  eq(c['2031'], 14000, 'both of them');
+  eq(c['2035'], 5000, 'Robin left in January 2035, Sam pays ten months of it');
+  eq(c['2036'], undefined);
+});
+t('the accumulation curve grows by exactly what the rates say', () => {
+  /* The regression guard's sibling: with rates filled in the curve MOVES, and
+     it must move by the contributions and nothing else. */
+  const s = deferralFixture({ people: [] });   // nobody to date → no rate money
+  const bare = H.drawdownYears(s, RET_FIX, 5).map(t => t.close);
+  const withRates = H.drawdownYears(deferralFixture(), RET_FIX, 5).map(t => t.close);
+  eq(bare, [100000, 100000, 100000, 100000, 100000, 100000], 'no growth, no pay-in');
+  eq(withRates, [100000, 106000, 112000, 118000, 124000, 129000],
+    '6,000 a year on top — and 5,000 in 2035, the year they go in November');
+});
 t('a mid-year retirement only spends the months that are left', () => {
   const s = potFixture({ settings: { retirementReturnAnnual: 0 },
     /* born November, retiring at 65 on their birthday → 2035-11 */

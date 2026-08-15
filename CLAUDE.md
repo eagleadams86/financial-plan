@@ -1084,6 +1084,26 @@ Things that are load-bearing and will look arbitrary later:
   different years instead of quietly showing one under the other's label. The
   year-by-year table's age column reads December, not mid-year, so the row where
   somebody retires at 55 doesn't say 54.
+- **Contributions come from BOTH places the app records them.**
+  `plannedContribs(st, thisYear, span)` is the one source the projection reads:
+  the per-year IRA rows (`contribYears`, taken exactly as typed and never
+  carried — a year you didn't type is a year you didn't pay) PLUS each 401(k)
+  card's RATE, which is how most people actually hold the figure. The rate is
+  carried forward in today's money until that person's own retirement and
+  pro-rated across the year they go — the mirror of `retiredShareOf`, so ten
+  months' pay-in and two months' spending add to one year. The projection read
+  only the first source at first, and a plan with its percentages filled in
+  showed "Paid in —" for forty years while understating itself badly; that is
+  how it was found. Two traps worth keeping: **only an earner the plan can DATE
+  gets projected contributions** (no retirement month, nothing to stop
+  contributing at, and a projection paying in at 95 is worse than one paying in
+  never), and **`plannedDeferral` carries the latest year that records a RATE,
+  not the latest year of any kind** — a comp year added ahead has a salary and
+  no percentages, so reading the last year of any kind would silently carry a
+  zero and empty the whole projection.
+  `limitsFor(year, personId)` keeps its exact pinned one-argument behaviour; the
+  state-taking core is `limitsForIn(st, …)` underneath, the same arrangement
+  `contribYears` got.
 - **The pot starts paying at the FIRST retirement in the household**, never a
   year in the past. Two people retiring in different years is a DATA question,
   not a branch: the one still working puts their pay in Other Retirement Income

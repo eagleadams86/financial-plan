@@ -4321,7 +4321,9 @@ function renderRetirement() {
     <div class="card" style="grid-column:1/-1">
       <h2>Where the Pot Is Heading${helpBtn('retProjection', 'the retirement projection')}</h2>
       <p class="sub">Today's balances grown at ${round2((state.settings.retirementReturnAnnual ?? 0.07) * 100)}%/yr
-        after inflation (Preferences), with each year's planned contributions added on top.${
+        after inflation (Preferences), with what you pay in added on top — the IRA rows
+        you've typed, plus whatever the 401(k) cards' percentages come to, carried forward
+        in today's money until each of you retires.${
         accts.length ? ` ${retMarkerNote()}` : ''}</p>
       ${accts.length
         ? `<div class="chartbox" style="height:280px"><canvas id="retChart"></canvas></div>
@@ -4532,7 +4534,13 @@ const FILING_LABEL = { single: 'single filer', joint: 'married filing jointly',
 
    The limits themselves stay on the flat record whoever is being looked at:
    they are a fact about the year, not about the earner. */
-function limitsFor(year, personId) {
+/* `limitsFor(year, personId)` keeps its exact one-argument behaviour — there is
+   a test pinning it — so the state-taking core sits underneath rather than in
+   its signature. The drawdown projection is pure and reads these rates, which
+   is the same reason `contribYears` was given an `st`. */
+const limitsFor = (year, personId) => limitsForIn(state, year, personId);
+function limitsForIn(st, year, personId) {
+  const state = st;   // the body below reads `state`; one name, one meaning
   const stored = (state.side.limits || {})[year] || {};
   /* Only the person the Comp tab is about can borrow from it — reading one
      career's salary into somebody else's calculator would be a fiction. */
@@ -4871,6 +4879,59 @@ function retiredShareOf(y, fromMonth) {
   return (13 - +fromMonth.slice(5, 7)) / 12;
 }
 
+/* What somebody's 401(k) card says they put in a year, out of the rates it
+   already holds — salary × the pre-tax percentage, plus bonus × its own. The
+   LATEST year that records a RATE is the one carried forward: reading the
+   latest year of any kind would silently carry a zero the moment a comp year
+   was added ahead (a planned raise has a salary and no percentages), which is
+   the sort of quiet nil this projection must not invent. */
+function plannedDeferral(st, personId, upTo) {
+  let out = 0;
+  for (const y of Object.keys(st.side.limits || {}).sort()) {
+    if (+y > upTo) continue;
+    const L = limitsForIn(st, y, personId);
+    if (L.pretaxPct || L.bonusPct)
+      out = round2(L.salary * L.pretaxPct + L.bonus * L.bonusPct);
+  }
+  return out;
+}
+
+/* Everything paid into the pot in a given year, from BOTH places the app
+   records it — and it took a real plan reading "PAID IN —" for forty years to
+   show that only one of them was ever being read.
+
+     · `contribYears` — the per-year, per-account rows under IRA Contributions.
+       Typed one year at a time, so they are taken exactly as they stand and
+       never carried forward: a year you didn't type is a year you didn't pay.
+     · the 401(k) cards' RATES — a percentage of salary and of bonus, which is
+       how most people actually hold the figure. Carried forward in today's
+       money (the frame this whole tab is in) until that person's OWN
+       retirement, pro-rated across the year they go: retire in November and
+       you paid in for ten months of it, the exact mirror of `retiredShareOf`.
+
+   Only an earner the plan can DATE gets one, the same rule the retirement
+   rules follow — without a retirement month there is nothing to stop
+   contributing at, and a projection that had somebody paying in at 95 would be
+   worse than one that had them paying in never. */
+function plannedContribs(st, thisYear, span) {
+  const out = {};
+  const add = (y, v) => { if (v) out[String(y)] = round2((out[String(y)] || 0) + v); };
+  for (const [y, v] of Object.entries(contribYears(st))) add(y, v);
+  for (const id of limitEarners(st)) {
+    const person = id === undefined ? null : personById(st, id);
+    const stop = person ? retirementMonthOf(person) : null;
+    if (!stop) continue;
+    const rate = plannedDeferral(st, id, thisYear);
+    if (!rate) continue;
+    for (let i = 1; i <= span; i++) {
+      const working = 1 - retiredShareOf(thisYear + i, stop);
+      if (working <= 0) break;
+      add(thisYear + i, round2(rate * working));
+    }
+  }
+  return out;
+}
+
 /* One record a year: `{ y, open, growth, contrib, income, spend, draw, short,
    close, phase }`. Money only — ages, names and whose retirement falls where
    are derived at render time, the way `ownerSubtotals` derives over balances
@@ -4878,7 +4939,7 @@ function retiredShareOf(y, fromMonth) {
 function drawdownYears(st, thisYear, span) {
   const dd = st.side.drawdown || {};
   const r = st.settings.retirementReturnAnnual ?? 0.07;
-  const contribs = contribYears(st);
+  const contribs = plannedContribs(st, thisYear, span);
   const fromMonth = drawdownFromMonth(st, thisYear);
   const target = dd.spend || 0;
   const rows = [];
@@ -10681,6 +10742,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   retirementMarkers, retirementHorizon, RET_YEARS_MIN, RET_YEARS_MAX,
   planToYearOf, PLAN_TO_AGE_DEFAULT, SAFE_RATE_DEFAULT, contribYears,
   retirementMonthOf, RETIRE_WHEN, retiredShareOf, drawdownFromMonth,
+  limitsForIn, plannedDeferral, plannedContribs,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,
