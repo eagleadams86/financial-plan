@@ -474,6 +474,12 @@ suite passed while the card was wrong.
   months while looking authoritative. (Filing status has a second job since the
   Tax tab arrived: it is the innermost key of a bracket table. Same principle —
   it selects between tables the reader typed, and still sets no figure itself.)
+  **Deleting a limits record clears figures, never neighbours**: a second
+  earner's delete touches only their `by` entry, and the comp person's delete
+  clears the flat record's own fields while `by` still holds somebody — the
+  year record itself only goes when nobody else is left in it. It used to
+  delete the whole year on the comp person's card, taking the other earner's
+  salary and elections with it.
   **The rule this used to state as "the app has no tax model and must not grow
   one" was two rules wearing one coat, and only one of them was ever the
   point** — see "Tax" below. No shipped FIGURE is the real rule and it is
@@ -655,6 +661,18 @@ The grid is keyboard-operable via `wireGridKeys()`: roving tabindex (one tab
 stop for the whole grid), arrow keys between cells, Enter/Space to open the cell
 editor — the table keeps its own row/column header semantics, so no ARIA grid
 roles are layered on.
+**Every OTHER clickable editor row is keyboard-operable via `wireEditFocus()`**
+(run at the end of `render()`): each `[data-edit]` row/card and `[data-note]`
+line outside `.grid` gets `tabindex="0"`, and a delegated keydown on `#views`
+turns Enter/Space into the click the delegated click listener already handles.
+Two rules it keeps: **no `role="button"` on a `<tr>`** (that strips the row
+semantics a screen reader needs to read the table — the `:focus-visible`
+outline plus the existing `title` text carry the affordance), and **a
+`data-edit` that is itself a `<button>` is skipped** (its native Enter already
+clicks, and a second click would call `showModal()` on an open dialog, which
+throws). The grid's row labels stay out on purpose: the cell dialog's "⚙ Row
+settings" button is the keyboard route to a budget row's editor, and forty more
+tab stops in the label column would bury it.
 **A select with NOTHING to offer must not throw.** `buildFields` used to read
 `f.options[0][0]` unguarded, so "Claimed first by" — which lists the OTHER goals
 — took the whole dialog down for anyone who had none, i.e. everybody adding
@@ -1979,7 +1997,11 @@ CSP. That is the whole feature; it adds no runtime code beyond one line in
   API (changelog) and `https://api.twelvedata.com` (holding prices — ticker
   only). A new feature that talks to a new endpoint must add it to the CSP in
   the same commit, and update `privacy.html` if it changes what leaves the
-  browser. The price-lookup key lives in localStorage `fin-pricekey`, NOT in
+  browser. **Every page in this repo ships its own CSP meta tag** — index.html,
+  privacy.html AND tests.html (which GitHub Pages publishes beside the app, so
+  it is as much a page on the shared origin as the app is). A new page starts
+  with one; the harness iframe's content is governed by index.html's own CSP,
+  not the parent page's. The price-lookup key lives in localStorage `fin-pricekey`, NOT in
   state: state syncs to Firestore and rides along in every backup file, and a
   credential belongs in neither.
 - Keep README.md current whenever the app meaningfully changes.

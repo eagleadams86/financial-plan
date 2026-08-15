@@ -113,7 +113,9 @@ included — treat those the way you treat the figures.
   outside any dialog closes it without saving, and a small ⓘ beside a figure
   explains the arithmetic behind it. The budget grid is keyboard-operable too:
   Tab into it, move between cells with the arrow keys, and press Enter to edit
-  the one you're on.
+  the one you're on — and every clickable row on the other tabs (a donation, a
+  trip line, a comp year, a goal card, a gathered note) takes a tab stop of its
+  own, so Enter or Space opens it without a mouse.
 - **Goals** — savings goals that add up whichever accounts you tick, so
   splitting an account is a matter of ticking the new ones. Each goal counts
   its accounts up to the target, in full, or only what another goal hasn't

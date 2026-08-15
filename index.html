@@ -3544,9 +3544,10 @@ function allowedViews() {
 
 function render() {
   /* textContent, not markup: this is the one string the reader names the whole
-     app with, and it goes in the browser tab as well as the header. A shared
-     link carries no settings (see SECTION_NEEDS), so a recipient sees their own
-     subtitle or none — never the sender's. */
+     app with, and it goes in the browser tab as well as the header. Settings
+     travel in FULL in a share link (decided 2026-08-14 — see buildSharePayload),
+     so a recipient sees the SENDER's subtitle over the sender's figures, which
+     is the right pairing; the Preferences hint on the field says so. */
   const tag = (state.settings.tagline || '').trim();
   const brandTag = F('brandTag');
   if (brandTag) { brandTag.textContent = tag ? `· ${tag}` : ''; brandTag.hidden = !tag; }
@@ -3589,6 +3590,7 @@ function render() {
   target.innerHTML = fn();
   if (viewOnly) stripEditAffordances(target);
   wireView(view);
+  wireEditFocus(target);
 }
 
 /* Everything that opens an editor is reached one of three ways: a `data-add`
@@ -5322,7 +5324,10 @@ function magiCard(year) {
   <div class="tablewrap"><table><tbody>
     <tr><th scope="row">Salary + bonus</th><td>${fmtMoney(gross)}</td></tr>
     <tr><th scope="row">− pre-tax 401(k)</th><td>${fmtMoney(pretax)}</td></tr>
-    <tr><th scope="row">− pre-tax HSA</th><td>${fmtMoney(L.hsaPretax)}</td></tr>
+    <!-- The SUMMED figure, like the 401(k) row above it: filing jointly counts
+         both earners' HSA money, and showing only the comp person's here left a
+         table whose rows didn't add up to the MAGI beneath them. -->
+    <tr><th scope="row">− pre-tax HSA</th><td>${fmtMoney(hsa)}</td></tr>
     <tr><th scope="row">MAGI</th><td>${fmtMoney(magi)}</td></tr>
     <tr><th scope="row">Phase-out starts</th><td>${fmtMoney(L.magiLimit)}</td></tr>
     <tr><th scope="row">Fully out at</th><td>${fmtMoney(band)}</td></tr>
@@ -10573,11 +10578,24 @@ const EDITORS = {
     },
     del: (ds) => {
       /* Clearing one earner's figures must not take the year's limits — or the
-         other earner — with them. */
+         other earner — with them. That covers BOTH directions: a second
+         earner's delete touches only their `by` record, and the comp person's
+         delete clears the flat record's own fields while `by` still holds
+         somebody — deleting the whole year there took the other earner's
+         salary and elections with it. Only when nobody else is left does the
+         year record itself go. */
       const rec = state.side.limits[ds.year];
       if (!rec) return;
       if (ds.person && ds.person !== compPersonId(state)) {
-        if (rec.by) delete rec.by[ds.person];
+        if (rec.by) {
+          delete rec.by[ds.person];
+          if (!Object.keys(rec.by).length) delete rec.by;
+        }
+        return;
+      }
+      if (rec.by && Object.keys(rec.by).length) {
+        for (const k of ['salary', 'bonus', 'pretaxPct', 'bonusPct',
+                         'rothShare', 'hsaPretax']) delete rec[k];
         return;
       }
       delete state.side.limits[ds.year];
@@ -10942,6 +10960,37 @@ F('views').addEventListener('click', (e) => {
   const row = e.target.closest('[data-edit]');
   if (row) openRowEditor(row.dataset.edit, row.dataset, false);
 });
+
+/* Enter or Space on a focused editor row behaves as the click does — the other
+   half of wireEditFocus() below. Only for the rows that AREN'T buttons: a real
+   <button> carrying data-edit (a trip's ✎ Edit) already fires its own click on
+   Enter, and firing a second would call showModal() on a dialog that is
+   already open, which throws. */
+F('views').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest('[data-edit], [data-note]');
+  if (!el || el.matches('button, a, input, select, textarea')) return;
+  if (e.target !== el && e.target.closest('button, a, input, select, textarea')) return;
+  e.preventDefault();   // Space would otherwise scroll the page
+  el.click();
+});
+
+/* Every clickable editor row gets a tab stop, so the tables outside the budget
+   grid — donations, trips, comp years, retirement accounts, goal cards, the
+   gathered notes — are reachable from the keyboard at all. The element keeps
+   its own semantics (no role="button" on a <tr>, which would strip the row
+   semantics a screen reader needs to read the table); the grid is excluded
+   because its cells already carry the roving-tabindex pattern and the cell
+   dialog's "⚙ Row settings" button is the keyboard route to a budget row's
+   editor. In a shared view stripEditAffordances() has already removed the
+   attributes, so nothing here finds anything to stamp. */
+function wireEditFocus(root) {
+  root.querySelectorAll('[data-edit], .notelist li[data-note]').forEach(el => {
+    if (el.closest('.grid')) return;
+    if (el.matches('button, a, input, select')) return;
+    el.tabIndex = 0;
+  });
+}
 
 const helpDialog = F('helpDialog');
 function openHelp(key) {
@@ -13012,8 +13061,13 @@ window.finAdopt = (incoming, ts) => {
     side: Object.assign(blankState().side, incoming.side || {}),
     ui: Object.assign(blankState().ui, incoming.ui || {})
   });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  localStorage.setItem(UPDATED_KEY, String(ts || Date.now()));
+  /* Guarded like save(): a private-mode browser throws on the write, and an
+     unguarded throw here would kill the sync callback mid-adopt — the in-memory
+     state is already the cloud copy, so drawing it still beats dying. */
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(UPDATED_KEY, String(ts || Date.now()));
+  } catch (e) { console.warn('Could not write saved data', e); }
   render();
 };
 /* What the "which copy?" dialog counts. People belong here: someone who has
