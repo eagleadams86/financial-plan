@@ -210,9 +210,14 @@ included — treat those the way you treat the figures.
   - **Type a table by hand or paste one in.** The paste box reads the layouts the
     published schedules actually use — rate-first, range-first, the
     over/but-not-over form, a bare two-column table, or a single flat rate — and
-    tells you what it will store *as you type*. It **refuses whole rather than
-    importing half**: bands that don't climb, a rate over 100%, a schedule whose
-    top row is missing, and it names the lines it ignored.
+    tells you what it will store *as you type*.
+    It copes with what a real clipboard does to a table: **a wide table with a
+    column per filing status** (yours is picked out), markdown bullets, headings,
+    citation links, and a copy that **lost its line breaks** and arrived as one
+    run-on line. It **refuses whole rather than importing half**: bands that
+    don't climb, a rate over 100%, a schedule whose top row is missing, two
+    schedules pasted together, or a wide table with no column for your status —
+    and it names the lines it ignored.
   - **A table carries forward.** The newest one at or before a year is what that
     year uses, so one schedule covers a forty-year projection; the "Years You've
     Stored" card says which stretch of years is reading which table, rather than

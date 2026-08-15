@@ -1544,6 +1544,39 @@ side.tax = {
   largest number.** Taking the largest also works for every well-formed
   schedule, but it silently REPAIRS a reversed range into the figure beside it,
   and a paste that came in backwards has to be refused rather than tidied.
+- **`parseBrackets(text, filing)` takes the filing status as an ARGUMENT.** It
+  briefly read `state.settings` for one refusal message, which is the
+  ambient-state trap in the Tests section above wearing a different hat: the
+  same paste would behave differently depending on what the browser held.
+- **Three things a real clipboard does, all found by pasting real schedules in
+  and all pinned by tests.** Each is a deterministic repair, never a guess —
+  which is what makes doing any of them acceptable:
+  - **A copy flattens the table onto ONE line** ("…Single Filers10%: Up to
+    $12,30012%: $12,301 to…"). Put back by two rules: a digit after a complete
+    `,NNN` group starts a new token (a comma-formatted amount's last group is
+    exactly three digits, so `$12,30012` can only be `$12,300` then `12`), and a
+    digit straight after a LETTER starts one (a heading glued to the first
+    band). **Do not "take the last two digits before the %"** — that turns
+    `$50,3007%` into `$50,30`, an edge wrong by a factor of ten. Applied only to
+    a line carrying more than one percentage, so anything that already parsed is
+    untouched.
+  - **Markdown bullets and citation footnotes** ride along — `[[1](https://…)]`
+    hanging off the last band. **URLs are stripped first and whole**: they are
+    full of digits and hyphens (`…/2026-federal-income-tax-brackets…`) and every
+    one is something the band reader could take for an edge or a range. Stripped
+    rather than ignored as a LINE, because the debris sits on the same line as a
+    real band and dropping it would lose the top band.
+  - **A wide rate-by-status table** — one row per rate, a column per filing
+    status — is narrowed to the reader's own column BEFORE any number is read
+    (`pickFilingColumn`). Every other column is somebody else's schedule.
+    **Gated on finding a HEADER**, not on the text merely looking wide, or a
+    dot-leader schedule or a gutter-separated table would be torn into columns
+    that were never there. No column for the current status is a refusal that
+    names the ones it did have.
+- **An open band with more bands after it means TWO SCHEDULES were pasted**, not
+  a band-order mistake — the published pages stack single above married and a
+  copy takes both. The message says so and names which one to keep; "put the
+  and-above band at the bottom" was advice about a mistake nobody made.
 - **Confirm-before-store with NO new dialog**: a `readout` filled by `link()` on
   every keystroke says what will be stored or why nothing will be. That needed
   two small widenings of the dialog machinery, both of which are general fixes

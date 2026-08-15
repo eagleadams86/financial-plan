@@ -5950,16 +5950,108 @@ function taxAtDraw(G, opts) {
      table goes quietly wrong.
    · **An open-ended band discards its number.** `$80,000+` names the band's
      BOTTOM; storing it as the top is the same off-by-one. */
-function parseBrackets(text) {
+/* Which column of a wide table belongs to which filing status. A published
+   page usually gives ONE table with a column per status, so a copy brings all
+   four — and picking the wrong one is a whole schedule wrong, silently. */
+const FILING_COLUMN = { single: /\bsingle\b/i, joint: /\bjoint/i,
+                        separate: /\bseparat/i };
+const FILING_COLUMN_OTHER = /head of household/i;
+
+/* Reduce a rate-by-status table to the reader's own column.
+   Returns the rewritten lines, a refusal, or null for "not that shape".
+
+   Gated on FINDING A HEADER, not on the text merely looking wide: without that
+   gate a dot-leader schedule or a rate-first table with a wide gutter would be
+   torn into columns that were never there. With it, the shape is something the
+   paste itself declared. */
+function pickFilingColumn(lines, filing) {
+  const cells = (l) => l.split(/\t|\s{3,}/).map(c => c.trim()).filter(Boolean);
+  let head = -1, cols = [];
+  for (let i = 0; i < lines.length; i++) {
+    const c = cells(lines[i]);
+    if (c.length < 3) continue;
+    const named = c.filter(x => FILING_COLUMN_OTHER.test(x)
+      || Object.values(FILING_COLUMN).some(re => re.test(x))).length;
+    if (named >= 2) { head = i; cols = c; break; }
+  }
+  if (head < 0) return null;
+  const want = FILING_COLUMN[filing] || FILING_COLUMN.single;
+  const target = cols.findIndex(c => want.test(c));
+  if (target < 0)
+    return { refuse: `That table has columns for ${andList(cols.slice(1))}, but none `
+      + `for ${FILING_LABEL[filing]} — which is what this table would be filed under.` };
+  /* The rate lives in the first cell and the band in the chosen one; everything
+     else on the row belongs to somebody else's schedule and must not be read.
+     A row too short to have the column is left alone — it is a heading, not a
+     band, and the band reader will ignore it for having no percentage. */
+  return { lines: lines.map((l, i) => {
+    if (i === head) return '';
+    const c = cells(l);
+    return c.length > target ? `${c[0]} ${c[target]}` : l;
+  }) };
+}
+
+function parseBrackets(text, filing) {
+  const status = filing || 'single';
   const src = String(text || '')
     .replace(/\r\n?/g, '\n')
     .replace(/[   ]/g, ' ')
-    .replace(/[‐-―−]/g, '-');
+    .replace(/[‐-―−]/g, '-')
+    /* ── Markdown and citation debris ──────────────────────
+       A schedule copied out of a page or an assistant's answer arrives dressed
+       up: bullet markers, and footnotes like "[[1](https://…), [2](https://…)]"
+       hanging off the last band. **URLs go first and go whole** — they are full
+       of digits and hyphens ("…/2026-federal-income-tax-brackets…") and every
+       one of those is something the band reader could mistake for an edge or a
+       range. Then the bare footnote markers, then the bullets.
+
+       Stripped rather than treated as an ignorable LINE, because this debris
+       sits on the same line as a real band — dropping the line would lose the
+       top band and turn a good paste into "some of the schedule is missing". */
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/\[\s*\d+\s*\]/g, ' ')
+    .split('\n').map(l => l.replace(/^\s*[*•·]\s+/, '')).join('\n');
   const ignored = [];
   const bands = [];
-  const lines = src.split('\n').map(l => l.trim()).filter(Boolean);
   let sawPercent = false;
   const no = (why) => ({ ok: false, why, ignored });
+
+  /* ── A paste that lost its line breaks ────────────────────────────────────
+     Copying a bracket table out of a web page routinely flattens the whole
+     schedule onto ONE line, so it arrives as
+     "…Single Filers10%: Up to $12,30012%: $12,301 to $50,300…". Refusing that
+     is correct but useless: retyping the line breaks is most of the work the
+     paste box exists to save.
+
+     It is put back deterministically, NOT guessed at, which is what makes this
+     safe to do at all:
+     · A comma-formatted amount's last group is EXACTLY three digits. So any
+       digit following a complete `,NNN` group starts a new token — `$12,30012`
+       can only be `$12,300` then `12`. Reading the rate off the end instead
+       ("take the last two digits") would corrupt `$50,3007%` into `$50,30`.
+     · A digit straight after a LETTER starts a new token too, which is what
+       separates a heading from the first band ("Single Filers10%").
+     Applied only to a line carrying more than one percentage, so anything that
+     already parsed takes exactly the path it always did. */
+  const unrun = (l) => l
+    .replace(/([A-Za-z])(\d)/g, '$1\n$2')
+    .replace(/(,\d{3})(\d)/g, '$1\n$2');
+  /* A wide rate-by-status table is narrowed to the reader's own column FIRST,
+     before anything else looks at a number — every other column is somebody
+     else's schedule, and the band reader has no way to tell them apart. */
+  let raws = src.split('\n');
+  const col = pickFilingColumn(raws, status);
+  if (col && col.refuse) return no(col.refuse);
+  if (col) raws = col.lines;
+
+  const lines = [];
+  for (const raw of raws) {
+    const l = raw.trim();
+    if (!l) continue;
+    const many = (l.match(/\d+(?:\.\d+)?\s*%/g) || []).length > 1;
+    for (const part of (many ? unrun(l).split('\n') : [l]))
+      if (part.trim()) lines.push(part.trim());
+  }
 
   for (const line of lines) {
     /* Reported, never silently dropped: a schedule pasted whole usually brings
@@ -6016,8 +6108,13 @@ function parseBrackets(text) {
      be a plausible-looking lie. */
   for (let i = 1; i < bands.length; i++) {
     const prev = bands[i - 1], cur = bands[i];
+    /* An open band with more after it almost always means TWO schedules were
+       pasted together — the published pages put single and married tables one
+       under the other, and copying takes both. Say that, rather than talking
+       about band order, because "put the and-above band at the bottom" is
+       advice about a mistake the reader did not make. */
     if (prev.upTo === null)
-      return no(`An open-ended band is not the last one — ${fmtMoney(cur.upTo || 0)} comes after it. Put the “and above” band at the bottom.`);
+      return no(`This looks like more than one schedule — the table runs on past its top band to ${fmtMoney(cur.upTo || 0)}. Paste just the one for ${FILING_LABEL[status]}.`);
     if (cur.upTo !== null && cur.upTo <= prev.upTo)
       return no(`The bands do not climb: ${fmtMoney(prev.upTo)} then ${fmtMoney(cur.upTo)}.`);
   }
@@ -6470,7 +6567,7 @@ function taxTableAt(jur, year, create) {
 function taxPastePreview(text) {
   if (!(text || '').trim())
     return 'Nothing pasted — the bands already stored are left exactly as they are.';
-  const p = parseBrackets(text);
+  const p = parseBrackets(text, state.settings.filingStatus);
   if (!p.ok) return `✕ Nothing will be stored — ${p.why}`;
   const say = p.bands.map(b => b.upTo === null
     ? `and above at ${(b.rate * 100).toFixed(2)}%`
@@ -10206,7 +10303,9 @@ const EDITORS = {
           + 'from. Never sent anywhere.' },
       { key: 'paste', label: 'Paste a schedule (optional)', type: 'note', rows: 7, wide: true,
         hint: 'Paste the bracket table and it will be read and REPLACE the bands below. '
-          + 'It is checked before anything is stored — if any part of it does not read, '
+          + 'Most layouts work, including a wide table with a column per filing status — '
+          + 'yours is picked out. Bullets, headings and citation links are ignored. It is '
+          + 'checked before anything is stored, and if any part of it does not read, '
           + 'nothing is stored at all.' },
       { key: 'preview', label: 'What will be stored', type: 'readout' },
     ],
@@ -10228,7 +10327,7 @@ const EDITORS = {
       if (!/^\d{4}$/.test(year)) return 'That is not a year — nothing was stored.';
       let parsed = null;
       if ((v.paste || '').trim()) {
-        parsed = parseBrackets(v.paste);
+        parsed = parseBrackets(v.paste, state.settings.filingStatus);
         /* REFUSED WHOLE. Nothing about the table changes — not the deduction,
            not the source — because a half-applied edit is the thing this
            discipline exists to prevent. */

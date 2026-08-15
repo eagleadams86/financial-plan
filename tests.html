@@ -3808,6 +3808,129 @@ t('an open-ended marker discards its number, because that number is the floor', 
       { upTo: null, rate: 0.3 }, line);
 });
 
+t('it puts back the line breaks a web-page copy threw away', () => {
+  /* THE bug that reached Charlie: copying a schedule out of a page flattens it
+     onto one line, and every band arrived glued to the amount before it —
+     "$12,00012%". Refusing was correct and useless, since retyping the breaks
+     is most of the work the paste box exists to save.
+
+     The split is DETERMINISTIC, not a guess: a comma-formatted amount's last
+     group is exactly three digits, so a digit after a complete `,NNN` group can
+     only start a new token. */
+  const r = P('2030 Tax Brackets for Single Filers10%: Up to $12,00012%: '
+    + '$12,001 to $50,00022%: $50,001 to $105,00024%: Over $105,0002030');
+  eq(r.ok, true, r.why);
+  eq(r.bands, [{ upTo: 12000, rate: 0.1 }, { upTo: 50000, rate: 0.12 },
+               { upTo: 105000, rate: 0.22 }, { upTo: null, rate: 0.24 }]);
+  eq(r.ignored.includes('2030 Tax Brackets for Single Filers'), true,
+    'the heading glued to the first band is split off and reported');
+});
+
+t('the rescue reads the amount, never the last digits before the %', () => {
+  /* The tempting shortcut — "take the one or two digits in front of the %" —
+     turns $50,3007% into $50,30 and a band edge off by a factor of ten. The
+     comma group is what makes it unambiguous. */
+  const r = P('10%: Up to $50,3007%: Over $50,301');
+  eq(r.ok, true, r.why);
+  eq(r.bands[0].upTo, 50300, 'the amount keeps all three digits after the comma');
+  eq(r.bands[1].rate, 0.07, 'and the single-digit rate is read as 7%, not 07 of something');
+});
+
+t('two schedules pasted together say so, rather than talking about band order', () => {
+  /* The published pages stack the single and married tables, and copying takes
+     both. "Put the and-above band at the bottom" would be advice about a
+     mistake the reader did not make. */
+  const r = P('10%: Up to $12,00024%: Over $12,0002030\n'
+    + 'Married Filing Jointly10%: Up to $24,00024%: Over $24,000');
+  eq(r.ok, false);
+  ok(/more than one schedule/i.test(r.why), r.why);
+  ok(/single filer/i.test(r.why), 'and it names which one to keep: ' + r.why);
+});
+
+t('a schedule that already has line breaks takes the path it always did', () => {
+  /* The rescue only touches a line carrying more than one percentage, so
+     nothing that parsed before can start parsing differently. */
+  eq(P('10%   $0 to $12,000\n20%   $12,000 to $50,000\n30%   $50,000 or more').bands,
+     [{ upTo: 12000, rate: 0.1 }, { upTo: 50000, rate: 0.2 }, { upTo: null, rate: 0.3 }]);
+  /* The over/not-over layout keeps its running total on one line with one
+     percentage — untouched by the rescue, and still read correctly. */
+  eq(P('Over $0 but not over $12,000 ... 10% of the amount over $0\n'
+     + 'Over $12,000 but not over $50,000 ... $1,200 plus 20% of the amount over $12,000\n'
+     + 'Over $50,000 ... $8,800 plus 30% of the amount over $50,000').bands,
+     [{ upTo: 12000, rate: 0.1 }, { upTo: 50000, rate: 0.2 }, { upTo: null, rate: 0.3 }]);
+});
+
+t('it takes YOUR column out of a rate-by-status table', () => {
+  /* A published page gives one wide table with a column per filing status, so a
+     copy brings all four. Picking the wrong one is a whole schedule wrong,
+     silently — which is why the column is selected rather than the numbers
+     being scanned for the biggest. Invented figures; the SHAPE is the real one.
+     The separate column deliberately differs from single only in its last
+     closed band, which is what proves a column is really being read. */
+  const wide = ['2030 tax brackets',
+    'Tax rate\tSingle filers\tMarried couples filing jointly\tMarried couples filing separately\tHead of household',
+    '10%\t$12,000 or less\t$24,000 or less\t$12,000 or less\t$17,000 or less',
+    '22%\t$12,001 to $105,000\t$24,001 to $211,000\t$12,001 to $105,000\t$17,001 to $105,000',
+    '35%\t$105,001 to $640,000\t$211,001 to $768,000\t$105,001 to $384,000\t$105,001 to $640,000',
+    '37%\tOver $640,000\tOver $768,000\tOver $384,000\tOver $640,000'].join('\n');
+  const edges = (f) => H.parseBrackets(wide, f).bands.map(b => b.upTo);
+  eq(edges('single'), [12000, 105000, 640000, null]);
+  eq(edges('joint'), [24000, 211000, 768000, null]);
+  eq(edges('separate'), [12000, 105000, 384000, null],
+    'the column that differs only at the end is still read as its own');
+  eq(H.parseBrackets(wide, 'single').bands.map(b => b.rate), [0.1, 0.22, 0.35, 0.37]);
+});
+
+t('a wide table with no column for you refuses and names what it had', () => {
+  const wide = ['Tax rate\tHead of household\tMarried couples filing jointly',
+    '10%\t$17,000 or less\t$24,000 or less',
+    '37%\tOver $17,000\tOver $24,000'].join('\n');
+  const r = H.parseBrackets(wide, 'separate');
+  eq(r.ok, false);
+  ok(/none for married filing separately/i.test(r.why), r.why);
+  ok(/Head of household/i.test(r.why), 'and says what it did have: ' + r.why);
+});
+
+t('columns are only taken when the paste declared them', () => {
+  /* Gated on finding a HEADER, not on the text looking wide: a rate-first table
+     with a gutter, or a dot-leader schedule, must not be torn into columns that
+     were never there. */
+  eq(H.parseBrackets('10%   $0 to $12,000\n20%   $12,000 to $50,000\n30%   $50,000 or more',
+    'single').bands.map(b => b.upTo), [12000, 50000, null], 'a wide gutter is not a column');
+  eq(H.parseBrackets('Over $0 but not over $12,000 ....... 10% of the amount over $0\n'
+    + 'Over $12,000 .......  $1,200 plus 20% of the amount over $12,000',
+    'single').bands.map(b => b.upTo), [12000, null], 'nor a dot leader');
+});
+
+t('bullets and citation links are stripped, not treated as a lost band', () => {
+  /* A schedule copied out of a page or an assistant's answer brings markdown
+     bullets and footnotes like "[[1](https://…)]" hanging off the LAST band.
+     The URLs are full of digits and hyphens, so they go first and go whole —
+     and they are stripped rather than ignored as a line, because dropping the
+     line would take the top band with it. */
+  const r = H.parseBrackets(`2030 Tax Brackets for Single Filers
+
+* 10%: Up to $12,000
+* 22%: $12,001 to $105,000
+* 37%: Over $105,000 [[1](https://example.com/explainer/2030-federal-income-tax-brackets-and-calculator/), [2](https://example.com/tax-tips/L8jeM6XaJ)]`, 'single');
+  eq(r.ok, true, r.why);
+  eq(r.bands, [{ upTo: 12000, rate: 0.1 }, { upTo: 105000, rate: 0.22 },
+               { upTo: null, rate: 0.37 }],
+    'the cited band is still the open one, and no URL digit became an edge');
+});
+
+t('the parser reads no state of its own', () => {
+  /* Filing status is passed IN. It used to reach for `state.settings` for one
+     refusal message, which is the ambient-state trap: the same paste would then
+     behave differently depending on what the browser happened to hold. */
+  const wide = ['Tax rate\tSingle filers\tMarried couples filing jointly',
+    '10%\t$12,000 or less\t$24,000 or less',
+    '37%\tOver $12,000\tOver $24,000'].join('\n');
+  eq(H.parseBrackets(wide, 'joint').bands[0].upTo, 24000);
+  eq(H.parseBrackets(wide, 'single').bands[0].upTo, 12000);
+  eq(H.parseBrackets(wide).bands[0].upTo, 12000, 'defaulting to single, not to a global');
+});
+
 t('lines about anything other than a band are ignored and REPORTED', () => {
   const r = P(`Standard deduction: $15,000
     Personal exemption: $0
