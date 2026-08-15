@@ -157,7 +157,35 @@ family names as well as balances.
   `ruleDesc()` renders a rule with its
   row's own numbers — use it, not RULE_LABEL, wherever a rule is named next
   to a specific row.
-- **A retirement account can list its HOLDINGS**, the same `{ticker, shares,
+- **A retirement account can list its CONTRIBUTION TYPES** (`a.buckets`, each
+`{label, kind, amount}`). One real 401(k) holds a rollover, a Roth deferral, an
+employer match and a pre-tax deferral at once, each taxed differently — so **the
+account has one contribution limit and several tax treatments**, which is why
+`type` stays on the account and `kind` moves to the bucket. Splitting one 401(k)
+into five "accounts" to express that was a workaround that made the Roth split
+right by accident.
+- **No migration and no schema bump** — `buckets` is additive, and folding
+  accounts is a user-invoked action (`foldAccounts`), never automatic. Guessing
+  that "401k RAA" and "401k rollover" are one real account would be inventing;
+  the same-name merge's rule applies — *"a rename does the same job from then
+  on, at the point where you actually said they were the same thing."*
+- **`retirementPots` emits one pot per BUCKET** when an account has them, one
+  per account when it doesn't — which is what keeps a plan that has never used
+  them byte-for-byte unchanged, and why the one-pot-per-account test still
+  passes. Account-level `contribs` ride on a pot of the ACCOUNT's kind: the
+  401(k) card's Roth share already splits the ongoing deferral, and typed
+  contribution rows in practice live on IRAs, which have one treatment. **Per-
+  bucket contributions are deliberately out of scope** — say so rather than
+  half-build it.
+- **`kindTotals(accts)` is the one reader** for the Traditional/Roth question on
+  screen; the tab asks it twice (the bar and the per-person table) and the two
+  drifting apart would show a household whose halves don't add up.
+- **The fold refuses whole and changes nothing** — different owners, or a
+  `contribs` year claimed by both — the same-name merge's discipline. It also
+  **drops the `ra-*` keys from `ui.collapsed`**, because splicing the array
+  repoints every index-keyed folded pane; a box springing open is the harmless
+  direction.
+**A retirement account can list its HOLDINGS**, the same `{ticker, shares,
 price}` rows an investment pane holds, keyed `ra:<index>` through the existing
 `holdingList()`. One table, one editor, one price lookup, wherever the rows
 live — `priceLists()` includes them, so the refresh, the staleness count and the

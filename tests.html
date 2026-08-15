@@ -3214,6 +3214,94 @@ t('an account with holdings takes its balance from them, one without keeps its o
   listed.rows[0].price = 110;
   eq(H.retAcctBalance(listed), 1202.5);
 });
+/* One real 401(k) holds a rollover, a Roth deferral, an employer match and a
+   pre-tax deferral at once, each taxed differently. Splitting it into five
+   "accounts" to express that was a workaround; buckets are the structure. */
+t('an account can list its contribution types, each with its own treatment', () => {
+  const s = H.coerceShape({ side: { retirementAccounts: [
+    { name: '401(k)', type: '401k', kind: 'traditional', amount: 999999, buckets: [
+      { label: 'Rollover', kind: 'traditional', amount: 267442.15 },
+      { label: 'Roth 401k deferrals', kind: 'roth', amount: 92486.18 },
+      { label: 'Safe harbor match', kind: 'traditional', amount: 68182.36 },
+      { label: 'Employee pre-tax', kind: 'traditional', amount: 31903.62 },
+      { label: 'RAA/DEC', kind: 'traditional', amount: 26274.58 }] }] } });
+  const a = s.side.retirementAccounts[0];
+  eq(H.bucketsValue(a.buckets), 486288.89, "the statement's own total");
+  eq(H.retAcctBalance(a), 486288.89, 'buckets outrank the stale typed amount');
+  const pots = H.retirementPots(s, RET_FIX, 5);
+  eq(pots.length, 5, 'one pot per bucket');
+  eq(pots.map(p => p.kind),
+    ['traditional', 'roth', 'traditional', 'traditional', 'traditional']);
+  eq(pots[1].label, '401(k) — Roth 401k deferrals');
+  const sp = H.retirementSplit(s, RET_FIX);
+  eq(sp.now.roth, 92486.18, 'the Roth side comes from the bucket, not from five fake accounts');
+  eq(sp.now.traditional, H.round2(486288.89 - 92486.18));
+});
+t('an account with no buckets is one pot, exactly as it always was', () => {
+  const s = H.coerceShape({ side: { retirementAccounts: [
+    { name: 'Roth IRA', type: 'roth-ira', kind: 'roth', amount: 50000 }] } });
+  const pots = H.retirementPots(s, RET_FIX, 5);
+  eq(pots.length, 1);
+  eq([pots[0].key, pots[0].label, pots[0].kind, pots[0].balance],
+    ['a0', 'Roth IRA', 'roth', 50000]);
+});
+t('a half-built bucket inherits its account, and a list of numbers empties', () => {
+  const s = H.coerceShape({ side: { retirementAccounts: [
+    { name: 'Roth 401(k)', type: 'roth-401k', kind: 'roth',
+      buckets: [{ label: 'Deferrals', amount: 100 },          // no kind
+                { label: 'Odd', kind: 'nonsense', amount: 50 }] },
+    { name: 'Broken', type: '401k', kind: 'traditional', amount: 7,
+      buckets: [23850, 0.1] }] } });
+  eq(s.side.retirementAccounts[0].buckets.map(b => b.kind), ['roth', 'roth'],
+    "a bucket with no readable treatment sits where its account sits, not on the pre-tax side");
+  eq(s.side.retirementAccounts[1].buckets, [],
+    'a list of bare numbers empties rather than storing a phantom that taxes at nothing');
+  eq(H.retAcctBalance(s.side.retirementAccounts[1]), 7, 'so the typed amount still stands');
+});
+t('folding five accounts into one leaves the split exactly where it was', () => {
+  /* The whole point of the restructure: expressing five tax treatments as five
+     accounts and as five contribution types must give the SAME answer. If it
+     didn't, one of the two readings was wrong about somebody's retirement. */
+  const five = [
+    ['401k rollover', 'traditional', 267442.15], ['Roth 401k deferrals', 'roth', 92486.18],
+    ['Safe harbor match', 'traditional', 68182.36], ['Employee pre-tax', 'traditional', 31903.62],
+    ['Raa/dec', 'traditional', 26274.58]];
+  const asAccounts = H.coerceShape({ side: { retirementAccounts: five.map(([name, kind, amount]) =>
+    ({ name, type: kind === 'roth' ? 'roth-401k' : '401k', kind, amount })) } });
+  const asBuckets = H.coerceShape({ side: { retirementAccounts: [
+    { name: '401(k)', type: '401k', kind: 'traditional',
+      buckets: five.map(([label, kind, amount]) => ({ label, kind, amount })) }] } });
+  eq(H.kindTotals(asAccounts.side.retirementAccounts),
+     H.kindTotals(asBuckets.side.retirementAccounts), 'the same split either way');
+  eq(H.kindTotals(asBuckets.side.retirementAccounts),
+     { traditional: 393802.71, roth: 92486.18 });
+  eq(H.retAcctBalance(asBuckets.side.retirementAccounts[0]), 486288.89);
+  /* And the projection agrees with the card, as it must. */
+  const pots = H.retirementPots(asBuckets, RET_FIX, 5);
+  eq(H.round2(pots.reduce((t, p) => t + p.balance, 0)), 486288.89);
+  eq(H.round2(pots.filter(p => p.kind === 'roth').reduce((t, p) => t + p.balance, 0)), 92486.18);
+});
+t('the split reads buckets where there are any and the account where there are not', () => {
+  const s = H.coerceShape({ side: { retirementAccounts: [
+    { name: 'Mixed', type: '401k', kind: 'traditional', amount: 999, buckets: [
+      { label: 'Pre-tax', kind: 'traditional', amount: 300 },
+      { label: 'Roth', kind: 'roth', amount: 200 }] },
+    { name: 'Plain Roth IRA', type: 'roth-ira', kind: 'roth', amount: 500 }] } });
+  eq(H.kindTotals(s.side.retirementAccounts), { traditional: 300, roth: 700 },
+    'the bucketed account contributes both sides, the plain one only its own');
+});
+t('buckets and holdings disagreeing is reported, never resolved', () => {
+  const mk = (bucketTotal) => H.coerceShape({ side: { retirementAccounts: [
+    { name: '401(k)', type: '401k', kind: 'traditional',
+      buckets: [{ label: 'Pre-tax', kind: 'traditional', amount: bucketTotal }],
+      rows: [{ ticker: 'AAA', shares: 100, price: 60 }] }] } });
+  eq(H.bucketGap(mk(6000).side.retirementAccounts[0]), null, 'agreement is silence');
+  eq(H.bucketGap(mk(6500).side.retirementAccounts[0]), 500, 'and a gap is stated');
+  eq(H.retAcctBalance(mk(6500).side.retirementAccounts[0]), 6500,
+    'buckets still decide the balance — the gap is reported, not resolved');
+  eq(H.bucketGap({ buckets: [{ amount: 1 }] }), null, 'one statement cannot disagree with itself');
+  eq(H.bucketGap({ rows: [{ shares: 1, price: 1 }] }), null);
+});
 t('holdings reach the projection, the split and the price lookup', () => {
   const s = H.coerceShape({ settings: { retirementReturnAnnual: 0 },
     people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 }],

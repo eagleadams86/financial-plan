@@ -155,6 +155,12 @@ included — treat those the way you treat the figures.
   go in, and what it is worth by the month the paying-in stops;
   **a growth rate per account** (leave it empty to follow Preferences) so a
   bond-heavy rollover and an all-equity Roth don't have to compound alike;
+  **the contribution types inside an account** — a real 401(k) holds a rollover,
+  a Roth deferral, an employer match and a pre-tax deferral at once, each taxed
+  differently, so one account carries them all rather than being faked as
+  several; a **Combine** button folds accounts you split that way back into one,
+  keeping every balance and treatment, and refuses outright rather than half-
+  doing it;
   **the holdings inside each account** — the same ticker/shares/price rows an
   investment pane takes, priced by the same lookup, and once an account lists
   them its balance follows the holdings instead of a figure you typed;

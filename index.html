@@ -2014,6 +2014,24 @@ function coerceShape(data) {
        lookup works on them without knowing where they live. */
     a.rows = arr(a.rows);
     a.rows.forEach(numHolding);
+    /* CONTRIBUTION TYPES within one account. A real 401(k) holds a rollover, a
+       Roth deferral, an employer match and a pre-tax deferral all at once, each
+       taxed differently — the account has ONE contribution limit and SEVERAL
+       tax treatments, which is why `type` stays up here and `kind` moves down
+       to the bucket. Splitting one 401(k) into five "accounts" to express that
+       was a workaround, and it made the Roth split right by accident.
+
+       `arr()` drops non-objects, so a bucket list of bare numbers empties
+       rather than storing a phantom that taxes at nothing. A bucket with no
+       readable treatment INHERITS THE ACCOUNT'S rather than defaulting to
+       traditional — a half-built bucket should sit where its account sits, not
+       quietly land on the pre-tax side. */
+    a.buckets = arr(a.buckets);
+    for (const b of a.buckets) {
+      b.label = String(b.label || '');
+      b.amount = num(b.amount);
+      if (b.kind !== 'roth' && b.kind !== 'traditional') b.kind = retKind(a);
+    }
     for (const y of Object.keys(a.contribs || {})) a.contribs[y] = num(a.contribs[y]);
     /* Whose retirement account it is — the same owner field the budget
        accounts carry, and the one place "spouses have different retirement
@@ -4114,13 +4132,54 @@ function holdingList(key) {
   return state.side[key] || [];
 }
 
-/* What an account is worth: the holdings inside it if it has any, otherwise the
-   balance typed on it. Derived, never stored — the moment a row is edited the
-   total has to follow, and a copy of it sitting in `amount` would be the stale
-   figure every other total on the tab was quietly adding up. `amount` stays as
-   what it always was for an account nobody has listed the contents of. */
-const retAcctBalance = (a) => (a && a.rows && a.rows.length)
-  ? holdingsValue(a.rows) : round2((a && a.amount) || 0);
+const bucketsValue = (buckets) =>
+  round2((buckets || []).reduce((s, b) => s + (b.amount || 0), 0));
+
+/* What an account is worth, in order of what the reader has actually said:
+   its contribution-type BUCKETS, then its HOLDINGS, then the balance typed on
+   it. Derived, never stored — the moment a figure is edited the total has to
+   follow, and a copy of it sitting in `amount` would be the stale figure every
+   other total on the tab was quietly adding up.
+
+   Buckets come first because they are the only one of the three that also
+   carries the TAX TREATMENT, so they are the statement the split depends on;
+   letting holdings outrank them would leave a balance nobody could reconcile
+   with the Traditional/Roth figures beside it. Where both are listed they are
+   two statements of the same money, and `bucketGap` reports a disagreement
+   rather than picking a winner quietly. */
+const retAcctBalance = (a) =>
+  (a && a.buckets && a.buckets.length) ? bucketsValue(a.buckets)
+  : (a && a.rows && a.rows.length) ? holdingsValue(a.rows)
+  : round2((a && a.amount) || 0);
+
+/* Traditional against Roth over a list of accounts, reading each account's
+   CONTRIBUTION TYPES where it lists them and its own treatment where it does
+   not. One helper because the tab asks this twice — the bar at the top and the
+   per-person table under it — and the two drifting apart would show a household
+   whose halves don't add up to its total. It is the same question
+   `retirementPots` answers a different way for the projection; there is a test
+   that the two agree. */
+function kindTotals(accts) {
+  let traditional = 0, roth = 0;
+  for (const a of (accts || [])) {
+    if ((a.buckets || []).length) {
+      for (const b of a.buckets)
+        if (b.kind === 'roth') roth += (b.amount || 0); else traditional += (b.amount || 0);
+    } else if (retKind(a) === 'roth') roth += retAcctBalance(a);
+    else traditional += retAcctBalance(a);
+  }
+  return { traditional: round2(traditional), roth: round2(roth) };
+}
+
+/* The two statements disagreeing, or null. Stated and stopped at — the
+   `reconcileNote` rule: the app cannot know which is right, and a stale bucket
+   figure is exactly what this is for. Null when either list is absent, because
+   one statement cannot disagree with itself. */
+function bucketGap(a) {
+  if (!a || !(a.buckets || []).length || !(a.rows || []).length) return null;
+  const gap = round2(bucketsValue(a.buckets) - holdingsValue(a.rows));
+  return gap === 0 ? null : gap;
+}
 
 function holdingsTable(rows, list) {
   const body = rows.map((h, idx) => `<tr class="editrow" data-edit="holding"
@@ -4284,10 +4343,7 @@ function renderRetirement() {
   const accts = s.retirementAccounts || [];
 
   /* Traditional vs Roth, from the account list */
-  const trad = round2(accts.filter(a => retKind(a) !== 'roth')
-    .reduce((t, a) => t + retAcctBalance(a), 0));
-  const roth = round2(accts.filter(a => retKind(a) === 'roth')
-    .reduce((t, a) => t + retAcctBalance(a), 0));
+  const { traditional: trad, roth } = kindTotals(accts);
   const total = round2(trad + roth);
   const tradPct = total ? trad / total : 0;
   /* The split PER PERSON is a table, not a second bar and not a chart line.
@@ -4300,10 +4356,7 @@ function renderRetirement() {
       .map(([id, label]) => {
         const mine = accts.filter(a => (a.owner || '') === id);
         if (!mine.length) return '';
-        const t = round2(mine.filter(a => retKind(a) !== 'roth')
-          .reduce((s, a) => s + retAcctBalance(a), 0));
-        const r = round2(mine.filter(a => retKind(a) === 'roth')
-          .reduce((s, a) => s + retAcctBalance(a), 0));
+        const { traditional: t, roth: r } = kindTotals(mine);
         return `<tr><th scope="row">${esc(label)}</th><td>${fmtMoney(t)}</td>
           <td>${fmtMoney(r)}</td><td>${fmtMoney(round2(t + r))}</td></tr>`;
       }).join('');
@@ -4330,17 +4383,40 @@ function renderRetirement() {
         showOwner ? '<th style="text-align:left">Whose</th>' : ''
         }<th style="text-align:left">Type</th>
         <th>Balance</th><th>${esc(year)} in</th></tr></thead>
-      <tbody>${accts.map((a, idx) => `<tr class="editrow" data-edit="retAcct" data-idx="${idx}">
+      <tbody>${accts.map((a, idx) => {
+        const bs = a.buckets || [];
+        const gap = bucketGap(a);
+        const cols = 3 + (showOwner ? 1 : 0);
+        /* A bucketed account's contribution types sit under it, indented and
+           clickable, so the tax treatments are visible where the balance is
+           rather than only inside a dialog. */
+        return `<tr class="editrow" data-edit="retAcct" data-idx="${idx}">
         <th scope="row">${esc(a.name)}</th>
         ${showOwner ? `<td style="text-align:left">${
           esc(ownerLabel(state, a.owner)) || '<span class="muted">—</span>'}</td>` : ''}
-        <td style="text-align:left">${esc(RET_TYPE_LABEL[a.type] || 'Other')}</td>
+        <td style="text-align:left">${esc(RET_TYPE_LABEL[a.type] || 'Other')}${
+          bs.length ? ` <span class="muted">· ${bs.length} types</span>` : ''}</td>
         <td>${fmtMoney(retAcctBalance(a))}</td>
-        <td>${(a.contribs || {})[year] ? fmtMoney(a.contribs[year]) : ''}</td></tr>`).join('')}</tbody>
+        <td>${(a.contribs || {})[year] ? fmtMoney(a.contribs[year]) : ''}</td></tr>`
+        + bs.map((b, bidx) => `<tr class="editrow" data-edit="bucket"
+            data-idx="${idx}" data-bidx="${bidx}">
+            <td style="padding-left:22px" class="muted">${esc(b.label || 'Unnamed')}</td>
+            ${showOwner ? '<td></td>' : ''}
+            <td style="text-align:left" class="muted">${
+              b.kind === 'roth' ? 'Roth' : 'Pre-tax'}</td>
+            <td class="muted">${fmtMoney(b.amount || 0)}</td><td></td></tr>`).join('')
+        + (gap === null ? '' : `<tr><td colspan="${cols + 1}" class="muted"
+            style="padding-left:22px">The types come to ${fmtMoney(Math.abs(gap))} ${
+            gap > 0 ? 'more' : 'less'} than the holdings listed for this account — the
+            balance follows the types, and one of the two is out of date.</td></tr>`);
+      }).join('')}</tbody>
       <tfoot><tr><th>Total</th>${showOwner ? '<td></td>' : ''}<td></td>
         <td>${fmtMoney(total)}</td><td></td></tr></tfoot>
     </table></div>` : '<p class="sub">Nothing recorded.</p>'}
-    <div class="addbar"><button class="btn small" data-add="retAcct">＋ Add account</button></div>`;
+    <div class="addbar"><button class="btn small" data-add="retAcct">＋ Add account</button>${
+      accts.length > 1 ? `<button class="btn small" data-edit="foldAccounts"
+        title="Fold several accounts into one, keeping each as a contribution type"
+        >⇲ Combine into one account</button>` : ''}</div>`;
 
   /* IRA contributions, per account rather than the one hard-wired Roth IRA.
      One line per contribution, so every one of them is a row you can click —
@@ -5194,7 +5270,8 @@ const accountRate = (st, a) => typeof a.rate === 'number'
    one, both at the plan's own rate. Type it as contribution rows against a
    named account instead and those win, at that account's own rate. */
 function retirementPots(st, thisYear, span) {
-  const pots = (st.side.retirementAccounts || []).map((a, idx) => {
+  const pots = [];
+  (st.side.retirementAccounts || []).forEach((a, idx) => {
     const contribs = {};
     const add = (y, v) => { if (v) contribs[String(y)] = round2((contribs[String(y)] || 0) + v); };
     for (const [y, v] of Object.entries(a.contribs || {})) add(y, v);
@@ -5211,8 +5288,30 @@ function retirementPots(st, thisYear, span) {
         add(y, round2(carried * working));
       }
     }
-    return { key: `a${idx}`, idx, label: a.name, kind: retKind(a),
-             rate: accountRate(st, a), balance: retAcctBalance(a), contribs };
+    const rate = accountRate(st, a);
+    /* An account whose contribution types are listed becomes ONE POT PER
+       BUCKET, each at the account's own rate — one 401(k) is invested one way,
+       so the buckets grow alike and only their tax treatment differs. An
+       account with no buckets is one pot exactly as it always was, which is
+       what keeps a plan that has never used them byte-for-byte unchanged.
+
+       The account-level `contribs` ride on a pot of the ACCOUNT's own kind
+       rather than being attributed to a bucket: the 401(k) card's Roth share
+       already splits the ongoing deferral by treatment, and typed contribution
+       rows in practice live on IRAs, which have one treatment anyway. Said out
+       loud on the tab rather than half-built. */
+    if ((a.buckets || []).length) {
+      a.buckets.forEach((b, bidx) => pots.push({
+        key: `a${idx}b${bidx}`, idx, bidx, label: `${a.name} — ${b.label || 'Unnamed'}`,
+        kind: b.kind === 'roth' ? 'roth' : 'traditional',
+        rate, balance: round2(b.amount || 0), contribs: {} }));
+      if (Object.keys(contribs).length)
+        pots.push({ key: `a${idx}c`, idx, label: `${a.name} — paid in`,
+                    kind: retKind(a), rate, balance: 0, contribs });
+      return;
+    }
+    pots.push({ key: `a${idx}`, idx, label: a.name, kind: retKind(a),
+                rate, balance: retAcctBalance(a), contribs });
   });
   const deferral = { traditional: {}, roth: {} };
   for (const id of limitEarners(st)) {
@@ -8581,12 +8680,18 @@ const EDITORS = {
          edit and that is then ignored is worse than no figure at all. It
          becomes a readout, which `readFields` skips, so `save` keeps whatever
          was stored rather than reading `undefined` and zeroing it. */
-      ...((ds.idx !== undefined
-           && ((state.side.retirementAccounts[+ds.idx] || {}).rows || []).length)
-        ? [{ key: 'amountRead', label: 'Balance', type: 'readout',
-             hint: 'Shares × price, added up from the holdings listed for this account. '
-               + 'Edit a holding to change it.' }]
-        : [{ key: 'amount', label: 'Balance', type: 'money' }]),
+      ...((() => {
+        const a = ds.idx === undefined ? {} : (state.side.retirementAccounts[+ds.idx] || {});
+        const byBuckets = (a.buckets || []).length, byRows = (a.rows || []).length;
+        return (byBuckets || byRows)
+          ? [{ key: 'amountRead', label: 'Balance', type: 'readout',
+               hint: byBuckets
+                 ? 'Added up from the contribution types listed for this account. Edit one '
+                   + 'of those to change it.'
+                 : 'Shares × price, added up from the holdings listed for this account. '
+                   + 'Edit a holding to change it.' }]
+          : [{ key: 'amount', label: 'Balance', type: 'money' }];
+      })()),
       /* Blank, not prefilled with the global: absent means "follow Preferences",
          and a copy of today's figure sitting in the account would stop doing
          that the moment the setting changed. */
@@ -8609,10 +8714,10 @@ const EDITORS = {
       const list = state.side.retirementAccounts;
       const old = ds.idx !== undefined ? list[+ds.idx] : null;
       const type = RET_TYPE_LABEL[v.type] ? v.type : 'other';
-      /* `contribs` and `rows` are NOT on this form, so they are carried across
-         by hand — this save rebuilds the row from scratch and anything it
-         doesn't name is gone. That is the trap every new per-account field
-         falls into; see the note in CLAUDE.md. */
+      /* `contribs`, `rows` and `buckets` are NOT on this form, so they are
+         carried across by hand — this save rebuilds the row from scratch and
+         anything it doesn't name is gone. That is the trap every new
+         per-account field falls into; it has caught two already. */
       const row = { name: v.name || '?', type,
         kind: (RET_TYPES.find(t => t[0] === type) || [])[2] || 'traditional',
         /* `v.amount` is undefined when the box was a readout, which is not the
@@ -8620,7 +8725,8 @@ const EDITORS = {
            later clearing them leaves the old typed balance intact. */
         amount: v.amount ?? (old?.amount ?? 0),
         contribs: { ...(old?.contribs || {}) },
-        rows: [...(old?.rows || [])] };
+        rows: [...(old?.rows || [])],
+        buckets: [...(old?.buckets || [])] };
       /* Empty DELETES rather than storing 0: a 0% account is a real statement
          (cash, say) and "follow Preferences" is a different one. */
       if (v.rate !== null && v.rate !== undefined) row.rate = v.rate;
@@ -8634,6 +8740,105 @@ const EDITORS = {
     },
     del: (ds) => state.side.retirementAccounts.splice(+ds.idx, 1),
     move: (ds, dir) => listSwap(state.side.retirementAccounts, +ds.idx, dir),
+  },
+
+  /* One contribution type inside one account — a rollover, a Roth deferral, an
+     employer match. The account has one contribution limit; these have the tax
+     treatments. */
+  bucket: {
+    title: (ds, isNew) => isNew ? 'Add a Contribution Type' : 'Contribution Type',
+    sub: () => 'What it is, how it is taxed, and how much of the account it is. The '
+      + 'balance above is the sum of these.',
+    cols: 2,
+    fields: () => [
+      { key: 'label', label: 'What it is', type: 'text', wide: true },
+      { key: 'kind', label: 'Taxed as', type: 'select', options: [
+        ['traditional', 'Pre-tax — taxed when it comes out'],
+        ['roth', 'Roth — already taxed'],
+      ], hint: 'A rollover is usually pre-tax, but it can be a Roth one — which is why '
+        + 'this is asked rather than guessed from the name.' },
+      { key: 'amount', label: 'Amount', type: 'money' },
+    ],
+    get: (ds) => ({ ...(state.side.retirementAccounts[+ds.idx].buckets || [])[+ds.bidx] }),
+    blank: (ds) => ({ kind: retKind(state.side.retirementAccounts[+ds.idx] || {}) }),
+    save(ds, v) {
+      const a = state.side.retirementAccounts[+ds.idx];
+      if (!a) return;
+      a.buckets = a.buckets || [];
+      const row = { label: v.label || 'Unnamed',
+        kind: v.kind === 'roth' ? 'roth' : 'traditional', amount: v.amount ?? 0 };
+      if (ds.bidx !== undefined) a.buckets[+ds.bidx] = row; else a.buckets.push(row);
+    },
+    del: (ds) => state.side.retirementAccounts[+ds.idx].buckets.splice(+ds.bidx, 1),
+    move: (ds, dir) =>
+      listSwap(state.side.retirementAccounts[+ds.idx].buckets, +ds.bidx, dir),
+  },
+
+  /* Folding several accounts into one. A real 401(k) split across five rows to
+     express five tax treatments becomes one account with five contribution
+     types — and it is INVOKED, never automatic, for the reason the same-name
+     account merge is: guessing that "401k RAA" and "401k rollover" are one real
+     account would be inventing, and this is the moment you say they are. */
+  foldAccounts: {
+    title: 'Combine Into One Account',
+    sub: () => 'Each account you fold in becomes a contribution type inside the one you '
+      + 'keep, with its name, its tax treatment and its balance. Nothing is added up or '
+      + 'thrown away.',
+    fields: () => [
+      { key: 'into', label: 'Keep this account', type: 'select',
+        options: (state.side.retirementAccounts || []).map((a, i) => [String(i), a.name]) },
+      { key: 'from', label: 'Fold these into it', type: 'checks', wide: true,
+        options: (state.side.retirementAccounts || []).map((a, i) =>
+          [String(i), `${a.name} — ${fmtMoney(retAcctBalance(a))}`]),
+        hint: 'Tick the ones that are really the same account. Each keeps its name as the '
+          + 'label of a contribution type.' },
+    ],
+    get: () => ({ into: '0', from: [] }),
+    save(ds, v) {
+      const list = state.side.retirementAccounts || [];
+      const target = list[+v.into];
+      const idxs = (v.from || []).map(Number)
+        .filter(i => Number.isInteger(i) && i !== +v.into && list[i]);
+      if (!target || !idxs.length) return 'Nothing to fold — pick an account to keep and at least one to fold in.';
+      const sources = idxs.map(i => list[i]);
+      /* REFUSE THE WHOLE FOLD, say why, change nothing — the discipline the
+         same-name account merge set. A half-done fold is worse than none. */
+      const owners = new Set([target, ...sources]
+        .map(a => a.owner || '').filter((v2, i, arr) => arr.indexOf(v2) === i));
+      if (owners.size > 1)
+        return 'Those accounts are not all the same person’s — a retirement account belongs to one of you, so nothing was folded.';
+      const claimed = new Set(Object.keys(target.contribs || {}));
+      for (const a of sources)
+        for (const y of Object.keys(a.contribs || {})) {
+          if (claimed.has(y))
+            return `Both accounts record a contribution for ${y}. Those are two different payments, not one — nothing was folded.`;
+          claimed.add(y);
+        }
+      /* Each source becomes a bucket carrying its own treatment and whatever
+         its balance was, however that balance was arrived at. */
+      target.buckets = target.buckets || [];
+      if (!target.buckets.length && retAcctBalance(target))
+        target.buckets.push({ label: target.name, kind: retKind(target),
+                              amount: retAcctBalance(target) });
+      for (const a of sources) {
+        target.buckets.push({ label: a.name, kind: retKind(a), amount: retAcctBalance(a) });
+        /* Holdings come across too, so the two statements of this money agree
+           by construction rather than immediately reporting a gap. */
+        if ((a.rows || []).length) target.rows = [...(target.rows || []), ...a.rows];
+        for (const [y, amt] of Object.entries(a.contribs || {})) {
+          target.contribs = target.contribs || {};
+          target.contribs[y] = amt;
+        }
+      }
+      state.side.retirementAccounts = list.filter((a, i) => !idxs.includes(i));
+      /* Every folded-away index shifts the ones after it, and the panes' folded
+         state is keyed `ra-<index>` — so those keys now name the wrong account.
+         Dropped rather than remapped: a box springing open is the harmless
+         direction, and the stored-shut rule already makes that safe. */
+      state.ui.collapsed = (state.ui.collapsed || []).filter(k => !/\/ra-\d+$/.test(k));
+      return `Folded ${plural(sources.length, 'account')} into ${target.name} — ${
+        plural(target.buckets.length, 'contribution type')}, ${fmtMoney(retAcctBalance(target))}.`;
+    },
   },
 
   /* One year's contribution into one retirement account. Kept separate from
@@ -11206,7 +11411,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   limitsForIn, plannedDeferral, plannedContribs,
   isIra, iraAccountsOf, latestContrib, contribStopMonth, iraOutlook,
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
-  retAcctBalance, holdingsValue,
+  retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,
