@@ -188,27 +188,49 @@ included — treat those the way you treat the figures.
   **rate you call safe** — 4% is only where the box starts, not a figure this
   app endorses.
   **Everything on the tab is in today's money**, which is what makes the return
-  setting a *real* one (growth after inflation). There is currently **no tax in
-  any of it** and no required minimum distributions, and the tab says so rather
-  than pretending — a pre-tax 401(k) has to pay out more than you spend, so this
-  projection is optimistic by whatever your rate turns out to be. The Tax tab
-  below is the beginning of fixing that.
+  setting a *real* one (growth after inflation). It does not model required
+  minimum distributions, and it says so rather than pretending.
+  **Once you enter brackets on the Tax tab, the withdrawal is grossed up to
+  cover the tax on it** — a Tax column appears in the year-by-year table, a
+  fourth tile names what the year owes, and the withdrawal rate says it is
+  measured on the gross figure. Until then nothing on the tab moves by a cent.
   Contributions are rows you click to edit, one per year and account.
   The thresholds stay figures **you** type: they move every year and differ by
   filing status, and the app ships none of them.
-- **Tax** *(being built)* — a place to keep the bracket tables **you** type,
-  federal and state, so the retirement projection can eventually work out what a
-  withdrawal has to be *before* tax in order to leave you what you planned to
-  spend. **Nothing ships with the app**: no bracket, no rate, no deduction, not
-  even as a placeholder. A year with no table means no tax, so until you enter
-  one every figure on Retirement is exactly what it has always been. The app may
-  work tax out; it deliberately does not know what the tax is — the same rule
-  the contribution limits have always followed. It will not do required minimum
-  distributions, a Roth-versus-traditional withdrawal order, the Social Security
-  provisional-income formula, itemising, capital gains, NIIT or IRMAA; each is a
-  figure with a year attached that would be quietly wrong within twelve months
-  while looking authoritative. *Today the tab explains itself and stores what you
-  type; the tables, the calculator and the gross-up are still being built.*
+- **Tax** — the bracket tables **you** type, federal and state, so the
+  retirement projection can work out what a withdrawal has to be *before* tax in
+  order to leave you what you planned to spend. That gap was the biggest
+  remaining dishonesty in the drawdown: a pre-tax 401(k) has to pay out more
+  than you spend, and the projection used to draw exactly what you spend.
+  - **Nothing ships with the app**: no bracket, no rate, no deduction, not even
+    as a placeholder or a realistic-looking example. The app may work tax out; it
+    deliberately does not know what the tax is — the same rule the contribution
+    limits have always followed, and for the same reason. **A year with no table
+    means no tax.**
+  - **Type a table by hand or paste one in.** The paste box reads the layouts the
+    published schedules actually use — rate-first, range-first, the
+    over/but-not-over form, a bare two-column table, or a single flat rate — and
+    tells you what it will store *as you type*. It **refuses whole rather than
+    importing half**: bands that don't climb, a rate over 100%, a schedule whose
+    top row is missing, and it names the lines it ignored.
+  - **A table carries forward.** The newest one at or before a year is what that
+    year uses, so one schedule covers a forty-year projection; the "Years You've
+    Stored" card says which stretch of years is reading which table, rather than
+    leaving you to infer it. Federal and state carry separately.
+  - **Each Other Retirement Income row carries its own taxable share**, with a
+    separate state share once you have a state table. A row nobody has answered
+    for is counted as 0% and **said so** — "untaxed" and "nobody has said" are
+    different claims.
+  - **A calculator** to check an income against your own tables, and a
+    **"What the Pot Has to Pay"** card that works the first whole year of
+    retirement through line by line. Those figures are read off the same records
+    the Retirement chart is drawn from, so the two can never disagree.
+  - **Your spending target now means what you get to spend** — after tax. That
+    is a change in what the figure means, and both tabs say so out loud.
+  - It will not do required minimum distributions, a Roth-versus-traditional
+    withdrawal order, the Social Security provisional-income formula, itemising,
+    capital gains, NIIT or IRMAA; each is a figure with a year attached that
+    would be quietly wrong within twelve months while looking authoritative.
 - **Compensation** — where comp stands, raises over time (the raise in dollars
   and how the salary actually moved since last year, which differ whenever
   something lands mid-year), and bonuses by year — one figure per year, editable

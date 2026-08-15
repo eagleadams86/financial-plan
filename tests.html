@@ -3752,6 +3752,109 @@ t('the rate clamp is the solver’s precondition, not tidiness', () => {
   pinsGrossUp(40000, 0, { federal: { bands }, tradShare: 0.5 }, 'a clamped table still solves');
 });
 
+group('Reading a schedule somebody pasted in');
+
+/* Every schedule here is INVENTED — round thousands at 10/20/30%. The layouts
+   are the real ones; the figures never are. */
+const P = (s) => H.parseBrackets(s);
+
+t('it reads a rate-first schedule', () => {
+  const r = P(`10%   $0 to $10,000
+    20%   $10,000 to $20,000
+    30%   $20,000 or more`);
+  eq(r.ok, true, r.why);
+  eq(r.bands, [{ upTo: 10000, rate: 0.1 }, { upTo: 20000, rate: 0.2 },
+               { upTo: null, rate: 0.3 }]);
+});
+
+t('it reads a range-first schedule', () => {
+  const r = P(`$0 – $10,000    10%
+    $10,001 – $20,000   20%
+    $20,001 and above   30%`);
+  eq(r.ok, true, r.why);
+  eq(r.bands.length, 3);
+  eq(r.bands[2], { upTo: null, rate: 0.3 }, 'and the open band keeps no number');
+});
+
+t('it reads the over / but-not-over schedule', () => {
+  /* The layout that needs the "of the amount" cut: what follows names a LOWER
+     edge, and reading it as an upper one is an off-by-one band that looks
+     perfectly right in a preview. */
+  const r = P(`Over $0 but not over $10,000 ........ 10% of the amount over $0
+    Over $10,000 but not over $20,000 ... $1,000 plus 20% of the amount over $10,000
+    Over $20,000 ....................... $3,000 plus 30% of the amount over $20,000`);
+  eq(r.ok, true, r.why);
+  eq(r.bands, [{ upTo: 10000, rate: 0.1 }, { upTo: 20000, rate: 0.2 },
+               { upTo: null, rate: 0.3 }],
+    'the running totals ($1,000, $3,000) are not mistaken for edges');
+});
+
+t('it reads a bare two-column table and a flat state rate', () => {
+  const two = P(`10,000   10%\n20,000   20%\n20,000+   30%`);
+  eq(two.ok, true, two.why);
+  eq(two.bands.map(b => b.upTo), [10000, 20000, null]);
+  const flat = P('5%');
+  eq(flat.ok, true, flat.why);
+  eq(flat.bands, [{ upTo: null, rate: 0.05 }], 'one open band is a whole flat tax');
+  eq(P('All income taxed at 5%').bands, [{ upTo: null, rate: 0.05 }]);
+});
+
+t('an open-ended marker discards its number, because that number is the floor', () => {
+  /* `$80,000+` names where the band STARTS. Storing it as the top is an
+     off-by-one-band error that reads perfectly in a preview. */
+  for (const line of ['$20,000+   30%', '$20,000 and above  30%',
+                      '$20,000 or more  30%', 'Over $20,000  30%'])
+    eq(P(`10%  $0 to $10,000\n20%  $10,000 to $20,000\n${line}`).bands[2],
+      { upTo: null, rate: 0.3 }, line);
+});
+
+t('lines about anything other than a band are ignored and REPORTED', () => {
+  const r = P(`Standard deduction: $15,000
+    Personal exemption: $0
+    10%   $0 to $10,000
+    30%   $20,000 and above`);
+  eq(r.ok, true, r.why);
+  eq(r.bands.length, 2);
+  eq(r.ignored.length, 2, 'and the reader is told they went nowhere');
+  ok(/deduction/i.test(r.ignored[0]));
+});
+
+t('it refuses whole and carries no bands at all', () => {
+  /* `ok:false` has NO bands key — not an empty one — so there is nothing for a
+     caller to store by accident. */
+  const bad = [
+    ['', 'nothing at all'],
+    ['no percentages here at all', 'no rate'],
+    ['0.10   $0 to $10,000', 'a bare decimal is not a rate'],
+    ['10%  $0 to $20,000\n20%  $20,000 to $10,000', 'not strictly increasing'],
+    ['150%  $0 and above', 'a rate over 100%'],
+    ['10% 20%   $0 to $10,000', 'two rates on one line'],
+    ['10%   $0 to $10,000', 'a last band that is not open-ended'],
+    ['30%  $0 and above\n10%  $0 to $10,000', 'an open band that is not last'],
+  ];
+  for (const [text, why] of bad) {
+    const r = P(text);
+    eq(r.ok, false, why + ' should be refused');
+    eq(r.hasOwnProperty('bands'), false, why + ' must carry no bands');
+    ok(typeof r.why === 'string' && r.why.length, why + ' must say why');
+  }
+  eq(P(Array.from({ length: 26 }, (_, i) => `${i + 1}%  $${(i + 1) * 1000}`).join('\n')).ok,
+    false, 'more bands than any real schedule');
+});
+
+t('a refusal quotes the lines it is refusing over', () => {
+  const r = P('10%  $0 to $20,000\n20%  $20,000 to $10,000');
+  ok(/20,000/.test(r.why) && /10,000/.test(r.why), 'both edges named: ' + r.why);
+});
+
+t('what survives the parser also survives coerceTaxBands', () => {
+  /* The parser is the front door and coerceShape is the boundary; a band that
+     got through one and was dropped by the other would be a table that changed
+     between saving and reloading. */
+  const r = P(`10%   $0 to $10,000\n20%   $10,000 to $20,000\n30%   $20,000 or more`);
+  eq(H.coerceTaxBands(r.bands), r.bands);
+});
+
 group('Tax reaches the projection');
 
 t('with no tables the drawing half is what it always was, to the cent', () => {
@@ -4158,8 +4261,24 @@ t('the Tax tab is plumbed through everywhere a tab has to be', () => {
   eq(H.tabOrder({ tabOrder: ['giving'] }).includes('tax'), true,
     'and a reader who dragged their tabs before it existed still gets it');
   eq(H.BRANCH_OWNERS['side.tax'], ['tax']);
-  eq(H.SECTION_NEEDS.tax, ['side.tax'],
-    'its own branch only, for as long as the tab draws nothing else');
+  eq(H.SECTION_NEEDS.tax.includes('side.tax'), true, 'it owns its brackets');
+  /* "What the Pot Has to Pay" is read off `drawdownYears`, so the Tax tab reads
+     everything the drawdown does. These were deliberately absent while the tab
+     drew nothing — a link whose Tax tab showed none of it had no business
+     carrying somebody's retirement accounts. */
+  for (const b of ['people', 'side.retirementAccounts', 'side.drawdown'])
+    eq(H.SECTION_NEEDS.tax.includes(b), true, b + ' — the bridge card reads it');
+  eq(H.SECTION_NEEDS.tax.includes('years'), false, 'but never the budget grid');
+});
+
+t('a tax link says out loud what it carries beyond the brackets', () => {
+  /* Retirement owns those branches, so the sender is told before they send —
+     the same courtesy Giving gets about the salary history. */
+  const note = H.shareCarriesNote(['tax']);
+  ok(/retirement accounts/i.test(note), 'it names the accounts: ' + note);
+  ok(/people|plan/i.test(note), 'and the household');
+  eq(H.shareCarriesNote(['tax', 'retirement']).includes('retirement accounts'), false,
+    'nothing to warn about once Retirement is in the link itself');
 });
 
 group('Share links — what travels');

@@ -1395,11 +1395,11 @@ Still forbidden, for the original reason — each is a figure with a year
 attached: RMDs, a Roth-vs-traditional withdrawal order, the Social Security
 provisional-income formula, SALT/itemising, capital gains, NIIT, IRMAA.
 
-**Built so far (step 1 of the plan): the state, its coercion, the share tables
-and the tab. No calculator, no gross-up, no editors** — `renderTax` is one
-`.note info` saying what the tab will hold. `taxOn`/`grossUpDraw` and the wiring
-into `drawdownYears` come next, and the guard on that step is that **`the
-accumulation half is exactly what it always was` must pass UNEDITED**.
+**The whole feature is built.** The regression guard it rests on is that **`the
+accumulation half is exactly what it always was` passes UNEDITED** — it does,
+and it must keep doing. Its sibling, `with no tables the drawing half is what it
+always was, to the cent`, recomputes the old drawing formula inline and compares
+every field; between them a plan with no brackets is pinned in both phases.
 
 ```js
 side.tax = {
@@ -1443,11 +1443,14 @@ side.tax = {
   (anything else is deleted), and `BRANCH_HAS_DATA['side.tax']` judges the tab
   on its TABLES as belt to that braces — a number typed into the calculator is
   not a reason to send anybody anything.
-- **`SECTION_NEEDS.tax` is `['side.tax']` and nothing more, for as long as the
-  tab draws nothing else.** The planned bridge card ("what the pot has to pay",
-  read off `drawdownYears`) needs Retirement's whole set, and it MUST be added
-  in the same commit as that card. Adding it early ships somebody's retirement
-  accounts inside a link whose Tax tab shows nothing of them.
+- **`SECTION_NEEDS.tax` carries Retirement's whole set beside `side.tax`**,
+  because "What the Pot Has to Pay" is read off `drawdownYears` and therefore
+  reads everything the drawdown does. They were deliberately absent while the
+  tab drew nothing and were added in the same commit as that card — the rule
+  either way is that the table describes what the tab ACTUALLY reads: too
+  little shows the recipient blanks, too much ships data the tab never displays,
+  and only the second is a privacy bug. `shareCarriesNote` names them, since
+  Retirement owns them.
 - **`trimTaxYearMap`, not `trimShareYearMap`** — and both differences follow
   from a table being an ASSUMPTION about a year rather than a record of one.
   The **CUTOFF applies, the CEILING does not** (a table dated ahead is a
@@ -1463,6 +1466,104 @@ side.tax = {
   = load()`** — the temporal-dead-zone rule at the top of this file. coerceShape
   reads all three, `load()` swallows the ReferenceError, and the whole workbook
   comes up blank.
+
+### What the brackets say
+
+- **`taxOn` taxes income above a TRUNCATED table's top band at that band's
+  rate, never at 0.** A schedule somebody typed only as far as they read must
+  not make the next dollar free; that silent cliff is the one failure this
+  could not afford. Unreachable when the table ends in an open band, which is
+  the normal case.
+- **Two layers, and the split is load-bearing.** `taxRaw`/`taxableAfterRaw`/
+  `taxBillRaw` are UNROUNDED and exist for the solver; everything user-facing
+  goes through the rounded pair. **`round2` inside the solver turns a strictly
+  increasing function into a staircase**, and a bisection chasing a staircase
+  lands wherever it happens to stop. The one rounding is `Math.ceil` on the
+  final answer.
+- **`effectiveRateOn` returns NULL, not 0**, with no income or no table — the
+  house rule `impliedRate` already follows. A 0% reads as "you pay no tax"; the
+  truth is that the question has not been asked.
+- **`taxTableFor` reads the CURRENT filing status only** and never borrows
+  another's — taxing a married couple on a single filer's schedule is a wrong
+  answer wearing a right one's clothes. `taxStatusGap` is what says so out loud,
+  on the tab and in the brackets card.
+
+### The gross-up
+
+- **`grossUpDraw` solves `income + G − tax(taxableOther + G·tradShare) ≥ spend`
+  BY BISECTION.** The closed form is exactly solvable and was rejected: it needs
+  four special cases nobody gets right twice, and the bisection's test is
+  stronger than either — **`net(G) ≥ spend` and `net(G − 0.01) < spend`**, which
+  is the definition of the answer rather than a re-derivation of the arithmetic.
+  There is a test that checks it as a PROPERTY over a grid.
+- **The 0–1 rate clamp in `coerceTaxBands` is this function's PRECONDITION**,
+  not tidiness: `net'(G) = 1 − m·tradShare ≥ 0` holds only while every marginal
+  rate does. There is a test pinning the two together.
+- **Two early returns carry the whole no-tax invariant.** No tables returns
+  `Math.max(0, round2(spend − income))` — the literal expression it replaced,
+  character for character. `spend === 0` returns 0, without which a TAXABLE
+  income row would start draining the pot at 45.
+- Brackets by doubling, capped at 60 → `capped: true` rather than hanging, for a
+  table that can never reach the target (everything at 100% against a pre-tax
+  pot).
+- **`taxAtDraw` reports NOTHING TAXABLE when there is no table** — not "nothing
+  taxed on an income of X". With no brackets there is no measure, and a record
+  carrying a taxable income beside a tax of zero reads as a bug.
+
+### In `drawdownYears`
+
+- **`tradShare` is read off `before`** — after the year's growth and
+  contributions, because that is the money being drawn. **Nothing feeds back:**
+  drawing pro rata takes the same proportion from every pot, so the draw cannot
+  change its own taxable share. That is the strongest argument yet against ever
+  making this a withdrawal-order strategy — the moment it became one, this
+  figure would depend on the answer it is used to compute.
+- **`short` stays GROSS** (what the pot could not produce, which is what
+  `runsOutYear` keys off), and `phase` still keys off `spend`, so no existing
+  test moved.
+- **The bill is measured on the ACTUAL draw, not the wanted one** — a pot that
+  ran dry pays tax on the smaller sum it managed.
+- New record fields `{tax, taxable, tradShare, want}`; nothing removed.
+
+### The parser
+
+- **Refuses whole, never half** — the JSON-restore discipline. `ok:false`
+  carries **no `bands` key at all**, not an empty one, so there is nothing to
+  store by accident. Refusals: no percentages, zero bands, not strictly
+  increasing (quoting both edges), a rate over 100%, more than 25 bands, two
+  rates on a line, an open band that isn't last, and **a last band that isn't
+  open-ended** (a pasted schedule that lost its top row is a paste error, where
+  a hand-typed truncated table is a deliberate act `taxOn` already handles).
+- **Cut each line at "of the amount"/"of the excess"** — what follows is a LOWER
+  edge, and reading it as an upper one is an off-by-one-band error that looks
+  right in the preview. **NOT cut at "plus"** — that is where the rate lives.
+- **Exactly one percentage per line, with the `%` sign.** A bare `0.10` is
+  indistinguishable from an amount and guessing is how tables go quietly wrong.
+- **An open-ended marker discards its number** (`$80,000+` names the FLOOR).
+- **The upper edge comes off an explicit RANGE where there is one, not off the
+  largest number.** Taking the largest also works for every well-formed
+  schedule, but it silently REPAIRS a reversed range into the figure beside it,
+  and a paste that came in backwards has to be refused rather than tidied.
+- **Confirm-before-store with NO new dialog**: a `readout` filled by `link()` on
+  every keystroke says what will be stored or why nothing will be. That needed
+  two small widenings of the dialog machinery, both of which are general fixes
+  rather than tax special cases: **`link` now fires on TEXTAREA as well as
+  INPUT**, and **a CHECKBOX now re-evaluates `showIf`** like a select always
+  has (without it a tick did nothing, which reads as a dead control).
+
+### Other retirement income
+
+- **Store the PERCENTAGES only and derive the tick.** `taxed: true, pct: 0` is a
+  pair that cannot mean anything, and one half would eventually contradict the
+  other.
+- **`stateTaxPct` falls back to the FEDERAL figure, not to zero** — defaulting a
+  state share to nothing would quietly halve the bill.
+- **Absent is 0% and is SAID OUT LOUD** — an em dash in the Taxable column and a
+  line counting the rows nobody has answered for. "Untaxed" and "nobody has
+  said" are different claims, and only one of them is the app's to make.
+- The fields only appear once a table exists, and `retIncome.save` carries any
+  existing shares across untouched when they don't — **a dialog that never asked
+  the question must not answer it.**
 
 ## Folding a box up
 

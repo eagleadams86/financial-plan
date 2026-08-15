@@ -472,6 +472,13 @@ tr.editrow:hover > th:first-child::after,
 tr.editrow:hover > td:first-child::after { opacity: 1; }
 tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
 .addbar { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+/* One stored bracket table inside its jurisdiction's card. Separated by a rule
+   rather than by a nested card: a card inside a card gives the reader two
+   headings to fold and no way to guess which one they shut. No new colour —
+   the existing border token, as everywhere else. */
+.taxyear + .taxyear { margin-top: 18px; padding-top: 16px;
+  border-top: 1px solid var(--border); }
+.taxyear h3 { margin: 0 0 4px; font-size: 15px; }
 /* Small inline edit button beside a card heading (trip name, PTO year…) */
 .h-edit { margin-left: 8px; padding: 1px 8px; font-size: 12px;
   background: var(--bg-card-alt); color: var(--text-secondary);
@@ -3429,6 +3436,53 @@ const HELP = {
       + 'the spot — the six hours only ever held back the automatic top-up. Every price '
       + 'stays editable by hand, and typing one over a fetched price is fine; open a '
       + 'holding to see where its price came from and when.' },
+  taxBrackets: { title: 'The Bracket Tables',
+    body: 'Every figure here is one you typed. The app ships no bracket, no rate and no '
+      + 'deduction, and it never looks any up — a threshold baked in would be quietly '
+      + 'wrong within twelve months while looking authoritative, which is the same reason '
+      + 'the Roth income limit is yours to set. A band runs from wherever the one above '
+      + 'it stopped up to the figure you give, and the last band is left open so '
+      + 'everything above it falls in there. If you do stop the table early, income above '
+      + 'the top band is taxed at that band\'s rate rather than at nothing — a schedule '
+      + 'typed halfway must not make the next dollar free. Tables are filed by filing '
+      + 'status, and one for a status you have left is kept rather than deleted: it is '
+      + 'still the truth about the year it was for.' },
+  taxCarry: { title: 'How a Table Carries Forward',
+    body: 'A year with no table of its own uses the newest one before it. That is what '
+      + 'lets a single schedule cover a forty-year projection without asking you to type '
+      + 'forty of them, and it is deliberately said out loud here rather than left to be '
+      + 'inferred — a 2026 table silently governing 2060 would be the app putting words '
+      + 'in your mouth. Federal and state carry separately, because they move on '
+      + 'different clocks. Nothing is adjusted for inflation on the way: everything on '
+      + 'these tabs is in today\'s money, so a table typed in today\'s money is the '
+      + 'consistent thing to carry.' },
+  taxCheck: { title: 'Checking an Income',
+    body: 'A plain calculator over your own tables — what a given taxable income would '
+      + 'owe. It exists because a schedule you have just typed is a column of numbers '
+      + 'until something turns it into a figure, and one income is the fastest way to see '
+      + 'whether it is the table you meant. The effective rate is the tax over the whole '
+      + 'income; the marginal rate is what the next dollar would meet. Nothing here '
+      + 'touches the projection.' },
+  taxGrossUp: { title: 'What the Pot Has to Pay',
+    body: 'A pre-tax 401(k) has to pay out MORE than you spend, because the withdrawal '
+      + 'itself is income and is taxed. This works out how much more: the withdrawal '
+      + 'whose after-tax remainder is exactly the spending target you set. It is solved '
+      + 'rather than estimated — the figure is checked to the cent, and a penny less '
+      + 'would not cover the target. How much of a withdrawal is taxable comes from the '
+      + 'pot\'s own mix of pre-tax and Roth money; because the drawdown takes the same '
+      + 'proportion out of every account, that share does not move as the pot is spent. '
+      + 'The figures here are read off the same records the Retirement chart is drawn '
+      + 'from, so the two can never disagree.' },
+  taxableShare: { title: 'How Much of This Is Taxable',
+    body: 'Different retirement income is taxed differently, and the app cannot know '
+      + 'which is which — so it asks. Social Security is taxed on part of itself under a '
+      + 'formula this app deliberately does not model; a pension is usually taxed in '
+      + 'full; a Roth withdrawal is not taxed at all. Give each row the share the '
+      + 'brackets should see. A state share is asked separately once you have a state '
+      + 'table, because states commonly tax retirement income differently from the '
+      + 'federal government — left empty it follows the federal figure rather than '
+      + 'dropping to zero. A row nobody has answered for is counted as 0% and SAID SO, '
+      + 'never quietly assumed: "untaxed" and "nobody has said" are different claims.' },
 };
 
 function helpBtn(key, label) {
@@ -4706,20 +4760,35 @@ function renderRetirement() {
   </div>`;
 }
 
-/* The three things this tab cannot work out and must not pretend to. Prose, so
+/* Does ANY jurisdiction hold a table the current filing status can read? The
+   one question the Retirement tab asks before showing a tax column, a tax tile
+   or a taxable-share field — a plan that has typed no brackets must look
+   exactly as it always did. */
+const anyTaxTable = () => TAX_JURISDICTIONS.some(j => taxYearsOf(j).length);
+
+/* The things this tab cannot work out and must not pretend to. Prose, so
    a `.note info` rather than a card — a card promises figures underneath it. */
 function drawdownNote() {
+  const taxed = anyTaxTable();
   return `<div class="note info" style="grid-column:1/-1">
     <p><strong>Everything here is in today's money.</strong> There is no inflation in the
       projection, so the return in Preferences is a <em>real</em> one — subtract the inflation
       you expect from the growth you expect. Your spending target stays the same figure every
       year, because in today's money it does.</p>
-    <p><strong>The pot is one pot, and there is no tax in it.</strong> A dollar in a Roth and a
-      dollar in a 401(k) are worth different amounts once tax is taken, and this app keeps no
-      tax tables and will not grow any — a threshold shipped here would be quietly wrong within
-      twelve months while looking authoritative. So if your money is mostly pre-tax, read the
-      spending target as what you need <em>before</em> tax and set it accordingly. The
-      Traditional vs Roth split above is there so you can see which kind you have.</p>
+    ${taxed ? `<p><strong>Your spending target is what you get to SPEND — after tax.</strong>
+      That is a change in what the figure means, so it is worth reading twice: it used to be
+      a withdrawal, and it is now the money left in your hand once the withdrawal has paid
+      its tax. A pre-tax 401(k) has to pay out more than you spend, and the projection now
+      works out how much more, using the brackets you entered on the
+      <strong>Tax</strong> tab. If you set the target while reading it as a pre-tax figure,
+      it is now asking for more than you meant — check it against the costs card below.</p>`
+      : `<p><strong>The pot is one pot, and there is no tax in it yet.</strong> A dollar in a
+      Roth and a dollar in a 401(k) are worth different amounts once tax is taken. This app
+      ships no tax tables and never will — a threshold baked in would be quietly wrong
+      within twelve months while looking authoritative — but you can type your own on the
+      <strong>Tax</strong> tab, and the withdrawal will then be grossed up to cover them.
+      Until you do, read the spending target as what you need <em>before</em> tax and set it
+      accordingly.</p>`}
     <p><strong>Nor does it model required minimum distributions</strong> — past a certain age the
       law makes you take money out of a pre-tax account whether you need it or not, and that age
       moves. This chart takes what you asked for and no more. Whatever sits in your everyday
@@ -4745,8 +4814,11 @@ function costsCard() {
   /* The rate is a PILL with a glyph and words, never a colour on its own. The
      pot it is measured against is the one the money came OUT of — the opening
      balance plus what that year added, which is what "a 4% withdrawal" means. */
+  const taxRow = rows.find(t => t.y === out.rateYear);
+  const taxed = !!(taxRow && taxRow.tax > 0);
   const rateFoot = out.impliedRate === null ? ''
-    : `${(out.impliedRate * 100).toFixed(2)}% of ${fmtMoney(out.firstPot)}
+    : `${(out.impliedRate * 100).toFixed(2)}% of ${fmtMoney(out.firstPot)}${
+        taxed ? ', measured on the gross withdrawal' : ''}
        <span class="pill ${out.impliedRate > safe ? 'warn' : 'good'}">${
         out.impliedRate > safe ? '!' : '✓'} ${
         out.impliedRate > safe ? 'above' : 'within'} the ${
@@ -4783,7 +4855,15 @@ function costsCard() {
       ${tile(`Out of the pot${of}`,
         out.firstDraw === null ? null : fmtMoney(out.firstDraw),
         out.firstDraw === null ? 'No withdrawal to measure yet.' : rateFoot)}
+      ${!taxed ? '' : tile(`Tax on it${of}`, fmtMoney(taxRow.tax),
+        `${(taxRow.tax / taxRow.draw * 100).toFixed(1)}% of the withdrawal · your
+         ${esc([taxTableFor(state, 'federal', out.rateYear), taxTableFor(state, 'state', out.rateYear)]
+           .filter(Boolean).map(t => t.fromYear).filter((v, i, a) => a.indexOf(v) === i).join(' and '))}
+         table${taxTableFor(state, 'federal', out.rateYear) && taxTableFor(state, 'state', out.rateYear) ? 's' : ''}`)}
     </div>
+    ${!taxed ? '' : `<p class="sub" style="margin-top:10px">The spending target is what is
+      left <em>after</em> that tax — ${fmtMoney(taxRow.draw)} comes out so that
+      ${fmtMoney(taxRow.spend)} can be spent.</p>`}
     ${scenarioRangeNote()}
     ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-edit="drawdown"
       >✎ Edit the figures</button></div>`}
@@ -4964,8 +5044,27 @@ function spendSeed() {
 function retIncomeCard() {
   const list = (state.side.drawdown || {}).income || [];
   const showOwner = adultsOf(state).length > 1;
+  /* The Taxable column only appears once there is a table to apply it to: a
+     column of em dashes on a plan with no brackets would be asking a question
+     the app has no use for the answer to. */
+  const showTax = anyTaxTable();
+  const unanswered = showTax
+    ? list.filter(r => typeof r.taxPct !== 'number' && typeof r.stateTaxPct !== 'number').length
+    : 0;
   const yearCell = (v) => typeof v === 'number' ? esc(String(v))
     : '<span class="muted">—</span>';
+  /* ABSENT IS SHOWN AS ABSENT. It is counted as 0% by the projection, which is
+     the only safe default, but "untaxed" and "nobody has said" are different
+     claims and the table must not spell the second as the first. */
+  const taxCell = (r) => {
+    if (typeof r.taxPct !== 'number' && typeof r.stateTaxPct !== 'number')
+      return '<span class="muted" title="Counted as 0% — nobody has said">—</span>';
+    const fed = typeof r.taxPct === 'number' ? r.taxPct : 0;
+    const st = typeof r.stateTaxPct === 'number' ? r.stateTaxPct : fed;
+    return taxYearsOf('state').length && st !== fed
+      ? `${(fed * 100).toFixed(0)}% <span class="muted">/ ${(st * 100).toFixed(0)}% state</span>`
+      : `${(fed * 100).toFixed(0)}%`;
+  };
   const rows = list.map((r, idx) => `<tr class="editrow" data-edit="retIncome"
       data-idx="${idx}"${r.note ? ` title="${esc(r.note)}"` : ''}>
       <th scope="row">${esc(r.label || 'Unnamed')}${hasNote(r) ? ' <span class="muted">•</span>' : ''}</th>
@@ -4975,7 +5074,8 @@ function retIncomeCard() {
       <td>${typeof r.from === 'number' ? esc(String(r.from))
         : '<span class="muted">no year — it never arrives</span>'}</td>
       <td>${typeof r.to === 'number' ? yearCell(r.to)
-        : '<span class="muted">for life</span>'}</td></tr>`).join('');
+        : '<span class="muted">for life</span>'}</td>
+      ${showTax ? `<td>${taxCell(r)}</td>` : ''}</tr>`).join('');
   return `<div class="card">
     <h2>Other Retirement Income${helpBtn('retIncome', 'other retirement income')}</h2>
     <p class="sub">Money that arrives without coming out of the pot — Social Security, a
@@ -4983,10 +5083,15 @@ function retIncomeCard() {
       adultsOf(state).length > 1
         ? ' A partner still working after you retire belongs here too, as pay that ends in their own retirement year.'
         : ''}</p>
+    ${!unanswered ? '' : `<p class="sub"><strong>${unanswered} of these ${
+      unanswered === 1 ? 'has' : 'have'} no taxable share yet${helpBtn('taxableShare', 'taxable shares')
+      }</strong> — counted as 0% until you say otherwise, which makes the withdrawal look
+      smaller than it will be. Open a row to set it.</p>`}
     ${list.length ? `<div class="tablewrap"><table>
       <thead><tr><th style="text-align:left">What it is</th>
         ${showOwner ? '<th style="text-align:left">Whose</th>' : ''}
-        <th>A year</th><th>From</th><th>Until</th></tr></thead>
+        <th>A year</th><th>From</th><th>Until</th>
+        ${showTax ? '<th>Taxable</th>' : ''}</tr></thead>
       <tbody>${rows}</tbody></table></div>`
       : '<p class="sub">Nothing recorded, so the pot is covering the whole spending target.</p>'}
     ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-add="retIncome"
@@ -5020,6 +5125,9 @@ function drawdownTable() {
      their birthday fell in the second half of the year — the table arguing
      with the retirement age two cards above it. */
   const ages = (y) => people.map(p => `${esc(p.name)} ${ageAt(p, `${y}-12`)}`).join(', ');
+  /* Only when some year actually owes something, so a plan with no brackets
+     sees precisely the table it always saw — no empty column, no em dashes. */
+  const anyTax = shown.some(t => t.tax > 0);
   const body = shown.map(t => `<tr${t.short ? ' class="k-auto"' : ''}>
     <th scope="row">${t.y}</th>
     ${people.length ? `<td style="text-align:left">${ages(t.y)}</td>` : ''}
@@ -5030,6 +5138,7 @@ function drawdownTable() {
       ? ` <span class="muted">(${fmtMoney(t.short)} short)</span>`
       : t.share > 0 && t.share < 1
       ? ` <span class="muted">(${Math.round(t.share * 12)} months)</span>` : ''}</td>
+    ${anyTax ? `<td>${t.tax ? fmtMoney(t.tax) : '<span class="muted">—</span>'}</td>` : ''}
     <td>${fmtMoney(t.close)}</td>${alt
       ? `<td class="muted">${fmtMoney(alt.low.get(t.y) ?? 0)}</td>
          <td class="muted">${fmtMoney(alt.high.get(t.y) ?? 0)}</td>` : ''}</tr>`).join('');
@@ -5044,7 +5153,8 @@ function drawdownTable() {
       <thead><tr><th style="text-align:left">Year</th>
         ${people.length ? '<th style="text-align:left">Age</th>' : ''}
         <th>Pot at the start</th><th>Growth</th><th>Paid in</th>
-        <th>Other income</th><th>Taken out</th><th>Pot at the end</th>${alt
+        <th>Other income</th><th>Taken out</th>${anyTax ? '<th>Tax</th>' : ''}
+        <th>Pot at the end</th>${alt
           ? `<th>End if worse</th><th>End if better</th>` : ''}</tr></thead>
       <tbody>${body}</tbody></table></div>
   </div>`;
@@ -5813,6 +5923,114 @@ function taxAtDraw(G, opts) {
            taxable: round2(other + g * share) };
 }
 
+/* ── Reading a schedule somebody pasted in ──────────────────────────────────
+   There is no paste-and-parse precedent in this app, so this establishes one,
+   and it is modelled on the JSON-restore discipline rather than on a spell
+   checker: **validate the whole thing and REFUSE, never half-import.** A table
+   that came in with one band missing is worse than no table at all, because it
+   looks complete and quietly taxes forty years wrongly.
+
+   `ok: false` carries NO `bands` key at all — not an empty one — so there is
+   nothing for a caller to accidentally store.
+
+   Layouts it reads, which are the ones the published schedules actually use:
+     · rate first          10%    $0 to $12,000
+     · range first         $0 - $20,000    10%
+     · the over/not-over   Over $12,000 but not over $50,000 ... $1,200 plus 12%
+     · bare two-column     12,000    10%
+     · a flat-rate state   5%
+
+   Three rules do most of the work:
+   · **Cut each line at "of the amount"/"of the excess".** What follows is a
+     LOWER edge ("of the amount over $12,000") and reading it as an upper one is
+     an off-by-one-band error that looks perfectly right in a preview. Note the
+     line is NOT cut at "plus" — that is where the rate lives.
+   · **Exactly one percentage per line, and it must carry the `%` sign.** A bare
+     `0.10` is indistinguishable from an amount, and guessing is precisely how a
+     table goes quietly wrong.
+   · **An open-ended band discards its number.** `$80,000+` names the band's
+     BOTTOM; storing it as the top is the same off-by-one. */
+function parseBrackets(text) {
+  const src = String(text || '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[   ]/g, ' ')
+    .replace(/[‐-―−]/g, '-');
+  const ignored = [];
+  const bands = [];
+  const lines = src.split('\n').map(l => l.trim()).filter(Boolean);
+  let sawPercent = false;
+  const no = (why) => ({ ok: false, why, ignored });
+
+  for (const line of lines) {
+    /* Reported, never silently dropped: a schedule pasted whole usually brings
+       its standard deduction with it, and the reader has to know that figure
+       went nowhere rather than into the box above. */
+    if (/deduction|exemption|credit|capital gain|surtax|allowance/i.test(line)) {
+      ignored.push(line);
+      continue;
+    }
+    const cut = line.split(/of the (?:amount|excess)/i)[0];
+    const pcts = cut.match(/(\d+(?:\.\d+)?)\s*%/g) || [];
+    if (!pcts.length) { ignored.push(line); continue; }
+    sawPercent = true;
+    if (pcts.length > 1)
+      return no(`Two rates on one line — “${line.slice(0, 70)}”. Split them onto separate lines.`);
+    const rate = parseFloat(pcts[0]) / 100;
+    if (rate > 1) return no(`A rate over 100% — “${line.slice(0, 70)}”.`);
+
+    /* The percentage is taken OUT before any number is read, so a rate can
+       never be mistaken for an amount. */
+    const clean = cut.replace(/(\d+(?:\.\d+)?)\s*%/g, ' ');
+    const nums = (clean.match(/\d[\d,]*(?:\.\d+)?/g) || [])
+      .map(n => parseFloat(n.replace(/,/g, '')));
+    const explicitOpen = /\bor more\b|\band over\b|\band above\b|\band up\b|no limit|\d\s*\+/i.test(cut);
+    /* An explicit RANGE — "$0 to $10,000", "$0 - $10,000", "Over $10,000 but
+       not over $20,000". Its SECOND number is the upper edge. */
+    const range = clean.match(
+      /(\d[\d,]*(?:\.\d+)?)\s*(?:-|to|through|but not over|not over|under)\s*\$?\s*(\d[\d,]*(?:\.\d+)?)/i);
+    const lowerOnly = /\bover\b|\bexceeding\b|\bmore than\b|\bat least\b/i.test(cut);
+
+    let upTo;
+    if (explicitOpen) upTo = null;                    // the number names the FLOOR
+    /* Read off the range rather than off the largest number on the line. Taking
+       the largest would also work for every well-formed schedule, but it would
+       silently REPAIR a reversed range ("$20,000 to $10,000") into the figure
+       it was already sitting next to — and a paste that came in backwards is
+       exactly the thing that has to be refused rather than tidied. */
+    else if (range) upTo = parseFloat(range[2].replace(/,/g, ''));
+    else if (!nums.length) upTo = null;               // a bare rate — a flat tax
+    else if (lowerOnly) upTo = null;                  // "Over $20,000 …" — the top band
+    /* Bare two-column: the one number on the line is its upper edge. */
+    else upTo = Math.max(...nums);
+    bands.push({ upTo, rate });
+  }
+
+  if (!sawPercent)
+    return no('No percentages found. Each band needs a rate with a % sign on it.');
+  if (!bands.length) return no('Nothing here reads as a band.');
+  if (bands.length > 25)
+    return no(`${bands.length} bands — that is more than any real schedule, so this is being refused rather than half-read.`);
+
+  /* STRICTLY INCREASING, quoting both offenders. Out-of-order edges mean the
+     paste picked up a column it shouldn't have, and the resulting table would
+     be a plausible-looking lie. */
+  for (let i = 1; i < bands.length; i++) {
+    const prev = bands[i - 1], cur = bands[i];
+    if (prev.upTo === null)
+      return no(`An open-ended band is not the last one — ${fmtMoney(cur.upTo || 0)} comes after it. Put the “and above” band at the bottom.`);
+    if (cur.upTo !== null && cur.upTo <= prev.upTo)
+      return no(`The bands do not climb: ${fmtMoney(prev.upTo)} then ${fmtMoney(cur.upTo)}.`);
+  }
+  /* A pasted schedule that lost its top band is a PASTE error, and the
+     difference matters: a hand-typed table may deliberately stop early (taxOn
+     handles it by taxing on at the top rate), but a paste ending at a finite
+     edge means the copy was short. */
+  if (bands[bands.length - 1].upTo !== null)
+    return no(`The last band stops at ${fmtMoney(bands[bands.length - 1].upTo)} rather than running on. Some of the schedule is missing — paste it including its top row.`);
+
+  return { ok: true, bands, ignored };
+}
+
 /* ── The withdrawal that pays its own tax ───────────────────────────────────
    Solves `income + G − tax(taxableOther + G·tradShare) ≥ spend` for G.
 
@@ -6231,36 +6449,278 @@ function retChartSummary(rows, out, r, labels, data, markers) {
 
 /* ═══════════════════════════════ Tax view ═════════════════════════════════ */
 
-/* The tab's cards — the two bracket tables, the years you've stored, the
-   calculator and the bridge card that reads the drawdown — are steps 5 and 6 of
-   the tax plan. What stands here now is the plumbing's landing place and the
-   one paragraph that has to be true before any of them exist: the app ships no
-   bracket, and a year with no table means no tax.
+/* The table a year holds for the CURRENT filing status. With `create` it makes
+   the chain on the way down, which is what the editors need; without, it hands
+   back an empty object so a renderer can read `.bands` off it safely. */
+function taxTableAt(jur, year, create) {
+  const filing = state.settings.filingStatus;
+  if (!create) {
+    const rec = ((state.side.tax || {})[jur] || {})[year] || {};
+    return rec[filing] || {};
+  }
+  const tax = state.side.tax;
+  const byYear = tax[jur] || (tax[jur] = {});
+  const rec = byYear[year] || (byYear[year] = {});
+  return rec[filing] || (rec[filing] = { bands: [] });
+}
 
-   It renders SOMETHING deliberately. A tab that draws an empty div reads as
-   broken rather than unbuilt, and the point of doing the plumbing on its own is
-   to be able to open the tab and see that it works.
+/* What the paste box will do, in a sentence, recomputed on every keystroke.
+   This IS the confirm-before-store step — there is no second dialog, because a
+   reader who has to click through one stops reading it by the third table. */
+function taxPastePreview(text) {
+  if (!(text || '').trim())
+    return 'Nothing pasted — the bands already stored are left exactly as they are.';
+  const p = parseBrackets(text);
+  if (!p.ok) return `✕ Nothing will be stored — ${p.why}`;
+  const say = p.bands.map(b => b.upTo === null
+    ? `and above at ${(b.rate * 100).toFixed(2)}%`
+    : `to ${fmtMoney(b.upTo)} at ${(b.rate * 100).toFixed(2)}%`).join(' · ');
+  const skipped = p.ignored.length
+    ? ` ${p.ignored.length} line${p.ignored.length > 1 ? 's' : ''} ignored (${
+        p.ignored.slice(0, 2).map(l => `“${l.slice(0, 40)}”`).join(', ')}${
+        p.ignored.length > 2 ? '…' : ''}).`
+    : '';
+  return `✓ ${p.bands.length} bands will REPLACE what is stored: ${say}.${skipped}`;
+}
 
-   When the cards land, `SECTION_NEEDS.tax` grows with them — see the note on
-   that table. */
-function renderTax() {
-  return `
-  <div class="note info">
-    <p><strong>Nothing here ships with the app.</strong> This app holds no
-      bracket, no rate and no deduction of its own — you type the tables, the
-      same way you type the contribution limits on Retirement. It may work tax
-      out; it may not know what the tax is.</p>
-    <p><strong>A year with no table means no tax.</strong> Until you enter one,
-      every figure on Retirement is exactly what it has always been.</p>
-    <p>What it deliberately will not do: required minimum distributions, a
-      Roth-versus-traditional withdrawal order, the Social Security
-      provisional-income formula, itemising, capital gains, NIIT or IRMAA.
-      Every one of those is a figure with a year attached, and it would be
-      quietly wrong within twelve months while looking authoritative.</p>
-    <p class="muted">The tables and the calculator are still being built. The
-      brackets you enter are stored with the rest of your plan and go nowhere
-      else.</p>
+const JUR_LABEL = { federal: 'Federal', state: 'State' };
+
+/* The state's name if the reader gave one, so headings read "New York" rather
+   than "State" — a label and nothing else, since the app derives nothing from
+   which state it is. */
+const jurLabel = (jur) => jur === 'state'
+  ? ((state.side.tax || {}).stateLabel || 'State') : 'Federal';
+
+/* Every year that has a table for the CURRENT filing status, newest first. */
+function taxYearsOf(jur) {
+  const byYear = (state.side.tax || {})[jur] || {};
+  const filing = state.settings.filingStatus;
+  return Object.keys(byYear).filter(y => byYear[y] && byYear[y][filing]).sort().reverse();
+}
+
+/* One stored table, drawn as the schedule it is: each band's lower edge is the
+   one above it, which is how a bracket is read everywhere else and is not
+   something the reader should have to work out from a column of upper edges. */
+function bandRows(jur, year, table) {
+  let from = 0;
+  return (table.bands || []).map((b, bidx) => {
+    const lower = from;
+    from = b.upTo === null ? Infinity : b.upTo;
+    return `<tr class="editrow" data-edit="taxBand" data-jur="${esc(jur)}"
+        data-year="${esc(year)}" data-bidx="${bidx}">
+      <th scope="row">${fmtMoney(lower)}</th>
+      <td>${b.upTo === null ? '<span class="muted">and above</span>' : fmtMoney(b.upTo)}</td>
+      <td>${(b.rate * 100).toFixed(2)}%</td></tr>`;
+  }).join('');
+}
+
+function bracketsCard(jur) {
+  const years = taxYearsOf(jur);
+  const byYear = (state.side.tax || {})[jur] || {};
+  const filing = state.settings.filingStatus;
+  const name = jurLabel(jur);
+  const tables = years.map(y => {
+    const t = byYear[y][filing];
+    const open = (t.bands || []).some(b => b.upTo === null);
+    return `<div class="taxyear">
+      <h3>${esc(y)}${viewOnly ? '' : ` <button class="h-edit" data-edit="taxYear"
+        data-jur="${esc(jur)}" data-year="${esc(y)}"
+        title="Edit this year's deduction, source, or paste a schedule in">✎ Edit</button>`}</h3>
+      <p class="sub">${t.deduction
+        ? `First ${fmtMoney(t.deduction)} not taxed.`
+        : 'No deduction — the brackets start at the first dollar.'}${
+        t.source ? ` <span class="muted">Source: ${esc(t.source)}</span>` : ''}${
+        open ? '' : ` <strong>The top band is closed</strong> — income above
+          ${fmtMoney(t.bands[t.bands.length - 1].upTo)} is taxed at
+          ${(t.bands[t.bands.length - 1].rate * 100).toFixed(2)}%, never at nothing.`}</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th style="text-align:left">From</th><th>Up to</th><th>Rate</th></tr></thead>
+        <tbody>${bandRows(jur, y, t)}</tbody></table></div>
+      ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-add="taxBand"
+        data-jur="${esc(jur)}" data-year="${esc(y)}">＋ Add a band</button></div>`}
+    </div>`;
+  }).join('');
+  const gap = taxStatusGap(state, new Date().getFullYear()).includes(jur);
+  return `<div class="card" data-box="brackets-${jur}">
+    <h2>${esc(name)} Brackets${helpBtn('taxBrackets', 'the bracket tables')}</h2>
+    <p class="sub">${years.length
+      ? `Filed under <strong>${esc(FILING_LABEL[filing])}</strong>. The newest table at or
+         before a year is the one that year uses, so one table covers everything after it
+         until you type another.`
+      : `Nothing typed yet, so no ${jur === 'state' ? 'state ' : ''}tax is worked out at
+         all. Add a year and enter its bands — the app ships none.`}</p>
+    ${gap ? `<p class="note info" style="margin:0 0 12px"><strong>You have
+      ${esc(name.toLowerCase())} tables, but none filed under
+      ${esc(FILING_LABEL[filing])}.</strong> Rather than quietly tax you on somebody else's
+      schedule, the projection treats this as no table at all. Add one for your filing
+      status, or change the status in Preferences.</p>` : ''}
+    ${tables}
+    ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-add="taxYear"
+      data-jur="${esc(jur)}">＋ Add a year</button></div>`}
   </div>`;
+}
+
+/* Which stored table each stretch of years actually reads. The carry-forward is
+   the one part of this feature that is invisible in the tables themselves — a
+   2026 schedule silently governing 2060 is exactly the sort of thing that
+   should be said out loud rather than left to be inferred. */
+function taxYearsStoredCard() {
+  const thisYear = new Date().getFullYear();
+  const last = thisYear + retirementHorizon(state, thisYear);
+  const filing = state.settings.filingStatus;
+  const rows = [];
+  for (const jur of TAX_JURISDICTIONS) {
+    const years = taxYearsOf(jur).slice().reverse();
+    years.forEach((y, i) => {
+      const next = years[i + 1];
+      const until = next ? `${y}–${+next - 1}`
+        : (+y >= last ? `${y}` : `${y} onward`);
+      const t = ((state.side.tax || {})[jur] || {})[y][filing];
+      rows.push(`<tr><th scope="row">${esc(jurLabel(jur))}</th>
+        <td>${esc(y)}</td>
+        <td>${(t.bands || []).length}</td>
+        <td>${t.deduction ? fmtMoney(t.deduction) : '<span class="muted">—</span>'}</td>
+        <td>${esc(until)}</td></tr>`);
+    });
+  }
+  if (!rows.length) return '';
+  return `<div class="card">
+    <h2>Years You've Stored${helpBtn('taxCarry', 'how a table carries forward')}</h2>
+    <p class="sub">A year with no table of its own uses the newest one before it, which is
+      what lets a single schedule cover a forty-year projection. Nothing is invented for
+      the years in between — they are reading the table named here.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Where</th><th>Table</th><th>Bands</th>
+        <th>Deduction</th><th>Used for</th></tr></thead>
+      <tbody>${rows.join('')}</tbody></table></div>
+  </div>`;
+}
+
+/* A plain calculator over the tables — what a given income would owe. It exists
+   because a schedule you have just typed is a column of numbers until something
+   turns it into a figure, and typing one income in is the fastest way to see
+   whether the table is the one you meant. */
+function taxCheckCard() {
+  const thisYear = new Date().getFullYear();
+  const tables = taxTablesFor(state, thisYear);
+  if (!tables.federal && !tables.state) return '';
+  const income = ((state.side.tax || {}).check || {}).income;
+  const tile = (label, value, foot) => `<div class="goal">
+    <div class="label">${label}</div>
+    <div class="value${value === null ? ' muted' : ''}">${value === null ? '—' : value}</div>
+    <div class="foot">${foot}</div></div>`;
+  const each = (side) => {
+    const t = tables[side];
+    if (!t) return null;
+    return taxOn(taxableAfter(income || 0, t.table), t.table);
+  };
+  const fed = each('federal'), st = each('state');
+  const total = round2((fed || 0) + (st || 0));
+  const eff = income ? total / income : null;
+  /* The marginal rate is the FEDERAL one where there is a federal table: two
+     jurisdictions have two marginal rates and adding them together would be a
+     figure that exists nowhere. */
+  const mt = tables.federal || tables.state;
+  const marg = income === undefined ? null
+    : marginalRateOn(taxableAfter(income, mt.table), mt.table);
+  return `<div class="card">
+    <h2>What You'd Pay${helpBtn('taxCheck', 'this calculator')}</h2>
+    <p class="sub">${income === undefined
+      ? 'Type an income and see what your own tables make of it — the quickest way to check that a schedule you just entered is the one you meant.'
+      : `On ${fmtMoney(income)} of ${tables.federal ? 'federally ' : ''}taxable income, read
+         against your ${esc(tables.federal ? tables.federal.fromYear : tables.state.fromYear)}
+         table${tables.federal && tables.state ? 's' : ''}. Nothing here touches the
+         projection; it is a scratch figure.`}</p>
+    <div class="goalgrid">
+      ${tile('Federal', fed === null ? null : fmtMoney(fed),
+        tables.federal ? `Your ${esc(tables.federal.fromYear)} table` : 'No federal table')}
+      ${tile(jurLabel('state'), st === null ? null : fmtMoney(st),
+        tables.state ? `Your ${esc(tables.state.fromYear)} table` : 'No state table')}
+      ${tile('Total', income === undefined ? null : fmtMoney(total),
+        income ? `Leaving ${fmtMoney(round2(income - total))}` : 'Federal and state together')}
+      ${tile('Effective rate', eff === null ? null : `${(eff * 100).toFixed(2)}%`,
+        marg === null ? 'Of the whole income'
+          : `Of the whole income · next dollar at ${(marg * 100).toFixed(2)}%`)}
+    </div>
+    ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-edit="taxCheck"
+      >✎ ${income === undefined ? 'Type an income' : 'Change the income'}</button></div>`}
+  </div>`;
+}
+
+/* THE BRIDGE CARD. Read straight off `drawdownYears`, which is the same
+   function the Retirement chart and its year-by-year table are drawn from, so
+   this can never disagree with them — the `givingStats` arrangement, and the
+   reason this is worth a card rather than a paragraph. */
+function taxPotCard() {
+  const thisYear = new Date().getFullYear();
+  const rows = drawdownYears(state, thisYear, retirementHorizon(state, thisYear));
+  const out = drawdownOutlook(rows);
+  const r = rows.find(t => t.y === out.rateYear);
+  const taxed = rows.some(t => t.tax > 0);
+  if (!r) return `<div class="card">
+    <h2>What the Pot Has to Pay</h2>
+    <p class="sub">Nothing is being drawn down yet — set a spending target and a retirement
+      age on the Retirement and Household tabs, and this says what the withdrawal has to be
+      before tax.</p>
+  </div>`;
+  const row = (label, v, note) => `<tr><th scope="row">${label}</th>
+    <td>${v}</td><td style="text-align:left" class="muted">${note || ''}</td></tr>`;
+  return `<div class="card" style="grid-column:1/-1">
+    <h2>What the Pot Has to Pay${helpBtn('taxGrossUp', 'the gross-up')}</h2>
+    <p class="sub">${taxed
+      ? `Your first whole year of retirement, <strong>${r.y}</strong>, worked through. These
+         are the same figures the Retirement chart is drawn from — if they ever disagreed,
+         one of them would be lying about your retirement.`
+      : `Your first whole year of retirement, <strong>${r.y}</strong>. No table covers it,
+         so no tax is worked out and the withdrawal is simply what the spending target
+         needs.`}</p>
+    <div class="tablewrap"><table><tbody>
+      ${row('You want to spend', fmtMoney(r.spend), 'In today’s money, after tax')}
+      ${row('Other income covers', r.income ? fmtMoney(r.income) : '—',
+        r.income ? 'Social Security, a pension, part-time work' : 'Nothing arriving that year')}
+      ${taxed ? row('Of your withdrawal, taxable',
+        `${(r.tradShare * 100).toFixed(1)}%`,
+        'The pre-tax share of the pot — drawing pro rata leaves it where it was') : ''}
+      ${taxed ? row('Taxable income', fmtMoney(r.taxable),
+        'Before any deduction') : ''}
+      ${taxed ? row('Tax', fmtMoney(r.tax),
+        `${esc(FILING_LABEL[state.settings.filingStatus])}`) : ''}
+      <tr><th scope="row"><strong>Out of the pot</strong></th>
+        <td><strong>${fmtMoney(r.draw)}</strong></td>
+        <td style="text-align:left" class="muted">${taxed
+          ? `${fmtMoney(r.draw)} out, ${fmtMoney(r.tax)} to tax, ${fmtMoney(r.spend)} to spend`
+          : 'What the spending target needs, with no tax in it'}</td></tr>
+    </tbody></table></div>
+    ${taxed ? `<p class="sub" style="margin-top:10px"><strong>That is the whole point of
+      this tab.</strong> Without a table the pot would have paid out
+      ${fmtMoney(round2(Math.max(0, r.spend - r.income)))} and left you short by the tax.</p>`
+      : ''}
+  </div>`;
+}
+
+function renderTax() {
+  const any = TAX_JURISDICTIONS.some(j => taxYearsOf(j).length);
+  return `
+  <div class="note info" style="grid-column:1/-1">
+    <p><strong>Nothing here ships with the app.</strong> It holds no bracket, no rate and no
+      deduction of its own — you type the tables, exactly the way you type the contribution
+      limits on Retirement. It may work tax out; it deliberately does not know what the tax
+      is, because a figure baked in here would be quietly wrong within twelve months while
+      looking authoritative.</p>
+    <p><strong>A year with no table means no tax.</strong>${any ? ''
+      : ' You have none yet, so every figure on Retirement is exactly what it has always been.'
+      } What a table changes is the <em>withdrawal</em>: a pre-tax pot has to pay out more
+      than you spend, and the projection now works out how much more.</p>
+    <p>What it will not do: required minimum distributions, a Roth-versus-traditional
+      withdrawal order, the Social Security provisional-income formula, itemising, capital
+      gains, NIIT or IRMAA. Each is a figure with a year attached, and each would need to be
+      maintained for ever to stay true.</p>
+  </div>
+  ${bracketsCard('federal')}
+  ${bracketsCard('state')}
+  ${taxYearsStoredCard()}
+  ${taxCheckCard()}
+  ${taxPotCard()}`;
 }
 
 /* ═══════════════════════════ Compensation view ════════════════════════════ */
@@ -8093,7 +8553,9 @@ function buildFields(fields, values, link) {
       input.textContent = values[f.key] ?? '';
     } else if (f.type === 'note') {
       input = document.createElement('textarea');
-      input.rows = 2;
+      /* Two lines suits a note; a pasted bracket schedule needs room to be
+         recognisable as one, so a field may ask for more. */
+      input.rows = f.rows || 2;
       input.value = values[f.key] ?? '';
     } else {
       input = document.createElement('input');
@@ -8117,7 +8579,11 @@ function buildFields(fields, values, link) {
        choosing which child a goal is for is what suggests its target date. The
        existing linked pairs are all text boxes keyed off `changed`, so this
        hands them a key they ignore. */
-    if (input.tagName === 'SELECT')
+    /* A CHECKBOX drives visibility too, for the same reason a select does: a
+       tick is a choice, and "some of this income is taxable" exists precisely
+       to reveal the two percentage boxes under it. Without this the box ticks
+       and nothing happens, which reads as a dead control. */
+    if (input.tagName === 'SELECT' || (input.tagName === 'INPUT' && input.type === 'checkbox'))
       input.addEventListener('change', () => {
         applyFieldVisibility(fields);
         if (link) link(f.key);
@@ -8126,7 +8592,12 @@ function buildFields(fields, values, link) {
        for fields that are two ways of saying the same thing. It reads and
        writes the FORM, never the state — nothing is committed until Save, and
        setting .value doesn't re-fire input, so there is no loop. */
-    if (link && input.tagName === 'INPUT' && input.type !== 'checkbox')
+    /* TEXTAREA as well as INPUT: the bracket paste box is a textarea, and its
+       whole confirm-before-store step is a readout recomputed as you type. The
+       three other sections with a `link` are unaffected — each either keys off
+       a named field or simply recomputes a derived box. */
+    if (link && (input.tagName === 'TEXTAREA'
+                 || (input.tagName === 'INPUT' && input.type !== 'checkbox')))
       input.addEventListener('input', () => link(f.key));
     /* A field may carry an `action`: a small button beside the box for a move
        you would otherwise make by hand in two fields at once. It works on the
@@ -9637,6 +10108,24 @@ const EDITORS = {
       { key: 'to', label: 'Last year', type: 'number', step: 1,
         hint: 'Empty for something that carries on for life — a pension, Social Security. '
           + 'Filled in for part-time work, or a salary that stops.' },
+      /* The tick is DERIVED from the percentage, never stored beside it:
+         `taxed: true, pct: 0` is a pair that cannot mean anything, and one of
+         the two would eventually contradict the other. Unticking clears the
+         percentages, which is the whole of what "not taxed" means here. */
+      ...(anyTaxTable() ? [
+        { key: 'taxed', label: 'Some of it is taxable', type: 'check',
+          hint: 'A pension is usually taxed in full; part of Social Security is; a Roth '
+            + 'withdrawal is not. Untick for income the brackets never see.' },
+        { key: 'taxPct', label: 'Taxable share', type: 'percent',
+          showIf: (v) => v.taxed,
+          hint: 'How much of it the federal brackets see. 100% for a pension.' },
+        /* Only where there is a state table to apply it to — a percentage with
+           nothing to multiply is a question with no consequence. */
+        ...(taxYearsOf('state').length ? [{ key: 'stateTaxPct', label: 'State taxable share',
+          type: 'percent', showIf: (v) => v.taxed,
+          hint: 'States commonly tax retirement income differently. Left empty it follows '
+            + 'the federal share above rather than dropping to zero.' }] : []),
+      ] : []),
       noteField,
     ],
     /* Picking a person offers their retirement year, and only into an EMPTY
@@ -9650,7 +10139,10 @@ const EDITORS = {
     },
     get: (ds) => {
       const r = (state.side.drawdown.income || [])[+ds.idx] || {};
-      return { ...r, person: r.person || '' };
+      /* The tick opens on whether a share was ever given, which is the only
+         honest reading of a row that stores percentages alone. */
+      return { ...r, person: r.person || '',
+               taxed: typeof r.taxPct === 'number' || typeof r.stateTaxPct === 'number' };
     },
     blank: () => ({ from: drawdownFrom(state, new Date().getFullYear())
       || new Date().getFullYear() }),
@@ -9669,11 +10161,156 @@ const EDITORS = {
       if (v.note) row.note = v.note;
       const owner = adultsOf(state).length ? v.person : (list[+ds.idx] || {}).person;
       if (owner && (owner === JOINT_OWNER || personById(state, owner))) row.person = owner;
+      /* Percentages only, and only while the box is ticked — see the field
+         spec. A dialog that never ASKED the question must not answer it, so
+         where there are no tables at all the fields are absent and whatever the
+         row already said is carried across untouched. */
+      const prev = list[+ds.idx] || {};
+      if (!anyTaxTable()) {
+        for (const k of ['taxPct', 'stateTaxPct'])
+          if (typeof prev[k] === 'number') row[k] = prev[k];
+      } else if (v.taxed) {
+        if (typeof v.taxPct === 'number') row.taxPct = Math.min(1, Math.max(0, v.taxPct));
+        if (typeof v.stateTaxPct === 'number')
+          row.stateTaxPct = Math.min(1, Math.max(0, v.stateTaxPct));
+      }
       if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
       if (refused) return refused;
     },
     del: (ds) => state.side.drawdown.income.splice(+ds.idx, 1),
     move: (ds, dir) => listSwap(state.side.drawdown.income, +ds.idx, dir),
+  },
+
+  /* ── The bracket tables ─────────────────────────────────────────────────
+     A year's table: its deduction, where it came from, and the paste box.
+     Confirm-before-store needs NO new dialog — a `readout` filled by `link()`
+     on every keystroke says what will be stored, or why nothing will be, and
+     `save` returns the refusal for the existing toast. `openRowEditor` already
+     refuses in viewOnly, so `stripEditAffordances` has nothing new to miss. */
+  taxYear: {
+    title: (ds, isNew) => isNew
+      ? `Add a ${ds.jur === 'state' ? 'state' : 'federal'} table`
+      : `${ds.year} ${ds.jur === 'state' ? 'state' : 'federal'} table`,
+    cols: 2,
+    sub: (ds) => `Filed under ${FILING_LABEL[state.settings.filingStatus]}. Nothing here `
+      + 'ships with the app — a year with no table means no tax, and this is the year you '
+      + 'are typing one for.',
+    fields: (ds, isNew) => [
+      ...(isNew ? [{ key: 'year', label: 'Which year', type: 'number', step: 1,
+        hint: 'The year this schedule is for. Later years use it until you type another.' }] : []),
+      { key: 'deduction', label: 'Deduction', type: 'money',
+        hint: 'Taken off before the bands are applied. Leave it empty for a schedule that '
+          + 'taxes from the first dollar.' },
+      { key: 'source', label: 'Where it came from', type: 'text', wide: true,
+        hint: 'For your own reference — “IRS Rev. Proc. 2025-32”, or the page you copied it '
+          + 'from. Never sent anywhere.' },
+      { key: 'paste', label: 'Paste a schedule (optional)', type: 'note', rows: 7, wide: true,
+        hint: 'Paste the bracket table and it will be read and REPLACE the bands below. '
+          + 'It is checked before anything is stored — if any part of it does not read, '
+          + 'nothing is stored at all.' },
+      { key: 'preview', label: 'What will be stored', type: 'readout' },
+    ],
+    /* Re-parsed on every keystroke, so the reader sees the refusal or the band
+       list before committing anything. */
+    link(key) {
+      const box = F('rf-paste'), out = F('rf-preview');
+      if (!box || !out) return;
+      out.textContent = taxPastePreview(box.value);
+    },
+    get: (ds) => {
+      const t = taxTableAt(ds.jur, ds.year);
+      return { deduction: t.deduction, source: t.source, paste: '', preview: '' };
+    },
+    save(ds, v) {
+      const jur = ds.jur === 'state' ? 'state' : 'federal';
+      const year = ds.year !== undefined ? String(ds.year)
+        : (typeof v.year === 'number' ? String(Math.round(v.year)) : '');
+      if (!/^\d{4}$/.test(year)) return 'That is not a year — nothing was stored.';
+      let parsed = null;
+      if ((v.paste || '').trim()) {
+        parsed = parseBrackets(v.paste);
+        /* REFUSED WHOLE. Nothing about the table changes — not the deduction,
+           not the source — because a half-applied edit is the thing this
+           discipline exists to prevent. */
+        if (!parsed.ok) return `Nothing stored — ${parsed.why}`;
+      }
+      const tax = state.side.tax;
+      const byYear = tax[jur] || (tax[jur] = {});
+      const rec = byYear[year] || (byYear[year] = {});
+      const filing = state.settings.filingStatus;
+      const t = rec[filing] || (rec[filing] = { bands: [] });
+      if (parsed) t.bands = parsed.bands;
+      if (typeof v.deduction === 'number') t.deduction = Math.max(0, v.deduction);
+      else delete t.deduction;
+      if ((v.source || '').trim()) t.source = v.source.trim().slice(0, 200);
+      else delete t.source;
+      t.bands = coerceTaxBands(t.bands);
+      if (!t.bands.length && !parsed)
+        return `${year} added — now add its bands, or paste the schedule in.`;
+      if (parsed) {
+        const skipped = parsed.ignored.length
+          ? ` ${parsed.ignored.length} line${parsed.ignored.length > 1 ? 's' : ''} ignored.` : '';
+        return `Read ${t.bands.length} bands into ${year}.${skipped}`;
+      }
+    },
+    del(ds) {
+      const byYear = (state.side.tax || {})[ds.jur] || {};
+      const rec = byYear[ds.year];
+      if (!rec) return;
+      delete rec[state.settings.filingStatus];
+      /* A year with no table left under any status is not a year. */
+      if (!Object.keys(rec).length) delete byYear[ds.year];
+    },
+  },
+
+  /* One band. Twenty lines, and it is what makes the feature work without the
+     parser at all — which is why the parser was built last. */
+  taxBand: {
+    title: (ds, isNew) => isNew ? 'Add a band' : 'Band',
+    cols: 2,
+    sub: () => 'A band runs from wherever the one above it stopped, up to the figure you '
+      + 'give here. Leave “Up to” empty for the top band — the one everything above it '
+      + 'falls into.',
+    fields: () => [
+      { key: 'upTo', label: 'Up to', type: 'money',
+        hint: 'Empty means this is the top band and runs on without limit.' },
+      { key: 'rate', label: 'Rate', type: 'percent',
+        hint: 'The rate on the money inside this band only, not on the whole income.' },
+    ],
+    get: (ds) => (taxTableAt(ds.jur, ds.year).bands || [])[+ds.bidx] || {},
+    save(ds, v) {
+      const t = taxTableAt(ds.jur, ds.year, true);
+      const band = { upTo: typeof v.upTo === 'number' ? v.upTo : null,
+                     rate: typeof v.rate === 'number' ? v.rate : 0 };
+      const bands = (t.bands || []).slice();
+      if (ds.bidx !== undefined) bands[+ds.bidx] = band; else bands.push(band);
+      const before = bands.length;
+      /* Sorted and de-overlapped on the way in, so a band typed out of order
+         lands where it belongs rather than sitting wrong until a reload. */
+      t.bands = coerceTaxBands(bands);
+      if (t.bands.length < before)
+        return 'That band overlapped one already there, so it was folded into it.';
+    },
+    del(ds) {
+      const t = taxTableAt(ds.jur, ds.year, true);
+      t.bands = coerceTaxBands((t.bands || []).filter((_, i) => i !== +ds.bidx));
+    },
+  },
+
+  /* The calculator's scratch figure. Stored so it survives a reload — it is
+     what you last asked — but deliberately not counted as data worth sharing;
+     see BRANCH_HAS_DATA. */
+  taxCheck: {
+    title: () => 'Check an income',
+    sub: () => 'Worked against your own tables. Nothing here touches the projection.',
+    fields: () => [{ key: 'income', label: 'Taxable income', type: 'money', wide: true,
+      hint: 'What the brackets are measured against, before the deduction above them.' }],
+    get: () => ({ income: ((state.side.tax || {}).check || {}).income }),
+    save(ds, v) {
+      if (typeof v.income === 'number') state.side.tax.check = { income: v.income };
+      else delete state.side.tax.check;
+    },
+    del: () => { delete state.side.tax.check; },
   },
 
   /* The two calculators' inputs (401(k) limit, Roth IRA income check) */
@@ -11270,16 +11907,14 @@ const SECTION_NEEDS = {
      that sentence is the thing that's gated instead. */
   retirement:  ['people', 'side.retirementAccounts', 'side.limits',
                 'side.drawdown', 'side.comp', 'side.bonuses'],
-  /* Its OWN branch and nothing else, for as long as the tab draws nothing else.
-     The bridge card planned for this tab — what the pot has to pay, read
-     straight off `drawdownYears` — will need Retirement's whole set alongside
-     it, and it MUST be added here in the same commit as that card. Adding it
-     now would ship somebody's retirement accounts inside a link whose Tax tab
-     shows nothing of them, which is the leak this table exists to stop; the
-     opposite mistake, adding the card and forgetting the branches, shows the
-     recipient blanks. Neither is silent for long, and only one of them is a
-     privacy bug. */
-  tax:         ['side.tax'],
+  /* `side.tax` is its own; the rest arrived with the "What the Pot Has to Pay"
+     card, which is read straight off `drawdownYears` and therefore reads
+     everything the drawdown does. They were deliberately NOT listed while the
+     tab drew nothing — shipping somebody's retirement accounts inside a link
+     whose Tax tab showed nothing of them would be the leak this table exists to
+     stop. The dialog names them out loud, since Retirement owns them. */
+  tax:         ['side.tax', 'people', 'side.retirementAccounts', 'side.limits',
+                'side.drawdown', 'side.comp', 'side.bonuses'],
   comp:        ['people', 'side.comp', 'side.bonuses'],
   investments: ['side.portfolios', 'side.taxable'],
   /* No people: the trips and PTO tables name nobody — checked, not assumed. */
@@ -12148,7 +12783,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   coerceTaxBands, TAX_JURISDICTIONS,
   taxOn, taxRaw, taxableAfter, taxableAfterRaw, effectiveRateOn, marginalRateOn,
   taxTableFor, taxTablesFor, taxStatusGap, taxAtDraw, taxBillRaw, grossUpDraw,
-  taxableIncomeIn,
+  taxableIncomeIn, parseBrackets,
   JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears, enteredThroughOf, goalChartPoints,
   projectionYearsAfter, applyToRow, dropRow, swapRows, moveRowBefore, moveInList,
@@ -12162,6 +12797,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   shareStartedYear, shareFutureYears, keepShareYear,
   trimShareYearMap, trimShareYearMaps, trimTaxYearMap, stripNotes, anonymisePeople,
   looksEmpty, sectionHasData, shareRangeNote, shareFutureNote, shareScopeNote,
+  shareCarriesNote,
   encodeShare, decodeShare };
 
 /* ── Hooks the sync module calls ──────────────────────────────────────────
