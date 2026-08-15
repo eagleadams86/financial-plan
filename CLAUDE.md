@@ -157,7 +157,19 @@ family names as well as balances.
   `ruleDesc()` renders a rule with its
   row's own numbers — use it, not RULE_LABEL, wherever a rule is named next
   to a specific row.
-- **Accounts are a list, not four fixed ids.** `settings.accounts` is ordered
+- **A RETIREMENT account has no id — it is addressed by its INDEX**, unlike a
+budget account, whose `id` is permanent and load-bearing. `retAcct.save` builds
+`{name, type, kind, amount, contribs, owner?}` and nothing anywhere adds an id;
+every editor, delete and move keys off `data-idx`. So **never match a retirement
+account by `a.id`**: every one of them has `undefined` there, `find` therefore
+returns the FIRST account in the list, and the failure is silent and plausible.
+It shipped once — the IRA projection printed a Roth IRA's balance under a
+401(k)'s name, because a record carried `id: a.id` and the renderer looked it up
+by that. `iraOutlook` carries `idx` and the name and owner it needs, so nothing
+downstream looks anything up. **Test fixtures must not invent ids for these
+accounts either**: the ones for the IRA projection did, which is exactly why the
+suite passed while the card was wrong.
+**Accounts are a list, not four fixed ids.** `settings.accounts` is ordered
   `{id, name, rate, creditTo, hub?, since?}`. The ids `cash/mid/long/bank`
   stay reserved (seeds, `overrides`, goal sources and the dividends rule key
   off them). `hub` is the one account ordinary money flows through — do not
