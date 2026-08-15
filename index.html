@@ -671,6 +671,11 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .chartkey i.rule { width: 0; height: 15px; border: 0;
   border-left: 2px dotted var(--text-secondary); border-radius: 0; margin: 0 15px 0 9px; }
 .chartkey i.rule.solid { border-left-style: solid; }
+/* The worse/better band: a filled swatch, because the thing it names is an
+   area rather than a stroke. `--accent-bg` is the pack's own tint of the line
+   the band surrounds, so no colour is invented and the pairing is one the
+   contrast gate has already seen. */
+.chartkey i.band { background: var(--accent-bg); border: 1px solid var(--border-strong); }
 
 /* ── Info dots ──────────────────────────────────────────────────────────────
    A small circled "i" beside a label, opening a dialog rather than a hover
@@ -1768,6 +1773,17 @@ function coerceShape(data) {
     : (typeof v === 'number' && Number.isFinite(v)) ? v
     : (Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0);
   const numHolding = (h) => { h.shares = num(h.shares); h.price = num(h.price); };
+  /* A growth rate, read strictly and NOT through num(): num turns anything it
+     cannot parse into 0, and a 0 rate is a real statement ("this doesn't
+     grow") that must not be manufactured out of a corrupt field. Undefined is
+     the answer for anything that isn't a figure, and every caller treats that
+     as "not set" rather than as a number. Three fields want exactly this — an
+     account's own rate and the two worse/better assumptions — so it is one
+     function rather than three copies drifting apart. */
+  const rateOrNone = (raw) =>
+    (typeof raw === 'number' && Number.isFinite(raw)) ? raw
+      : (typeof raw === 'string' && raw.trim() !== ''
+         && Number.isFinite(parseFloat(raw))) ? parseFloat(raw) : undefined;
   d.schema = typeof d.schema === 'number' ? d.schema : 1;
   d.settings = obj(d.settings);
   /* The household, normalised BEFORE the accounts: the account loop below
@@ -2010,14 +2026,8 @@ function coerceShape(data) {
        Preferences", so a non-number is deleted rather than defaulted: storing
        the global here would freeze today's figure into the account and stop it
        following the setting it was copied from. */
-    /* Read strictly, NOT through num(): num turns anything it cannot parse
-       into 0, and 0 here is a real statement ("this pot doesn't grow") that
-       must not be manufactured out of a corrupt field. Absent is the answer
-       for anything that isn't a figure. */
-    const raw = a.rate;
-    const parsed = (typeof raw === 'number' && Number.isFinite(raw)) ? raw
-      : (typeof raw === 'string' && raw.trim() !== ''
-         && Number.isFinite(parseFloat(raw))) ? parseFloat(raw) : undefined;
+    /* Read strictly — see `rateOrNone`. */
+    const parsed = rateOrNone(a.rate);
     if (parsed === undefined) delete a.rate; else a.rate = parsed;
     /* What is actually inside the account — the same {ticker, shares, price}
        rows an investment pane holds, coerced the same way, so the whole price
@@ -2290,6 +2300,15 @@ function coerceShape(data) {
      in `migrate`. 'single' is what the old fixed MAGI figure already encoded. */
   if (!['single', 'joint', 'separate'].includes(d.settings.filingStatus))
     d.settings.filingStatus = 'single';
+  /* The worse and better real returns the projection can also be drawn at.
+     ABSENT by default and deleted when unreadable — one line is what the chart
+     has always shown, and a shipped spread would be this app inventing a range
+     it has no basis for. They are assumptions like the main rate, not a
+     probability band; the copy says so. */
+  for (const k of ['retirementReturnLow', 'retirementReturnHigh']) {
+    const v = rateOrNone(d.settings[k]);
+    if (v === undefined) delete d.settings[k]; else d.settings[k] = v;
+  }
   /* Whose career the Comp tab is about. Falls back to the first adult, so it
      is right without ever being set; a pointer at somebody deleted, or at a
      child, is dropped rather than left to name a stranger. */
@@ -4501,7 +4520,8 @@ function renderRetirement() {
            <p class="chartkey"><i></i> Dashed — still saving.
              <i class="dot"></i> Tighter dash — the pot is paying out.
              <i class="rule"></i> Dotted rule — somebody retires.
-             <i class="rule solid"></i> Solid rule — the pot runs out.</p>`
+             <i class="rule solid"></i> Solid rule — the pot runs out.${
+             scenarioNote() ? `<br><i class="band"></i> ${scenarioNote()}` : ''}</p>`
         : '<p class="sub">Add an account above and its projection appears here.</p>'}
     </div>
     ${accts.length ? costsCard() : ''}
@@ -4588,9 +4608,37 @@ function costsCard() {
         out.firstDraw === null ? null : fmtMoney(out.firstDraw),
         out.firstDraw === null ? 'No withdrawal to measure yet.' : rateFoot)}
     </div>
+    ${scenarioRangeNote()}
     ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-edit="drawdown"
       >✎ Edit the figures</button></div>`}
   </div>`;
+}
+
+/* The answer to "what if" in a sentence, rather than left to be read off the
+   shape of a curve. Says what each assumption does to the year the money goes,
+   and names the rates so nobody has to remember which line is which. */
+function scenarioRangeNote() {
+  const thisYear = new Date().getFullYear();
+  const { retirementReturnLow: lo, retirementReturnHigh: hi } = state.settings;
+  if (lo === undefined || hi === undefined) return '';
+  const sc = drawdownScenarios(state, thisYear, retirementHorizon(state, thisYear));
+  if (!sc.mid.some(t => t.phase === 'drawing')) return '';
+  const born = (adultsOf(state).find(p => p.birth) || {}).birth;
+  const say = (rows, label, rate) => {
+    const y = drawdownOutlook(rows).runsOutYear;
+    const age = (y && born) ? ` (age ${y - +born.slice(0, 4)})` : '';
+    return `<li><strong>${label}</strong> at ${round2(rate * 100)}% — ${
+      y ? `runs out in ${y}${age}` : 'lasts the whole plan'}.</li>`;
+  };
+  return `<p class="sub" style="margin-top:12px">What each assumption does to the
+      year the money goes:</p>
+    <ul class="sub" style="margin:6px 0 0;padding-left:20px">
+      ${say(sc.low, 'Worse', lo)}
+      ${say(sc.mid, 'As you have it', state.settings.retirementReturnAnnual ?? 0.07)}
+      ${say(sc.high, 'Better', hi)}
+    </ul>
+    <p class="sub" style="margin-top:6px">Three assumptions you have typed — not a
+      range of likelihoods. Nothing here says which is more probable.</p>`;
 }
 
 /* What is actually inside each retirement account. The same holdings table the
@@ -4776,8 +4824,16 @@ function retIncomeCard() {
    an edit that has nowhere to land. */
 function drawdownTable() {
   const thisYear = new Date().getFullYear();
-  const rows = drawdownYears(state, thisYear, retirementHorizon(state, thisYear));
+  const span = retirementHorizon(state, thisYear);
+  const sc = drawdownScenarios(state, thisYear, span);
+  const rows = sc.mid;
   const out = drawdownOutlook(rows);
+  /* Two extra closing balances rather than two extra copies of every column:
+     the table is already eight wide, and what a worse year actually costs you
+     is what is LEFT at the end of it. Drawn only when both are set. */
+  const alt = (sc.low && sc.high)
+    ? { low: new Map(sc.low.map(t => [t.y, t.close])),
+        high: new Map(sc.high.map(t => [t.y, t.close])) } : null;
   if (out.firstDrawYear === null) return '';
   /* From the year BEFORE the first withdrawal, so the reader sees the pot at
      the moment it starts being spent rather than one row into it. */
@@ -4798,7 +4854,9 @@ function drawdownTable() {
       ? ` <span class="muted">(${fmtMoney(t.short)} short)</span>`
       : t.share > 0 && t.share < 1
       ? ` <span class="muted">(${Math.round(t.share * 12)} months)</span>` : ''}</td>
-    <td>${fmtMoney(t.close)}</td></tr>`).join('');
+    <td>${fmtMoney(t.close)}</td>${alt
+      ? `<td class="muted">${fmtMoney(alt.low.get(t.y) ?? 0)}</td>
+         <td class="muted">${fmtMoney(alt.high.get(t.y) ?? 0)}</td>` : ''}</tr>`).join('');
   return `<div class="card" style="grid-column:1/-1">
     <h2>Year by Year in Retirement</h2>
     <p class="sub">Every figure here is worked out from the plan above — nothing in this
@@ -4810,7 +4868,8 @@ function drawdownTable() {
       <thead><tr><th style="text-align:left">Year</th>
         ${people.length ? '<th style="text-align:left">Age</th>' : ''}
         <th>Pot at the start</th><th>Growth</th><th>Paid in</th>
-        <th>Other income</th><th>Taken out</th><th>Pot at the end</th></tr></thead>
+        <th>Other income</th><th>Taken out</th><th>Pot at the end</th>${alt
+          ? `<th>End if worse</th><th>End if better</th>` : ''}</tr></thead>
       <tbody>${body}</tbody></table></div>
   </div>`;
 }
@@ -4994,6 +5053,19 @@ function retirementMarkers(st, labels) {
     Object.assign(m, {
       label: `${andList(m.names)} ${m.names.length > 1 ? 'retire' : 'retires'}`,
     }));
+}
+
+/* The band's key, and the sentence that keeps it honest. Empty unless both
+   rates are set, so the chart says nothing extra until there is something
+   extra to say. "Three assumptions" rather than a range, deliberately and
+   repeatedly: the app has no distribution behind these and a band that read as
+   a confidence interval would be the most authoritative-looking wrong thing on
+   the tab. */
+function scenarioNote() {
+  const { retirementReturnLow: lo, retirementReturnHigh: hi } = state.settings;
+  if (lo === undefined || hi === undefined) return '';
+  return `Shaded — the same plan at ${round2(lo * 100)}% and ${round2(hi * 100)}%.
+    Three assumptions, not a range of likelihoods.`;
 }
 
 /* What the rules down the projection mean — and, just as load-bearing, who
@@ -5505,6 +5577,41 @@ function retirementSplit(st, thisYear) {
   return { at, now, then };
 }
 
+/* The same plan with every growth rate moved by the same number of points.
+   SHIFTED, not replaced: an account you have said grows at 3% while the plan
+   assumes 7% is a deliberate statement about how it is invested, and a worse
+   market should knock both down rather than flattening them to one figure. So
+   a 7% plan viewed at 4% takes three points off everything, and that bond-heavy
+   rollover goes to 0%. A rate is allowed to go negative — real returns do.
+
+   A copy, so nothing here can reach back into the state it was handed. */
+function shiftRates(st, delta) {
+  if (!delta) return st;
+  const out = JSON.parse(JSON.stringify(st));
+  out.settings.retirementReturnAnnual =
+    (st.settings.retirementReturnAnnual ?? 0.07) + delta;
+  for (const a of out.side.retirementAccounts || [])
+    if (typeof a.rate === 'number') a.rate += delta;
+  return out;
+}
+
+/* The projection drawn three ways: as you have assumed it, and at the worse and
+   better returns if you have typed them. Absent means absent — the chart is
+   then exactly the one line it has always been.
+
+   These are THREE ASSUMPTIONS, not a probability range, and the copy has to
+   keep saying so. The app has no distribution to draw from and no business
+   inventing one; a band that looked like a confidence interval would be the
+   most authoritative-looking wrong thing on the tab. */
+function drawdownScenarios(st, thisYear, span) {
+  const base = st.settings.retirementReturnAnnual ?? 0.07;
+  const at = (rate) => rate === undefined ? null
+    : drawdownYears(shiftRates(st, rate - base), thisYear, span);
+  return { mid: drawdownYears(st, thisYear, span),
+           low: at(st.settings.retirementReturnLow),
+           high: at(st.settings.retirementReturnHigh) };
+}
+
 /* What arrives from everything other than the pot in a given year. A row with
    no start year never arrives at all — `coerceShape` drops a year it cannot
    read rather than zeroing it, because `from: 0` would pour a pension into
@@ -5571,7 +5678,8 @@ function buildRetirementChart() {
   if (!accts.length) return;
   const r = state.settings.retirementReturnAnnual ?? 0.07;
   const thisYear = new Date().getFullYear();
-  const rows = drawdownYears(state, thisYear, retirementHorizon(state, thisYear));
+  const sc = drawdownScenarios(state, thisYear, retirementHorizon(state, thisYear));
+  const rows = sc.mid;
   const labels = rows.map(t => String(t.y));
   const data = rows.map(t => t.close);
   const out = drawdownOutlook(rows);
@@ -5581,9 +5689,28 @@ function buildRetirementChart() {
      keeps its signature and its tests. */
   const markers = [...retirementMarkers(state, labels), ...drawdownMarkers(rows, labels)];
   const accent = cssVar('--accent');
+  /* The worse and better lines are drawn as a BAND rather than as two more
+     curves, and that is the whole design. Three competing lines would need
+     three ways of telling them apart, and the only ones left are colours (there
+     are none to spare, and hue may never carry a meaning alone here) and more
+     dash patterns (already spoken for: loose is saving, tight is drawing). A
+     filled range needs neither — it reads by POSITION, above and below the line
+     you actually set, and the line itself is untouched.
+
+     Edges drawn faintly so the two ends are readable where the band is thin.
+     `fill: '-1'` fills to the dataset before it, so the pair must stay adjacent
+     and ahead of the main line, which then draws on top. */
+  const band = (!sc.low || !sc.high) ? [] : [
+    { label: 'If it goes worse', data: sc.low.map(t => t.close),
+      borderColor: cssVar('--border-strong'), backgroundColor: 'transparent',
+      borderWidth: 1, pointRadius: 0, tension: .2, borderDash: [2, 4] },
+    { label: 'If it goes better', data: sc.high.map(t => t.close),
+      borderColor: cssVar('--border-strong'), backgroundColor: cssVar('--accent-bg'),
+      borderWidth: 1, pointRadius: 0, tension: .2, borderDash: [2, 4], fill: '-1' },
+  ];
   newChart('retChart', {
     type: 'line',
-    data: { labels, datasets: [{
+    data: { labels, datasets: [...band, {
       label: 'Projected balance', data,
       borderColor: accent, backgroundColor: 'transparent',
       borderWidth: 2, pointRadius: 0, tension: .2,
@@ -5607,6 +5734,11 @@ function buildRetirementChart() {
            millions draws as a flat line on the floor), so this is where it
            gets said. */
         tooltip: { callbacks: { label: (t) => {
+          /* The band's two edges are a different plan, so they must not borrow
+             the middle line's story — a "took $80,000" read out beside the
+             worse line would be describing a withdrawal that plan never made. */
+          if (t.datasetIndex < band.length)
+            return `${t.dataset.label}: ${fmtMoney(t.parsed.y)}`;
           const row = rows[t.dataIndex];
           const m = markers.filter(k => k.index === t.dataIndex);
           const drew = row && row.draw
@@ -8098,6 +8230,17 @@ const EDITORS = {
         hint: 'What the retirement projection assumes AFTER inflation. Everything on that '
           + 'tab is in today\'s money, so subtract the inflation you expect from the growth '
           + 'you expect: 7% growth against 3% inflation is 4% here.' },
+      { key: 'retirementReturnLow', label: 'If it goes worse %/yr', type: 'percent',
+        hint: 'Optional. Set this and the one beside it and the projection is drawn three '
+          + 'ways, with the range shaded. They are three assumptions YOU have typed — the '
+          + 'app has no distribution behind them and says nothing about which is likelier.' },
+      { key: 'retirementReturnHigh', label: 'If it goes better %/yr', type: 'percent',
+        hint: 'Optional. Leave either empty and the chart stays the single line it has '
+          + 'always been. An account with a rate of its own moves by the same number of '
+          + 'points, so a bond-heavy pot stays behind an all-equity one. Keep the two '
+          + 'close together: compounding is brutal over decades, and a wide upper figure '
+          + 'stretches the axis until the line you actually set is flattened against the '
+          + 'bottom of it.' },
       /* The exact figure. The header's picker does quarter steps for the
          everyday change; this is here for the one percent that suits your
          screen. Like the API key it is NOT part of the plan — it lives in its
@@ -8120,6 +8263,8 @@ const EDITORS = {
                   givingFund: !!state.settings.givingFund,
                   midTermRateAnnual: state.settings.midTermRateAnnual ?? 0.03,
                   retirementReturnAnnual: state.settings.retirementReturnAnnual ?? 0.07,
+                  retirementReturnLow: state.settings.retirementReturnLow,
+                  retirementReturnHigh: state.settings.retirementReturnHigh,
                   zoom: savedZoom(),
                   priceApiKey: priceKey() }),
     save(ds, v) {
@@ -8153,6 +8298,12 @@ const EDITORS = {
       if (v.midTermRateAnnual !== null) state.settings.midTermRateAnnual = v.midTermRateAnnual;
       if (v.retirementReturnAnnual !== null)
         state.settings.retirementReturnAnnual = v.retirementReturnAnnual;
+      /* Empty DELETES: absent is what keeps the chart the single line it has
+         always been, and a stored 0 would draw a band down to nothing. */
+      for (const k of ['retirementReturnLow', 'retirementReturnHigh']) {
+        if (v[k] === null || v[k] === undefined) delete state.settings[k];
+        else state.settings[k] = v[k];
+      }
       setPriceKey(v.priceApiKey);
       /* Applied, not just stored — the whole point of typing it is to see it.
          An empty box means "leave it alone" rather than "shrink to 50": a
@@ -11451,6 +11602,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   limitsForIn, plannedDeferral, plannedContribs,
   isIra, iraAccountsOf, latestContrib, contribStopMonth, iraOutlook,
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
+  shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,

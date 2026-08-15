@@ -3432,6 +3432,55 @@ t('the split adds up to the pot the chart draws', () => {
   approx(sp.then.total, H.round2(atStop.open + atStop.growth + atStop.contrib),
     'the split totals the same money the chart has that year', 0.05);
 });
+/* The projection drawn three ways. THREE ASSUMPTIONS, not a probability band —
+   the app has no distribution behind them, and the copy has to keep saying so. */
+t('with no worse or better rate set, the projection is the single line it was', () => {
+  const s = potFixture();
+  const sc = H.drawdownScenarios(s, RET_FIX, 25);
+  eq(sc.low, null); eq(sc.high, null);
+  eq(sc.mid.map(t => t.close), H.drawdownYears(s, RET_FIX, 25).map(t => t.close),
+    'and the middle line is exactly what it always was');
+});
+t('the worse and better lines shift every rate by the same points', () => {
+  /* SHIFTED, not replaced: an account you said grows at 3% while the plan
+     assumes 7% is a statement about how it is invested, and a worse market
+     should knock both down rather than flattening them to one figure. */
+  const s = H.coerceShape({ settings: { retirementReturnAnnual: 0.07,
+      retirementReturnLow: 0.04, retirementReturnHigh: 0.09 },
+    side: { retirementAccounts: [
+      { name: 'Equities', type: '401k', amount: 100000 },
+      { name: 'Bonds', type: '401k', amount: 100000, rate: 0.03 }] } });
+  const worse = H.shiftRates(s, 0.04 - 0.07);
+  eq(worse.settings.retirementReturnAnnual, 0.04, 'the plan rate moves to the worse one');
+  approx(worse.side.retirementAccounts[1].rate, 0, 'and the 3% pot drops the same 3 points', 1e-9);
+  eq(s.side.retirementAccounts[1].rate, 0.03, 'the state it was handed is untouched');
+  eq(H.shiftRates(s, 0), s, 'no shift is no copy at all');
+  const sc = H.drawdownScenarios(s, RET_FIX, 10);
+  ok(sc.low[10].close < sc.mid[10].close, 'worse ends lower');
+  ok(sc.high[10].close > sc.mid[10].close, 'better ends higher');
+});
+t('a worse assumption can bring the year the money goes forward', () => {
+  const s = H.coerceShape({ settings: { retirementReturnAnnual: 0.05,
+      retirementReturnLow: 0.01, retirementReturnHigh: 0.08 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65,
+               retireWhen: 'jan-that-year' }],
+    side: { retirementAccounts: [{ name: '401(k)', type: '401k', amount: 400000 }],
+            drawdown: { spend: 40000, income: [] } } });
+  const sc = H.drawdownScenarios(s, RET_FIX, H.retirementHorizon(s, RET_FIX));
+  const gone = (rows) => H.drawdownOutlook(rows).runsOutYear;
+  ok(gone(sc.low) !== null, 'the worse assumption runs out');
+  ok(gone(sc.low) < (gone(sc.mid) ?? 9999), 'and does so earlier than the one you set');
+  ok((gone(sc.high) ?? 9999) >= (gone(sc.mid) ?? 9999), 'while the better one lasts at least as long');
+});
+t('a rate that is not a figure is dropped, so the band simply is not drawn', () => {
+  const d = H.coerceShape({ settings: { retirementReturnLow: 'nonsense',
+                                        retirementReturnHigh: '' } });
+  eq(d.settings.hasOwnProperty('retirementReturnLow'), false,
+    'never manufactured into a deliberate-looking 0%');
+  eq(d.settings.hasOwnProperty('retirementReturnHigh'), false);
+  eq(H.coerceShape({ settings: { retirementReturnLow: 0 } }).settings.retirementReturnLow, 0,
+    'but a typed zero is a real assumption and is kept');
+});
 t('a mid-year retirement only spends the months that are left', () => {
   const s = potFixture({ settings: { retirementReturnAnnual: 0 },
     /* born November, retiring at 65 on their birthday → 2035-11 */

@@ -1154,6 +1154,28 @@ Things that are load-bearing and will look arbitrary later:
   different years instead of quietly showing one under the other's label. The
   year-by-year table's age column reads December, not mid-year, so the row where
   somebody retires at 55 doesn't say 54.
+- **The projection can be drawn three ways** — `drawdownScenarios` returns the
+  plan at your rate plus the optional `settings.retirementReturnLow`/`High`.
+  **Both absent by default**, so the chart is the single line it always was
+  until there is something extra to say. `shiftRates(st, delta)` SHIFTS every
+  rate by the same points rather than replacing them: an account you said grows
+  at 3% while the plan assumes 7% is a statement about how it is invested, and
+  a worse market should knock both down rather than flattening them to one
+  figure. It returns a copy, and `delta === 0` returns the state untouched.
+  **Drawn as a BAND, not three lines**, and that is the design: three curves
+  would need three ways of telling them apart, and the only ones left are
+  colours (none to spare, and hue may never carry meaning alone here) and more
+  dash patterns (loose is saving, tight is drawing — both spoken for). A filled
+  range reads by POSITION and leaves the existing line untouched; `--accent-bg`
+  inside, `--border-strong` on the edges, no colour invented. The band's two
+  datasets must stay adjacent and ahead of the main line, since `fill: '-1'`
+  fills to the dataset before it, and the tooltip checks `datasetIndex` so an
+  edge never borrows the middle line's story about a withdrawal it never made.
+  **THREE ASSUMPTIONS, NOT A PROBABILITY BAND** — said in the chart key, in the
+  costs card and in the Preferences hint, because the app has no distribution
+  behind these and a band that read as a confidence interval would be the most
+  authoritative-looking wrong thing on the tab. Do not add one without a model
+  that earns it.
 - **The projection grows POTS, not one balance** (`retirementPots`). Each
   retirement account is a pot with its own `rate` (`accountRate` — the account's
   own, else Preferences; **absent means follow Preferences, and a 0 is a real

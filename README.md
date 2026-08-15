@@ -155,6 +155,10 @@ included — treat those the way you treat the figures.
   go in, and what it is worth by the month the paying-in stops;
   **a growth rate per account** (leave it empty to follow Preferences) so a
   bond-heavy rollover and an all-equity Roth don't have to compound alike;
+  an optional **worse and better return** that draws the same plan three ways
+  with the range shaded, and says in a line what each does to the year the money
+  runs out — three assumptions you typed, deliberately **not** a range of
+  likelihoods, since the app has no distribution behind them;
   **the contribution types inside an account** — a real 401(k) holds a rollover,
   a Roth deferral, an employer match and a pre-tax deferral at once, each taxed
   differently, so one account carries them all rather than being faked as
