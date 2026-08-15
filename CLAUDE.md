@@ -282,17 +282,10 @@ family names as well as balances.
   `<title>` and the `<h1>` both said whose plan it was, so every copy and every
   shared link carried it. `settings.tagline` replaces it: empty by default,
   capped at 60 chars, written by `render()` into both the header and
-  `document.title` through textContent. It is NOT in `SECTION_NEEDS` — **but
-  that does not keep it out of a link, and this paragraph used to claim it
-  did.** `buildSharePayload` sets `settings: state.settings` unconditionally,
-  outside the `SECTION_NEEDS` machinery entirely, and `openSharedView` merges it
-  over the recipient's own — so the sender's subtitle DOES travel, and so does
-  every other setting. The Preferences hint on that field still promises
-  otherwise. **Unfixed as of 2026-08-14 and known**: either the payload should
-  stop sending `settings` (and each tab declare the settings it needs) or both
-  bits of copy should stop promising it doesn't. Until then, treat `settings`
-  as shared — which is why the drawdown's spending target is in `side.drawdown`
-  and not there. When adding anything that names the app, ask whose name it is.
+  `document.title` through textContent. **It travels in a share link, like
+  every setting** — see the rule below; the hint on that field used to promise
+  the opposite and was simply wrong. When adding anything that names the app,
+  ask whose name it is.
 - **A dividends row names the accounts it earns on** (`cat.accounts`, read only
   through `dividendAccounts()`). The rule used to read the ids `cash` and `mid`
   literally — invisible to the author, and for anybody else who renamed or
@@ -1288,10 +1281,27 @@ step.
   new gate. The imperative COPY is gated per renderer (`viewOnly ? '' : ' Click
   a row to edit it.'`) — a read-only view that tells you to click things is a
   bug in the writing.
-- **`SECTION_NEEDS` is the whole privacy model.** It maps each tab to the state
-  branches it actually reads, and nothing else decides what travels. Start
-  reading a new branch in a renderer and it must be added there, or the shared
-  copy of that tab shows blanks. `BRANCH_OWNERS` says which tab a branch belongs
+- **`settings` travels in FULL, and is the one thing `SECTION_NEEDS` does not
+  gate.** Deliberate, decided 2026-08-14, and the opposite of what this file
+  used to imply: currency, the rates the projections assume and the subtitle are
+  what make the shared figures mean what the sender meant — a recipient reading
+  a plan in their own default currency at their own assumed return is reading
+  different numbers. **The only credential that must never be shared is the
+  Twelve Data price key, and it cannot be**: it lives in localStorage under
+  `fin-pricekey` and has never been part of `state`, so it reaches neither a
+  link nor a backup nor Firestore. That is the whole reason it is kept there
+  rather than in `settings`, and it must stay there. The zoom is out for the
+  same reason in a smaller key: it describes a screen, not a plan.
+  **So anything added to `settings` is shared by default — if it must not be,
+  it does not belong in `settings`.** That is why the drawdown's spending target
+  is `side.drawdown` and not a setting: it is data about a household, gated per
+  tab like every other branch. The one trim is `settings.accounts`, emptied when
+  no grid is going, since a holdings link has no business carrying the names of
+  somebody's bank accounts.
+- **`SECTION_NEEDS` is the whole privacy model for state BRANCHES.** It maps
+  each tab to the branches it actually reads, and nothing else decides what
+  travels. Start reading a new branch in a renderer and it must be added there,
+  or the shared copy of that tab shows blanks. `BRANCH_OWNERS` says which tab a branch belongs
   to; a branch travelling for a tab that doesn't own it is named out loud in the
   dialog (`shareCarriesNote`) — Giving measures donations against `side.comp`, so
   a Giving link carries the salary history, and the sender is told before they
