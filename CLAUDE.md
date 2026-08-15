@@ -1419,7 +1419,7 @@ side.tax = {
   for a status you have left is KEPT**: filing status changes, and the schedule
   you typed for the year you were single is still the truth about that year.
 - **`bands` must be OBJECTS.** `arr()` filters to objects, so a hand-edited
-  `bands: [23850, 0.10]` empties SILENTLY — a table that reads "no tax" on
+  `bands: [20000, 0.10]` empties SILENTLY — a table that reads "no tax" on
   screen while looking perfectly full in the backup it came from. That is why
   `coerceTaxBands` is its own function with its own tests rather than a line in
   coerceShape's `arr()` loop.
