@@ -1839,6 +1839,15 @@ is what the tests diff the JS engine against.
 **`run()` is async and `await`s each test**, because the share-link encode/decode
 goes through `CompressionStream`; `await` on an ordinary return value is a no-op,
 so every synchronous test is untouched.
+**A test must never depend on the app's AMBIENT state.** The harness frames the
+real `index.html`, so the app inside it loads whatever is in that browser's
+`fin-state` — and while testing a feature by hand that is routinely Charlie's
+real plan. A test that calls a function reading the global `state` therefore
+passes locally and fails in CI on a blank one. It happened with
+`shareCarriesNote` (which skips branches with nothing in them): green here, red
+in CI, and the local green was the WRONG answer. Build the state a test needs
+and pass it in; where a function reads the global, assert over the pure tables
+behind it instead. Real data loaded into the harness is not a fixture.
 **It only runs on localhost, and enforces that itself** — the family rule from
 Team Dashboard: the iframe is created by the gate at the foot of the script
 (never in the markup — don't put it back), because on the published site the
