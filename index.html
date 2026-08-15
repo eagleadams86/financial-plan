@@ -3069,6 +3069,17 @@ const HELP = {
       + 'is a real one — growth after inflation. There is no tax in any of it, and no '
       + 'required minimum distributions; this app keeps no tax tables and will not grow '
       + 'any.' },
+  iraProjection: { title: 'Where the IRAs Land',
+    body: 'Each IRA\'s balance today, plus what goes in every year between now and the '
+      + 'month the paying-in stops, all grown at the real return in Preferences. The '
+      + 'contributions come from the table above: a year you have typed is used exactly '
+      + 'as typed, and the years you have not are filled in from the last figure you did '
+      + '— which is what "I put in $7,000 a year" usually means. Type a year of your own '
+      + 'and it wins, a 0 included, so a year you deliberately skipped stays skipped. '
+      + 'Paying-in stops at the owner\'s retirement, or at the first retirement in the '
+      + 'household for an IRA that hasn\'t been assigned to anybody. Everything is in '
+      + 'today\'s money and before tax: a Traditional IRA is taxed on the way out and a '
+      + 'Roth is not, and this app keeps no tax tables.' },
   safeRate: { title: 'The Withdrawal Rate',
     body: 'What the first year out of the pot comes to as a share of the pot it came out '
       + 'of. It is shown against a rate YOU set, and 4% is only where the box starts — '
@@ -4308,6 +4319,7 @@ function renderRetirement() {
       ${iraAccts.length ? `<div class="addbar"><button class="btn small" data-add="contrib"
         >＋ Add a contribution</button></div>` : ''}
     </div>
+    ${iraAccts.length ? iraProjectionCard() : ''}
     ${limitEarners(state).map(id => `<div class="card" data-box="k401-${esc(id || 'all')}">
       <h2>401(k) Limit Check${id ? ` — ${esc(personById(state, id).name)}` : ''}${
         helpBtn('k401Limit', 'the 401(k) limit check')}</h2>
@@ -4419,6 +4431,55 @@ function costsCard() {
     </div>
     ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-edit="drawdown"
       >✎ Edit the figures</button></div>`}
+  </div>`;
+}
+
+/* Where each IRA lands by retirement. Read-only, like the year-by-year table:
+   every figure is worked out, and the sub-line says which of the contributions
+   behind it were typed and which were carried forward — a projection that
+   didn't distinguish those would be putting words in the reader's mouth about
+   fifteen years of saving. */
+function iraProjectionCard() {
+  const thisYear = new Date().getFullYear();
+  const rows = iraOutlook(state, thisYear);
+  const r = state.settings.retirementReturnAnnual ?? 0.07;
+  const dated = rows.filter(t => t.stop);
+  if (!dated.length) return `<div class="card">
+    <h2>Where the IRAs Land</h2>
+    <p class="sub">Give somebody a birth month and a retirement age on the Household tab
+      and this works out what each IRA is worth by the time they stop paying into it.</p>
+  </div>`;
+  const showAcct = rows.length > 1;
+  const total = (k) => round2(dated.reduce((s, t) => s + t[k], 0));
+  const carried = dated.reduce((s, t) => s + t.projected, 0);
+  const body = dated.map(t => `<tr>
+    <th scope="row">${esc(retAcctLabel(state.side.retirementAccounts
+      .find(a => a.id === t.id) || { name: t.name }))}</th>
+    <td>${fmtMoney(t.balanceNow)}</td>
+    <td>${t.yearly === null ? '<span class="muted">—</span>' : fmtMoney(t.yearly)}</td>
+    <td>${esc(monthLabelFull(t.stop))}</td>
+    <td>${fmtMoney(t.paid)}</td>
+    <td><strong>${fmtMoney(t.atStop)}</strong></td></tr>`).join('');
+  return `<div class="card">
+    <h2>Where the IRAs Land${helpBtn('iraProjection', 'the IRA projection')}</h2>
+    <p class="sub">Today's balance plus every year's contribution, each grown at
+      ${round2(r * 100)}%/yr after inflation, up to the month the paying-in stops.${
+      carried ? ` ${carried} year${carried === 1 ? '' : 's'} of those contributions
+        ${carried === 1 ? 'is' : 'are'} carried forward from the last figure you typed —
+        type a year of your own and it wins, a 0 included.` : ''}</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">${showAcct ? 'Account' : 'IRA'}</th>
+        <th>Now</th><th>A year</th><th>Until</th><th>Still to pay in</th>
+        <th>Worth by then</th></tr></thead>
+      <tbody>${body}</tbody>
+      ${showAcct ? `<tfoot><tr><th scope="row">Total</th>
+        <td>${fmtMoney(total('balanceNow'))}</td><td></td><td></td>
+        <td>${fmtMoney(total('paid'))}</td>
+        <td><strong>${fmtMoney(total('atStop'))}</strong></td></tr></tfoot>` : ''}
+    </table></div>
+    <p class="sub" style="margin-top:10px">In today's money, and before any tax — a
+      Traditional IRA is taxed when it comes out and a Roth isn't, and this app keeps no
+      tax tables. These figures are already inside the pot on the projection below.</p>
   </div>`;
 }
 
@@ -4879,6 +4940,33 @@ function retiredShareOf(y, fromMonth) {
   return (13 - +fromMonth.slice(5, 7)) / 12;
 }
 
+/* An IRA is the account whose contributions are typed a year at a time under
+   IRA Contributions, and the only kind whose typed history is carried forward.
+   A 401(k)'s pay-in comes from its card's PERCENTAGE instead, so carrying its
+   typed rows forward as well would count the same money twice. */
+const isIra = (a) => a.type === 'roth-ira' || a.type === 'trad-ira';
+const iraAccountsOf = (st) => (st.side.retirementAccounts || []).filter(isIra);
+
+/* The last thing the reader actually said they pay into an account — the
+   newest year in its own contributions, whatever that figure is. A typed zero
+   is carried like any other: it says they stopped. */
+function latestContrib(a) {
+  const years = Object.keys(a.contribs || {}).sort();
+  return years.length ? (a.contribs[years[years.length - 1]] || 0) : null;
+}
+
+/* When an account stops being paid into: its OWNER's retirement if it has one
+   the plan can date, otherwise the household's first. An IRA is a dollar
+   amount rather than a slice of one person's salary, so unlike a 401(k) rate
+   it still means something on a plan that never named anybody — falling back
+   to the household date is what keeps a single-person plan working without
+   making them fill in an owner. */
+function contribStopMonth(st, a) {
+  const owner = a.owner ? personById(st, a.owner) : null;
+  return (owner && retirementMonthOf(owner))
+    || drawdownFromMonth(st, new Date().getFullYear());
+}
+
 /* What somebody's 401(k) card says they put in a year, out of the rates it
    already holds — salary × the pre-tax percentage, plus bonus × its own. The
    LATEST year that records a RATE is the one carried forward: reading the
@@ -4901,8 +4989,13 @@ function plannedDeferral(st, personId, upTo) {
    show that only one of them was ever being read.
 
      · `contribYears` — the per-year, per-account rows under IRA Contributions.
-       Typed one year at a time, so they are taken exactly as they stand and
-       never carried forward: a year you didn't type is a year you didn't pay.
+       Taken exactly as typed, and a TYPED YEAR ALWAYS WINS.
+     · an IRA's latest typed figure, carried forward into the years it has
+       nothing typed for, up to retirement. Those rows are half history and
+       half plan, so filling the gaps is what the reader means by "I pay in
+       $7,000 a year" — but only the gaps: type a 0 for one year and that year
+       really is nothing, which is the escape hatch that keeps the carry
+       honest.
      · the 401(k) cards' RATES — a percentage of salary and of bonus, which is
        how most people actually hold the figure. Carried forward in today's
        money (the frame this whole tab is in) until that person's OWN
@@ -4917,6 +5010,20 @@ function plannedContribs(st, thisYear, span) {
   const out = {};
   const add = (y, v) => { if (v) out[String(y)] = round2((out[String(y)] || 0) + v); };
   for (const [y, v] of Object.entries(contribYears(st))) add(y, v);
+  for (const a of iraAccountsOf(st)) {
+    const rate = latestContrib(a);
+    const stop = contribStopMonth(st, a);
+    if (!rate || !stop) continue;
+    for (let i = 1; i <= span; i++) {
+      const y = thisYear + i;
+      const working = 1 - retiredShareOf(y, stop);
+      if (working <= 0) break;
+      /* Only where the reader has said nothing. Their own figure for a year is
+         the last word on it, in both directions. */
+      if ((a.contribs || {})[String(y)] !== undefined) continue;
+      add(y, round2(rate * working));
+    }
+  }
   for (const id of limitEarners(st)) {
     const person = id === undefined ? null : personById(st, id);
     const stop = person ? retirementMonthOf(person) : null;
@@ -4930,6 +5037,43 @@ function plannedContribs(st, thisYear, span) {
     }
   }
   return out;
+}
+
+/* Where each IRA lands by the day it stops being paid into: today's balance
+   plus every year's contribution, each grown at the same real return the chart
+   uses. One record per account.
+
+   The growth convention is copied EXACTLY from `drawdownYears` — year zero is
+   today's balance untouched, then growth on the opening balance and the
+   contribution on top. Two views of the same money that compound differently
+   is the sort of disagreement nobody catches until the figures are years old,
+   and there is a test that the contribution stream here is the same one the
+   household projection counts. */
+function iraOutlook(st, thisYear) {
+  const r = st.settings.retirementReturnAnnual ?? 0.07;
+  return iraAccountsOf(st).map(a => {
+    const stop = contribStopMonth(st, a);
+    const rate = latestContrib(a);
+    const typed = a.contribs || {};
+    let bal = round2(a.amount || 0), paid = 0, years = 0, projected = 0;
+    if (stop) {
+      const stopYear = +stop.slice(0, 4);
+      for (let y = thisYear + 1; y <= stopYear; y++) {
+        const working = 1 - retiredShareOf(y, stop);
+        if (working <= 0) break;
+        const own = typed[String(y)];
+        const put = own !== undefined ? own
+          : (rate ? round2(rate * working) : 0);
+        if (own === undefined && rate) projected++;
+        bal = round2(bal * (1 + r) + put);
+        paid = round2(paid + put);
+        years++;
+      }
+    }
+    return { id: a.id, name: a.name, owner: a.owner, kind: retKind(a),
+             stop, balanceNow: round2(a.amount || 0), yearly: rate,
+             years, paid, projected, atStop: bal };
+  });
 }
 
 /* One record a year: `{ y, open, growth, contrib, income, spend, draw, short,
@@ -10743,6 +10887,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   planToYearOf, PLAN_TO_AGE_DEFAULT, SAFE_RATE_DEFAULT, contribYears,
   retirementMonthOf, RETIRE_WHEN, retiredShareOf, drawdownFromMonth,
   limitsForIn, plannedDeferral, plannedContribs,
+  isIra, iraAccountsOf, latestContrib, contribStopMonth, iraOutlook,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,

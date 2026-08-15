@@ -1086,9 +1086,26 @@ Things that are load-bearing and will look arbitrary later:
   somebody retires at 55 doesn't say 54.
 - **Contributions come from BOTH places the app records them.**
   `plannedContribs(st, thisYear, span)` is the one source the projection reads:
-  the per-year IRA rows (`contribYears`, taken exactly as typed and never
-  carried — a year you didn't type is a year you didn't pay) PLUS each 401(k)
-  card's RATE, which is how most people actually hold the figure. The rate is
+  the per-year IRA rows (`contribYears`), an IRA's latest figure CARRIED into
+  the years it has nothing typed for, PLUS each 401(k) card's RATE, which is how
+  most people actually hold the figure.
+  **A typed year always wins, in both directions** — that is the escape hatch
+  that makes the carry safe, and a typed 0 is a year they really skipped. **A 0
+  in the NEWEST year stops the carry entirely**: the last thing you said about
+  an account is the current statement of it, and understating what goes in is
+  the safe direction for a retirement projection to be wrong in.
+  **Only an IRA carries** (`isIra`) — a 401(k)'s pay-in comes from its
+  percentage, so carrying its typed rows too would count the same money twice.
+  An IRA stops at its OWNER's retirement, or at the household's first for one
+  nobody has been assigned; unlike a 401(k) rate, a dollar figure still means
+  something on a plan that never named anybody.
+  `iraOutlook(st, thisYear)` is the per-account view behind "Where the IRAs
+  Land" — balance now, what is still to go in, and what it is worth by the month
+  the paying-in stops. **It copies `drawdownYears`' growth convention exactly**
+  (year zero untouched, then growth on the opening balance, contribution on
+  top): two views of the same money compounding differently is the sort of
+  disagreement nobody catches until the figures are years old, and there is a
+  test that both count the identical contribution stream. The rate is
   carried forward in today's money until that person's own retirement and
   pro-rated across the year they go — the mirror of `retiredShareOf`, so ten
   months' pay-in and two months' spending add to one year. The projection read

@@ -3024,7 +3024,85 @@ t('a typed IRA row and a 401(k) rate are different money and both count', () => 
     drawdown: { income: [] } } });
   const c = H.plannedContribs(s, RET_FIX, 10);
   eq(c['2031'], 13000, '6,000 from the rate plus the 7,000 typed row');
-  eq(c['2032'], 6000, 'and a year with no typed row is just the rate');
+  eq(c['2032'], 13000, 'and the IRA figure carries into the years with nothing typed');
+});
+/* The carry rule, stated once so the three tests below can't drift from it:
+   the figure carried is the NEWEST typed year's, whatever it is, and it fills
+   only the years with nothing typed, up to retirement. */
+const iraFixture = (contribs) => deferralFixture({ side: {
+  comp: { '2030': { salary: 100000, raisePct: 0 } }, bonuses: { '2030': 10000 },
+  limits: {},                                     // no 401(k) rate: IRAs only here
+  retirementAccounts: [{ id: 'r', name: 'Roth IRA', type: 'roth-ira', amount: 0,
+    contribs }], drawdown: { income: [] } } });
+
+t('an IRA carries its latest figure into the years it has nothing typed for', () => {
+  const c = H.plannedContribs(iraFixture({ '2028': 6000, '2031': 7000 }), RET_FIX, 10);
+  eq(c['2028'], 6000, 'a past year stands exactly as it was typed');
+  eq(c['2031'], 7000, 'and so does a future one');
+  eq(c['2032'], 7000,
+    'the gap after it is filled from the LATEST figure, not the older 6,000');
+  eq(c['2035'], 5833.33, 'ten months of it in the year they retire in November');
+  eq(c['2036'], undefined, 'nothing once the paying-in has stopped');
+});
+t('a typed year always wins, and a typed zero is a year they really skipped', () => {
+  const c = H.plannedContribs(iraFixture({ '2031': 7000, '2032': 0, '2034': 7000 }),
+    RET_FIX, 10);
+  eq(c['2032'], undefined, 'the zero they typed, not the 7,000 either side of it');
+  eq(c['2033'], 7000, 'and the carry fills the gap after it');
+});
+t('a zero in the NEWEST year stops the carry — it says they have stopped', () => {
+  /* The conservative reading, and the one a retirement projection should take:
+     the last thing you said about this account is the current statement of it.
+     Understating what goes in is the safe direction to be wrong in. */
+  const s = iraFixture({ '2028': 6000, '2031': 7000, '2033': 0 });
+  eq(H.latestContrib(s.side.retirementAccounts[0]), 0);
+  const c = H.plannedContribs(s, RET_FIX, 10);
+  eq(c['2031'], 7000, 'the typed years still stand');
+  eq(c['2034'], undefined, 'but nothing carries past the zero');
+  eq(c['2035'], undefined);
+});
+t('an IRA says what it is worth by the time the paying-in stops', () => {
+  const s = deferralFixture({ settings: { retirementReturnAnnual: 0.10 },
+    side: { comp: {}, bonuses: {}, limits: {},
+      retirementAccounts: [{ id: 'r', name: 'Roth IRA', type: 'roth-ira', amount: 1000,
+        contribs: { '2031': 100 } }], drawdown: { income: [] } } });
+  /* Sam retires 2035-11, so 2031..2035 are paid into (2035 at ten twelfths).
+     Growth on the opening balance then the contribution on top — the same
+     convention drawdownYears uses, which is the point. */
+  let bal = 1000, paid = 0;
+  for (const put of [100, 100, 100, 100, H.round2(100 * 10 / 12)]) {
+    bal = H.round2(bal * 1.10 + put); paid = H.round2(paid + put);
+  }
+  const t0 = H.iraOutlook(s, RET_FIX)[0];
+  eq(t0.stop, '2035-11');
+  eq(t0.yearly, 100, 'the figure being carried');
+  eq(t0.years, 5);
+  eq(t0.projected, 4, 'four of those five years were filled in, not typed');
+  approx(t0.paid, paid, 'still to pay in', 0.011);
+  approx(t0.atStop, bal, 'worth by then', 0.011);
+});
+t('an unowned IRA stops at the household retirement, an owned one at its own', () => {
+  const mk = (owner) => deferralFixture({ people: [
+      { id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 },
+      { id: 'robin', name: 'Robin', role: 'adult', birth: '1980-03', retireAge: 60 }],
+    side: { comp: {}, bonuses: {}, limits: {},
+      retirementAccounts: [Object.assign({ id: 'r', name: 'Roth IRA', type: 'roth-ira',
+        amount: 0, contribs: { '2031': 5000 } }, owner ? { owner } : {})],
+      drawdown: { income: [] } } });
+  eq(H.iraOutlook(mk(null), RET_FIX)[0].stop, '2035-11',
+    'no owner, so the household\'s first retirement');
+  eq(H.iraOutlook(mk('robin'), RET_FIX)[0].stop, '2040-03', "Robin's own, later than Sam's");
+});
+t('the IRA card and the household projection count the same contributions', () => {
+  /* Two views of one stream. They compound in different loops, so the thing
+     worth pinning is that the MONEY going in is identical. */
+  const s = deferralFixture({ side: { comp: {}, bonuses: {}, limits: {},
+    retirementAccounts: [{ id: 'r', name: 'Roth IRA', type: 'roth-ira', amount: 0,
+      contribs: { '2031': 7000 } }], drawdown: { income: [] } } });
+  const card = H.iraOutlook(s, RET_FIX)[0].paid;
+  const chart = H.round2(Object.entries(H.plannedContribs(s, RET_FIX, 40))
+    .filter(([y]) => +y <= 2035).reduce((t, [, v]) => t + v, 0));
+  eq(card, chart);
 });
 t('the latest year with a RATE is what carries, not the latest year of any kind', () => {
   /* A comp year added ahead has a salary and no percentages. Reading the last

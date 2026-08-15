@@ -148,11 +148,14 @@ included — treat those the way you treat the figures.
   (that limit is per person) and a **Roth
   IRA income (MAGI) calculator** that counts both incomes when you file jointly;
   both recompute as you change the figures;
+  a **"Where the IRAs Land"** table — each IRA's balance now, what is still to
+  go in, and what it is worth by the month the paying-in stops;
   and a projection of where the balances are heading — counting **both** the
   IRA contribution rows you type and the **401(k) cards' own percentages**,
   carried forward in today's money until each of you retires and pro-rated
-  across the year you go — with a **dotted rule
-  marking each person's retirement year** — worked out from the birth month and
+  across the year you go. A year you have typed always wins, in both
+  directions, so a year you deliberately skipped stays skipped. Plus a
+  **dotted rule marking each person's retirement year** — worked out from the birth month and
   retirement age on the Household tab, and only for somebody who has both,
   since the alternative is a date you never gave.
   **Past the first of those retirements the line bends and the pot pays out.**
