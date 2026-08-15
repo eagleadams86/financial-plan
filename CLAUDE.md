@@ -837,6 +837,27 @@ interchangeable**:
   after a batch ends throttled, capped or failed. That is what actually stops
   the render→refresh loop, which is what frees `priceAutoTried` to be honest
   about what was really asked. The manual Refresh button ignores both.
+- **A NEWLY TYPED TICKER is looked up on the spot, on its own**
+  (`refreshPrices(false, [ticker])` from `holding.save`). The six-hour cache is
+  about the QUIET pass — it exists to stop the automatic top-up spending the
+  allowance re-asking about prices that cannot have moved — and typing a ticker
+  in is not the quiet pass; it is a deliberate request about one holding, as
+  much as pressing Refresh is. Without it a new row sat at $0.00 until something
+  else happened to trigger a batch, which reads as the lookup being broken.
+  Three things keep it honest:
+  - **Only when the TICKER is new or changed.** Correcting the share count on a
+    row whose price you typed over yourself must not fetch over the top of it —
+    that figure is a decision, and this dialog's provenance hint exists to
+    record it.
+  - **A named run writes back ONLY the tickers it fetched.** A whole-table
+    refresh still restates every holding with a fresh quote, which is what
+    pressing Refresh asks for; looking up one new ticker must not quietly
+    restate a price you typed over elsewhere on the tab.
+  - **`pendingLookups` remembers a named ticker asked for while a run is in
+    flight**, and the finishing run kicks it off. A quiet background pass
+    routinely holds the latch at exactly the moment a ticker is typed, and the
+    run in flight was assembled before that ticker existed — dropping it there
+    made the feature look intermittent, which is the worst way for it to fail.
 - **The manual button also ignores the six-hour cache** (`stalePrices()` takes a
   TTL; a press passes `MANUAL_FRESH_MS`, two minutes, instead of
   `QUOTE_TTL_MS`). The six hours only ever existed to stop the AUTOMATIC pass

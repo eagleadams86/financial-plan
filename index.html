@@ -794,6 +794,18 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 /* ── Goals ──────────────────────────────────────────────────────────────── */
 .goalgrid { display: grid; gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+/* FOUR tiles go 2 × 2, never 3 + 1. A lone tile on a row after a full one
+   reads as a mistake — the eye finishes the row, finds a gap, and goes looking
+   for the thing that should have been there. `:has(> :nth-child(4):last-child)`
+   is "exactly four children", so nothing else on the tab is touched.
+
+   The width is worked out against the CONTAINER rather than the viewport, so it
+   is right inside a card of any width and needs no breakpoint: each column is
+   at least half the grid (less half the gap), which forces exactly two — and
+   `max()` floors that at the usual 230px, so a container too narrow for two
+   real tiles still drops to one rather than squeezing both. */
+.goalgrid:has(> :nth-child(4):last-child) {
+  grid-template-columns: repeat(auto-fit, minmax(max(230px, calc(50% - 6px)), 1fr)); }
 .goal { border: 1px solid var(--border); border-left-width: 4px;
   border-left-color: var(--accent);
   border-radius: var(--radius-sm); padding: 12px 14px; background: var(--bg-card-alt); }
@@ -6490,8 +6502,22 @@ function buildRetirementChart() {
       borderDash: [6, 4],
       segment: { borderDash: (ctx) =>
         rows[ctx.p1DataIndex]?.phase === 'drawing' ? [2, 3] : [6, 4] },
+      /* The points are invisible until hovered, and then they mark WHICH year
+         is being described. Without this the tooltip named a year the eye had
+         no way to locate on a fifty-year line. */
+      pointHoverRadius: 4, pointHoverBackgroundColor: accent,
+      pointHoverBorderColor: accent,
     }]},
     options: {
+      /* Hovering ANYWHERE in a year's column reads that year, rather than
+         requiring the pointer to land on the line itself. The points are drawn
+         at radius 0 — a fifty-year projection cannot afford fifty dots — so
+         with the default `intersect: true` the tooltip could only be summoned
+         by hitting an invisible one exactly, which in practice meant it never
+         appeared at all. `index` also means the band's two edges are read out
+         beside the line for the same year, which is the comparison the band is
+         drawn for. */
+      interaction: { mode: 'index', intersect: false },
       plugins: { legend: { display: false },
         retirementMarkerLines: { markers },
         /* A marker year says whose it is in the tooltip too: the rule is drawn
@@ -6501,7 +6527,13 @@ function buildRetirementChart() {
            second series (a flow in tens of thousands against a balance in
            millions draws as a flat line on the floor), so this is where it
            gets said. */
-        tooltip: { callbacks: { label: (t) => {
+        tooltip: {
+          /* The plan you actually set reads FIRST, then the two edges of the
+             band. Datasets are drawn band-then-line so the line sits on top, so
+             without this the figure the reader came for is third in its own
+             tooltip, under two answers to a question they didn't ask. */
+          itemSort: (a, b) => b.datasetIndex - a.datasetIndex,
+          callbacks: { label: (t) => {
           /* The band's two edges are a different plan, so they must not borrow
              the middle line's story — a "took $80,000" read out beside the
              worse line would be describing a withdrawal that plan never made. */
@@ -6515,7 +6547,12 @@ function buildRetirementChart() {
                 : ''}`
             : row && row.short ? ` · ${fmtMoney(row.short)} short of the ${
                 fmtMoney(row.spend)} needed` : '';
-          return fmtMoney(t.parsed.y) + ' (projected)' + drew
+          /* What the withdrawal owed that year. Said here because the pot has
+             to produce it and the chart is where the pot is being read — a
+             withdrawal that looks large for the spending target is explained by
+             this figure and by nothing else on the plot. */
+          const owed = row && row.tax ? ` · ${fmtMoney(row.tax)} of it to tax` : '';
+          return fmtMoney(t.parsed.y) + ' (projected)' + drew + owed
             + m.map(k => ` · ${k.label}`).join('');
         } } } },
       scales: { x: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
@@ -6626,7 +6663,14 @@ function bracketsCard(jur) {
   const byYear = (state.side.tax || {})[jur] || {};
   const filing = state.settings.filingStatus;
   const name = jurLabel(jur);
-  const tables = years.map(y => {
+  /* The card's own "Add a year" rides on the LAST year's button bar rather than
+     starting a bar of its own underneath it. Two bars stacked one on the other
+     is two rows spent on two buttons that plainly belong side by side — and
+     with one table stored, which is the ordinary case, they are always
+     adjacent. Riding on the final bar is a rule rather than a special case for
+     the single-year layout, so it never stacks however many years are stored. */
+  const tables = years.map((y, i) => {
+    const last = i === years.length - 1;
     const t = byYear[y][filing];
     const open = (t.bands || []).some(b => b.upTo === null);
     return `<div class="taxyear">
@@ -6644,7 +6688,9 @@ function bracketsCard(jur) {
         <thead><tr><th style="text-align:left">From</th><th>Up to</th><th>Rate</th></tr></thead>
         <tbody>${bandRows(jur, y, t)}</tbody></table></div>
       ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-add="taxBand"
-        data-jur="${esc(jur)}" data-year="${esc(y)}">＋ Add a band</button></div>`}
+        data-jur="${esc(jur)}" data-year="${esc(y)}">＋ Add a band</button>${
+        last ? `<button class="btn small" data-add="taxYear"
+          data-jur="${esc(jur)}">＋ Add a year</button>` : ''}</div>`}
     </div>`;
   }).join('');
   const gap = taxStatusGap(state, new Date().getFullYear()).includes(jur);
@@ -6662,8 +6708,8 @@ function bracketsCard(jur) {
       schedule, the projection treats this as no table at all. Add one for your filing
       status, or change the status in Preferences.</p>` : ''}
     ${tables}
-    ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-add="taxYear"
-      data-jur="${esc(jur)}">＋ Add a year</button></div>`}
+    ${viewOnly || years.length ? '' : `<div class="addbar"><button class="btn small"
+      data-add="taxYear" data-jur="${esc(jur)}">＋ Add a year</button></div>`}
   </div>`;
 }
 
@@ -8377,6 +8423,11 @@ let priceRunToken = 0;
    is a tight request loop. The manual Refresh button ignores this set, so it
    always retries. */
 const priceAutoTried = new Set();
+/* Tickers asked for BY NAME while a run was already in flight. A ticker typed a
+   moment ago must not be lost because a quiet background pass happened to hold
+   the latch — the run in flight was assembled before that ticker existed and
+   knows nothing about it. Drained when the current run finishes. */
+const pendingLookups = new Set();
 /* When the quiet auto-refresh may next run. A throttled or failed batch stops
    the loop below part-way, and refreshPrices() ends in render(), which re-runs
    wireInvestments() and its quiet pass — so SOMETHING has to stand between the
@@ -8433,11 +8484,19 @@ function classifyQuote(status, data) {
 const priceTimeout = () => (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
   ? AbortSignal.timeout(PRICE_TIMEOUT_MS) : undefined;
 
-async function refreshPrices(quiet) {
+/* `only` is a specific list of tickers to fetch — used when a ticker is first
+   typed in, where the six-hour cache and the "already tried" set are both
+   answers to a question about OTHER holdings and have nothing to say about this
+   one. It takes the same path as the manual button for every other reason:
+   the latch, the key, the classify/cache/report machinery and its traps are all
+   documented in here and must not be reimplemented beside it. */
+async function refreshPrices(quiet, only) {
   /* A manual press says so out loud. A button that silently does nothing is
      indistinguishable from one that ran and found nothing to change, which is
      how a stranded latch stayed hidden for a whole day. */
   if (refreshingPrices && Date.now() - priceRunStartedAt < PRICE_RUN_STALE_MS) {
+    /* Remembered, not dropped — see pendingLookups. */
+    if (only) { for (const t of only) if (t) pendingLookups.add(t); return; }
     if (!quiet) toast('A price refresh is already running');
     return;
   }
@@ -8454,7 +8513,9 @@ async function refreshPrices(quiet) {
   if (viewOnly) return;
   const key = priceKey();
   const cache = quoteCache();
-  let want = stalePrices(quiet ? undefined : MANUAL_FRESH_MS);
+  /* A named ticker is asked about outright. Naming it IS the request, exactly
+     as pressing Refresh is, so the freshness window does not apply. */
+  let want = only ? only.filter(Boolean) : stalePrices(quiet ? undefined : MANUAL_FRESH_MS);
   /* A quiet auto-refresh skips anything it has already had a go at, so a ticker
      that can never be freshened can't drive the render→refresh loop — and skips
      anything the supplier has already answered "no price" for today, which is
@@ -8462,12 +8523,13 @@ async function refreshPrices(quiet) {
      load for ever. The manual button ignores both on purpose, as it ignores the
      six-hour cache above: pressing Refresh is a request to try again NOW,
      whatever we think we already know. */
-  if (quiet) want = want.filter(t => !priceAutoTried.has(t) && !noQuoteFresh(cache[t]));
+  if (quiet && !only) want = want.filter(t => !priceAutoTried.has(t) && !noQuoteFresh(cache[t]));
   if (!key) { if (!quiet) toast('Add a Twelve Data API key in Preferences first'); return; }
   if (!want.length) {
     /* Only reachable now when the last press was seconds ago, or when there is
        genuinely nothing with a ticker on it — two different things to be told. */
-    if (!quiet) toast(allTickers().length
+    if (!quiet) toast(only ? 'Nothing to look up'
+      : allTickers().length
       ? 'Every price was fetched moments ago — give it a minute'
       : 'No holdings with a ticker to look up');
     return;
@@ -8546,10 +8608,18 @@ async function refreshPrices(quiet) {
   writeQuoteCache(cache);
   try { localStorage.setItem(PRICE_RUN, JSON.stringify(run)); } catch (e) {}
   if (run.updated.length) {
+    /* A run for NAMED tickers writes back only those. A whole-table refresh
+       still writes every holding whose quote is fresh, which is what pressing
+       Refresh asks for — but looking up one ticker you have just typed must not
+       quietly restate the price on a row you typed over yourself somewhere
+       else on the tab. */
+    const touched = only ? new Set(run.updated.map(u => u.ticker)) : null;
     for (const rows of priceLists())
       for (const h of rows) {
         if (h.lookup === false) continue;
-        const q = cache[(h.ticker || '').trim().toUpperCase()];
+        const t = (h.ticker || '').trim().toUpperCase();
+        if (touched && !touched.has(t)) continue;
+        const q = cache[t];
         if (quoteFresh(q)) h.price = q.price;
       }
     save();
@@ -8576,6 +8646,12 @@ async function refreshPrices(quiet) {
   else if (run.missing.length)
     toast(`No quote for ${run.missing.join(', ')} — see the note above the tables.`);
   else if (!quiet) toast('Nothing came back — check the tickers, or try again later');
+  /* Anything asked for by name while this run held the latch goes now. */
+  if (pendingLookups.size) {
+    const next = [...pendingLookups];
+    pendingLookups.clear();
+    setTimeout(() => refreshPrices(false, next), 0);
+  }
 }
 
 
@@ -9851,9 +9927,26 @@ const EDITORS = {
     blank: () => ({ lookup: true }),
     save(ds, v) {
       const list = holdingList(ds.list);
+      const before = ds.idx !== undefined ? list[+ds.idx] : null;
       const row = { ticker: v.ticker || '?', shares: v.shares ?? 0, price: v.price ?? 0 };
       if (!v.lookup) row.lookup = false;   // absent means yes, so only "no" is stored
       if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
+      /* A ticker the plan has not seen before is looked up ON THE SPOT, and the
+         six-hour cache does not apply to it: that window exists to stop the
+         QUIET pass spending the allowance re-asking about prices that cannot
+         have moved, and typing a ticker in is not the quiet pass — it is a
+         request about this one holding, as deliberate as pressing Refresh.
+         Without it a new row sat at $0.00 until something else happened to
+         trigger a batch, which reads as the lookup being broken.
+
+         Only when the TICKER is new or changed. Correcting the share count on a
+         row whose price you typed over yourself must not fetch over the top of
+         it — that figure is a decision, and the provenance hint in this dialog
+         exists precisely to record it. */
+      const t = (row.ticker || '').trim().toUpperCase();
+      const was = ((before || {}).ticker || '').trim().toUpperCase();
+      if (t && t !== '?' && t !== was && row.lookup !== false && !viewOnly && priceKey())
+        setTimeout(() => refreshPrices(false, [t]), 0);
     },
     del: (ds) => holdingList(ds.list).splice(+ds.idx, 1),
     move: (ds, dir) => listSwap(holdingList(ds.list), +ds.idx, dir),
