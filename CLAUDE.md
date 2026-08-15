@@ -282,9 +282,17 @@ family names as well as balances.
   `<title>` and the `<h1>` both said whose plan it was, so every copy and every
   shared link carried it. `settings.tagline` replaces it: empty by default,
   capped at 60 chars, written by `render()` into both the header and
-  `document.title` through textContent. It is NOT in `SECTION_NEEDS`, so a
-  recipient sees their own subtitle or none. When adding anything that names the
-  app, ask whose name it is.
+  `document.title` through textContent. It is NOT in `SECTION_NEEDS` — **but
+  that does not keep it out of a link, and this paragraph used to claim it
+  did.** `buildSharePayload` sets `settings: state.settings` unconditionally,
+  outside the `SECTION_NEEDS` machinery entirely, and `openSharedView` merges it
+  over the recipient's own — so the sender's subtitle DOES travel, and so does
+  every other setting. The Preferences hint on that field still promises
+  otherwise. **Unfixed as of 2026-08-14 and known**: either the payload should
+  stop sending `settings` (and each tab declare the settings it needs) or both
+  bits of copy should stop promising it doesn't. Until then, treat `settings`
+  as shared — which is why the drawdown's spending target is in `side.drawdown`
+  and not there. When adding anything that names the app, ask whose name it is.
 - **A dividends row names the accounts it earns on** (`cat.accounts`, read only
   through `dividendAccounts()`). The rule used to read the ids `cash` and `mid`
   literally — invisible to the author, and for anybody else who renamed or
@@ -1045,6 +1053,66 @@ rule against the right-hand edge has nowhere to put its name — capped at
 real years into the left-hand inch. `retMarkerNote()` says out loud who has no
 rule and why; a marker that silently isn't drawn reads as the app lacking the
 feature rather than as a question nobody has answered.
+**The retirement projection SPENDS THE POT DOWN, and the arithmetic is one pure
+function.** `drawdownYears(st, thisYear, span)` returns one record a year
+(`{y, open, growth, contrib, income, spend, draw, short, close, phase}`), and
+the chart, the year-by-year table and the three tiles are three views of
+exactly those records — the `givingStats` arrangement, pure over state with an
+injectable today. `drawdownOutlook` and `drawdownMarkers` read the same rows.
+Things that are load-bearing and will look arbitrary later:
+- **Growth on the OPENING balance, then contributions** — bit for bit the old
+  `bal * (1 + r) + contribs[y]`. The accumulation half of this chart must not
+  move by a cent: a reader who knows their 2045 figure would find it changed by
+  a feature about 2060. **`the accumulation half is exactly what it always was`
+  recomputes the old formula inside the test and compares** — it is the
+  regression guard the whole feature rests on, and it must never be relaxed.
+- **`spend` and `safeRate` are ABSENT, never 0, when unset.** Absent is what
+  leaves an untouched plan's projection climbing exactly as it always did; a
+  stored 0 would be a claim that the household spends nothing. The editor
+  DELETES on an empty box for the same reason.
+- **The pot starts paying at the FIRST retirement in the household**, never a
+  year in the past. Two people retiring in different years is a DATA question,
+  not a branch: the one still working puts their pay in Other Retirement Income
+  with an end year. Splitting the spending target by who has retired needs a
+  model of who pays for what share of a household, and every household would
+  disagree with whatever ratio shipped — don't build it.
+- **Income only ever offsets a withdrawal.** Before the drawdown starts `spend`
+  is 0, so income does nothing to the pot: money received while working is
+  spent, not saved, and the app cannot know otherwise. The record still carries
+  it so the table can show it.
+- **A year has to be a YEAR.** `num()` turns anything it can't read into 0,
+  which is right for an amount and a disaster for `from` — `from: 0` matches
+  every year on the chart and would pour a pension into 2026. `coerceShape`
+  drops an implausible year instead, and a row with no start year never
+  arrives. There is a test.
+- **`side.drawdown`, never `side.retirement`** — `coerceShape` does
+  `delete s.retirement` on every load (the old imported free-form rows), so a
+  branch by that name would vanish on the next refresh.
+- **Not in `settings`.** `buildSharePayload` sends `settings: state.settings`
+  unconditionally, so anything there rides in EVERY link, including a
+  holidays-only one. What a household spends is not that.
+- **No tax, no RMDs, no Roth-vs-traditional withdrawal order, ever.** Same rule
+  as the MAGI threshold and for the same reason. The honest substitute is the
+  `.note info` above the chart, which says the pot is one pot and to read the
+  target as pre-tax if the money is pre-tax.
+- **`SAFE_RATE_DEFAULT` is where the box starts, not advice.** 4% assumes a
+  particular mix, a particular length of retirement and one country's history,
+  none of which this app checks, and the hint says exactly that.
+- **`planToYearOf` shares `retirementYearOf`'s guard** — a plan-to year exists
+  exactly where a retirement year does, which is what stops a half-filled
+  person stretching the chart forty years for a drawdown they aren't in. The
+  default is applied at the point of use and NEVER stored: a stored 95 would be
+  a figure the reader never typed sitting in their backup looking like a
+  decision. `RET_YEARS_MAX` went 50 → 75 because at 50 a thirty-year-old
+  planning to 95 loses fifteen years of their own drawdown.
+- **The chart carries three marks and none of them is a colour**: a loose dash
+  while saving, a tighter dash while drawing, a dotted rule for a retirement, a
+  solid one for the pot running out (`retirementMarkerLines` reads `m.dash`).
+  `drawdownMarkers` is concatenated with `retirementMarkers` rather than folded
+  into it, so that function keeps its signature and its tests. **Other income
+  is deliberately not a second series** — a flow in tens of thousands against a
+  balance in millions draws as a flat line on the floor, and there is no colour
+  to spare; it lives in the tooltip and its own table.
 **A paragraph explaining a section is a `.note info`, never a `.card`.** A card
 promises figures underneath it; one holding nothing but prose leaves the reader
 waiting for a table that never comes, which is what the Donations intro was.

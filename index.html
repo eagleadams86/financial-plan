@@ -357,6 +357,9 @@ select.ctl:hover { border-color: var(--text-muted); }
 .note.info { border-left-color: var(--border-strong); background: var(--surface-alt);
   color: var(--text-secondary); }
 .note p { margin: 0; }  /* full width, same reasoning as `.sub` above */
+/* A note making several separate points needs them separated — without this
+   three paragraphs run together into one grey slab nobody finishes. */
+.note p + p { margin-top: 10px; }
 .note .addbar { margin-top: 12px; }
 
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -659,6 +662,15 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
    line of its own above the words it belongs to. */
 .chartkey i { display: inline-block; width: 24px; height: 13px; margin-right: 8px;
   vertical-align: -2px; border-radius: 2px; border: 2px dashed var(--text-secondary); }
+/* The retirement projection has three marks to explain rather than one, and
+   they differ by LINE STYLE alone — the same colour throughout, because no
+   signal in this app may rest on hue. `dot` is the tighter dash the drawing
+   years take; `rule` is a marker drawn down the plot, not a stretch of the
+   line, so its swatch is a vertical stroke rather than a box. */
+.chartkey i.dot { border-style: dotted; }
+.chartkey i.rule { width: 0; height: 15px; border: 0;
+  border-left: 2px dotted var(--text-secondary); border-radius: 0; margin: 0 15px 0 9px; }
+.chartkey i.rule.solid { border-left-style: solid; }
 
 /* ── Info dots ──────────────────────────────────────────────────────────────
    A small circled "i" beside a label, opening a dialog rather than a hover
@@ -1535,6 +1547,23 @@ function retirementYearOf(person) {
   if (!person.birth || !person.retireAge) return null;
   return +monthAdd(person.birth, Math.round(person.retireAge * 12)).slice(0, 4);
 }
+/* How far the retirement projection runs for somebody — a PLANNING HORIZON,
+   not a guess at a lifespan: the whole point of the exercise is to find out
+   whether the money runs out before the plan does, so the year has to be a
+   deliberately long one.
+
+   The guard is the load-bearing line: a plan-to year exists EXACTLY where a
+   retirement year does. One place decides who the projection can date, so a
+   person with a birth month and no retirement age can't quietly stretch the
+   chart forty years for a drawdown they are not in. The default is applied
+   here, at the point of use, and never stored — a stored 95 would be a figure
+   the reader never typed, sitting in their backup looking like a decision. */
+const PLAN_TO_AGE_DEFAULT = 95;
+function planToYearOf(person) {
+  if (!retirementYearOf(person)) return null;
+  return +monthAdd(person.birth,
+    Math.round((person.planToAge || PLAN_TO_AGE_DEFAULT) * 12)).slice(0, 4);
+}
 /* The month a child turns 18 — the majority marker, and the target date a
    college goal is suggested against. 18 years is 216 months; it is a
    SUGGESTION at the point of use, never stored arithmetic, because plenty of
@@ -1611,7 +1640,15 @@ function blankState() {
          seeded from yr.seeds — months before it are blank and out of Total. */
       accounts: DEFAULT_ACCOUNTS.map(a => ({ ...a })),
       currency: 'USD',   // ISO code; the Preferences dialog edits it
-      retirementReturnAnnual: 0.07,  // the retirement projection's assumed return
+      /* The retirement projection's assumed REAL return — growth after
+         inflation, because everything on that tab is in today's money. The key
+         predates the drawdown and keeps its name: renaming it would need a
+         carry-over in coerceShape that could never be deleted (a backup taken
+         today can be restored in five years), and it would not fix the one
+         real problem, which is that a stored 0.07 meant nominal before the
+         drawdown arrived. That is a prose problem, and it is fixed in prose —
+         in Preferences, on the tab, and in the help. */
+      retirementReturnAnnual: 0.07,
       paycheckRule: false,  // show the per-check machinery (Preferences)
       givingFund: false,    // show the donor-advised fund section (Preferences)
       rowSort: 'manual',    // 'manual' (drag with ↑/↓) or 'alpha' within a section
@@ -1630,7 +1667,15 @@ function blankState() {
     side: {
       portfolios: [], taxable: [], rothContribs: {}, k401: {}, hsa: [],
       comp: {}, bonuses: {}, daf: [],
-      donations: {}, limits: {}, retirementAccounts: []
+      donations: {}, limits: {}, retirementAccounts: [],
+      /* The retirement spending plan. `spend` and `safeRate` are deliberately
+         ABSENT rather than 0: absent means "never said", and only that keeps
+         an untouched plan's projection identical to what it has always drawn.
+         A stored 0 would claim the household spends nothing and start drawing
+         a flat line down from the first retirement. NOT in `settings` — that
+         branch rides in every share link, and what a household spends is
+         among the most sensitive figures in the file. */
+      drawdown: { income: [] }
     },
     vacations: { trips: [], pto: {} },
     ui: { activeYear: null, activeTab: 'budget', collapsed: [] }
@@ -1678,6 +1723,11 @@ function coerceShape(data) {
     /* Reaches the page unescaped inside "retires in 2047" — coerce the field,
        don't just esc the one sink. */
     p.retireAge = num(p.retireAge);
+    /* How far the retirement projection runs for them. Same treatment as
+       retireAge, and deliberately NOT deleted for a child: `planToYearOf`
+       refuses instead, which is the discipline retireAge already follows —
+       one place decides who has a date, not two. */
+    p.planToAge = num(p.planToAge);
     peopleIds.add(p.id);
   }
   /* An owner naming someone who has been deleted degrades to unassigned. The
@@ -1880,6 +1930,39 @@ function coerceShape(data) {
        accounts carry, and the one place "spouses have different retirement
        accounts" actually lives. */
     if (!ownerOk(a.owner)) delete a.owner;
+  }
+
+  /* The retirement spending plan. `spend` and `safeRate` are DELETED rather
+     than defaulted when they aren't numbers: absent is the state that leaves
+     the projection climbing exactly as it always has, and a 0 would be read as
+     "spends nothing", which is a different claim and a visible one. The income
+     rows' amounts and years are num()'d for the class reason rather than the
+     sink reason — the table interpolates a year, and a NaN poisons every total
+     it reaches. */
+  const dd = obj(s.drawdown); s.drawdown = dd;
+  for (const k of ['spend', 'safeRate']) {
+    dd[k] = num(dd[k]);
+    if (typeof dd[k] !== 'number') delete dd[k];
+  }
+  dd.income = arr(dd.income);
+  /* A year has to be a YEAR, not merely a number. `num()` turns anything it
+     can't read into 0 — which is the right landing for an amount and a
+     disaster for a year, because `from: 0` matches every year the chart has
+     and would pour a pension into 2026. Anything outside a plausible range is
+     dropped, and a row with no start year never arrives at all (the table says
+     so; the editor makes one hard to create). */
+  const yearOrNone = (v) => {
+    const n = num(v);
+    return (typeof n === 'number' && n >= 1900 && n <= 9999) ? Math.round(n) : undefined;
+  };
+  for (const r of dd.income) {
+    r.label = String(r.label || '');
+    r.amount = num(r.amount);
+    r.from = yearOrNone(r.from);
+    r.to = yearOrNone(r.to);
+    if (r.from === undefined) delete r.from;
+    if (r.to === undefined) delete r.to;
+    if (!ownerOk(r.person)) delete r.person;
   }
 
   /* "Other money" used to be a standalone list of balances on the Retirement
@@ -2931,7 +3014,29 @@ const HELP = {
       + 'than the average suggests. A dotted rule down the chart marks each person\'s '
       + 'retirement year, worked out from the birth month and retirement age on the '
       + 'Household tab — so the chart runs at least far enough to show it. Nobody without '
-      + 'both of those gets a rule: the date would be a guess.' },
+      + 'both of those gets a rule: the date would be a guess. '
+      + 'From the FIRST of those retirements the line bends: the pot starts paying the '
+      + 'spending target you set, less whatever arrives from elsewhere, and the drawing '
+      + 'years are drawn in a tighter dash. Everything is in today\'s money, so the return '
+      + 'is a real one — growth after inflation. There is no tax in any of it, and no '
+      + 'required minimum distributions; this app keeps no tax tables and will not grow '
+      + 'any.' },
+  safeRate: { title: 'The Withdrawal Rate',
+    body: 'What the first year out of the pot comes to as a share of the pot it came out '
+      + 'of. It is shown against a rate YOU set, and 4% is only where the box starts — '
+      + 'that figure is the one most often quoted, not one this app endorses. It assumes '
+      + 'a particular mix of investments, a particular length of retirement and one '
+      + 'country\'s history, and none of those are checked here. Set the rate you '
+      + 'believe, the same way you set the Roth income threshold.' },
+  retIncome: { title: 'Other Retirement Income',
+    body: 'Money that arrives in retirement without coming out of the pot — Social '
+      + 'Security, a pension, part-time work. The pot only covers what these don\'t, so '
+      + 'leaving them out makes the plan look far worse than it is. Type today\'s '
+      + 'estimate: everything on this tab is in today\'s money, and Social Security rises '
+      + 'with inflation, so today\'s figure is the right one. Leave the last year empty '
+      + 'for something that carries on for life. If one of you keeps working after the '
+      + 'other retires, that pay belongs here too, ending in their own retirement year — '
+      + 'the pot starts paying at the FIRST retirement in the household.' },
   summaryBalances: { title: 'Balances in a Summary Year',
     body: 'Flow rows in a summary hold the year\'s total. Balance rows can\'t — adding up '
       + 'twelve monthly balances would be meaningless — so they hold December\'s figure, '
@@ -3910,10 +4015,13 @@ const RET_TYPES = [
 ];
 const RET_TYPE_LABEL = Object.fromEntries(RET_TYPES.map(([v, l]) => [v, l]));
 const retKind = (a) => a.kind === 'roth' ? 'roth' : 'traditional';
-/* Contributions to every account of a type, keyed by year. */
-function contribYears(filter) {
+/* Contributions to every account of a type, keyed by year. Takes its state as
+   an argument rather than reaching for the global, because the drawdown
+   projection is pure and reads this — the same reason `yearFlows` takes its
+   year and computed year instead of looking them up. */
+function contribYears(st, filter) {
   const out = {};
-  for (const a of (state.side.retirementAccounts || [])) {
+  for (const a of (st.side.retirementAccounts || [])) {
     if (filter && !filter(a)) continue;
     for (const [y, v] of Object.entries(a.contribs || {}))
       out[y] = round2((out[y] || 0) + (v || 0));
@@ -4154,15 +4262,181 @@ function renderRetirement() {
       <h2>Roth IRA Eligibility${helpBtn('magi', 'the Roth IRA income check')}</h2>
       ${magiCard(year)}
     </div>
+    ${accts.length ? drawdownNote() : ''}
     <div class="card" style="grid-column:1/-1">
-      <h2>Holdings &amp; Where They're Heading${helpBtn('retProjection', 'the retirement projection')}</h2>
+      <h2>Where the Pot Is Heading${helpBtn('retProjection', 'the retirement projection')}</h2>
       <p class="sub">Today's balances grown at ${round2((state.settings.retirementReturnAnnual ?? 0.07) * 100)}%/yr
-        (Preferences), with each year's planned contributions added on top.${
+        after inflation (Preferences), with each year's planned contributions added on top.${
         accts.length ? ` ${retMarkerNote()}` : ''}</p>
       ${accts.length
-        ? '<div class="chartbox" style="height:280px"><canvas id="retChart"></canvas></div>'
+        ? `<div class="chartbox" style="height:280px"><canvas id="retChart"></canvas></div>
+           <p class="chartkey"><i></i> Dashed — still saving.
+             <i class="dot"></i> Tighter dash — the pot is paying out.
+             <i class="rule"></i> Dotted rule — somebody retires.
+             <i class="rule solid"></i> Solid rule — the pot runs out.</p>`
         : '<p class="sub">Add an account above and its projection appears here.</p>'}
     </div>
+    ${accts.length ? costsCard() : ''}
+    ${accts.length ? retIncomeCard() : ''}
+    ${accts.length ? drawdownTable() : ''}
+  </div>`;
+}
+
+/* The three things this tab cannot work out and must not pretend to. Prose, so
+   a `.note info` rather than a card — a card promises figures underneath it. */
+function drawdownNote() {
+  return `<div class="note info" style="grid-column:1/-1">
+    <p><strong>Everything here is in today's money.</strong> There is no inflation in the
+      projection, so the return in Preferences is a <em>real</em> one — subtract the inflation
+      you expect from the growth you expect. Your spending target stays the same figure every
+      year, because in today's money it does.</p>
+    <p><strong>The pot is one pot, and there is no tax in it.</strong> A dollar in a Roth and a
+      dollar in a 401(k) are worth different amounts once tax is taken, and this app keeps no
+      tax tables and will not grow any — a threshold shipped here would be quietly wrong within
+      twelve months while looking authoritative. So if your money is mostly pre-tax, read the
+      spending target as what you need <em>before</em> tax and set it accordingly. The
+      Traditional vs Roth split above is there so you can see which kind you have.</p>
+    <p><strong>Nor does it model required minimum distributions</strong> — past a certain age the
+      law makes you take money out of a pre-tax account whether you need it or not, and that age
+      moves. This chart takes what you asked for and no more. Whatever sits in your everyday
+      accounts is on the Goals tab, not here.</p>
+  </div>`;
+}
+
+/* What retirement costs, and what the first year's withdrawal comes to as a
+   share of the pot — the sanity check on a spending target, next to the
+   target itself. Read off the same records the chart is drawn from. */
+function costsCard() {
+  const thisYear = new Date().getFullYear();
+  const rows = drawdownYears(state, thisYear, retirementHorizon(state, thisYear));
+  const out = drawdownOutlook(rows);
+  const dd = state.side.drawdown || {};
+  const safe = dd.safeRate ?? SAFE_RATE_DEFAULT;
+  const seed = spendSeed();
+  const tile = (label, value, foot) => `<div class="goal">
+    <div class="label">${label}</div>
+    <div class="value${value === null ? ' muted' : ''}">${value === null ? '—' : value}</div>
+    <div class="foot">${foot}</div></div>`;
+
+  /* The rate is a PILL with a glyph and words, never a colour on its own. The
+     pot it is measured against is the one the money came OUT of — the opening
+     balance plus what that year added, which is what "a 4% withdrawal" means. */
+  const first = rows.find(t => t.phase === 'drawing');
+  const rateFoot = out.impliedRate === null ? ''
+    : `${(out.impliedRate * 100).toFixed(2)}% of ${fmtMoney(
+        round2(first.open + first.growth + first.contrib))}
+       <span class="pill ${out.impliedRate > safe ? 'warn' : 'good'}">${
+        out.impliedRate > safe ? '!' : '✓'} ${
+        out.impliedRate > safe ? 'above' : 'within'} the ${
+        (safe * 100).toFixed(2)}% you call safe</span>`;
+
+  return `<div class="card">
+    <h2>What Retirement Costs${helpBtn('safeRate', 'the withdrawal rate')}</h2>
+    <p class="sub">${out.firstDrawYear === null
+      ? 'Nothing is being drawn down yet — either nobody has a retirement year on the Household tab, or no spending target has been set.'
+      : `The pot starts covering the household in <strong>${out.firstDrawYear}</strong>.`}</p>
+    <div class="goalgrid">
+      ${tile('Spending a year', dd.spend ? fmtMoney(dd.spend) : null,
+        dd.spend
+          ? `In today's money.${seed ? ` Your ${esc(seed.year)} Expenses total is ${fmtMoney(seed.value)}.` : ''}`
+          : `Type one in and the pot starts paying.${
+              seed ? ` Your ${esc(seed.year)} Expenses total is ${fmtMoney(seed.value)}.` : ''}`)}
+      ${tile('Other income, first year',
+        out.firstIncome === null ? null : fmtMoney(out.firstIncome),
+        out.firstIncome ? esc(andList((state.side.drawdown.income || [])
+            .filter(r => typeof r.from === 'number' && r.from <= out.firstDrawYear
+              && (typeof r.to !== 'number' || r.to >= out.firstDrawYear))
+            .map(r => r.label || 'Unnamed')))
+          : 'Nothing arriving that year — the pot covers all of it.')}
+      ${tile('Out of the pot, first year',
+        out.firstDraw === null ? null : fmtMoney(out.firstDraw),
+        out.firstDraw === null ? 'No withdrawal to measure yet.' : rateFoot)}
+    </div>
+    ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-edit="drawdown"
+      >✎ Edit the figures</button></div>`}
+  </div>`;
+}
+
+/* What the budget says the household spends now — the seed for the target, and
+   the sentence that says where it came from. Null in a shared view, which has
+   no grid to read: promising a provenance the recipient can't check would be
+   a claim about somebody else's budget. */
+function spendSeed() {
+  const y = latestGridYear();
+  if (!y || !C[y]) return null;
+  const v = yearSpending(state.years[y], C[y], y);
+  return v ? { year: y, value: v } : null;
+}
+
+function retIncomeCard() {
+  const list = (state.side.drawdown || {}).income || [];
+  const showOwner = adultsOf(state).length > 1;
+  const yearCell = (v) => typeof v === 'number' ? esc(String(v))
+    : '<span class="muted">—</span>';
+  const rows = list.map((r, idx) => `<tr class="editrow" data-edit="retIncome"
+      data-idx="${idx}"${r.note ? ` title="${esc(r.note)}"` : ''}>
+      <th scope="row">${esc(r.label || 'Unnamed')}${hasNote(r) ? ' <span class="muted">•</span>' : ''}</th>
+      ${showOwner ? `<td style="text-align:left">${
+        esc(ownerLabel(state, r.person)) || '<span class="muted">—</span>'}</td>` : ''}
+      <td>${fmtMoney(r.amount || 0)}</td>
+      <td>${typeof r.from === 'number' ? esc(String(r.from))
+        : '<span class="muted">no year — it never arrives</span>'}</td>
+      <td>${typeof r.to === 'number' ? yearCell(r.to)
+        : '<span class="muted">for life</span>'}</td></tr>`).join('');
+  return `<div class="card">
+    <h2>Other Retirement Income${helpBtn('retIncome', 'other retirement income')}</h2>
+    <p class="sub">Money that arrives without coming out of the pot — Social Security, a
+      pension, part-time work. The pot only has to cover what these don't.${
+      adultsOf(state).length > 1
+        ? ' A partner still working after you retire belongs here too, as pay that ends in their own retirement year.'
+        : ''}</p>
+    ${list.length ? `<div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">What it is</th>
+        ${showOwner ? '<th style="text-align:left">Whose</th>' : ''}
+        <th>A year</th><th>From</th><th>Until</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`
+      : '<p class="sub">Nothing recorded, so the pot is covering the whole spending target.</p>'}
+    ${viewOnly ? '' : `<div class="addbar"><button class="btn small" data-add="retIncome"
+      >＋ Add income</button></div>`}
+  </div>`;
+}
+
+/* The drawdown year by year. Every figure here is WORKED OUT — there is no
+   `data-edit` anywhere in it, and the sub-line says so, because a table of
+   money that looks like every other clickable table in this app would invite
+   an edit that has nowhere to land. */
+function drawdownTable() {
+  const thisYear = new Date().getFullYear();
+  const rows = drawdownYears(state, thisYear, retirementHorizon(state, thisYear));
+  const out = drawdownOutlook(rows);
+  if (out.firstDrawYear === null) return '';
+  /* From the year BEFORE the first withdrawal, so the reader sees the pot at
+     the moment it starts being spent rather than one row into it. */
+  const shown = rows.filter(t => t.y >= out.firstDrawYear - 1);
+  const people = adultsOf(state).filter(p => p.birth);
+  const ages = (y) => people.map(p => `${esc(p.name)} ${ageAt(p, `${y}-06`)}`).join(', ');
+  const body = shown.map(t => `<tr${t.short ? ' class="k-auto"' : ''}>
+    <th scope="row">${t.y}</th>
+    ${people.length ? `<td style="text-align:left">${ages(t.y)}</td>` : ''}
+    <td>${fmtMoney(t.open)}</td><td>${fmtMoney(t.growth)}</td>
+    <td>${t.contrib ? fmtMoney(t.contrib) : '<span class="muted">—</span>'}</td>
+    <td>${t.income ? fmtMoney(t.income) : '<span class="muted">—</span>'}</td>
+    <td>${fmtMoney(t.draw)}${t.short
+      ? ` <span class="muted">(${fmtMoney(t.short)} short)</span>` : ''}</td>
+    <td>${fmtMoney(t.close)}</td></tr>`).join('');
+  return `<div class="card" style="grid-column:1/-1">
+    <h2>Year by Year in Retirement</h2>
+    <p class="sub">Every figure here is worked out from the plan above — nothing in this
+      table is typed, and nothing in it can be. ${out.runsOutYear
+        ? `The pot runs out in <strong>${out.runsOutYear}</strong>; the years after it are
+           marked with what they could not pay.`
+        : `It lasts the whole plan, ending at ${fmtMoney(out.endBalance)}.`}</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Year</th>
+        ${people.length ? '<th style="text-align:left">Age</th>' : ''}
+        <th>Pot at the start</th><th>Growth</th><th>Paid in</th>
+        <th>Other income</th><th>Taken out</th><th>Pot at the end</th></tr></thead>
+      <tbody>${body}</tbody></table></div>
   </div>`;
 }
 
@@ -4339,15 +4613,31 @@ function retMarkerNote() {
   const behind = adults.filter(p => yearOf(p) && yearOf(p) < thisYear);
   const undated = adults.filter(p => !yearOf(p));
   if (!adults.length) return '';
+  /* Where the line bends, said in the same breath as who the rules belong to —
+     the two are one fact, since the FIRST retirement is what starts the
+     drawdown. A reader who has typed a spending target and sees nothing happen
+     is owed the reason, so the "nobody is dated" case says it out loud. */
+  const from = drawdownFrom(state, thisYear);
+  const target = (state.side.drawdown || {}).spend;
+  const draws = from === null ? ''
+    : !target ? `Nothing is drawn down yet — set a spending target below and the pot starts
+        paying from <strong>${from}</strong>, the first retirement here.`
+    : from <= thisYear
+    ? `The pot is already paying the household's spending, from the very first year on this
+       chart.`
+    : `From <strong>${from}</strong> — the first of those — the pot starts covering the
+       household's spending, and the line bends.`;
   return [
     shown.length && `A dotted rule marks ${andList(shown.map(p =>
       `${esc(p.name)}'s retirement (${yearOf(p)})`))}.`,
     behind.length && `${andList(behind.map(p => `${esc(p.name)} (${yearOf(p)})`))} already
       ${behind.length > 1 ? 'fall' : 'falls'} behind where this chart starts, so there is no
       rule for ${behind.length > 1 ? 'those' : 'that'}.`,
+    draws,
     undated.length && `${andList(undated.map(p => esc(p.name)))} ${
       undated.length > 1 ? 'have' : 'has'} no birth month or retirement age yet — fill
-      ${undated.length > 1 ? 'those' : 'that'} in on the Household tab and a rule appears.`,
+      ${undated.length > 1 ? 'those' : 'that'} in on the Household tab and a rule appears${
+      from === null ? ', and the pot starts paying out' : ''}.`,
   ].filter(Boolean).join(' ');
 }
 
@@ -4377,7 +4667,11 @@ const retirementMarkerLines = {
       const px = Math.round(scale.getPixelForValue(m.index)) + 0.5;
       ctx.strokeStyle = tick;
       ctx.lineWidth = 1;
-      ctx.setLineDash([2, 4]);
+      /* Dotted by default — a retirement. A marker may ask for its own style
+         instead, which is how "the pot runs out" comes through solid: two
+         kinds of news down one plot, told apart by the LINE and never by a
+         colour, since the rules share the neutral tick colour on purpose. */
+      ctx.setLineDash(m.dash || [2, 4]);
       ctx.beginPath();
       ctx.moveTo(px, area.top);
       ctx.lineTo(px, area.bottom);
@@ -4410,14 +4704,161 @@ const retirementMarkerLines = {
 /* Twenty-five years is the shape of this chart, and the floor rather than the
    rule: somebody in their thirties retires past the end of it, which is the
    reader whose marker matters most and the one who would never see it. The
-   horizon stretches to a couple of years past the last retirement it can date,
-   capped — a mistyped retirement age must not flatten twenty-five real years
-   into the left-hand inch. */
-const RET_YEARS_MIN = 25, RET_YEARS_MAX = 50;
+   horizon stretches to reach the last thing it has to show, capped — a mistyped
+   age must not flatten twenty-five real years into the left-hand inch.
+
+   Two things pull it out, and they are pulled differently. A RETIREMENT year
+   takes two years of headroom, because the rule drawn there needs somewhere to
+   put its name. A PLAN-TO year takes none: it is the last label by definition,
+   nothing is drawn at it, and the runs-out rule that can land there already
+   flips its label leftwards rather than running off the plot.
+
+   The cap went 50 → 75 when the drawdown arrived. At 50 a thirty-year-old
+   planning to 95 loses the last fifteen years of their own drawdown — which is
+   the argument that made 25 a floor in the first place. 75 still catches a
+   plan-to age of 999. */
+const RET_YEARS_MIN = 25, RET_YEARS_MAX = 75;
 function retirementHorizon(st, thisYear) {
+  const marks = peopleOf(st).map(retirementYearOf).filter(Boolean)
+    .map(y => y - thisYear + 2);
+  const plans = peopleOf(st).map(planToYearOf).filter(Boolean)
+    .map(y => y - thisYear);
+  return Math.min(RET_YEARS_MAX, Math.max(RET_YEARS_MIN, ...marks, ...plans));
+}
+
+/* ═══════════════════════ Spending the pot down ════════════════════════════
+   The projection used to climb at the assumed return for ever, straight
+   through every retirement year it draws a rule at. This is the arithmetic
+   that makes it bend.
+
+   One pass, oldest year first: the chart, the year-by-year table and the
+   headline tiles are three views of exactly these records — the arrangement
+   `givingStats` uses, pure over state with an injectable "today" so a test can
+   pin it without a clock.
+
+   EVERYTHING HERE IS IN TODAY'S MONEY. There is no inflation anywhere in it,
+   which is what makes the return setting a REAL one and lets a single spending
+   figure stand for every year. It is said out loud on the tab, in Preferences
+   and in the help, because a reader who takes it for a nominal 7% is out by a
+   factor of three over thirty years.
+
+   What it deliberately does NOT model, and must not grow: tax. A dollar in a
+   Roth and a dollar in a 401(k) are worth different amounts once tax is taken,
+   and this app has no tax tables and never will — a figure shipped here would
+   be quietly wrong within twelve months while looking authoritative, the same
+   reasoning that keeps the Roth MAGI threshold a number the reader types. Nor
+   required minimum distributions, whose age moves. The honest substitute is
+   prose on the tab telling you to read the spending target as pre-tax if the
+   money is mostly pre-tax. */
+
+/* The rate the first year's withdrawal is measured against. 4% is where this
+   STARTS because it is the figure most often quoted, and for no other reason:
+   it assumes a particular mix of investments, a particular length of
+   retirement and one country's history, none of which this app checks. It is
+   the reader's own figure to set, exactly as the Roth MAGI threshold is — a
+   number shipped here as though it were authority would be the same mistake,
+   and a more expensive one. */
+const SAFE_RATE_DEFAULT = 0.04;
+
+/* The year the pot starts paying: the FIRST retirement in the household, never
+   in the past. Two people retiring in different years is then a DATA question
+   rather than a branch in here — the one still working puts their pay in the
+   Other Retirement Income table with an end year, which is a mechanism this
+   already needed for a pension. The alternative, splitting the spending target
+   by who has retired, needs a model of who pays for what share of a household,
+   and every household would disagree with whatever ratio shipped. */
+function drawdownFrom(st, thisYear) {
   const years = peopleOf(st).map(retirementYearOf).filter(Boolean);
-  return Math.min(RET_YEARS_MAX,
-    Math.max(RET_YEARS_MIN, ...years.map(y => y - thisYear + 2)));
+  return years.length ? Math.max(thisYear, Math.min(...years)) : null;
+}
+
+/* One record a year: `{ y, open, growth, contrib, income, spend, draw, short,
+   close, phase }`. Money only — ages, names and whose retirement falls where
+   are derived at render time, the way `ownerSubtotals` derives over balances
+   the engine already worked out. */
+function drawdownYears(st, thisYear, span) {
+  const dd = st.side.drawdown || {};
+  const r = st.settings.retirementReturnAnnual ?? 0.07;
+  const contribs = contribYears(st);
+  const from = drawdownFrom(st, thisYear);
+  const target = dd.spend || 0;
+  const rows = [];
+  let open = round2((st.side.retirementAccounts || [])
+    .reduce((t, a) => t + (a.amount || 0), 0));
+  for (let i = 0; i <= span; i++) {
+    const y = thisYear + i;
+    /* Year zero is today's balance untouched — no growth, no contribution.
+       That is what the chart has always drawn at its left-hand end, and it is
+       the figure the reader recognises as "what I have". */
+    const growth = i ? round2(open * r) : 0;
+    const contrib = i ? (contribs[String(y)] || 0) : 0;
+    /* Growth on the OPENING balance, then contributions — bit for bit the old
+       `bal * (1 + r) + contribs[y]`. The accumulation half of this chart must
+       not move by a cent: a reader who knows their 2045 figure would find it
+       changed by a feature that was supposed to be about 2060. There is a test
+       that recomputes the old formula and compares. */
+    const income = incomeIn(dd.income, y);
+    const spend = (from !== null && y >= from) ? target : 0;
+    const want = Math.max(0, round2(spend - income));
+    const pot = round2(open + growth + contrib);
+    /* Never more than there is. The pot floors at zero and `short` records
+       what the plan could not pay — a negative balance would be a debt the app
+       has no way to model and no business inventing. */
+    const draw = Math.min(want, Math.max(0, pot));
+    rows.push({ y, open, growth, contrib, income, spend, draw,
+                short: round2(want - draw), close: round2(pot - draw),
+                phase: spend > 0 ? 'drawing' : 'saving' });
+    open = round2(pot - draw);
+  }
+  return rows;
+}
+
+/* What arrives from everything other than the pot in a given year. A row with
+   no start year never arrives at all — `coerceShape` drops a year it cannot
+   read rather than zeroing it, because `from: 0` would pour a pension into
+   every year on the chart. */
+function incomeIn(list, y) {
+  let out = 0;
+  for (const r of (list || [])) {
+    if (typeof r.from !== 'number' || y < r.from) continue;
+    if (typeof r.to === 'number' && y > r.to) continue;
+    out += r.amount || 0;
+  }
+  return round2(out);
+}
+
+/* The three figures the tiles and the summary read, so they can never disagree
+   with the chart: they are read off the same records. */
+function drawdownOutlook(rows) {
+  const first = rows.find(t => t.phase === 'drawing');
+  const gone = rows.find(t => t.short > 0);
+  return {
+    firstDrawYear: first ? first.y : null,
+    firstDraw: first ? first.draw : null,
+    firstIncome: first ? first.income : null,
+    /* Measured against the pot the money came OUT of — open plus what the year
+       added, which is what "a 4% withdrawal" means. Null rather than 0 where
+       nothing is drawn: a 0% would read as perfectly safe, when the truth is
+       that the question hasn't been asked. */
+    impliedRate: (first && (first.open + first.growth + first.contrib) > 0)
+      ? first.draw / (first.open + first.growth + first.contrib) : null,
+    runsOutYear: gone ? gone.y : null,
+    endBalance: rows.length ? rows[rows.length - 1].close : 0,
+  };
+}
+
+/* The runs-out rule, in the shape `retirementMarkerLines` already consumes, so
+   the chart concatenates it with the retirement markers and the plugin needs
+   nothing but a line style. It obeys that function's rule too: no marker at
+   all beats a marker at the wrong year. Solid, where a retirement rule is
+   dotted — two line styles, one neutral colour, no hue carrying anything. */
+function drawdownMarkers(rows, labels) {
+  const gone = rows.find(t => t.short > 0);
+  if (!gone) return [];
+  const index = labels.indexOf(String(gone.y));
+  if (index < 0) return [];
+  return [{ year: gone.y, index, names: [], label: 'The pot runs out',
+            dash: [] }];
 }
 
 function buildRetirementChart() {
@@ -4425,16 +4866,15 @@ function buildRetirementChart() {
   if (!accts.length) return;
   const r = state.settings.retirementReturnAnnual ?? 0.07;
   const thisYear = new Date().getFullYear();
-  const labels = [], data = [];
-  let bal = round2(accts.reduce((t, a) => t + (a.amount || 0), 0));
-  const contribs = contribYears();
-  for (let i = 0; i <= retirementHorizon(state, thisYear); i++) {
-    const y = thisYear + i;
-    if (i) bal = round2(bal * (1 + r) + (contribs[String(y)] || 0));
-    labels.push(String(y));
-    data.push(bal);
-  }
-  const markers = retirementMarkers(state, labels);
+  const rows = drawdownYears(state, thisYear, retirementHorizon(state, thisYear));
+  const labels = rows.map(t => String(t.y));
+  const data = rows.map(t => t.close);
+  const out = drawdownOutlook(rows);
+  /* Two kinds of rule down one plot, and the plugin tells them apart by LINE
+     STYLE rather than colour: a retirement is dotted, the pot running out is
+     solid. Concatenated rather than merged into `retirementMarkers`, which
+     keeps its signature and its tests. */
+  const markers = [...retirementMarkers(state, labels), ...drawdownMarkers(rows, labels)];
   const accent = cssVar('--accent');
   newChart('retChart', {
     type: 'line',
@@ -4442,18 +4882,36 @@ function buildRetirementChart() {
       label: 'Projected balance', data,
       borderColor: accent, backgroundColor: 'transparent',
       borderWidth: 2, pointRadius: 0, tension: .2,
-      /* every point past today is a projection, and says so */
+      /* Dashed throughout, because every point past today is a projection and a
+         solid segment would claim it happened. The DRAWING years take a tighter
+         dash — one costume in two weights on one series, not a second signal,
+         and the real news is the bend rather than the stitching. Same mechanism
+         the end-of-year chart uses for its projected tail. */
       borderDash: [6, 4],
+      segment: { borderDash: (ctx) =>
+        rows[ctx.p1DataIndex]?.phase === 'drawing' ? [2, 3] : [6, 4] },
     }]},
     options: {
       plugins: { legend: { display: false },
         retirementMarkerLines: { markers },
         /* A marker year says whose it is in the tooltip too: the rule is drawn
            at the top of the plot and the figure you came for is read down at
-           the line, which is a long way for an eye to carry a name. */
+           the line, which is a long way for an eye to carry a name. The
+           drawing years add where the money went — other income is not a
+           second series (a flow in tens of thousands against a balance in
+           millions draws as a flat line on the floor), so this is where it
+           gets said. */
         tooltip: { callbacks: { label: (t) => {
-          const m = markers.find(k => k.index === t.dataIndex);
-          return fmtMoney(t.parsed.y) + ' (projected)' + (m ? ` · ${m.label}` : '');
+          const row = rows[t.dataIndex];
+          const m = markers.filter(k => k.index === t.dataIndex);
+          const drew = row && row.draw
+            ? ` · took ${fmtMoney(row.draw)}${row.income
+                ? ` of the ${fmtMoney(row.spend)} needed, ${fmtMoney(row.income)} of it from other income`
+                : ''}`
+            : row && row.short ? ` · ${fmtMoney(row.short)} short of the ${
+                fmtMoney(row.spend)} needed` : '';
+          return fmtMoney(t.parsed.y) + ' (projected)' + drew
+            + m.map(k => ` · ${k.label}`).join('');
         } } } },
       scales: { x: Object.assign(chartAxes(), { ticks: { color: cssVar('--chart-tick'),
           maxRotation: 0, autoSkipPadding: 14 } }),
@@ -4461,11 +4919,31 @@ function buildRetirementChart() {
           callback: (v) => fmtMoney0(v) } }) },
     },
     plugins: [retirementMarkerLines],
-  }, `Projected retirement balance at ${round2(r * 100)}% a year: ${fmtMoney(data[0])} in ${
-    labels[0]}, reaching ${fmtMoney(data[data.length - 1])} by ${
-    labels[labels.length - 1]}.${markers.map(m =>
-      ` ${m.label} in ${m.year}, with ${fmtMoney(data[m.index])} projected by then.`).join('')
-    } A straight-line projection, not a forecast.`);
+  }, retChartSummary(rows, out, r, labels, data, markers));
+}
+
+/* The a11y summary, out of line because the chart now has two halves to
+   describe and a canvas announces nothing at all without one. It carries the
+   figures the picture is drawn from, in the order a reader would ask for
+   them: what there is, where it bends, what comes out, and whether it lasts. */
+function retChartSummary(rows, out, r, labels, data, markers) {
+  const bits = [`Projected retirement balance in today's money, at a real return of ${
+    round2(r * 100)}% a year: ${fmtMoney(data[0])} in ${labels[0]}.`];
+  for (const m of markers.filter(k => k.names.length))
+    bits.push(`${m.label} in ${m.year}, with ${fmtMoney(data[m.index])} projected by then.`);
+  if (out.firstDrawYear === null) {
+    bits.push(`Nothing is drawn down, so it climbs to ${
+      fmtMoney(data[data.length - 1])} by ${labels[labels.length - 1]}.`);
+  } else {
+    bits.push(`From ${out.firstDrawYear} the pot pays out: ${fmtMoney(out.firstDraw)} that year${
+      out.impliedRate === null ? '' : `, ${(out.impliedRate * 100).toFixed(2)}% of it`}.`);
+    bits.push(out.runsOutYear
+      ? `It runs out in ${out.runsOutYear}, ${rows[rows.length - 1].y - out.runsOutYear
+        } years before the end of the plan.`
+      : `It lasts to ${labels[labels.length - 1]}, ending at ${fmtMoney(out.endBalance)}.`);
+  }
+  bits.push('A straight-line projection, not a forecast, and it models no tax.');
+  return bits.join(' ');
 }
 
 /* ═══════════════════════════ Compensation view ════════════════════════════ */
@@ -5799,7 +6277,7 @@ function buildGoalChart() {
 }
 
 function buildRothChart() {
-  const contribs = contribYears(a => a.type === 'roth-ira' || a.type === 'trad-ira');
+  const contribs = contribYears(state, a => a.type === 'roth-ira' || a.type === 'trad-ira');
   /* Planning rows can sit decades out; charting them would flatten every real
      year into the axis, so the chart stops just past today. */
   const years = Object.keys(contribs).sort().filter(y => +y <= new Date().getFullYear() + 1);
@@ -6903,8 +7381,10 @@ const EDITORS = {
         hint: 'Shows its holdings on Giving. Donations are tracked either way.' },
       { key: 'midTermRateAnnual', label: 'Dividend row interest %/yr', type: 'percent',
         hint: 'Used by a dividend row with no rate of its own.' },
-      { key: 'retirementReturnAnnual', label: 'Retirement return %/yr', type: 'percent',
-        hint: 'What the retirement projection assumes.' },
+      { key: 'retirementReturnAnnual', label: 'Retirement real return %/yr', type: 'percent',
+        hint: 'What the retirement projection assumes AFTER inflation. Everything on that '
+          + 'tab is in today\'s money, so subtract the inflation you expect from the growth '
+          + 'you expect: 7% growth against 3% inflation is 4% here.' },
       /* The exact figure. The header's picker does quarter steps for the
          everyday change; this is here for the one percent that suits your
          screen. Like the API key it is NOT part of the plan — it lives in its
@@ -7183,8 +7663,13 @@ const EDITORS = {
           + 'child turns 18.' },
       { key: 'retireAge', label: 'Retires at age', type: 'number', step: '1',
         showIf: (v) => v.role === 'adult',
-        hint: 'Optional, and only a marker — the retirement projection does not draw down '
-          + 'yet.' },
+        hint: 'Optional. It marks their retirement on the projection, and the FIRST '
+          + 'retirement in the household is where the pot starts paying out.' },
+      { key: 'planToAge', label: 'Plan to age', type: 'number', step: '1',
+        showIf: (v) => v.role === 'adult',
+        hint: `How far the projection runs for them — ${PLAN_TO_AGE_DEFAULT} unless you say `
+          + 'otherwise. A planning horizon, not a guess at a lifespan: finding out whether '
+          + 'the money runs out before the plan does is the point of the exercise.' },
       noteField,
     ],
     get: (ds) => state.people[+ds.idx],
@@ -7196,18 +7681,31 @@ const EDITORS = {
       /* A child has no retirement age; keeping one from before the role was
          changed would show a retirement year for a nine-year-old. */
       const retireAge = role === 'adult' && v.retireAge ? v.retireAge : undefined;
+      /* A plan that ends at or before the retirement it is planning for has no
+         retirement in it at all. Refuse that one figure and say why, keeping
+         the rest of the edit — throwing away a corrected name to punish a
+         mistyped age is its own surprise. */
+      const was = (ds.idx !== undefined ? state.people[+ds.idx] : null) || {};
+      let planToAge = role === 'adult' && v.planToAge ? v.planToAge : undefined;
+      let refused = '';
+      if (planToAge !== undefined && retireAge !== undefined && planToAge <= retireAge) {
+        planToAge = was.planToAge;
+        refused = `Planning to ${v.planToAge} would end before they retire at ${retireAge
+          } — kept ${planToAge || PLAN_TO_AGE_DEFAULT}`;
+      }
       const p = ds.idx !== undefined ? state.people[+ds.idx] : null;
       if (p) {
-        Object.assign(p, { name: v.name, role, birth, retireAge,
+        Object.assign(p, { name: v.name, role, birth, retireAge, planToAge,
                            note: v.note || undefined });
-        return;
+        return refused || undefined;
       }
       /* 'joint' is a reserved owner rather than a person, but it shares this id
          space — so someone actually called Joint has to be pushed off it. */
       let id = slugJs(v.name), n = 2;
       while (id === JOINT_OWNER || personById(state, id)) id = `${slugJs(v.name)}-${n++}`;
-      state.people.push({ id, name: v.name, role, birth, retireAge,
+      state.people.push({ id, name: v.name, role, birth, retireAge, planToAge,
                           note: v.note || undefined });
+      return refused || undefined;
     },
     /* Deleting someone leaves whatever was theirs UNASSIGNED rather than
        deleting it — the money is still real. Say how much was let go of: it
@@ -7215,10 +7713,15 @@ const EDITORS = {
     del(ds) {
       const p = state.people[+ds.idx];
       if (!p) return;
-      let accts = 0, ret = 0, goals = 0, rows = 0;
+      let accts = 0, ret = 0, goals = 0, rows = 0, inc = 0;
       for (const a of accountsOf(state)) if (a.owner === p.id) { delete a.owner; accts++; }
       for (const a of state.side.retirementAccounts || [])
         if (a.owner === p.id) { delete a.owner; ret++; }
+      /* A retirement income row keeps its amount and its years — whose pension
+         it is was only ever a label, and the projection adds the household up
+         either way. */
+      for (const r of (state.side.drawdown || {}).income || [])
+        if (r.person === p.id) { delete r.person; inc++; }
       for (const g of state.goals) if (g.for === p.id) { delete g.for; goals++; }
       for (const y of yearKeys()) {
         const yr = state.years[y];
@@ -7231,6 +7734,7 @@ const EDITORS = {
       const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
       if (accts) bits.push(plural(accts, 'account'));
       if (ret) bits.push(plural(ret, 'retirement account'));
+      if (inc) bits.push(plural(inc, 'retirement income row'));
       if (goals) bits.push(plural(goals, 'goal'));
       if (rows) bits.push(plural(rows, 'budget row'));
       if (bits.length) return `${p.name} removed — ${andList(bits)} no longer say whose they are`;
@@ -7520,6 +8024,136 @@ const EDITORS = {
     del(ds) {
       delete (state.side.retirementAccounts[+ds.idx].contribs || {})[ds.key];
     },
+  },
+
+  /* What retirement costs — the two figures the drawdown turns on. */
+  drawdown: {
+    title: 'What Retirement Costs',
+    cols: 2,
+    sub: () => 'In today\'s money. There is no inflation in the projection, so this figure '
+      + 'stays the same every year and the return in Preferences is a real one.',
+    fields: () => {
+      const seed = spendSeed();
+      return [
+        { key: 'spend', label: 'Spending a year', type: 'money', wide: true,
+          hint: (seed
+            ? `What the household spends now — your ${seed.year} Expenses total is ${
+                fmtMoney(seed.value)}, filled in below. Type straight over it. `
+            : 'What the household spends now, in today\'s money. ')
+            + 'Clear the box and nothing is drawn down at all.' },
+        { key: 'safeRate', label: 'Rate you call safe %', type: 'percent',
+          hint: '4% is where this starts because it is the figure most often quoted — not '
+            + 'because this app endorses it. It assumes a particular mix, a particular '
+            + 'length of retirement and one country\'s history, none of which are checked '
+            + 'here. Set the one you believe.' },
+        { key: 'firstDraw', label: 'First year out of the pot', type: 'readout' },
+        { key: 'firstRate', label: 'Which comes to', type: 'readout' },
+      ];
+    },
+    /* The seed fills the BOX, never the state — the same move `limitsFor`
+       makes from the comp record. A real value rather than a placeholder,
+       because unlike the balance dialog there is no recalculation here for a
+       filled-in box to kill. */
+    get: () => {
+      const dd = state.side.drawdown || {};
+      const seed = spendSeed();
+      return { spend: dd.spend ?? (seed ? seed.value : null),
+               safeRate: dd.safeRate ?? SAFE_RATE_DEFAULT };
+    },
+    /* The sanity check, live in the dialog rather than a click away: type a
+       target and watch what it means as a share of the pot. */
+    link() {
+      const spendBox = F('rf-spend'), rateBox = F('rf-safeRate');
+      if (!spendBox) return;
+      const spend = parseMoney(spendBox.value);
+      const ratePct = parseFloat((rateBox || {}).value || '');
+      const thisYear = new Date().getFullYear();
+      /* Worked out on a COPY: `link` reads and writes the form, never the
+         state — nothing is committed until Save, and a probe that mutated the
+         real plan would leave a spending target behind on Cancel. */
+      const probe = JSON.parse(JSON.stringify(state));
+      probe.side.drawdown = Object.assign({}, probe.side.drawdown,
+        { spend: spend === null ? 0 : spend });
+      const rows = drawdownYears(probe, thisYear, retirementHorizon(probe, thisYear));
+      const out = drawdownOutlook(rows);
+      const setOut = (k, txt) => { const el = F(`rf-${k}`); if (el) el.textContent = txt; };
+      setOut('firstDraw', out.firstDrawYear === null
+        ? 'Nothing is drawn down'
+        : `${out.firstDrawYear} — ${fmtMoney(out.firstDraw)}`);
+      const safe = Number.isFinite(ratePct) ? ratePct / 100 : SAFE_RATE_DEFAULT;
+      setOut('firstRate', out.impliedRate === null ? '—'
+        : `${(out.impliedRate * 100).toFixed(2)}% — ${
+            out.impliedRate > safe ? 'above' : 'within'} the rate above${
+            out.runsOutYear ? `, and the pot runs out in ${out.runsOutYear}` : ''}`);
+    },
+    save(ds, v) {
+      const dd = state.side.drawdown;
+      /* An empty box DELETES rather than storing 0: "not set" and "spends
+         nothing" are different claims, and only one of them leaves the
+         projection climbing the way it always has. */
+      if (v.spend === null) delete dd.spend; else dd.spend = v.spend;
+      if (v.safeRate === null) delete dd.safeRate; else dd.safeRate = v.safeRate;
+    },
+  },
+
+  /* Money arriving in retirement from anywhere but the pot. */
+  retIncome: {
+    title: (ds, isNew) => isNew ? 'Add Retirement Income' : 'Retirement Income',
+    cols: 2,
+    sub: () => 'Social Security, a pension, part-time work — money that arrives without '
+      + 'coming out of the pot. In today\'s money, like everything else on this tab.',
+    fields: () => [
+      { key: 'label', label: 'What it is', type: 'text', wide: true },
+      ...(adultsOf(state).length ? [{ key: 'person', label: 'Whose', type: 'select',
+        options: [['', 'Not said'], ...adultsOf(state).map(p => [p.id, p.name]),
+                  [JOINT_OWNER, 'Joint']],
+        hint: 'Only a label — the projection adds the household\'s income up either way. '
+          + 'Picking somebody fills in the first year below, if it is empty.' }] : []),
+      { key: 'amount', label: 'A year', type: 'money',
+        hint: 'Social Security rises with inflation, so today\'s estimate is the right '
+          + 'figure to type.' },
+      { key: 'from', label: 'First year', type: 'number', step: 1,
+        hint: 'The year it starts arriving. Without one it never arrives at all.' },
+      { key: 'to', label: 'Last year', type: 'number', step: 1,
+        hint: 'Empty for something that carries on for life — a pension, Social Security. '
+          + 'Filled in for part-time work, or a salary that stops.' },
+      noteField,
+    ],
+    /* Picking a person offers their retirement year, and only into an EMPTY
+       box — the same rule the goal's target date follows. */
+    link(key) {
+      if (key !== 'person') return;
+      const from = F('rf-from'), who = F('rf-person');
+      if (!from || !who || from.value) return;
+      const y = retirementYearOf(personById(state, who.value));
+      if (y) from.value = y;
+    },
+    get: (ds) => {
+      const r = (state.side.drawdown.income || [])[+ds.idx] || {};
+      return { ...r, person: r.person || '' };
+    },
+    blank: () => ({ from: drawdownFrom(state, new Date().getFullYear())
+      || new Date().getFullYear() }),
+    save(ds, v) {
+      const list = state.side.drawdown.income;
+      const row = { label: v.label || 'Unnamed', amount: v.amount ?? 0 };
+      if (typeof v.from === 'number') row.from = Math.round(v.from);
+      let refused = '';
+      /* An end year before the start would mean it never arrives. Drop the end
+         and say so, rather than throwing away the rest of the edit. */
+      if (typeof v.to === 'number') {
+        if (row.from !== undefined && v.to < row.from)
+          refused = `An end year before ${row.from} would mean it never arrives — left it open-ended`;
+        else row.to = Math.round(v.to);
+      }
+      if (v.note) row.note = v.note;
+      const owner = adultsOf(state).length ? v.person : (list[+ds.idx] || {}).person;
+      if (owner && (owner === JOINT_OWNER || personById(state, owner))) row.person = owner;
+      if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
+      if (refused) return refused;
+    },
+    del: (ds) => state.side.drawdown.income.splice(+ds.idx, 1),
+    move: (ds, dir) => listSwap(state.side.drawdown.income, +ds.idx, dir),
   },
 
   /* The two calculators' inputs (401(k) limit, Roth IRA income check) */
@@ -9098,8 +9732,13 @@ const SECTION_NEEDS = {
   budget:      ['years'],
   goals:       ['years', 'goals'],
   household:   ['years', 'goals', 'people'],
+  /* No 'years', deliberately, though the drawdown's spending target is SEEDED
+     from the budget's own expense total: the seed fills the box, the figure is
+     stored, and a shared Retirement tab reads the stored one. Adding the grid
+     would ship a whole budget for the sake of one provenance sentence — so
+     that sentence is the thing that's gated instead. */
   retirement:  ['people', 'side.retirementAccounts', 'side.limits',
-                'side.comp', 'side.bonuses'],
+                'side.drawdown', 'side.comp', 'side.bonuses'],
   comp:        ['people', 'side.comp', 'side.bonuses'],
   investments: ['side.portfolios', 'side.taxable'],
   /* No people: the trips and PTO tables name nobody — checked, not assumed. */
@@ -9121,6 +9760,7 @@ const BRANCH_OWNERS = {
   'side.portfolios': ['investments'], 'side.taxable': ['investments'],
   'side.donations': ['giving'], 'side.daf': ['giving'],
   'side.retirementAccounts': ['retirement'], 'side.limits': ['retirement'],
+  'side.drawdown': ['retirement'],
 };
 
 /* Deliberately not one label per branch: salary and bonus are one idea to a
@@ -9139,6 +9779,7 @@ const BRANCH_LABEL = {
   'side.daf': 'your giving fund',
   'side.retirementAccounts': 'your retirement accounts',
   'side.limits': 'your contribution limits',
+  'side.drawdown': 'what you plan to spend in retirement',
 };
 
 const readBranch = (d, b) => b.startsWith('side.') ? (d.side || {})[b.slice(5)] : d[b];
@@ -9881,6 +10522,8 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
   ownerSubtotals, validOwner, accountOption, suggestedTargetDate,
   retirementMarkers, retirementHorizon, RET_YEARS_MIN, RET_YEARS_MAX,
+  planToYearOf, PLAN_TO_AGE_DEFAULT, SAFE_RATE_DEFAULT, contribYears,
+  drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL,
   JOINT_OWNER, UNOWNED,
   yearStarted, startedGridYears, enteredThroughOf, goalChartPoints,

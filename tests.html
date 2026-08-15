@@ -993,28 +993,44 @@ t('a year the chart has not got is left undrawn rather than clamped', () => {
   eq(H.retirementMarkers(st, ['2026', '2027']), [],
     'no rule at all beats a rule at the wrong year');
 });
-t('the chart stretches to reach a retirement, within a limit', () => {
-  const none = { people: [] };
-  eq(H.retirementHorizon(none, 2026), H.RET_YEARS_MIN, '25 years is the floor');
-  const soon = { people: [
-    { id: 'a', name: 'A', role: 'adult', birth: '1986-04', retireAge: 60 }] };
-  eq(H.retirementHorizon(soon, 2026), H.RET_YEARS_MIN,
+t('a retirement year earns two years of headroom for its label', () => {
+  /* Each of these plans to the year AFTER retiring, so the plan-to end can
+     never be what stretches the chart — the retirement year is the subject
+     here, and the plan-to end is the next test's. */
+  const one = (over) => {
+    const p = Object.assign({ id: 'a', name: 'A', role: 'adult',
+      birth: '1986-04', retireAge: 65 }, over);
+    return { people: [{ ...p, planToAge: p.retireAge + 1 }] };
+  };
+  eq(H.retirementHorizon({ people: [] }, 2026), H.RET_YEARS_MIN, '25 years is the floor');
+  eq(H.retirementHorizon(one({ retireAge: 60 }), 2026), H.RET_YEARS_MIN,
     '2046 sits inside the 25 years with room to spare, so nothing stretches');
-  const edge = { people: [
-    { id: 'e', name: 'E', role: 'adult', birth: '1986-04', retireAge: 65 }] };
-  eq(H.retirementHorizon(edge, 2026), 27,
-    'a retirement ON the old last year still earns its two years of headroom — a rule '
-    + 'drawn against the right-hand edge has nowhere to put its name');
-  const later = { people: [
-    { id: 'b', name: 'B', role: 'adult', birth: '1996-04', retireAge: 65 }] };
-  eq(H.retirementHorizon(later, 2026), 37, '2061, plus two years of headroom');
-  const silly = { people: [
-    { id: 'c', name: 'C', role: 'adult', birth: '2000-01', retireAge: 99 }] };
-  eq(H.retirementHorizon(silly, 2026), H.RET_YEARS_MAX,
+  eq(H.retirementHorizon(one({}), 2026), 27,
+    'a retirement ON the old last year still earns its headroom — a rule drawn against '
+    + 'the right-hand edge has nowhere to put its name');
+  eq(H.retirementHorizon(one({ birth: '1996-04' }), 2026), 37,
+    '2061, plus two years of headroom');
+  eq(H.retirementHorizon(one({ birth: '1940-01' }), 2026), H.RET_YEARS_MIN,
+    'a year gone by shortens nothing');
+});
+t('the chart runs to the last plan-to age, and a mistyped one is capped', () => {
+  const one = (over) => ({ people: [Object.assign(
+    { id: 'a', name: 'A', role: 'adult', birth: '1986-04', retireAge: 65 }, over)] });
+  eq(H.retirementHorizon(one({}), 2026), 2081 - 2026,
+    `the ${H.PLAN_TO_AGE_DEFAULT} default reaches further than the retirement does`);
+  eq(H.retirementHorizon(one({ planToAge: 80 }), 2026), 2066 - 2026,
+    'a shorter plan brings it in — but the retirement rule still fits');
+  eq(H.retirementHorizon(one({ planToAge: 999 }), 2026), H.RET_YEARS_MAX,
     'a mistyped age must not flatten the real years into an inch');
-  const past = { people: [
-    { id: 'd', name: 'D', role: 'adult', birth: '1940-01', retireAge: 65 }] };
-  eq(H.retirementHorizon(past, 2026), H.RET_YEARS_MIN, 'a year gone by shortens nothing');
+  eq(H.retirementHorizon({ people: [
+    { id: 'a', name: 'A', role: 'adult', birth: '1986-04', retireAge: 65, planToAge: 80 },
+    { id: 'b', name: 'B', role: 'adult', birth: '1990-04', retireAge: 65, planToAge: 90 },
+  ] }, 2026), 2080 - 2026, 'the LAST of them decides, not the first');
+  eq(H.retirementHorizon({ people: [
+    { id: 'n', name: 'No age', role: 'adult', birth: '1986-04' }] }, 2026),
+    H.RET_YEARS_MIN,
+    'and somebody the plan cannot date stretches nothing — the guard planToYearOf shares '
+    + 'with retirementYearOf');
 });
 t('an 18th birthday lands in the right month across a year end', () => {
   eq(H.majorityMonthOf({ role: 'child', birth: '2015-12' }), '2033-12');
@@ -2103,6 +2119,38 @@ t('money maps from a hand-edited backup become numbers, not $NaN', () => {
   eq(d.side.retirementAccounts[0].contribs['2030'], 1000);
   eq(d.side.donations['2030'][0].funding, 250);
 });
+t('the drawdown plan survives a hand-edited backup', () => {
+  const evil = '<img src=x onerror=alert(1)>';
+  const d = H.coerceShape({ people: [{ id: 'sam', name: 'Sam', planToAge: '92' }],
+    side: { drawdown: { spend: '60000', safeRate: 'x', income: [
+      { label: 'Social Security', amount: '24000', from: '2051' },
+      { label: 'Pension', amount: evil, from: evil, to: evil },
+      { label: 'Ghost money', amount: 100, from: 2051, person: 'nobody' },
+    ] } } });
+  const dd = d.side.drawdown;
+  eq(dd.spend, 60000, 'a numeric string parses');
+  eq(dd.safeRate, 0, 'not a figure at all → 0');
+  eq(dd.income[0].from, 2051, 'a real year survives as a number');
+  eq(dd.income[1].amount, 0, 'markup in an amount → 0');
+  eq(dd.income[1].from, undefined,
+    'markup in a YEAR is dropped, never zeroed — from:0 would arrive every year');
+  eq(dd.income[1].to, undefined);
+  eq(dd.income[2].person, undefined, 'an income row naming nobody loses the tag');
+  eq(dd.income[2].amount, 100, 'and keeps its money');
+  eq(d.people[0].planToAge, 92);
+});
+t('an unset spending target stays unset rather than becoming zero', () => {
+  /* Absent and $0 are different claims, and only one of them leaves the
+     projection climbing the way it always has. */
+  const d = H.coerceShape({ side: { drawdown: { income: [] } } });
+  eq(d.side.drawdown.hasOwnProperty('spend'), false);
+  eq(d.side.drawdown.hasOwnProperty('safeRate'), false);
+  eq(d.side.drawdown.income, []);
+  const blank = H.coerceShape({});
+  eq(blank.side.drawdown.income, [], 'a plan that has never seen this still gets the shape');
+  const junk = H.coerceShape({ side: { drawdown: 'nonsense' } });
+  eq(junk.side.drawdown.income, [], 'and so does one whose branch is not even an object');
+});
 t('markup in a year key survives coerceShape as data, not as markup', () => {
   const evil = '<img src=x onerror=alert(1)>';
   const d = H.coerceShape({ years: { [evil]: { kind: 'summary', categoryTotals: [] } } });
@@ -2779,6 +2827,174 @@ t('a split month carries into the next year on rollover', () => {
   eq(s.years['2031'].cells['cc|2031-02'].parts.length, 2);
 });
 
+/* ── Spending the retirement pot down ───────────────────────────────────────
+   The projection used to climb at the assumed return for ever, straight through
+   the retirement rules it draws. These pin the arithmetic that makes it bend —
+   and, first of all, that the ACCUMULATION half of it did not move. */
+const RET_FIX = 2030;
+function potFixture(over) {
+  return H.coerceShape(Object.assign({
+    settings: { retirementReturnAnnual: 0.05 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-04', retireAge: 65 }],
+    side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
+              amount: 500000, contribs: {} }],
+            drawdown: { spend: 40000, income: [] } },
+  }, over || {}));
+}
+
+group('Drawing the retirement pot down');
+t('the accumulation half is exactly what it always was', () => {
+  /* THE regression guard. A plan with nobody in it draws nothing down, and its
+     curve must match the old `bal * (1 + r) + contribs[y]` to the cent —
+     recomputed here rather than quoted, so a change to either side fails. */
+  const s = potFixture({ people: [], side: {
+    retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k', amount: 500000,
+      contribs: { '2031': 20000, '2032': 20000 } }],
+    drawdown: { spend: 40000, income: [] } } });
+  const rows = H.drawdownYears(s, RET_FIX, 25);
+  const contribs = { 2031: 20000, 2032: 20000 };
+  let bal = 500000;
+  for (let i = 0; i <= 25; i++) {
+    if (i) bal = H.round2(bal * 1.05 + (contribs[RET_FIX + i] || 0));
+    approx(rows[i].close, bal, `${RET_FIX + i} matches the old formula`, 0.011);
+  }
+  eq(rows.every(t => t.phase === 'saving'), true, 'and nothing is drawn down');
+  eq(rows.every(t => t.draw === 0), true);
+  eq(H.drawdownOutlook(rows).firstDrawYear, null);
+});
+t('a spending target with nobody to retire draws nothing down', () => {
+  const s = potFixture({ people: [
+    { id: 'jo', name: 'Jo', role: 'adult', birth: '1970-04' },   // no retireAge
+    { id: 'ellis', name: 'Ellis', role: 'child', birth: '2015-09' }] });
+  eq(H.drawdownFrom(s, RET_FIX), null, 'nobody the plan can date');
+  eq(H.drawdownYears(s, RET_FIX, 25).every(t => t.draw === 0), true);
+});
+t('an unset spending target draws nothing down either', () => {
+  const s = potFixture({ side: { retirementAccounts: [{ id: 'k', name: '401(k)',
+    type: '401k', amount: 500000, contribs: {} }], drawdown: { income: [] } } });
+  const rows = H.drawdownYears(s, RET_FIX, 25);
+  eq(rows.every(t => t.phase === 'saving'), true, 'absent is not zero-spending');
+  eq(H.drawdownOutlook(rows).firstDrawYear, null);
+});
+t('the pot starts paying in the FIRST retirement year of the household', () => {
+  const s = potFixture({ people: [
+    { id: 'sam', name: 'Sam', role: 'adult', birth: '1970-04', retireAge: 65 },   // 2035
+    { id: 'robin', name: 'Robin', role: 'adult', birth: '1974-11', retireAge: 65 }] }); // 2039
+  eq(H.drawdownFrom(s, RET_FIX), 2035);
+  const rows = H.drawdownYears(s, RET_FIX, 25);
+  eq(rows.find(t => t.phase === 'drawing').y, 2035);
+  eq(rows.find(t => t.y === 2034).draw, 0, 'the year before it is still saving');
+});
+t('somebody already retired is drawn on from the very first year', () => {
+  const s = potFixture({ people: [
+    { id: 'sam', name: 'Sam', role: 'adult', birth: '1950-04', retireAge: 65 }] }); // 2015
+  eq(H.drawdownFrom(s, RET_FIX), RET_FIX, 'never a year in the past');
+  eq(H.drawdownYears(s, RET_FIX, 25)[0].phase, 'drawing');
+});
+t('the pot covers only what the other income does not', () => {
+  const s = potFixture({ side: { retirementAccounts: [{ id: 'k', name: '401(k)',
+    type: '401k', amount: 500000, contribs: {} }],
+    drawdown: { spend: 60000, income: [
+      { label: 'Social Security', amount: 24000, from: 2035 }] } } });
+  const rows = H.drawdownYears(s, RET_FIX, 25);
+  const at = (y) => rows.find(t => t.y === y);
+  eq(at(2035).income, 24000);
+  eq(at(2035).draw, 36000, '60,000 needed, 24,000 of it arriving');
+  eq(at(2036).draw, 36000, 'and it carries on');
+});
+t('income arriving before the drawdown starts changes the pot by nothing', () => {
+  /* It is recorded so the table can show it, but money you receive while still
+     working is spent, not saved, and the app has no way to know otherwise. */
+  const withIncome = potFixture({ side: { retirementAccounts: [{ id: 'k', name: '401(k)',
+    type: '401k', amount: 500000, contribs: {} }],
+    drawdown: { spend: 40000, income: [{ label: 'Rent', amount: 12000, from: 2030 }] } } });
+  const without = potFixture({ side: { retirementAccounts: [{ id: 'k', name: '401(k)',
+    type: '401k', amount: 500000, contribs: {} }], drawdown: { spend: 40000, income: [] } } });
+  const a = H.drawdownYears(withIncome, RET_FIX, 4), b = H.drawdownYears(without, RET_FIX, 4);
+  eq(a[2].income, 12000, 'the record carries it');
+  eq(a.map(t => t.close), b.map(t => t.close), 'and the pot is untouched by it');
+});
+t('an income source stops in the year it says, and an open-ended one never does', () => {
+  const list = [{ label: 'Part-time', amount: 10000, from: 2035, to: 2040 },
+                { label: 'Pension', amount: 5000, from: 2035 }];
+  eq(H.incomeIn(list, 2034), 0, 'before either starts');
+  eq(H.incomeIn(list, 2035), 15000, 'the first year counts');
+  eq(H.incomeIn(list, 2040), 15000, 'the last year counts too');
+  eq(H.incomeIn(list, 2041), 5000, 'and the ended one has gone');
+  eq(H.incomeIn([{ label: 'No year', amount: 9999 }], 2041), 0,
+    'a row with no start year never arrives at all');
+});
+t('the pot empties, stays empty, and says what it could not pay', () => {
+  const s = potFixture({ settings: { retirementReturnAnnual: 0 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65 }],
+    side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
+              amount: 100000, contribs: {} }],
+            drawdown: { spend: 40000, income: [] } } });
+  const rows = H.drawdownYears(s, RET_FIX, 10);   // draws from 2030, no growth
+  eq(rows[0].draw, 40000); eq(rows[0].close, 60000);
+  eq(rows[2].close, 0, 'the third year takes the last of it');
+  eq(rows[2].short, 20000, 'and records the 20,000 it could not find');
+  eq(rows[3].draw, 0); eq(rows[3].short, 40000, 'after that the whole year is short');
+  eq(rows.every(t => t.close >= 0), true, 'nothing is EVER negative');
+  eq(H.drawdownOutlook(rows).runsOutYear, 2032);
+});
+t('a contribution typed after the pot empties refills it', () => {
+  /* Honest, not tidy: the reader typed that contribution and the app does not
+     argue with an instruction. Pinned so nobody "fixes" it. */
+  const s = potFixture({ settings: { retirementReturnAnnual: 0 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65 }],
+    side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
+              amount: 40000, contribs: { '2033': 50000 } }],
+            drawdown: { spend: 40000, income: [] } } });
+  const rows = H.drawdownYears(s, RET_FIX, 6);
+  eq(rows[1].close, 0, 'empty by the second year');
+  eq(rows[3].contrib, 50000);
+  eq(rows[3].close, 10000, 'and it pays that year in full again');
+});
+t('the implied rate is what came out over the pot it came out of', () => {
+  const s = potFixture({ settings: { retirementReturnAnnual: 0 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65 }],
+    side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
+              amount: 1000000, contribs: {} }],
+            drawdown: { spend: 40000, income: [] } } });
+  eq(H.drawdownOutlook(H.drawdownYears(s, RET_FIX, 5)).impliedRate, 0.04);
+  const idle = potFixture({ people: [] });
+  eq(H.drawdownOutlook(H.drawdownYears(idle, RET_FIX, 5)).impliedRate, null,
+    'null, never 0 — a 0% would read as perfectly safe');
+});
+t('the projection does not touch the state it reads', () => {
+  const s = potFixture();
+  const before = JSON.stringify(s);
+  H.drawdownYears(s, RET_FIX, 25);
+  eq(JSON.stringify(s), before);
+});
+t('the runs-out rule lands on its own year, or is not drawn at all', () => {
+  const s = potFixture({ settings: { retirementReturnAnnual: 0 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1965-04', retireAge: 65 }],
+    side: { retirementAccounts: [{ id: 'k', name: '401(k)', type: '401k',
+              amount: 100000, contribs: {} }],
+            drawdown: { spend: 40000, income: [] } } });
+  const rows = H.drawdownYears(s, RET_FIX, 10);
+  const labels = []; for (let y = RET_FIX; y <= RET_FIX + 10; y++) labels.push(String(y));
+  const marks = H.drawdownMarkers(rows, labels);
+  eq(marks.length, 1);
+  eq(marks[0].year, 2032);
+  eq(labels[marks[0].index], '2032', 'the index points at its own year');
+  eq(H.drawdownMarkers(rows, ['2030', '2031']), [],
+    'no rule at all beats a rule at the wrong year');
+  const lasts = potFixture({ people: [] });
+  eq(H.drawdownMarkers(H.drawdownYears(lasts, RET_FIX, 25), labels), [],
+    'and a pot that survives is not marked');
+});
+t('a plan-to year exists exactly where a retirement year does', () => {
+  const sam = { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 };
+  eq(H.planToYearOf(sam), 1986 + H.PLAN_TO_AGE_DEFAULT, 'the default, applied not stored');
+  eq(H.planToYearOf({ ...sam, planToAge: 90 }), 2076);
+  eq(H.planToYearOf({ ...sam, retireAge: undefined }), null, 'no retirement age, no horizon');
+  eq(H.planToYearOf({ ...sam, birth: undefined }), null);
+  eq(H.planToYearOf({ ...sam, role: 'child' }), null);
+});
+
 group('Building next year early');
 t('a year built before it arrives is not the year the app reads', () => {
   const s = H.coerceShape(fixtureState());
@@ -3173,6 +3389,21 @@ t('a tab with nothing of its own in it is not worth sending', () => {
   const noGoals = shareFixture(); noGoals.goals = [];
   eq(H.sectionHasData(noGoals, 'budget'), true);
   eq(H.sectionHasData(noGoals, 'goals'), false);
+  /* A drawdown plan is Retirement's own data — somebody who has typed a
+     spending target and nothing else still has a Retirement tab worth sending,
+     and an empty {income:[]} must not make one out of nothing. */
+  const planOnly = H.coerceShape({});
+  eq(H.sectionHasData(planOnly, 'retirement'), false, 'the empty branch is still empty');
+  planOnly.side.drawdown.spend = 60000;
+  eq(H.sectionHasData(planOnly, 'retirement'), true, 'a spending target is data');
+});
+t('a retirement link carries the drawdown plan and not the budget grid', () => {
+  /* The spending target is SEEDED from the budget's expense total but STORED,
+     so the recipient reads the stored figure — shipping a whole grid for one
+     provenance sentence would be the leak this table exists to stop. */
+  eq(H.SECTION_NEEDS.retirement.includes('side.drawdown'), true);
+  eq(H.SECTION_NEEDS.retirement.includes('years'), false);
+  eq(H.BRANCH_OWNERS['side.drawdown'], ['retirement']);
 });
 
 t('empty means empty, and a zero is not empty', () => {
