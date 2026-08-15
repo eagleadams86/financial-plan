@@ -177,6 +177,20 @@ right by accident.
   contribution rows in practice live on IRAs, which have one treatment. **Per-
   bucket contributions are deliberately out of scope** — say so rather than
   half-build it.
+- **`401k-mixed` is a real type**, because one 401(k) really does hold a pre-tax
+  deferral beside a Roth one. Without it, saying so meant claiming the whole
+  account was one or the other — which is what drove faking several accounts in
+  the first place, so the restructure was only half a fix until it existed. Its
+  third column in `RET_TYPES` is a FALLBACK only, read where no contribution
+  types are listed; `traditional` because that is where the bulk of a mixed
+  401(k) sits, and the accounts table **prompts** rather than counting quietly
+  when an account is marked mixed with nothing under it. `foldAccounts` sets the
+  type itself when what it just folded spans both treatments — derived from the
+  reader's own accounts, not guessed — and only for the 401(k) family, since a
+  Traditional and a Roth IRA are separate accounts in law.
+  **The `retAcct` dialog's `sub` is a function** for the same reason: it used to
+  say the TYPE decides the split, which stopped being true the moment buckets
+  existed, and it was saying it in the one dialog where somebody is choosing one.
 - **`kindTotals(accts)` is the one reader** for the Traditional/Roth question on
   screen; the tab asks it twice (the bar and the per-person table) and the two
   drifting apart would show a household whose halves don't add up.

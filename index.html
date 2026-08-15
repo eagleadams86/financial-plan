@@ -1672,13 +1672,23 @@ const DEFAULT_ACCOUNTS = [
    the ReferenceError is swallowed and the whole workbook comes up empty. The
    file has been bitten by that before; see the note at the top of CLAUDE.md. */
 const RET_TYPES = [
-  ['401k',      '401(k) pre-tax',  'traditional'],
-  ['roth-401k', '401(k) Roth',     'roth'],
-  ['trad-ira',  'Traditional IRA', 'traditional'],
-  ['roth-ira',  'Roth IRA',        'roth'],
-  ['hsa',       'HSA',             'traditional'],
-  ['other',     'Other',           'traditional'],
+  ['401k',       '401(k) pre-tax',            'traditional'],
+  ['roth-401k',  '401(k) Roth',               'roth'],
+  /* One 401(k) really does hold both — a pre-tax deferral beside a Roth one,
+     an employer match beside a rollover. Before this, saying so meant claiming
+     the whole account was one or the other, which is what drove people to fake
+     several accounts in the first place. The third column is only ever a
+     FALLBACK for an account with no contribution types listed; where they are
+     listed, each one carries its own and this is never read. `traditional`
+     because that is where the bulk of a mixed 401(k) sits — and an account
+     left mixed with nothing listed is prompted rather than quietly counted. */
+  ['401k-mixed', '401(k) — pre-tax and Roth', 'traditional'],
+  ['trad-ira',   'Traditional IRA',           'traditional'],
+  ['roth-ira',   'Roth IRA',                  'roth'],
+  ['hsa',        'HSA',                       'traditional'],
+  ['other',      'Other',                     'traditional'],
 ];
+const isMixedType = (a) => a && a.type === '401k-mixed';
 const RET_TYPE_LABEL = Object.fromEntries(RET_TYPES.map(([v, l]) => [v, l]));
 const retKind = (a) => a.kind === 'roth' ? 'roth' : 'traditional';
 
@@ -4408,7 +4418,13 @@ function renderRetirement() {
         + (gap === null ? '' : `<tr><td colspan="${cols + 1}" class="muted"
             style="padding-left:22px">The types come to ${fmtMoney(Math.abs(gap))} ${
             gap > 0 ? 'more' : 'less'} than the holdings listed for this account — the
-            balance follows the types, and one of the two is out of date.</td></tr>`);
+            balance follows the types, and one of the two is out of date.</td></tr>`)
+        /* A mixed account with nothing listed has no way to say what is Roth,
+           so the whole balance would land on the pre-tax side. Ask, rather than
+           count it quietly — the wrong answer here is invisible. */
+        + (!isMixedType(a) || bs.length ? '' : `<tr><td colspan="${cols + 1}" class="muted"
+            style="padding-left:22px">This is marked as holding both, but nothing is
+            listed — so all of it is counting as pre-tax. Add its contribution types.</td></tr>`);
       }).join('')}</tbody>
       <tfoot><tr><th>Total</th>${showOwner ? '<td></td>' : ''}<td></td>
         <td>${fmtMoney(total)}</td><td></td></tr></tfoot>
@@ -8668,13 +8684,27 @@ const EDITORS = {
      nothing about Roth IRAs is special-cased in code any more. */
   retAcct: {
     title: (ds, isNew) => isNew ? 'Add a Retirement Account' : 'Retirement Account',
-    sub: () => 'The type decides which side of the Traditional / Roth split it counts on, '
-      + 'and whether its yearly contributions show in the IRA table. Those are edited there, '
-      + 'a row at a time.',
+    /* This used to say the TYPE decides the split, which stopped being true the
+       moment an account could list its contribution types — and saying it in
+       the one dialog where somebody is choosing a type would send them looking
+       for a single answer to a question their 401(k) answers several ways. */
+    sub: (ds) => {
+      const a = ds.idx === undefined ? {} : (state.side.retirementAccounts[+ds.idx] || {});
+      return (a.buckets || []).length
+        ? 'The contribution types listed under this account decide which side of the '
+          + 'Traditional / Roth split each part of it counts on. The type below says which '
+          + 'account it is, and whether its yearly contributions show in the IRA table.'
+        : 'The type decides which side of the Traditional / Roth split it counts on, and '
+          + 'whether its yearly contributions show in the IRA table. Pick the mixed 401(k) '
+          + 'if one account holds both, and list the contribution types inside it.';
+    },
     fields: (ds) => [
       { key: 'name', label: 'Account', type: 'text' },
       { key: 'type', label: 'Type', type: 'select',
-        options: RET_TYPES.map(([v, label]) => [v, label]) },
+        options: RET_TYPES.map(([v, label]) => [v, label]),
+        hint: 'Pick the mixed 401(k) where one account holds a pre-tax deferral, a Roth '
+          + 'one, a match and a rollover at once — then list those as contribution types '
+          + 'and each carries its own treatment.' },
       /* Once an account lists what is inside it, its balance is the sum of
          those rows and this box must stop being typeable — a figure you can
          edit and that is then ignored is worse than no figure at all. It
@@ -8829,6 +8859,16 @@ const EDITORS = {
           target.contribs = target.contribs || {};
           target.contribs[y] = amt;
         }
+      }
+      /* Folding a Roth deferral in beside a pre-tax one MAKES the account mixed,
+         and it can say so out of what was just folded rather than leaving the
+         reader to notice the type is now a half-truth. Only the 401(k) family:
+         a Traditional and a Roth IRA are separate accounts in law, so folding
+         those is the reader's business and not something to relabel. */
+      const kinds = new Set(target.buckets.map(b => b.kind));
+      if (kinds.size > 1 && ['401k', 'roth-401k'].includes(target.type)) {
+        target.type = '401k-mixed';
+        target.kind = 'traditional';
       }
       state.side.retirementAccounts = list.filter((a, i) => !idxs.includes(i));
       /* Every folded-away index shifts the ones after it, and the panes' folded
