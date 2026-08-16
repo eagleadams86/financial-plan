@@ -1042,6 +1042,29 @@ no media query: `width: calc(100% - 32px)` already wins on a small screen, and
 auto-fit falls back to fewer columns on the way down (one at 375px). The class is
 toggled per section in `openRowEditor` beside `cols2` — never left on, or the
 next dialog opened inherits a width its four fields don't need.
+**A BOX IS SIZED BY WHAT IT HOLDS, and by its input TYPE rather than by a
+per-field setting** — number 130px, date/month 180px, text and select 320px, all
+of them a `max-width` OVER the existing `width: 100%`, so a narrow column still
+wins and nothing can push a box past its own cell. It is the `applyFieldSpans`
+bargain a third time: an opt-in width is the one whoever adds the next field
+forgets, and then that field is the odd one out. 320px is where it is because it
+takes the longest thing any text box here really holds — a 32-character API key,
+whole. **The HINT keeps the full column width** and that is the point of the
+split: the long measure is what holds these dialogs to a few rows, while a box
+the length of a paragraph asking for four characters reads as though the app
+expects far more than it does. A checkbox (sized by the inline style that
+centres it) and a textarea (prose) are caught by neither rule. The category
+dialog's documented reason for `cols: 2` survives it — 320px is wider than the
+293px half-column those sentence-long options were measured against.
+**A `wide` field belongs at the TOP or the BOTTOM of a section's list.** It ends
+whatever row is in progress, so one in the middle strands its predecessors on a
+row of their own — Preferences' subtitle sat second and left the filing-status
+select alone, stretched across the whole dialog by `applyFieldSpans` to hide the
+gap. Preferences' own order is otherwise by SUBJECT, nearest thing to nearest
+thing: the household and tax questions, then how figures and rows read, then the
+three switches that turn a tab's machinery on, then the four assumed rates, and
+last the zoom and the price key together — the only two settings in the dialog
+that are not part of the plan at all.
 A field spec may be **`type: 'readout'`** — a figure the dialog WORKS OUT and
 the reader never types. It renders as a `<p class="field-readout">` rather than
 an input, so `readFields` skips it (a `<p>` has no `.value` and asking for one
