@@ -1965,7 +1965,15 @@ function coerceShape(data) {
   const num = (v) => (v === null || v === undefined || v === '') ? v
     : (typeof v === 'number' && Number.isFinite(v)) ? v
     : (Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0);
-  const numHolding = (h) => { h.shares = num(h.shares); h.price = num(h.price); };
+  const numHolding = (h) => {
+    h.shares = num(h.shares); h.price = num(h.price);
+    /* Cost basis is OPTIONAL — absent means "never said" and shows no gain,
+       so it is deleted rather than zeroed (a $0 basis would claim the whole
+       value is gain). Present it is a number like the rest: NaN poisons every
+       total it reaches. */
+    const cost = num(h.cost);
+    if (typeof cost === 'number') h.cost = cost; else delete h.cost;
+  };
   /* A growth rate, read strictly and NOT through num(): num turns anything it
      cannot parse into 0, and a 0 rate is a real statement ("this doesn't
      grow") that must not be manufactured out of a corrupt field. Undefined is
@@ -4716,16 +4724,70 @@ function bucketGap(a) {
   return gap === 0 ? null : gap;
 }
 
+/* Every holding across every pot that is still the reader's money — the
+   investment panes AND the retirement accounts, grouped by ticker. Pure over
+   state so the grouping is pinned by tests. The giving fund is left out by
+   construction: that money is already given, and concentration in dollars you
+   no longer own is not a fact about your risk. Tickers group case-insensitively
+   (a "voo" and a "VOO" are one fund), and a pot is named once however many of
+   its rows land in a group. */
+function allHoldings(st) {
+  const side = st.side || {};
+  const pots = [
+    ...(side.portfolios || []).map(p => ({ name: p.name, rows: p.rows || [] })),
+    ...(side.retirementAccounts || []).map(a => ({ name: a.name, rows: a.rows || [] })),
+  ];
+  const by = new Map();
+  for (const pot of pots) for (const h of pot.rows) {
+    const key = String(h.ticker || '?').trim().toUpperCase();
+    if (!by.has(key)) by.set(key, { ticker: String(h.ticker || '?').trim(), value: 0, pots: [] });
+    const g = by.get(key);
+    g.value = round2(g.value + (h.shares || 0) * (h.price || 0));
+    if (!g.pots.includes(pot.name)) g.pots.push(pot.name);
+  }
+  const rows = [...by.values()].sort((a, b) => b.value - a.value);
+  return { rows, total: round2(rows.reduce((s, r) => s + r.value, 0)) };
+}
+
+/* Gain over a typed cost basis, formatted once for the tables and the dialog
+   readout. A signed dollar figure with the percentage beside it; null when
+   there is no basis to measure against — an absent basis is "never said",
+   and a gain measured against nothing would be a claim. */
+function gainText(value, cost) {
+  if (typeof cost !== 'number' || cost <= 0) return null;
+  const gain = round2(value - cost);
+  const sign = gain > 0 ? '+' : '';
+  return `${sign}${fmtMoney(gain)} (${sign}${(gain / cost * 100).toFixed(1)}%)`;
+}
+
 function holdingsTable(rows, list) {
-  const body = rows.map((h, idx) => `<tr class="editrow" data-edit="holding"
+  /* Cost and Gain appear only once some row has a basis typed — the trip
+     tables' rule: a column of nothing is noise. A row without one shows an em
+     dash and stays out of the footer's gain, which is measured only over the
+     rows that actually have a basis. */
+  const hasCost = rows.some(h => typeof h.cost === 'number');
+  const body = rows.map((h, idx) => {
+    const value = round2((h.shares || 0) * (h.price || 0));
+    return `<tr class="editrow" data-edit="holding"
       data-list="${esc(list)}" data-idx="${idx}"><th scope="row">${esc(h.ticker)}${
         h.lookup === false ? ' <span class="muted" title="Priced by hand — not looked up">✎</span>' : ''}</th>
       <td>${h.shares ?? ''}</td><td>${h.price != null ? fmtMoney(h.price) : ''}</td>
-      <td>${fmtMoney(round2((h.shares || 0) * (h.price || 0)))}</td></tr>`).join('');
+      <td>${fmtMoney(value)}</td>${!hasCost ? '' : `
+      <td>${typeof h.cost === 'number' ? fmtMoney(h.cost) : '<span class="muted">—</span>'}</td>
+      <td>${gainText(value, h.cost) || '<span class="muted">—</span>'}</td>`}</tr>`;
+  }).join('');
+  const costed = rows.filter(h => typeof h.cost === 'number');
+  const costTotal = round2(costed.reduce((s, h) => s + h.cost, 0));
+  const costedValue = round2(costed.reduce((s, h) => s + (h.shares || 0) * (h.price || 0), 0));
   return `${rows.length ? `<div class="tablewrap"><table>
-    <thead><tr><th style="text-align:left">Ticker</th><th>Shares</th><th>Price</th><th>Value</th></tr></thead>
+    <thead><tr><th style="text-align:left">Ticker</th><th>Shares</th><th>Price</th><th>Value</th>${
+      hasCost ? '<th>Cost</th><th>Gain</th>' : ''}</tr></thead>
     <tbody>${body}</tbody>
-    <tfoot><tr><th>Total</th><td></td><td></td><td>${fmtMoney(holdingsValue(rows))}</td></tr></tfoot>
+    <tfoot><tr><th>Total</th><td></td><td></td><td>${fmtMoney(holdingsValue(rows))}</td>${
+      !hasCost ? '' : `<td>${fmtMoney(costTotal)}</td>
+      <td>${gainText(costedValue, costTotal) || ''}${
+        costed.length < rows.length ? ` <span class="muted">· the ${
+          rows.length - costed.length} without a basis left out</span>` : ''}</td>`}</tr></tfoot>
   </table></div>` : '<p class="sub">Nothing recorded.</p>'}
   <div class="addbar"><button class="btn small" data-add="holding"
     data-list="${esc(list)}">＋ Add holding</button></div>`;
@@ -7370,8 +7432,30 @@ function renderInvestments() {
       ${holdingsTable(pf.rows, 'pf:' + pf.id)}
     </div>`;
   }).join('');
+  /* One table across every pot that is still yours — the panes above plus the
+     retirement accounts — answering the question no single pane can: how
+     concentrated is the whole picture? Only drawn once two pots contribute;
+     with one, it is that pane's own table wearing a grander heading. */
+  const roll = allHoldings(state);
+  const potCount = new Set(roll.rows.flatMap(r => r.pots)).size;
+  const rollup = (roll.rows.length && potCount >= 2) ? `<div class="card">
+    <h2>Everything You Hold</h2>
+    <p class="sub">Every holding here and on the Retirement tab, added up by ticker.
+      Retirement money counts at full value, before any tax, and the giving fund stays
+      out — that money is already given. Rows are read-only; edit a holding in its own
+      pot's table.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Ticker</th><th style="text-align:left">Held in</th>
+        <th>Value</th><th>% of holdings</th></tr></thead>
+      <tbody>${roll.rows.map(r => `<tr><th scope="row">${esc(r.ticker)}</th>
+        <td style="text-align:left">${esc(andList(r.pots))}</td>
+        <td>${fmtMoney(r.value)}</td>
+        <td>${roll.total ? (r.value / roll.total * 100).toFixed(1) + '%' : ''}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th>Total</th><td></td><td>${fmtMoney(roll.total)}</td><td></td></tr></tfoot>
+    </table></div>
+  </div>` : '';
   return priceBar
-    + (panes ? `<div class="cards2">${panes}</div>`
+    + (panes ? `<div class="cards2">${panes}</div>${rollup}`
              : `<div class="card"><div class="empty"><h2>No Investment Accounts Yet</h2>
                 <p>Add one for each place you hold investments — a brokerage, an HSA, a
                   pension pot. Each gets its own pane of holdings.</p></div></div>`)
@@ -10324,6 +10408,12 @@ const EDITORS = {
         { key: 'ticker', label: 'Ticker', type: 'text' },
         { key: 'shares', label: 'Shares', type: 'number' },
         { key: 'price', label: 'Price', type: 'money', ...(hint ? { hint } : {}) },
+        /* Optional, and absent means "never said" — no gain is shown rather
+           than a gain measured against nothing. The TOTAL for the lot, not per
+           share: it is the figure a brokerage statement prints. */
+        { key: 'cost', label: 'What you paid', type: 'money',
+          hint: 'Optional — the total cost basis for these shares, off your statement. '
+            + 'Typing it shows the gain here and in the table.' },
         /* The dialog opens by saying value is shares × price and then never
            showed it. It is the one figure this row exists to produce, and the
            only place it appeared was the table underneath — which is no help
@@ -10334,6 +10424,7 @@ const EDITORS = {
            and it was answerable only by doing the arithmetic yourself off the
            table. */
         { key: 'share', label: 'Share of account', type: 'readout' },
+        { key: 'gain', label: 'Gain', type: 'readout' },
         /* "…automatically" measured 193px into a 191px column, so the label
            wrapped to a second line, outgrew `min-height: 2.5em` and pushed its
            checkbox below the two figures beside it. The paragraph above already
@@ -10366,6 +10457,14 @@ const EDITORS = {
       });
       F('rf-share').textContent = (mine === null || total <= 0) ? '—'
         : `${(mine / total * 100).toFixed(1)}%`;
+      /* The same em-dash rule as the others: no basis, or no value yet, is
+         "nothing to measure", never $0.00 of gain. */
+      const gainOut = F('rf-gain');
+      if (gainOut) {
+        const cost = parseMoney(F('rf-cost').value);
+        gainOut.textContent = (mine !== null && Number.isFinite(cost) && cost > 0)
+          ? gainText(round2(mine), cost) : '—';
+      }
     },
     get: (ds) => {
       const h = holdingList(ds.list)[+ds.idx];
@@ -10377,6 +10476,10 @@ const EDITORS = {
       const before = ds.idx !== undefined ? list[+ds.idx] : null;
       const row = { ticker: v.ticker || '?', shares: v.shares ?? 0, price: v.price ?? 0 };
       if (!v.lookup) row.lookup = false;   // absent means yes, so only "no" is stored
+      /* Save rebuilds the row from scratch — the retAcct trap every new
+         per-row field falls into — so the basis is carried across by hand.
+         An emptied box deletes it: "never said" rather than a $0 basis. */
+      if (typeof v.cost === 'number') row.cost = v.cost;
       if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
       /* A ticker the plan has not seen before is looked up ON THE SPOT, and the
          six-hour cache does not apply to it: that window exists to stop the
@@ -12697,7 +12800,10 @@ const SECTION_NEEDS = {
   tax:         ['side.tax', 'people', 'side.retirementAccounts', 'side.limits',
                 'side.drawdown', 'side.comp', 'side.bonuses'],
   comp:        ['people', 'side.comp', 'side.bonuses'],
-  investments: ['side.portfolios', 'side.taxable'],
+  /* Everything You Hold rolls the retirement accounts in beside the panes, so
+     an Investments link carries them — Retirement owns the branch, and the
+     dialog names it out loud (shareCarriesNote). */
+  investments: ['side.portfolios', 'side.taxable', 'side.retirementAccounts'],
   /* No people: the trips and PTO tables name nobody — checked, not assumed. */
   vacations:   ['vacations'],
   giving:      ['years', 'side.donations', 'side.daf', 'side.comp', 'side.bonuses'],
@@ -13558,6 +13664,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, KIND_LABEL,
+  allHoldings, gainText,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,

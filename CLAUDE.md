@@ -272,6 +272,17 @@ falls back to the stored `amount` rather than reading `undefined` and zeroing
 it. **`retAcct.save` rebuilds the row from scratch, so `rows` is carried across
 by hand exactly like `contribs`** — that is the trap every new per-account field
 falls into.
+**A holding may carry `cost` — the lot's TOTAL basis, optional.** Deleted
+rather than zeroed when absent or unreadable-empty ("never said" ≠ a $0 basis
+claiming the whole value is gain), num()'d when present. `holding.save`
+REBUILDS the row, so the field is carried by hand — the retAcct trap. Gain
+formats through `gainText(value, cost)` (pure, null without a real basis);
+the Cost/Gain columns appear only when some row in that table has a basis,
+and the footer's gain is measured over the costed rows alone, saying how many
+were left out. `allHoldings(st)` (pure) is the Everything You Hold rollup —
+panes + retirement accounts by upper-cased ticker, DAF excluded by
+construction; the card draws only when two pots contribute, and
+SECTION_NEEDS.investments carries `side.retirementAccounts` for it.
 **A RETIREMENT account has no id — it is addressed by its INDEX**, unlike a
 budget account, whose `id` is permanent and load-bearing. `retAcct.save` builds
 `{name, type, kind, amount, contribs, owner?}` and nothing anywhere adds an id;

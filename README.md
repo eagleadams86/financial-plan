@@ -277,7 +277,16 @@ included — treat those the way you treat the figures.
   way round: **type the percentage and the salary it comes to fills itself in,
   or type the new salary and the percentage does** — whichever your letter
   happened to give you.
-- **Investments** — one pane per place you hold investments (add, rename and
+- **Investments** — a holding can carry its **cost basis** ("what you paid",
+  off your statement), and the tables then show cost and gain — dollars and
+  percent — per holding and per pot, holdings without a basis honestly left
+  out of the footer's sum. The same field works on the Retirement tab's
+  holdings, since every holdings table is one renderer. An **Everything You
+  Hold** card rolls every pot that is still yours — the panes here plus the
+  retirement accounts — into one by-ticker table with each holding's share of
+  the whole, so concentration across pots is finally one number; the giving
+  fund stays out (that money is already given), and a shared Investments link
+  now carries the retirement accounts and says so. Otherwise: one pane per place you hold investments (add, rename and
   reorder them), with optional **automatic price lookups** (Twelve Data; free
   key kept on the device, cached six hours, and every price still editable by
   hand). Shares, ETFs and **mutual funds** are all quoted — a fund strikes one

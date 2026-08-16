@@ -2265,6 +2265,43 @@ t('an empty plan charts nothing', () => {
   eq(H.vacationYearStats(H.coerceShape({})), []);
 });
 
+group('Cost basis and the holdings rollup');
+t('a cost basis is coerced like the fields beside it', () => {
+  const d = H.coerceShape({ side: { portfolios: [{ id: 'a', name: 'A', rows: [
+    { ticker: 'VOO', shares: 2, price: 700, cost: '1000' },
+    { ticker: 'FXAIX', shares: 1, price: 100 },
+    { ticker: 'X', shares: 1, price: 5, cost: '<img onerror=x>' },
+  ] }] } });
+  eq(d.side.portfolios[0].rows[0].cost, 1000, 'a string amount becomes a number');
+  eq(d.side.portfolios[0].rows[1].cost, undefined, 'absent stays absent — no $0 basis invented');
+  eq(d.side.portfolios[0].rows[2].cost, 0, 'markup is only ever 0, never markup');
+});
+t('gain is measured only against a real basis', () => {
+  eq(H.gainText(1400, 1000), '+$400.00 (+40.0%)');
+  eq(H.gainText(900, 1000), '-$100.00 (-10.0%)');
+  eq(H.gainText(1400, undefined), null, 'no basis, no claim');
+  eq(H.gainText(1400, 0), null, 'a $0 basis is not a thing to divide by');
+});
+t('the rollup groups by ticker across panes and retirement accounts', () => {
+  const st = H.coerceShape({ side: {
+    portfolios: [{ id: 'cm', name: 'Cash Management',
+      rows: [{ ticker: 'VOO', shares: 2, price: 100 }] }],
+    retirementAccounts: [
+      { name: '401k', type: '401k', rows: [{ ticker: 'voo', shares: 1, price: 100 },
+        { ticker: 'VTI', shares: 1, price: 50 }] },
+      { name: 'Roth IRA', type: 'roth-ira', rows: [{ ticker: 'QQQM', shares: 4, price: 25 }] }],
+    daf: [{ ticker: 'FSKAX', shares: 10, price: 10 }],
+  } });
+  const roll = H.allHoldings(st);
+  eq(roll.rows.map(r => r.ticker), ['VOO', 'QQQM', 'VTI'], 'sorted by value, case-insensitive merge');
+  eq(roll.rows[0].value, 300, 'both pots\' VOO added up');
+  eq(roll.rows[0].pots, ['Cash Management', '401k'], 'and both named');
+  eq(roll.total, 450, 'the giving fund\'s FSKAX is nowhere in it');
+});
+t('an empty plan rolls up to nothing', () => {
+  eq(H.allHoldings(H.coerceShape({})).rows, []);
+});
+
 group('Property and net worth');
 t('a property row is coerced at the boundary', () => {
   const d = H.coerceShape({ side: { property: [
