@@ -729,6 +729,23 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .tile-help::after { content: ''; position: absolute; inset: -4px; }
 th .tile-help, td .tile-help { vertical-align: 1px; }
 td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
+
+/* The grid's own tooltip. A native title bubble needs the POINTER to cross
+   into a cell — scroll the grid sideways under a parked cursor, or re-render
+   after a save, and the cell under it was never "entered", so no bubble ever
+   comes (reported as the tooltip sometimes not showing, and unreproducible on
+   a recording because moving the mouse to demonstrate it heals it). This one
+   follows mousemove, so the first pixel of movement recovers it — and
+   pre-line means a split month reads one amount per line, which a title
+   cannot format. pointer-events: none, or it would sit under the cursor and
+   flicker as the hover target. */
+#gridTip { position: fixed; z-index: 70; display: none; max-width: 360px;
+  background: var(--bg-card); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); padding: 7px 10px; font-size: 12.5px;
+  line-height: 1.45; color: var(--text-primary); white-space: pre-line;
+  pointer-events: none; box-shadow: var(--shadow);
+  font-variant-numeric: tabular-nums; }
+#gridTip:not([hidden]) { display: block; }
 #helpDialog { max-width: 46ch; }
 .checkset { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 4px 0; }
 .checkset .checkline { font-weight: 400; }
@@ -991,6 +1008,9 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
+<!-- The budget grid's own tooltip — filled by wireGridTip, aria-hidden because
+     it only ever repeats what the cell dialog already offers a reader. -->
+<div id="gridTip" hidden aria-hidden="true"></div>
 
 <!-- ── Backup / restore ──────────────────────────────────────────────────── -->
 <dialog id="dataDialog" aria-labelledby="dataDialogTitle">
@@ -3666,6 +3686,9 @@ function render() {
   F('views').setAttribute('aria-labelledby', `tab-${view}`);
   buildMoneyFormats(state.settings.currency);
   const target = F('views');
+  /* The markup under the pointer is about to be replaced — a tip left showing
+     would describe a cell that no longer exists. */
+  hideGridTip();
   /* The welcome card is about setting YOUR plan up, so it must never stand in
      for a borrowed tab: a link can hold Investments and no budget year at all,
      and that tab draws perfectly well without one. */
@@ -3955,7 +3978,7 @@ function gridCard(y, yr) {
   const rowTotalTd = (v, plain, kind) => v === undefined
     ? '<td class="rowtot"></td>'
     : `<td class="rowtot ${kind ? `c-${kind}` : ''}"${
-        kind ? ` title="${esc(`${fmtMoney(v)} · ${KIND_LABEL[kind]}`)}"` : ''
+        kind ? ` data-tip="${esc(`${fmtMoney(v)} · ${KIND_LABEL[kind]}`)}"` : ''
       }>${plain ? esc(String(v)) : fmtCell(v)}</td>`;
   const cellOf = (id, m) => c.cells[`${id}|${m}`] || { v: 0, kind: 'missing' };
   const catTotal = (cat) => round2(ownMonths.reduce((s, m) =>
@@ -3971,19 +3994,12 @@ function gridCard(y, yr) {
 
   const cellTd = (cat, m) => {
     const r = c.cells[`${cat.id}|${m}`] || { v: 0, kind: 'missing' };
-    const partNote = (r.parts || []).some(p => p.note);
     const cls = ['cell', `c-${r.kind}`, hasNote(r) ? 'noted' : '',
       m === thisM ? 'now' : ''].filter(Boolean).join(' ');
-    /* Break the amounts out whenever they say something the total doesn't:
-       several of them, or a single one carrying a note of its own. */
-    const parts = r.parts && (r.parts.length > 1 || partNote)
-      ? r.parts.map(p => `${fmtMoney(p.v)}${p.note ? ` ${p.note}` : ''}${
-          p.kind === 'manual' ? ' (est)' : ''}`).join(' + ')
-      : '';
-    const title = [fmtMoney(r.v), KIND_LABEL[r.kind], parts, r.note]
-      .filter(Boolean).join(' · ');
+    /* data-tip, not title — see wireGridTip. cellTip breaks a split month out
+       one amount per line, which a native title cannot format. */
     return `<td class="${cls}" data-cat="${esc(cat.id)}" data-m="${m}"
-      title="${esc(title)}">${fmtCell(r.v)}</td>`;
+      data-tip="${esc(cellTip(r))}">${fmtCell(r.v)}</td>`;
   };
 
   const catTh = (cat) => `<th class="lbl" scope="row" data-edit="category"
@@ -4005,7 +4021,7 @@ function gridCard(y, yr) {
          real figures reads plain, a month of estimates italic, and one holding
          both reads as both. */
       const kind = sumKind(cells.map(r => r.kind));
-      return `<td class="c-${kind} ${m === thisM ? 'now' : ''}" title="${
+      return `<td class="c-${kind} ${m === thisM ? 'now' : ''}" data-tip="${
         esc(`${fmtMoney(sum)} · ${KIND_LABEL[kind]}`)}">${fmtCell(sum)}</td>`;
     }).join('')}${rowTotalTd(round2(cats.reduce((s, cat) => s + catTotal(cat), 0)), false,
       sumKind(cats.flatMap(cat => ownMonths.map(m => cellOf(cat.id, m).kind))))}</tr>`;
@@ -4082,7 +4098,8 @@ function gridCard(y, yr) {
         /* Same estimate mark as every other added-up figure in the grid — a
            subtotal that said nothing about what it was made of would be
            exactly the bug the Total row had. */
-        return `<td class="c-${b ? b.kind : 'missing'} ${m === thisM ? 'now' : ''}">${
+        return `<td class="c-${b ? b.kind : 'missing'} ${m === thisM ? 'now' : ''}"${
+          b ? ` data-tip="${esc(`${fmtMoney(b.v)} · ${KIND_LABEL[b.kind]}`)}"` : ''}>${
           b ? fmtCell(b.v) : '·'}</td>`;
       }).join('')}${rowTotalTd()}</tr>`;
   }).join('');
@@ -4100,7 +4117,7 @@ function gridCard(y, yr) {
         if (v === undefined)
           return `<td class="cell ${m === thisM ? 'now' : ''}"
             data-bal="${esc(a.id)}" data-m="${m}"
-            title="${live ? `Not tracked yet — click to start this account from ${esc(monthLabel(m))}`
+            data-tip="${live ? `Not tracked yet — click to start this account from ${esc(monthLabel(m))}`
               : `Nothing recorded — click to state what ${esc(a.name)} held in ${esc(monthLabel(m))}`}">·</td>`;
         const kind = c.balanceKinds[`${a.id}|${m}`];
         const ov = yr.overrides[`${a.id}|${m}`];
@@ -4109,7 +4126,7 @@ function gridCard(y, yr) {
         return `<td class="cell c-${kind} ${ov && ov.note ? 'noted' : ''} ${
           m === thisM ? 'now' : ''}"
           data-bal="${esc(a.id)}" data-m="${m}"
-          title="${esc([fmtMoney(v || 0), ov ? 'stated balance' : '', ov && ov.note]
+          data-tip="${esc([fmtMoney(v || 0), ov ? 'stated balance' : '', ov && ov.note]
             .filter(Boolean).join(' · '))}">${fmtCell(v || 0)}</td>`;
       }).join('')}${rowTotalTd()}</tr>`).join('')
     + secheadRow('')   // the same band that opens the block, closing it off
@@ -4119,10 +4136,13 @@ function gridCard(y, yr) {
        should be able to look like a fact while every account above it says
        otherwise. */
     + `<tr class="total"><th class="lbl" scope="row">Total</th>${
-        months.map(m => `<td class="c-${c.balanceKinds[`total|${m}`] || 'missing'} ${
-          m === thisM ? 'now' : ''}">${
-          c.balances[`total|${m}`] === undefined ? '·'
-            : fmtCell(c.balances[`total|${m}`])}</td>`).join('')}${rowTotalTd()}</tr>`
+        months.map(m => {
+          const tv = c.balances[`total|${m}`];
+          const tk = c.balanceKinds[`total|${m}`] || 'missing';
+          return `<td class="c-${tk} ${m === thisM ? 'now' : ''}"${
+            tv === undefined ? '' : ` data-tip="${esc(`${fmtMoney(tv)} · ${KIND_LABEL[tk]}`)}"`}>${
+            tv === undefined ? '·' : fmtCell(tv)}</td>`;
+        }).join('')}${rowTotalTd()}</tr>`
     + (!usesPaychecks ? '' :
       /* The count the income row is actually multiplying by, not just the ones
          typed in: a year built ahead inherits last year's, and a row reading
@@ -4131,7 +4151,7 @@ function gridCard(y, yr) {
          uses — never a colour. */
       `<tr class="paych"><th class="lbl" scope="row">Paychecks</th>${
         months.map(m => `<td class="cell ${yr.paychecks[m] === undefined ? 'c-auto' : ''} ${
-          m === thisM ? 'now' : ''}" data-pay="${m}" title="${
+          m === thisM ? 'now' : ''}" data-pay="${m}" data-tip="${
           yr.paychecks[m] === undefined ? 'Estimated from the same month last year'
             : 'Entered'}">${c.paychecks[m]}</td>`).join('')}${rowTotalTd(
             round2(months.filter(m => m.startsWith(y))
@@ -4320,6 +4340,23 @@ const hasNote = (cell) =>
 const KIND_LABEL = { actual: 'actual', manual: 'your estimate',
   auto: 'auto estimate', missing: 'nothing recorded', pinned: 'stated balance',
   mixed: 'part actual, part estimate' };
+
+/* The hover text for a category cell — pure, so the split-month formatting is
+   pinned by tests. An ordinary month is one line. A split month breaks its
+   amounts out ONE PER LINE with the total labelled last, the way the trip
+   tables read — they used to be squeezed onto one line joined with " + ",
+   which a three-check month made unreadable. Shown through the grid's own
+   tooltip (white-space: pre-line), so the line breaks actually render. */
+function cellTip(r) {
+  const head = [fmtMoney(r.v), KIND_LABEL[r.kind], r.note].filter(Boolean).join(' · ');
+  const partNote = (r.parts || []).some(p => p.note);
+  if (!r.parts || !(r.parts.length > 1 || partNote)) return head;
+  return [
+    ...r.parts.map(p => `${fmtMoney(p.v)}${p.kind === 'manual' ? ' (est)' : ''}${
+      p.note ? ` — ${p.note}` : ''}`),
+    `Total ${head}`,
+  ].join('\n');
+}
 
 /* Plain-English names for the estimate rules — shown wherever a rule needs
    identifying (cell editor, row tooltips). Keep in step with the option list
@@ -11525,9 +11562,56 @@ function wireRowDrag(grid) {
   body.addEventListener('lostpointercapture', stop);
 }
 
+/* ── The grid's own tooltip (see #gridTip in the CSS for why it exists) ──────
+   One delegated mousemove on the gridwrap; the tip's text comes out of the
+   cell's data-tip through textContent, so however it was built it renders as
+   text. Positioning follows the zoom rules: the event and the viewport are in
+   screen pixels, a fixed element's styles are written in pre-zoom pixels, so
+   the final coordinates divide by zoomScale — the pinGridHeader lesson. */
+function hideGridTip() {
+  const el = F('gridTip');
+  if (el) el.hidden = true;
+}
+function wireGridTip() {
+  const tip = F('gridTip');
+  const wrap = document.querySelector('.gridwrap');
+  if (!tip || !wrap) { hideGridTip(); return; }
+  hideGridTip();
+  wrap.addEventListener('mousemove', (e) => {
+    const td = e.target.closest('[data-tip]');
+    if (!td) { hideGridTip(); return; }
+    if (tip.textContent !== td.dataset.tip) tip.textContent = td.dataset.tip;
+    tip.hidden = false;
+    /* Measured at the origin, not wherever it last sat: a fixed element parked
+       against the right-hand edge is squeezed narrow by the viewport, and a
+       width read there wraps every later tip into a tall sliver. */
+    tip.style.left = '0px'; tip.style.top = '0px';
+    /* offsetWidth is pre-zoom; the clamping arithmetic runs in screen px. */
+    const w = tip.offsetWidth * zoomScale, h = tip.offsetHeight * zoomScale;
+    const pad = 14;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
+    if (y + h > window.innerHeight - 8) y = e.clientY - h - pad;
+    tip.style.left = `${Math.max(4, x) / zoomScale}px`;
+    tip.style.top = `${Math.max(4, y) / zoomScale}px`;
+  });
+  wrap.addEventListener('mouseleave', hideGridTip);
+  /* The grid scrolling under a parked cursor is exactly the case native
+     titles die on — hide, and the next real movement redraws it in the right
+     place over the right cell. */
+  wrap.addEventListener('scroll', hideGridTip, { passive: true });
+  /* A click is about to open the cell dialog — a tip floating over a modal
+     would outrank it visually while answering yesterday's question. */
+  wrap.addEventListener('click', hideGridTip);
+}
+/* Page scroll moves the grid under the cursor the same way; once, not per
+   render — the handler reads the element fresh each time. */
+window.addEventListener('scroll', hideGridTip, { passive: true });
+
 function wireBudget() {
   pinnedShift = -1;  // fresh cells, so force a write
   pinGridHeader();   // a render starts with the header wherever the page is
+  wireGridTip();
   /* The phone-sized "Actions" toggle over the grid's admin buttons. */
   const actBtn = F('gridActionsBtn');
   if (actBtn) actBtn.onclick = () => {
@@ -13460,7 +13544,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
-  netWorthParts, PROPERTY_KINDS, vacationYearStats,
+  netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, KIND_LABEL,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,

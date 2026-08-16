@@ -549,6 +549,22 @@ suite passed while the card was wrong.
   read goes through `normRole()`. **The pass-through timing is load-bearing**:
   the old `zelle` landed BEFORE its account's growth, `charitable` AFTER it —
   the real-data cross-check pins that, so never "simplify" it away.
+- **The grid's hover text is `data-tip` + `wireGridTip()`, never a `title`.**
+  A native title bubble needs the POINTER to cross into the cell: scroll the
+  grid sideways under a parked cursor, or re-render after a save, and the cell
+  under it was never "entered", so no bubble comes — reported as tooltips
+  sometimes not showing, unreproducible on a recording because moving the mouse
+  to demonstrate heals it. The app's own tip follows mousemove (first pixel of
+  movement recovers it), fills through textContent (text however built), hides
+  on grid/page scroll and on click (a dialog is about to open over it), and is
+  positioned with the zoom rules — event/viewport in screen px, fixed styles in
+  pre-zoom px, divide by `zoomScale`; measure at the ORIGIN first, since a tip
+  parked against the right edge is squeezed narrow and a width read there
+  wraps every later tip into a sliver. `cellTip(cell)` is pure and tested: a
+  split month reads one amount per line with "Total …" last, the trip-table
+  arrangement. Every FIGURE cell carries a data-tip (category, subtotal, owner,
+  balance, Total, paycheck, year-total); the row-label `th`s keep native titles
+  — theirs is click-affordance prose, not data.
 - The month header is pinned by `pinGridHeader()`, not by CSS: `.gridwrap`
   scrolls sideways, which makes it the sticky scroll container, and giving it a
   vertical scroll of its own would put a second scrollbar on screen. The header

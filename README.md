@@ -56,7 +56,7 @@ included — treat those the way you treat the figures.
   amounts**, each actual or estimated on its own, totalled on save. A row paid
   per check opens that way already, one line per payday with the amount filled
   in, so correcting a single cheque — a bonus, a missed shift — is one box to
-  type in rather than a lump sum to break apart first. A month's
+  type in rather than a lump sum to break apart first. Hovering a split month reads its amounts one per line with the total labelled last, in the grid's own tooltip — which follows the pointer, so it never goes missing after a scroll or an edit the way a browser title bubble does. A month's
   balance cell reconciles as you type — say what an account really holds and it
   tells you how far that is from what the plan expected, or confirms the two
   agree. It also shows what the account earned that month and lets you override
