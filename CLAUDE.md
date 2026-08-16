@@ -849,12 +849,28 @@ suite passed while the card was wrong.
   the $11,000 that came back were both in there.
   - **`internalRows(yr)` is the ONE test for "is this row internal?"**, read by
     the bars and by the note under them; two answers would put a chart and its
-    own caption at odds. It asks the ROLE (`transfer`/`passthrough` with a
-    `transferTo`), never the section — a Transfers-section row whose role is
-    `normal` is a Roth IRA contribution into an account the plan does NOT
-    track, so that money really left and dropping it would understate money out
-    by exactly what left. (`yearSpending` reads sections for the opposite
-    reason: it must equal the Budget tab's Expenses total.)
+    own caption at odds. It needs **BOTH the Transfers SECTION and an internal
+    ROLE** (`transfer`/`passthrough` with a `transferTo`), and each half rules
+    out a real row the other gets wrong:
+    - **the section**, because that is the reader's own statement of what the
+      money IS, and the role under it is only plumbing. Charlie's DAF row is
+      filed as an Expense and behaves as a pass-through into Long-term; the
+      Zelle and Venmo rows are the same shape. Reading the role alone took
+      $5,961 of real 2026 spending off his money-out bar — and contradicted a
+      call `coerceShape` had already made, since the legacy `charitable` role
+      is deliberately NOT among the roles it files under Transfers while
+      `zelle` is. He reported it as "I have it set as an expense, why is it a
+      transfer?", which is the right question.
+    - **the role**, because a Transfers-section row may behave as ordinary Cash
+      money when the far side isn't tracked (a Roth IRA contribution). That
+      money really left, and dropping it would understate money out by exactly
+      what left.
+    An absent section falls to `expense`, as renderBudget and yearSpending read
+    it, so a pre-sections plan never loses a row silently; coerceShape files
+    the legacy transfer roles under Transfers on the way in, which is what
+    keeps an imported plan's real sweeps recognised. (`yearSpending` reads
+    sections ALONE for its own reason: it must equal the Budget tab's Expenses
+    total.)
   - **Interest and dividends are not transfers** and count in both settings.
   - **`flowTransferNote` asks each year whether it has any internal row**, and
     NOT whether it is a summary. That difference was found in the real data:

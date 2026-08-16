@@ -1944,10 +1944,16 @@ function flowYear() {
     { id: 'venmo', name: 'Venmo', section: 'transfer',
       role: 'passthrough', transferTo: 'bank' },
     { id: 'roth', name: 'Roth IRA', section: 'transfer', role: 'normal' },
+    /* Filed as an EXPENSE while behaving as a pass-through — a DAF
+       contribution routed through the long-term account, or a Zelle payment
+       out of a tracked bank balance. Spending, whatever the plumbing says. */
+    { id: 'daf', name: 'DAF', section: 'expense',
+      role: 'passthrough', transferTo: 'long' },
   ], cells: {
     'pay|2030-01': { v: 4000 }, 'rent|2030-01': { v: -1500 },
     'sweep|2030-01': { v: -1000 }, 'sweep|2030-02': { v: 400 },
     'venmo|2030-01': { v: -200 }, 'roth|2030-01': { v: -500 },
+    'daf|2030-01': { v: -300 },
   } };
 }
 const FLOW_COMPUTED = { cells: flowYear().cells,
@@ -1955,21 +1961,40 @@ const FLOW_COMPUTED = { cells: flowYear().cells,
 t('by default every movement counts, transfers included', () => {
   const f = H.yearFlows(flowYear(), FLOW_COMPUTED, '2030');
   approx(f.in, 4430, '4000 pay + 400 swept back + 30 interest');
-  approx(f.out, 3200, '1500 rent + 1000 out + 200 Venmo + 500 Roth');
+  approx(f.out, 3500, '1500 rent + 1000 out + 200 Venmo + 500 Roth + 300 DAF');
 });
 t('leaving transfers out drops both directions of the internal ones', () => {
   const f = H.yearFlows(flowYear(), FLOW_COMPUTED, '2030', true);
   approx(f.in, 4030, 'the 400 that came back was your own money');
-  approx(f.out, 2000, '1500 rent + the 500 Roth');
+  approx(f.out, 2300, '1500 rent + the 500 Roth + the 300 DAF');
 });
+/* Both halves of the test, each pinned by the row it exists for. Either one
+   alone drops money somebody really spent or paid out. */
 t('a Transfers-section row that really leaves is NOT dropped', () => {
-  /* The ROLE says whether the far side is an account the plan tracks. Reading
-     the section here would take the Roth contribution out of money out, which
-     is money that genuinely left. */
-  const yr = flowYear();
-  const only = { kind: 'grid', model: 'live', categories: yr.categories,
+  /* The far side of a Roth IRA contribution isn't tracked here, so the money
+     genuinely left — its ROLE is what says so. */
+  const only = { kind: 'grid', model: 'live', categories: flowYear().categories,
     cells: { 'roth|2030-01': { v: -500 } } };
   approx(H.yearFlows(only, { cells: only.cells }, '2030', true).out, 500);
+});
+t('a row filed as an EXPENSE is never treated as a transfer', () => {
+  /* A DAF contribution, a Zelle payment, a Venmo spend: each behaves as a
+     pass-through into an account the plan tracks, and each is money the reader
+     has said is spending. The section is their statement; the role is only
+     plumbing. */
+  const only = { kind: 'grid', model: 'live', categories: flowYear().categories,
+    cells: { 'daf|2030-01': { v: -300 } } };
+  approx(H.yearFlows(only, { cells: only.cells }, '2030', true).out, 300);
+  eq([...H.internalRows(flowYear())].join(','), 'sweep,venmo',
+    'only the rows filed under Transfers, and only those with a tracked far side');
+});
+t('a row with no section at all falls to expense, never to transfer', () => {
+  /* A plan that predates sections must not have a row silently dropped. */
+  const yr = { kind: 'grid', model: 'live',
+    categories: [{ id: 'x', name: 'Old row', role: 'passthrough', transferTo: 'mid' }],
+    cells: { 'x|2030-01': { v: -700 } } };
+  eq(H.internalRows(yr).size, 0);
+  approx(H.yearFlows(yr, { cells: yr.cells }, '2030', true).out, 700);
 });
 t('interest is not a transfer and survives either way', () => {
   approx(H.yearFlows({ kind: 'grid', model: 'live', categories: [] },

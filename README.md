@@ -192,10 +192,12 @@ included — treat those the way you treat the figures.
   counts both — which is why "money in" can read well above anything you'd call
   income. A switch on that card, **"Leave out transfers between your own
   accounts"**, takes them off; it's remembered, and follows you to the phone
-  like the folded boxes do. Rows are recognised by their role rather than the
-  section they sit in, so a Roth IRA contribution filed under Transfers still
-  counts as money out — that account isn't tracked here, so the money really
-  left. The years imported from the old spreadsheet never recorded which rows
+  like the folded boxes do. A row only counts as a transfer if you've filed it
+  under Transfers *and* its other side is an account tracked here — so a
+  payment you've called an expense still counts as money out however it's
+  routed (giving through a fund, a Zelle out of a tracked balance), and a Roth
+  IRA contribution filed under Transfers counts too, because that account isn't
+  tracked and the money really left. The years imported from the old spreadsheet never recorded which rows
   were transfers, so their bars are the same either way, and a line under the
   chart names them rather than letting them look comparable. Beside them, **what you
   actually spent each year**: the expense rows alone, so money swept into

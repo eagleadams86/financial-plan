@@ -5189,9 +5189,12 @@ function renderGoals() {
       <p class="sub">Everything that moved through the accounts each year${
         noTransfers ? ', apart from money moved between your own accounts' : ' — transfers between\n        them included'}, and the interest they earned counted as money in. Striped bars are
         money out. Early years are best-effort reads of the old bi-weekly sheets.</p>
-      <label class="checkline" style="margin-bottom:10px"><input type="checkbox"
+      <label class="checkline stacked" style="margin-bottom:10px"><input type="checkbox"
         id="flowNoTransfers"${noTransfers ? ' checked' : ''}>
-        Leave out transfers between your own accounts</label>
+        <span>Leave out transfers between your own accounts
+        <span class="checkhint">Rows you've filed under Transfers whose other side is an
+          account here. A payment you've filed as an expense still counts, however it is
+          routed — giving through a fund, or a Zelle out of a tracked balance.</span></span></label>
       ${(() => {
         /* Said under the switch, not in the sub: it is news about the setting
            just chosen, and a sentence about 2011 sitting permanently in the
@@ -8659,18 +8662,34 @@ const EMPTY_SET = new Set();
    test for that, read by the flow bars and by the note that says which years
    cannot answer the question. Two answers to "is this row a transfer?" would
    put a chart and the sentence under it at odds.
-   It asks the ROLE, never the section: the role is what says the far side is
-   an account this plan tracks. A row in the Transfers SECTION whose role is
-   `normal` — a Roth IRA contribution, where the far account isn't tracked — is
-   money genuinely leaving, and dropping it would understate money out by
-   exactly what left. (`yearSpending` reads sections for the opposite reason: it
-   must equal the Budget tab's Expenses total, which is a section figure.)
+   BOTH halves are required, and each rules out a real row the other would get
+   wrong:
+   - the SECTION, because that is the reader's own statement of what the money
+     IS, and the role underneath it is only plumbing. A DAF contribution filed
+     as an Expense behaves as a pass-through into the long-term account — the
+     money really is routed through somewhere tracked — but it is giving, not
+     an internal shuffle, and dropping it took $5,000 of real spending off the
+     money-out bar of somebody who had said "Expense" in the dialog. The same
+     goes for a Zelle or Venmo row: the float is tracked, the payment is
+     spending. `coerceShape` made exactly this call at migration — the old
+     `charitable` role is deliberately NOT one of the roles that gets filed
+     under Transfers — so reading the role alone contradicted a decision the
+     app had already taken.
+   - the ROLE, because a Transfers-section row may behave as ordinary Cash
+     money when the far side isn't tracked here (a Roth IRA contribution). That
+     money genuinely leaves, and dropping it would understate money out by
+     exactly what left.
+   Unsectioned rows fall to `expense`, exactly as renderBudget and yearSpending
+   read them, so a pre-sections plan never has a row silently dropped — and
+   coerceShape files the legacy transfer roles under Transfers on the way in,
+   which is what keeps an imported plan's real sweeps recognised.
    `transferTo` is required, since a transfer role with nowhere to go moves
    nothing in the engine either; that it names a REAL account is guaranteed
    upstream — deleting an account is refused while a category still points at
    it — rather than re-checked here. */
 function internalRows(yr) {
   return new Set((yr.categories || []).filter(cat => {
+    if ((cat.section || 'expense') !== 'transfer') return false;
     const r = normRole(cat);
     return (r.role === 'transfer' || r.role === 'passthrough') && r.transferTo;
   }).map(cat => cat.id));
@@ -8686,7 +8705,9 @@ function internalRows(yr) {
    both real movements, and both dwarf the rows somebody is actually looking
    for. The old three-argument behaviour is untouched and pinned by its own
    tests, the `limitsFor` arrangement.
-   Which rows count as internal is `internalRows` above, and the years that
+   A row counts as internal only when the reader has filed it under Transfers
+   AND its far side is an account the plan tracks — see `internalRows` above,
+   which is where that decision lives. The years that
    have none come back unchanged — the old sheets and the imported history
    grids never said which of their rows were transfers. `flowTransferNote`
    names those years rather than letting one chart quietly draw two rules. */
@@ -14992,7 +15013,8 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, balanceTip,
-  receivedInto, earningsOver, balanceYearTip, flowTransferNote, KIND_LABEL,
+  receivedInto, earningsOver, balanceYearTip, flowTransferNote, internalRows,
+  KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
   coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
   csvCell, gridToCsv, donationsToCsv, searchPlan, SEARCH_CAP, snapshotPoints,
