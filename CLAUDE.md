@@ -170,6 +170,19 @@ family names as well as balances.
   quota problem and a stale-copy problem. Undone state still passes
   coerceShape/migrate on the way back in. ⌘Z is gated off inputs and open
   dialogs (the browser's own undo owns a text box).
+- **CSV export is `csvCell`/`gridToCsv`/`donationsToCsv`** (pure, pinned).
+  csvCell defuses formula triggers (=+@ and tab) on TEXT fields only — a
+  negative number legitimately opens with '-'. Values export RAW; currency
+  dress is the spreadsheet's job. downloadCsv prepends a BOM (Excel reads
+  bare UTF-8 as Latin-1). The buttons are contextual — the year's grid
+  actions, the Giving note — not the Back up dialog.
+- **Search is `searchPlan(st, q)`** (pure, pinned): two characters minimum,
+  `SEARCH_CAP` with the overflow COUNTED (`more`), and a budget cell hit
+  carries `{type,id,m}` so `goToSearchHit` opens the cell editor after
+  navigating; navigation-only in viewOnly, and hits are filtered against
+  `allowedViews()` so a shared link can't be steered to a tab it doesn't
+  carry. `findBtn` stays visible in shared views — searching carried data is
+  reading. ⌘K opens; the dialog renders through esc() everywhere.
 - **`savingsPulse` / `yearIncome`** are the Progress tab's Savings Rate &
   Runway card — yearIncome mirrors yearSpending exactly (computed cells,
   netted, summary fallback), and a missing denominator is NULL, never 0: no

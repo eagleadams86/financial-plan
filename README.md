@@ -95,6 +95,18 @@ included — treat those the way you treat the figures.
   arrange; the ↑↓ buttons in a row's editor still work everywhere.) The account
   rows drag too, in their own block — and since accounts are one list rather
   than one per year, that order holds across every year of the plan.
+- **Find (⌘K)** — one search box over all of it: every year's rows and
+  notes (split-part notes and balance notes included), donations, trips and
+  their line items, goals, people, property, and holdings by ticker. A budget
+  hit opens straight into its cell's editor; everything else lands you on the
+  right tab. Two characters minimum, and when results are capped it says how
+  many more there were rather than trimming silently.
+- **CSV export** — the way out to a spreadsheet. ⇩ CSV on any budget year
+  downloads that year's grid (sections, months, year totals, account balances
+  — raw numbers, ready for Excel or an accountant), and the Giving tab
+  exports every year's donations as the tax-season table. Text fields are
+  defused against spreadsheet formula injection; a BOM keeps Excel honest
+  about UTF-8.
 - **Undo** — every change banks the state it replaced, up to twenty deep, and
   ⌘Z (or the ↩ Undo button that appears in the header once there is something
   to undo) walks straight back through them, one honest step at a time. The

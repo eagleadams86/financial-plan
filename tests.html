@@ -2265,6 +2265,89 @@ t('an empty plan charts nothing', () => {
   eq(H.vacationYearStats(H.coerceShape({})), []);
 });
 
+group('CSV export');
+t('a cell is quoted only when it must be, and formulas are defused', () => {
+  eq(H.csvCell('plain', true), 'plain');
+  eq(H.csvCell('has, comma', true), '"has, comma"');
+  eq(H.csvCell('says "hi"', true), '"says ""hi"""');
+  eq(H.csvCell('=SUM(A1:A9)', true), "'=SUM(A1:A9)", 'a formula in a name opens as text');
+  eq(H.csvCell(-1234.5), '-1234.5', 'a negative NUMBER keeps its sign — no apostrophe');
+  eq(H.csvCell(undefined), '', 'absent is empty, not "undefined"');
+});
+t('a grid year exports the shape the screen shows', () => {
+  const st = H.coerceShape({ years: { '2026': {
+    kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 2,
+    enteredThrough: '2026-02',
+    categories: [
+      { id: 'pay', name: 'Pay, monthly', section: 'income', rule: 'none' },
+      { id: 'rent', name: 'Rent', section: 'expense', rule: 'none' },
+    ],
+    cells: { 'pay|2026-01': { v: 5000, kind: 'actual' },
+             'rent|2026-01': { v: -2000, kind: 'actual' } },
+    seeds: { cash: 100 },
+  } } });
+  const c = H.computeAll(st, '2026-02-10')['2026'];
+  const lines = H.gridToCsv(st, c, '2026').split('\n');
+  eq(lines[0].startsWith('Section,Row,2026-01,2026-02'), true, 'months as columns');
+  eq(lines[1].startsWith('Income,"Pay, monthly",5000'), true, 'a comma\'d name survives quoted');
+  ok(lines.some(l => l.startsWith('Expenses,Rent,-2000')), 'raw numbers, no currency dress');
+  ok(lines.some(l => l.startsWith('Accounts,Total,')), 'the balance total rides along');
+});
+t('a summary year is two columns', () => {
+  const st = H.coerceShape({ years: { '2015': { kind: 'summary',
+    categoryTotals: [{ name: 'Income', total: 40000 }] } } });
+  eq(H.gridToCsv(st, null, '2015').split('\n')[1], 'Income,40000');
+});
+t('donations export the tax-season table', () => {
+  const csv = H.donationsToCsv({ '2026': [
+    { date: '2026-02-13', foundation: 'Fidelity Charitable', cause: 'DAF Funding',
+      funding: 5009.18 },
+    { date: '2026-04-30', foundation: 'Cradle Beach', cause: 'Kids', grant: -1000,
+      pending: true },
+  ] });
+  const lines = csv.split('\n');
+  ok(lines[1].includes('Fund deposit') && lines[1].includes('Yes'),
+    'a deposit is the deductible event');
+  ok(lines[2].includes('DAF grant') && lines[2].includes('Planned') && lines[2].includes('No'),
+    'a planned grant is neither done nor deductible');
+});
+
+group('Search');
+function searchFixture() {
+  return H.coerceShape({
+    years: { '2024': { kind: 'grid', model: 'pinned', startMonth: '2024-01', monthCount: 12,
+      categories: [{ id: 'rent', name: 'Rent', section: 'expense' }],
+      cells: { 'rent|2024-03': { v: -900, kind: 'actual', note: 'plumber came out' },
+               'rent|2024-05': { v: -900, kind: 'actual',
+                 parts: [{ v: -400, kind: 'actual', note: 'split with Sam' },
+                         { v: -500, kind: 'actual' }] } },
+      overrides: { 'cash|2024-06': { v: 12, note: 'reconciled by hand' } } } },
+    side: { donations: { '2025': [{ foundation: 'Roswell Park', cause: 'Cancer' }] } },
+    vacations: { trips: [{ id: 't1', name: 'Cabo', year: 2023,
+      items: [{ label: 'Airfare', note: 'booked with points' }] }] },
+  });
+}
+t('search reaches names and notes wherever they live', () => {
+  const st = searchFixture();
+  eq(H.searchPlan(st, 'plumber').hits[0].cell, { type: 'cat', id: 'rent', m: '2024-03' },
+    'a cell note carries its cell, so a hit opens the editor');
+  eq(H.searchPlan(st, 'SAM').hits.length, 1, 'a split-part note, case aside');
+  eq(H.searchPlan(st, 'reconciled').hits[0].cell.type, 'bal', 'a balance note too');
+  eq(H.searchPlan(st, 'roswell').hits[0].view, 'giving');
+  eq(H.searchPlan(st, 'points').hits[0].view, 'vacations');
+  eq(H.searchPlan(st, 'rent').hits[0].view, 'budget');
+});
+t('one character is not a search, and the cap is counted out loud', () => {
+  const st = searchFixture();
+  eq(H.searchPlan(st, 'r').hits, [], 'one character matches half the plan');
+  const wide = H.coerceShape({ vacations: { trips:
+    Array.from({ length: H.SEARCH_CAP + 7 }, (x, i) =>
+      ({ id: 't' + i, name: 'Trip ' + i, year: 2020, items: [] })) } });
+  const r = H.searchPlan(wide, 'trip');
+  eq(r.hits.length, H.SEARCH_CAP);
+  eq(r.more, 7, 'what was dropped is said, never silent');
+});
+
 group('Undo');
 t('the snapshot ring appends and trims oldest-first', () => {
   eq(H.pushSnapshot([], 'a', 3), ['a']);

@@ -746,6 +746,25 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   pointer-events: none; box-shadow: var(--shadow);
   font-variant-numeric: tabular-nums; }
 #gridTip:not([hidden]) { display: block; }
+
+/* ── Search dialog ─────────────────────────────────────────────────────── */
+#searchDialog { width: min(640px, calc(100% - 32px)); }
+#searchBox { width: 100%; margin-top: 4px; }
+.searchresults { max-height: 50vh; overflow-y: auto; margin-top: 10px; }
+/* A hit is a full-width button so the keyboard reaches it — Tab walks the
+   list, Enter opens. Left-aligned prose, not button chrome. */
+.searchresults .hit { display: block; width: 100%; text-align: left;
+  background: none; border: none; border-bottom: 1px solid var(--border);
+  padding: 8px 10px; cursor: pointer; color: var(--text-primary);
+  font-size: 13px; border-radius: 0; }
+.searchresults .hit:hover, .searchresults .hit:focus-visible {
+  background: var(--accent-bg); }
+.searchresults .hitwhere { font-weight: 600; display: block; }
+.searchresults .hitsnip { display: block; color: var(--text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.searchresults .hittab { display: block; font-size: 11.5px;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em;
+  margin-top: 2px; }
 #helpDialog { max-width: 46ch; }
 .checkset { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 4px 0; }
 .checkset .checkline { font-weight: 400; }
@@ -957,6 +976,7 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
       <option value="175">175%</option>
       <option value="200">200%</option>
     </select>
+    <button class="btn small" id="findBtn" title="Search every year's rows, notes, donations, trips and holdings (⌘K)">⌕ Find</button>
     <!-- Hidden until there is something to undo THIS SITTING — the ring lives
          in memory, so a reload starts it empty and the button stays away. -->
     <button class="btn small" id="undoBtn" hidden title="Put things back the way they were before the last change (⌘Z)">↩ Undo</button>
@@ -1014,6 +1034,17 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 <!-- The budget grid's own tooltip — filled by wireGridTip, aria-hidden because
      it only ever repeats what the cell dialog already offers a reader. -->
 <div id="gridTip" hidden aria-hidden="true"></div>
+
+<!-- ── Search ────────────────────────────────────────────────────────────── -->
+<dialog id="searchDialog" aria-labelledby="searchDialogTitle">
+  <h3 id="searchDialogTitle">Find</h3>
+  <p class="sub">Every year's rows and notes, donations, trips, goals, people, property
+    and holdings. A budget note opens straight into its cell.</p>
+  <label class="sr-only" for="searchBox">Search</label>
+  <input type="text" id="searchBox" autocomplete="off" spellcheck="false"
+    placeholder="At least two characters…">
+  <div id="searchResults" class="searchresults"></div>
+</dialog>
 
 <!-- ── Backup / restore ──────────────────────────────────────────────────── -->
 <dialog id="dataDialog" aria-labelledby="dataDialogTitle">
@@ -4073,6 +4104,8 @@ function summaryCard(y, yr) {
     <div class="addbar">
       <button class="btn small" data-add="sumrow" data-year="${esc(y)}">＋ Add row</button>
       <button class="btn small" data-edit="sumyear" data-year="${esc(y)}">✎ End-of-year figure</button>
+      <button class="btn small" id="csvYearBtn"
+        title="Download ${esc(y)}'s totals as a spreadsheet">⇩ CSV</button>
       <button class="btn small" id="deleteYearBtn"
         title="Remove ${esc(y)} from the app entirely">🗑 Delete ${esc(y)}</button>
     </div>
@@ -4320,6 +4353,8 @@ function gridCard(y, yr) {
       ${!live ? `<button class="btn small" id="toSummaryBtn"
           title="Replace this year's months with its yearly totals — permanent">
           ⇩ Convert to a summary</button>` : ''}
+      <button class="btn small" id="csvYearBtn"
+        title="Download ${esc(y)} as a spreadsheet — raw numbers, one row per line of the grid">⇩ CSV</button>
       <button class="btn small" id="deleteYearBtn"
         title="Remove ${esc(y)} from the app entirely">🗑 Delete ${esc(y)}</button>
       </div>
@@ -8140,7 +8175,9 @@ function renderGiving() {
       Give one a date in <strong>any</strong> year — last year's, next year's — and that
       year gets its own table below, appearing the moment it has something in it and
       going again when it doesn't.</p>
-    ${years.length ? '' : `<div class="addbar"><button class="btn small" data-add="donation"
+    ${years.length ? `<div class="addbar"><button class="btn small" id="csvDonationsBtn"
+      title="Every year's donations in one spreadsheet — the tax-season table">⇩ Export donations as CSV</button></div>`
+      : `<div class="addbar"><button class="btn small" data-add="donation"
       data-year="${new Date().getFullYear()}">＋ Add the first donation</button></div>`}
   </div>` + trend + years.map(donTable).join('');
 }
@@ -8782,7 +8819,13 @@ function wireView(view) {
   if (view === 'goals') { buildGoalChart(); buildHistoryCharts(); }
   if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
   if (view === 'comp') buildCompChart();
-  if (view === 'giving') buildGivingChart();
+  if (view === 'giving') {
+    buildGivingChart();
+    const csvBtn = F('csvDonationsBtn');
+    if (csvBtn) csvBtn.onclick = () =>
+      downloadCsv(`financial-plan-donations-${todayISO()}.csv`,
+        donationsToCsv(state.side.donations));
+  }
   if (view === 'vacations') buildVacationsChart();
   if (view === 'investments') wireInvestments();
   /* LAST, after the charts. A canvas built inside a display:none card sizes
@@ -12073,6 +12116,11 @@ function wireBudget() {
   pinGridHeader();   // a render starts with the header wherever the page is
   wireGridTip();
   /* The phone-sized "Actions" toggle over the grid's admin buttons. */
+  const csvBtn = F('csvYearBtn');
+  if (csvBtn) csvBtn.onclick = () => {
+    const y = activeYearKey();
+    downloadCsv(`financial-plan-${y}.csv`, gridToCsv(state, C[y], y));
+  };
   const actBtn = F('gridActionsBtn');
   if (actBtn) actBtn.onclick = () => {
     const box = F('gridActions');
@@ -12733,6 +12781,238 @@ function downloadBackup() {
   toast('Exported');
 }
 F('exportBtn').onclick = downloadBackup;
+
+/* ── CSV export ─────────────────────────────────────────────────────────────
+   The way OUT to a spreadsheet — the data came IN from one, and an accountant
+   or Excel is where a year's grid or the donations log ends up at tax time.
+   Values go out RAW (12345.67, not $12,345.67): a spreadsheet wants numbers,
+   and currency formatting is its job. */
+
+/* One CSV cell, made safe twice over: quotes doubled inside quotes when the
+   value needs quoting at all, and a TEXT field opening with a formula trigger
+   gets a leading apostrophe — spreadsheet apps execute =SUM(...) on open, and
+   a row name is user text. Numbers skip that guard: a negative amount opens
+   with '-' legitimately. */
+function csvCell(v, isText) {
+  let s = v === null || v === undefined ? '' : String(v);
+  if (isText && /^[=+@\t]/.test(s)) s = "'" + s;
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+/* A year's grid, the shape the screen shows: category rows by section, then
+   the account balances and Total. Computed cells, estimates included — the
+   export is of the year as the app understands it, and a blank month is an
+   empty cell, not a zero. */
+function gridToCsv(st, computed, y) {
+  const yr = st.years[y];
+  if (!yr) return '';
+  if (yr.kind === 'summary') {
+    return [['Row', 'Total'].join(','),
+      ...(yr.categoryTotals || []).map(item =>
+        [csvCell(item.name, true), csvCell(item.total)].join(','))].join('\n');
+  }
+  const months = computed.months;
+  const own = months.filter(m => m.startsWith(y));
+  const lines = [['Section', 'Row', ...months, `${y} total`]
+    .map(h => csvCell(h, true)).join(',')];
+  for (const sec of ['income', 'expense', 'transfer']) {
+    for (const cat of (yr.categories || [])
+      .filter(c2 => (c2.section || 'expense') === sec)) {
+      const cells = months.map(m => computed.cells[`${cat.id}|${m}`]);
+      const total = round2(own.reduce((s2, m) =>
+        s2 + ((computed.cells[`${cat.id}|${m}`] || {}).v || 0), 0));
+      lines.push([csvCell(SECTION_LABEL[sec], true), csvCell(cat.name, true),
+        ...cells.map(cell => csvCell(cell && cell.kind !== 'missing' ? cell.v : '')),
+        csvCell(total)].join(','));
+    }
+  }
+  for (const a of accountsOf(st)) {
+    const vals = months.map(m => computed.balances[`${a.id}|${m}`]);
+    if (vals.every(v => v === undefined)) continue;
+    lines.push([csvCell('Accounts', true), csvCell(a.name, true),
+      ...vals.map(v => csvCell(v === undefined ? '' : v)), ''].join(','));
+  }
+  lines.push([csvCell('Accounts', true), csvCell('Total', true),
+    ...months.map(m => {
+      const v = computed.balances[`total|${m}`];
+      return csvCell(v === undefined ? '' : v);
+    }), ''].join(','));
+  return lines.join('\n');
+}
+
+/* Every donation, every year — the tax-season table. The How/Status/
+   Deductible derivations mirror the Giving tab's own rows exactly. */
+function donationsToCsv(donations) {
+  const lines = [['Year', 'Date', 'Foundation', 'Event', 'Cause', 'Amount',
+    'How', 'Status', 'Deductible'].join(',')];
+  for (const y of Object.keys(donations || {}).sort()) {
+    for (const d of donations[y] || []) {
+      const amount = d.funding || d.grant || d.cash || 0;
+      lines.push([csvCell(y), csvCell(d.date || '', true),
+        csvCell(d.foundation || '', true), csvCell(d.event || '', true),
+        csvCell(d.cause || '', true), csvCell(amount),
+        csvCell(d.funding ? 'Fund deposit' : d.grant ? 'DAF grant' : 'Cash', true),
+        csvCell(d.pending ? 'Planned' : 'Done', true),
+        csvCell(d.funding ? 'Yes' : 'No', true)].join(','));
+    }
+  }
+  return lines.join('\n');
+}
+
+/* The BOM is for Excel, which reads a bare UTF-8 CSV as Latin-1 and mangles
+   the first accented charity name it meets. */
+function downloadCsv(name, csv) {
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  toast('Exported');
+}
+
+/* ── Search ─────────────────────────────────────────────────────────────────
+   Sixteen years of rows, notes, split-part annotations, donations and trips —
+   findable, or the archive is write-only. Pure over state so the matching is
+   pinned by tests; the dialog renders whatever this returns. Two characters
+   minimum (one matches half the plan) and a hard cap, counted so the cap is
+   never silent. */
+const SEARCH_CAP = 80;
+function searchPlan(st, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (q.length < 2) return { hits: [], more: 0 };
+  const hits = [];
+  let dropped = 0;
+  const has = (t) => t && String(t).toLowerCase().includes(q);
+  const push = (r) => { if (hits.length < SEARCH_CAP) hits.push(r); else dropped++; };
+  for (const y of Object.keys(st.years || {}).sort().reverse()) {
+    const yr = st.years[y];
+    if (yr.kind === 'grid') {
+      for (const cat of yr.categories || [])
+        if (has(cat.name) || has(cat.note))
+          push({ view: 'budget', year: y, where: `${cat.name} — ${y} budget row`,
+                 snippet: cat.note || '' });
+      for (const [key, cell] of Object.entries(yr.cells || {})) {
+        if (!cell) continue;
+        const note = [cell.note, ...((cell.parts || []).map(p => p && p.note))]
+          .filter(Boolean).find(has);
+        if (!note) continue;
+        const [id, m] = key.split('|');
+        const cat = (yr.categories || []).find(c2 => c2.id === id);
+        push({ view: 'budget', year: y, where: `${cat ? cat.name : id} · ${monthLabel(m)}`,
+               snippet: note, cell: { type: 'cat', id, m } });
+      }
+      for (const [key, ov] of Object.entries(yr.overrides || {})) {
+        if (!ov || !has(ov.note)) continue;
+        const [id, m] = key.split('|');
+        push({ view: 'budget', year: y,
+               where: `${accountName(st, id) || id} balance · ${monthLabel(m)}`,
+               snippet: ov.note, cell: { type: 'bal', id, m } });
+      }
+      for (const n of yr.extraNotes || [])
+        if (has(n.text) || has(n.where))
+          push({ view: 'budget', year: y, where: n.where || `${y} note`,
+                 snippet: n.text || '' });
+    } else {
+      for (const item of yr.categoryTotals || [])
+        if (has(item.name) || has(item.note))
+          push({ view: 'budget', year: y, where: `${item.name} — ${y} summary`,
+                 snippet: item.note || '' });
+    }
+  }
+  for (const [y, list] of Object.entries((st.side || {}).donations || {}))
+    for (const d of list || [])
+      if ([d.foundation, d.event, d.cause, d.note].some(has))
+        push({ view: 'giving', where: `${d.foundation || 'Donation'} · ${y}`,
+               snippet: [d.event, d.cause].filter(Boolean).join(' · ') });
+  for (const t of ((st.vacations || {}).trips || [])) {
+    if (has(t.name))
+      push({ view: 'vacations', where: `${t.name}${t.year ? ` · ${t.year}` : ''}`,
+             snippet: 'trip' });
+    for (const i of t.items || [])
+      if (has(i.label) || has(i.note))
+        push({ view: 'vacations', where: `${t.name} · ${i.label}`, snippet: i.note || '' });
+  }
+  for (const [y, p] of Object.entries((st.vacations || {}).pto || {}))
+    for (const e of (p && p.entries) || [])
+      if (has(e.name))
+        push({ view: 'vacations', where: `${e.name} — ${y} PTO`, snippet: '' });
+  for (const g of st.goals || [])
+    if (has(g.name) || has(g.note))
+      push({ view: 'goals', where: `${g.name} — goal`, snippet: g.note || '' });
+  for (const p of st.people || [])
+    if (has(p.name) || has(p.note))
+      push({ view: 'household', where: `${p.name} — household`, snippet: p.note || '' });
+  for (const p of ((st.side || {}).property || []))
+    if (has(p.name) || has(p.note))
+      push({ view: 'household', where: `${p.name} — property`, snippet: p.note || '' });
+  for (const a of accountsOf(st))
+    if (has(a.name))
+      push({ view: 'budget', where: `${a.name} — account`, snippet: '' });
+  for (const pf of ((st.side || {}).portfolios || []))
+    for (const h of pf.rows || [])
+      if (has(h.ticker))
+        push({ view: 'investments', where: `${h.ticker} · ${pf.name}`, snippet: '' });
+  for (const a of ((st.side || {}).retirementAccounts || [])) {
+    if (has(a.name))
+      push({ view: 'retirement', where: `${a.name} — retirement account`, snippet: '' });
+    for (const h of a.rows || [])
+      if (has(h.ticker))
+        push({ view: 'retirement', where: `${h.ticker} · ${a.name}`, snippet: '' });
+  }
+  return { hits, more: dropped };
+}
+
+let searchHits = [];
+function renderSearchResults() {
+  const box = F('searchBox'), out = F('searchResults');
+  const { hits, more } = searchPlan(state, box.value);
+  searchHits = hits;
+  out.innerHTML = hits.length
+    ? hits.map((h, i) => `<button type="button" class="hit" data-hit="${i}">
+        <span class="hitwhere">${esc(h.where)}</span>${
+        h.snippet ? `<span class="hitsnip">${esc(String(h.snippet).slice(0, 120))}</span>` : ''}
+        <span class="hittab">${esc(viewLabel(h.view))}${h.year ? ` · ${esc(h.year)}` : ''}</span>
+      </button>`).join('')
+      + (more ? `<p class="sub muted" style="padding:8px 10px">…and ${more} more —
+          narrow the search.</p>` : '')
+    : box.value.trim().length >= 2
+      ? '<p class="sub muted" style="padding:8px 10px">Nothing matches.</p>'
+      : '<p class="sub muted" style="padding:8px 10px">Type at least two characters.</p>';
+}
+function goToSearchHit(h) {
+  F('searchDialog').close();
+  if (!allowedViews().includes(h.view)) return;
+  if (h.year) state.ui.activeYear = h.year;
+  state.ui.activeTab = h.view;
+  save();   // ui-only, so nothing joins the undo ring
+  render();
+  /* A cell hit opens straight into its editor — the note found is the note on
+     screen. Navigation-only in a shared view, where the editor refuses. */
+  if (h.cell && !viewOnly) openCellEditor(h.year, h.cell.type, h.cell.id, h.cell.m);
+}
+F('findBtn').onclick = () => {
+  const dlg = F('searchDialog');
+  dlg.showModal();
+  F('searchBox').value = '';
+  renderSearchResults();
+  F('searchBox').focus();
+};
+F('searchBox').addEventListener('input', renderSearchResults);
+F('searchResults').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-hit]');
+  if (btn && searchHits[+btn.dataset.hit]) goToSearchHit(searchHits[+btn.dataset.hit]);
+});
+document.addEventListener('keydown', (e) => {
+  if ((e.key !== 'k' && e.key !== 'K') || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey)
+    return;
+  const open = document.querySelector('dialog[open]');
+  if (open && open.id !== 'searchDialog') return;
+  e.preventDefault();
+  if (open) open.close();
+  else F('findBtn').onclick();
+});
 
 /* ── Delete everything ──────────────────────────────────────────────────────
    Folded behind "Start again" in the backup dialog and confirmed in a dialog of
@@ -14029,6 +14309,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
+  csvCell, gridToCsv, donationsToCsv, searchPlan, SEARCH_CAP,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,
