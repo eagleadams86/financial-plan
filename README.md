@@ -122,7 +122,11 @@ included — treat those the way you treat the figures.
   retirement accounts, and the Household tab's property at your stated values
   minus anything owed. The giving fund is deliberately left out (that money is
   already given), and a part with nothing recorded shows no tile rather than a
-  $0.00. Then **savings goals** that add up whichever accounts you tick, so
+  $0.00. Money that honestly lives in two places — a brokerage tracked as a
+  budget account *and* as an Investments pane — is counted **once**: the pane's
+  ✎ Edit dialog lets it name the budget account(s) its holdings are, and the
+  total then subtracts that overlap, keeping the pot at what the holdings are
+  worth. Then **savings goals** that add up whichever accounts you tick, so
   splitting an account is a matter of ticking the new ones. Each goal counts
   its accounts up to the target, in full, or only what another goal hasn't
   already claimed. Plus progress, target dates, required monthly saving, and a

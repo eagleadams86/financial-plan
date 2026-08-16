@@ -2150,6 +2150,15 @@ function coerceShape(data) {
     pf.name = String(pf.name || pf.id);
     pf.rows = arr(pf.rows);
     pf.rows.forEach(numHolding);
+    /* Which budget accounts these holdings ARE — the reader's own statement
+       (see the portfolio editor), used by net worth to count the pot once.
+       An id that no longer exists is dropped, the goal-accounts discipline:
+       renaming or splitting an account keeps the pane working while you
+       repoint it. Absent when empty, so it never rides along as clutter. */
+    if (Array.isArray(pf.accounts)) {
+      pf.accounts = pf.accounts.filter(id => acctIds.has(id));
+      if (!pf.accounts.length) delete pf.accounts;
+    } else delete pf.accounts;
   }
   s.daf.forEach(numHolding);
   /* Retirement accounts used to be six fixed fields (k401) with labels from
@@ -3370,7 +3379,11 @@ const HELP = {
       + 'values, minus anything still owed. The giving fund is deliberately left out: that '
       + 'money was given the day it went in, and counting it would inflate the total by '
       + 'dollars that are no longer yours. A part with nothing recorded shows no tile at '
-      + 'all rather than a $0.00 — an empty list and a worthless one are different claims.' },
+      + 'all rather than a $0.00 — an empty list and a worthless one are different claims. '
+      + 'One more rule: an Investments pane can say its holdings ARE a budget account\'s '
+      + 'money (its ✎ Edit dialog). The Liquid and Invested tiles still match their tabs, '
+      + 'but the Total counts that pot once — at what the holdings are worth, since a '
+      + 'priced figure is the better answer to what something is worth today.' },
   savingFor: { title: 'Saving for a Child',
     body: 'Naming the child a goal is for does two things, and only two. It files the goal '
       + 'under them on the Household tab, and — when the target date is still empty — it '
@@ -4395,10 +4408,18 @@ function netWorthParts(st) {
     property: round2(propertyValue - owed), propertyOwed: owed,
     hasProperty: property.length > 0,
     daf: round2(holdingsValue(side.daf || [])), hasDaf: (side.daf || []).length > 0,
+    /* Budget accounts whose money IS some pane's holdings (pf.accounts, the
+       reader's own statement) — the renderer subtracts their computed balances
+       from the total so the pot is counted once, at what the holdings are
+       worth. Only panes that actually hold rows: an empty pane adds nothing,
+       so subtracting its accounts would make real money vanish. */
+    linkedAccounts: [...new Set(portfolios
+      .filter(p => p && (p.rows || []).length && Array.isArray(p.accounts))
+      .flatMap(p => p.accounts))],
   };
 }
 
-function netWorthCard(liquid, cur) {
+function netWorthCard(liquid, cur, c) {
   const nw = netWorthParts(state);
   /* Nothing typed beyond the budget means nothing to add up — the Savings
      Goals card below already carries total liquidity, and a one-tile "net
@@ -4408,15 +4429,31 @@ function netWorthCard(liquid, cur) {
     <div class="label">${label}</div>
     <div class="value">${fmtMoney(value)}</div>
     ${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
+  /* Money a pane has claimed as its holdings (pf.accounts) is in the Liquid
+     figure AND the Invested one — both tiles honestly match their tabs, so
+     the dedupe lives in the TOTAL alone, subtracting the linked accounts'
+     computed balances. The pot then counts once, at what the holdings are
+     worth — the priced figure, which is the net-worth question. */
+  const overlap = round2(nw.linkedAccounts
+    .reduce((s, id) => s + (c.balances[`${id}|${cur}`] || 0), 0));
+  const linkedNames = nw.linkedAccounts
+    .map(id => (accountById(state, id) || {}).name).filter(Boolean);
   const total = round2(liquid + (nw.hasInvested ? nw.invested : 0)
-    + (nw.hasRetirement ? nw.retirement : 0) + (nw.hasProperty ? nw.property : 0));
+    + (nw.hasRetirement ? nw.retirement : 0) + (nw.hasProperty ? nw.property : 0)
+    - overlap);
   return `<div class="card">
     <h2>Net Worth${helpBtn('netWorth', 'what counts toward net worth')}</h2>
     <p class="sub">Everything the plan knows about, added up as of ${esc(monthLabelFull(cur))}.${
+      overlap ? ` ${esc(andList(linkedNames))} ${linkedNames.length === 1 ? 'is' : 'are'}
+      the same money as ${linkedNames.length === 1 ? 'an' : 'their'} Investments pane${
+      linkedNames.length === 1 ? '' : 's'}, so the total counts that pot once — at what
+      the holdings are worth.` : ''}${
       nw.hasDaf ? ` The giving fund's ${fmtMoney(nw.daf)} is not counted — that money is
       already given, and it is waiting on the Giving tab.` : ''}</p>
     <div class="goalgrid">
-      ${tile('Total', total, 'Everything below, added up')}
+      ${tile('Total', total, overlap
+        ? `Everything below, with ${fmtMoney(overlap)} of overlap counted once`
+        : 'Everything below, added up')}
       ${tile('Liquid', liquid, 'The budget grid’s accounts this month')}
       ${nw.hasInvested ? tile('Invested', nw.invested, 'The Investments tab’s holdings') : ''}
       ${nw.hasRetirement ? tile('Retirement', nw.retirement, 'Traditional and Roth together') : ''}
@@ -4442,7 +4479,7 @@ function renderGoals() {
   const totalNow = c.balances[`total|${cur}`] || 0;
   const totalTarget = state.goals.reduce((s, g) => s + (g.target || 0), 0);
   const totalPct = totalTarget ? Math.min(1, totalNow / totalTarget) : 0;
-  const netWorthHtml = netWorthCard(totalNow, cur);
+  const netWorthHtml = netWorthCard(totalNow, cur, c);
 
   /* EOY strip + reno pace, ported from the sheet's side table */
   const decThis = `${liveKey}-12`;
@@ -7268,13 +7305,21 @@ function renderInvestments() {
   ${run && run.limited && runIsToday(run) ? `<p class="sub" style="margin:-6px 0 14px"><strong>Twelve Data
     stopped answering.</strong> The free tier allows 800 lookups a day; the prices already
     fetched are kept. The allowance resets each day.</p>` : ''}`;
-  const panes = (s.portfolios || []).map(pf => `<div class="card" data-box="pf-${esc(pf.id)}">
+  const panes = (s.portfolios || []).map(pf => {
+    /* Said on the pane, not only in the dialog: a link that decides how net
+       worth adds up should be visible where the holdings are. */
+    const linked = (pf.accounts || [])
+      .map(id => (accountById(state, id) || {}).name).filter(Boolean);
+    return `<div class="card" data-box="pf-${esc(pf.id)}">
       <h2>${esc(pf.name)} <button class="h-edit" data-edit="portfolio"
         data-id="${esc(pf.id)}" title="Rename this account, reorder it, or delete it">✎ Edit</button></h2>
       <p class="sub">Value is shares × price.${
-        viewOnly ? '' : ' Type a price over a fetched one any time.'}</p>
+        viewOnly ? '' : ' Type a price over a fetched one any time.'}${
+        linked.length ? ` These holdings are the budget's ${esc(andList(linked))} — the net
+        worth on Progress counts the pot once.` : ''}</p>
       ${holdingsTable(pf.rows, 'pf:' + pf.id)}
-    </div>`).join('');
+    </div>`;
+  }).join('');
   return priceBar
     + (panes ? `<div class="cards2">${panes}</div>`
              : `<div class="card"><div class="empty"><h2>No Investment Accounts Yet</h2>
@@ -10200,18 +10245,46 @@ const EDITORS = {
     sub: (ds, isNew) => isNew
       ? 'A separate pane on the Investments tab — a brokerage, an HSA, a pension pot.'
       : 'Renaming changes only the heading. Deleting takes its holdings with it.',
-    fields: [{ key: 'name', label: 'Name', type: 'text', wide: true }],
-    get: (ds) => ({ name: (state.side.portfolios.find(p => p.id === ds.id) || {}).name }),
+    fields: () => [
+      { key: 'name', label: 'Name', type: 'text', wide: true },
+      /* The same money can honestly live in two places — a brokerage tracked
+         as budget accounts for goals AND as a holdings pane for prices. This
+         is the reader SAYING so, which is what lets net worth count the pot
+         once instead of twice. A statement, never a guess: matching by name
+         would merge a "Cash" pane with a "Cash" account nobody meant. A LIST,
+         the goal-accounts shape, because one real account is often several
+         budget ones — a Fidelity account split into cash, mid- and long-term
+         slices is one reader's actual arrangement. */
+      { key: 'accounts', label: 'These holdings are the budget\'s', type: 'checks', wide: true,
+        options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
+        hint: 'Tick the budget account (or accounts) whose money these holdings ARE, and '
+          + 'the net worth on Progress counts the pot once — at what the holdings are '
+          + 'worth. Tick only what the holdings really cover: a cash slice of the same '
+          + 'real-world account that isn\'t listed here should stay unticked, or its money '
+          + 'would vanish from the total. Leave them all unticked for money the budget '
+          + 'doesn\'t track.' },
+    ],
+    get: (ds) => {
+      const pf = state.side.portfolios.find(p => p.id === ds.id) || {};
+      return { name: pf.name, accounts: pf.accounts || [] };
+    },
     save(ds, v) {
       if (!v.name) return;
+      /* Only real account ids survive — the same discipline coerceShape
+         applies to a restored file. Empty means "its own money" and is stored
+         as nothing at all. */
+      const accounts = (Array.isArray(v.accounts) ? v.accounts : [])
+        .filter(id => accountById(state, id));
       if (ds.id) {
         const pf = state.side.portfolios.find(p => p.id === ds.id);
-        if (pf) pf.name = v.name;
+        if (pf) { pf.name = v.name;
+          if (accounts.length) pf.accounts = accounts; else delete pf.accounts; }
         return;
       }
       let id = slugJs(v.name), n = 2;
       while (state.side.portfolios.some(p => p.id === id)) id = `${slugJs(v.name)}-${n++}`;
-      state.side.portfolios.push({ id, name: v.name, rows: [] });
+      state.side.portfolios.push({ id, name: v.name,
+        ...(accounts.length ? { accounts } : {}), rows: [] });
     },
     del(ds) {
       state.side.portfolios = state.side.portfolios.filter(p => p.id !== ds.id);

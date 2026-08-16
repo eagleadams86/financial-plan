@@ -80,6 +80,16 @@ family names as well as balances.
   and zero are different answers: a missing branch draws no tile, never $0.00.
   SECTION_NEEDS.goals therefore carries those side branches, and a Progress
   link names them in the share dialog.
+  **`pf.accounts` is how a pane says its holdings ARE a budget account's
+  money** — the goal-accounts shape (a ticked LIST, since one real Fidelity
+  account is several budget slices), a statement never a guess, coerced to ids
+  that exist and ABSENT when empty. Net worth's tiles still match their tabs;
+  only the TOTAL subtracts the linked accounts' computed balances, so the pot
+  counts once at the holdings' priced value. `netWorthParts` lists
+  `linkedAccounts` from panes WITH rows only — an empty pane claims nothing,
+  or its accounts' real money would vanish from the total. The link is said
+  out loud in three places: the pane's sub, the Net Worth sub, and the Total
+  tile's foot.
 - **`side.property` is the household's stuff, not an account** — `{name, kind,
   value, owed?, note?}`, kinds from `PROPERTY_KINDS` (above `load()`, the
   temporal-dead-zone rule). Nothing flows through a house: the engine never
