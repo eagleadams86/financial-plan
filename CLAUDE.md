@@ -67,6 +67,53 @@ family names as well as balances.
   re-append the tabs when the order actually differs** — appending blurs the
   element, and doing it every render threw focus away the moment a tab was
   activated by keyboard, killing arrow navigation.
+- **The History tab is GONE and 'goals' wears the name "Progress"** (2026-08-16).
+  The three long-run charts render inside `renderGoals` now, under the goal
+  cards; `buildHistoryCharts` still draws them and kept its name. The view ID
+  stays `goals` — stored tab orders, folded-box keys and share-link section
+  lists all speak it, so renaming the id would orphan all three. `tabOrder()`
+  drops `history` from any stored order on its own; no migration. A NET WORTH
+  strip tops the tab: `netWorthParts(st)` (pure, tested) sums the investment
+  panes, the retirement accounts and the property equity, the renderer adds
+  this month's computed liquid total, and the giving fund is measured but NEVER
+  added — that money is already given. Each part carries `has*` because absent
+  and zero are different answers: a missing branch draws no tile, never $0.00.
+  SECTION_NEEDS.goals therefore carries those side branches, and a Progress
+  link names them in the share dialog.
+- **`side.property` is the household's stuff, not an account** — `{name, kind,
+  value, owed?, note?}`, kinds from `PROPERTY_KINDS` (above `load()`, the
+  temporal-dead-zone rule). Nothing flows through a house: the engine never
+  sees these rows, the Household tab lists them (equity = value − owed) and the
+  net worth counts them. Addressed by INDEX like a retirement account — nothing
+  points at a property row, so there is nothing an index shift could strand.
+  `owed` is deleted when it isn't a number ("paid off" and "never said" render
+  the same, and a stored 0 would be a claim the reader didn't make); `value`
+  and `owed` go through `num()` — several sinks, one class fix.
+- **The Retirement tab draws in two labelled groups** — "Now — Where You Stand"
+  (accounts, holdings, contributions, the two eligibility checks) and "Later —
+  the Projection" (the at-retirement split, the IRA outlook, the pot chart,
+  costs, other income, year by year). `.yearhead` headings inside the
+  `.cards2.pairs` grid, `grid-column: 1/-1` so auto-placement can't slot a card
+  beside one. Grouping and ORDER only — no card changed its markup, so every
+  folded-box key survives.
+- **On a phone (≤700px) the chrome shrinks three ways.** The tab bar stops
+  wrapping and scrolls sideways (render() nudges the active tab into view by
+  RECTANGLE, never offsetLeft, never smoothly — the year strip's rules);
+  `pan-x` there means touch DRAG-reordering is desktop-only, which is the
+  right trade (Alt+arrow still reorders anywhere). The header zoom picker
+  hides (`#zoomSel` — pinch does its job; the exact figure stays in
+  Preferences). And the budget grid's admin buttons fold behind one
+  "⋯ Actions" toggle (`.gridactions-wrap`, removed WHOLE in
+  `stripEditAffordances` — a toggle opening an emptied box is worse than none).
+- **`scrollGridToNow()` runs AFTER `wireBoxes`, and that is not a preference**:
+  folding machinery reparents a card's contents into `.card-body`, and
+  reinserting the gridwrap resets its scroll to 0 — a scroll set in
+  `wireBudget` was silently thrown away (found in testing, the pane showed
+  January). It opens the grid with the current month in view when it is off
+  the visible run — the one cell most phone visits are for — measured with
+  getBoundingClientRect against the wrap (offsetLeft is page-relative here),
+  instant, never smooth. A history year has no `th.now` and a grid that fits
+  whole never scrolls; both fall out of the guards.
 - **The year strip is NOT a second tab bar** (`yearPickerHtml` /
   `wireYearStrip`, replacing the old `<select>`). It picks a year INSIDE the
   Budget, so it must not wear the tabs' clothes: pill instead of rectangle,
@@ -542,7 +589,7 @@ suite passed while the card was wrong.
   derived, never stored: a grid year has begun once today reaches its own
   first month, or once the year before it is entered through December.
   `latestGridYear()` / `startedGridYears()` skip a year that hasn't begun, so
-  Goals, History, Retirement and Comp carry on reading the current year while
+  Progress, Retirement and Comp carry on reading the current year while
   the Budget tab can show next year's projections. `newestGridYear()` includes
   it — that's what the year picker and the Build button use.
 - **A balance is an `actual` once its month is ENTERED, never because the date
@@ -948,7 +995,7 @@ cap tells the reader to come back tomorrow when the fix was to press the button
 again. `run.left` is what the batch never
 reached, so the tab can say how many are still to come rather than leaving a
 bare "5 out of date" reading as a failure.
-All three History charts carry a `.chartkey` under them for the dashed projected
+All three long-run charts (on the Progress tab) carry a `.chartkey` under them for the dashed projected
 outline — the signal was explained only in the prose above the chart, which is
 not where you look when wondering why two bars are drawn differently. Its swatch
 is neutral, not either series colour: the DASH is the meaning.

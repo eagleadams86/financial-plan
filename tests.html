@@ -1496,18 +1496,26 @@ t('a box key survives the year picker and the note count', () => {
   eq(H.boxKey('budget', '2026 Budget'), H.boxKey('budget', '2025 Budget'));
   eq(H.boxKey('budget', 'Notes for 2026 (5)'), H.boxKey('budget', 'Notes for 2025 (12)'));
   eq(H.boxKey('budget', '2026 Budget'), 'budget/budget');
-  eq(H.boxKey('history', 'Money in vs Money Out'), 'history/money-in-vs-money-out');
+  eq(H.boxKey('goals', 'Money in vs Money Out'), 'goals/money-in-vs-money-out');
   eq(H.boxKey('budget', '2026'), 'budget/box', 'a heading of nothing but digits still has a key');
-  eq(H.boxKey('goals', 'Goals') === H.boxKey('history', 'Goals'), false,
+  eq(H.boxKey('goals', 'Goals') === H.boxKey('household', 'Goals'), false,
     'the same heading on two tabs is two boxes');
 });
 
 group('The order of the tabs');
 t('an arrangement is kept, and anything missing is added on the end', () => {
-  eq(H.tabOrder({ tabOrder: ['history', 'giving'] }).slice(0, 2), ['history', 'giving']);
-  eq(H.tabOrder({ tabOrder: ['history', 'giving'] }).length, H.VIEWS.length,
+  eq(H.tabOrder({ tabOrder: ['comp', 'giving'] }).slice(0, 2), ['comp', 'giving']);
+  eq(H.tabOrder({ tabOrder: ['comp', 'giving'] }).length, H.VIEWS.length,
     'a tab left out of a stored order still appears');
-  eq(new Set(H.tabOrder({ tabOrder: ['history'] })).size, H.VIEWS.length, 'each exactly once');
+  eq(new Set(H.tabOrder({ tabOrder: ['comp'] })).size, H.VIEWS.length, 'each exactly once');
+});
+t('an order from before the History merge sheds the dead tab', () => {
+  /* History's charts moved onto Progress (view id 'goals') on 2026-08-16. A
+     stored order naming 'history' is every real plan from before that day —
+     the id must vanish without disturbing the arrangement around it. */
+  const after = H.tabOrder({ tabOrder: ['budget', 'history', 'giving'] });
+  ok(!after.includes('history'), 'the dead id is gone');
+  eq(after.slice(0, 2), ['budget', 'giving'], 'and its neighbours close ranks');
 });
 t('rubbish in a stored order is ignored rather than drawn', () => {
   eq(H.tabOrder({ tabOrder: ['nope', 'budget', 'budget', 42, null] })[0], 'budget');
@@ -1524,7 +1532,7 @@ t('an order saved before the Household tab existed picks it up', () => {
   /* The real upgrade path: someone who had dragged their tabs before this
      version shipped. No migration writes it — tabOrder appends it. */
   const before = ['budget', 'goals', 'retirement', 'comp', 'investments',
-                  'vacations', 'giving', 'history'];
+                  'vacations', 'giving'];
   const after = H.tabOrder({ tabOrder: before });
   ok(after.includes('household'), 'the new tab turns up');
   eq(after.slice(0, 2), ['budget', 'goals'], 'and the arrangement is kept');
@@ -1534,12 +1542,12 @@ t('coerceShape survives a full payload without throwing', () => {
      blank state — the workbook silently comes up empty. A helper it calls that
      is declared later in the file does exactly that, so this pins that the
      whole pass completes. */
-  const d = H.coerceShape({ ui: { tabOrder: ['history'] },
+  const d = H.coerceShape({ ui: { tabOrder: ['giving'] },
     years: { '2026': { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 12,
       categories: [{ id: 'r', name: 'Rent' }], cells: { 'r|2026-01': { v: -100 } } } },
     side: { donations: { '2026': [{ foundation: 'x', cash: -5 }] } } });
   eq(Object.keys(d.years), ['2026'], 'the year is still there');
-  eq(d.ui.tabOrder[0], 'history', 'and the order came through');
+  eq(d.ui.tabOrder[0], 'giving', 'and the order came through');
 });
 
 group('Donations and the giving fund');
@@ -2198,6 +2206,62 @@ t('markup in a year key survives coerceShape as data, not as markup', () => {
   const escaped = evil.replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   eq(escaped.indexOf('<'), -1, 'no angle bracket survives escaping');
+});
+
+group('Property and net worth');
+t('a property row is coerced at the boundary', () => {
+  const d = H.coerceShape({ side: { property: [
+    { name: 'House', kind: 'home', value: '350000', owed: '120000' },
+    { kind: 'submarine', value: 9000 },
+    /* a hand-edited backup can put markup in a number field — num() is the
+       class fix, same as holdings and nights */
+    { name: 'Car', kind: 'vehicle', value: '<img onerror=x>', owed: 'junk' },
+    'not even an object',
+  ] } });
+  eq(d.side.property.length, 3, 'a non-object never arrives');
+  eq(d.side.property[0].value, 350000, 'a string amount becomes a number');
+  eq(d.side.property[0].owed, 120000);
+  eq(d.side.property[1].kind, 'other', 'a kind off the list settles on other');
+  eq(d.side.property[1].name, 'Property', 'a missing name gets one');
+  eq(d.side.property[2].value, 0, 'markup in a value is only ever 0, never markup');
+  eq(d.side.property[2].owed, 0, 'a present but unreadable owed is 0, not poison');
+});
+t('an absent owed stays absent rather than becoming a claim', () => {
+  const d = H.coerceShape({ side: { property: [{ name: 'Boat', kind: 'boat', value: 20000 }] } });
+  eq(d.side.property[0].owed, undefined, '"paid off" and "never said" render the same');
+});
+t('a blank plan has an empty property list', () => {
+  eq(H.blankState().side.property, []);
+  eq(H.coerceShape({}).side.property, []);
+});
+t('net worth sums what is typed and says which parts exist', () => {
+  const st = H.coerceShape({ side: {
+    portfolios: [{ id: 'a', name: 'A', rows: [{ ticker: 'X', shares: 2, price: 10 }] }],
+    retirementAccounts: [{ name: 'IRA', type: 'roth-ira', amount: 1000 },
+      /* holdings outrank the typed amount — retAcctBalance's rule */
+      { name: '401k', type: '401k', amount: 5,
+        rows: [{ ticker: 'Y', shares: 1, price: 500 }] }],
+    property: [{ name: 'House', kind: 'home', value: 300, owed: 120 },
+               { name: 'Car', kind: 'vehicle', value: 50 }],
+    daf: [{ ticker: 'Z', shares: 1, price: 40 }],
+  } });
+  const nw = H.netWorthParts(st);
+  eq(nw.invested, 20);
+  eq(nw.retirement, 1500, 'listed holdings beat the stale typed amount');
+  eq(nw.property, 230, 'equity: value minus owed, across the list');
+  eq(nw.propertyOwed, 120);
+  eq(nw.daf, 40, 'measured so the sub can name it — never added');
+  ok(nw.hasInvested && nw.hasRetirement && nw.hasProperty && nw.hasDaf);
+});
+t('an empty plan has no net-worth parts, not $0 ones', () => {
+  /* coerceShape migrates two NAMED but empty panes into side.portfolios, so
+     `hasInvested` must read the rows, not the pane count — the same trap
+     BRANCH_HAS_DATA already guards for the share dialog. */
+  const nw = H.netWorthParts(H.coerceShape({}));
+  eq(nw.hasInvested, false, 'two empty panes are not an investment');
+  eq(nw.hasRetirement, false);
+  eq(nw.hasProperty, false);
+  eq(nw.hasDaf, false);
 });
 
 group('Investment panes');
@@ -4168,7 +4232,7 @@ t('a finished year is a record right through December', () => {
 });
 
 group('Year lifecycle');
-t('converting a grid to a summary keeps the flows History charts read', () => {
+t('converting a grid to a summary keeps the flows the Progress charts read', () => {
   const s = H.coerceShape(fixtureState());
   const yr = s.years['2030'];
   const flows = (obj) => {
