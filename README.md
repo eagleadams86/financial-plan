@@ -150,7 +150,10 @@ included — treat those the way you treat the figures.
   $0.00. **Record today's figures** turns the strip into history: each press
   states the card's exact figures as a dated snapshot — a deliberate act,
   like pinning a balance; the app never records one on its own — and two or
-  more draw the net-worth-over-time line, with the parts in the hover. A
+  more draw the net-worth-over-time line, with the parts in the hover. The
+  table under it lists each snapshot's parts beside its total, in the same
+  order as the tiles above, and a part a snapshot never stated shows a dash
+  rather than a $0.00. A
   second press the same day restates rather than duplicating, old statements
   can be typed in by hand to backfill the line, and every snapshot is
   clickable to correct or delete. Money that honestly lives in two places — a brokerage tracked as a
