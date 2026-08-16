@@ -45,7 +45,7 @@ included — treat those the way you treat the figures.
   drops out of Total instead of carrying its final balance forward for ever.
   A row that earns interest **names the accounts it earns on**, and any income
   row can be marked as pay so the giving percentages count it. **Interest &
-  dividends** is a line of its own at the foot of Income — what every account
+  Dividends** is a line of its own at the foot of Income — what every account
   earned that month, added together, with the two halves named on hover. It is
   worked out from each account's rates rather than typed, so you correct it on
   the account rather than in the grid, and the Income total counts it: it is

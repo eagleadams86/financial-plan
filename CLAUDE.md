@@ -214,7 +214,7 @@ family names as well as balances.
   exact: an expense is always a row, income is not.
 - **`accountEarnings(c, yr, months)` is the ONE answer to "what did the
   accounts themselves earn?"** — every account's interest and dividends over a
-  run of months. The Budget grid's Interest & dividends row, that row's year
+  run of months. The Budget grid's Interest & Dividends row, that row's year
   column, the Income total that adds it up, the CSV and the savings rate all
   read it, so none of them can disagree about what a year earned. Pure over the
   computed year, and it reads the interest/dividend MAPS rather than walking
