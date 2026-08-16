@@ -7344,6 +7344,83 @@ function wireInvestments() {
 
 /* ═══════════════════════════ Vacations view ═══════════════════════════════ */
 
+/* One record per dated year of trips — the chart's data, pure over state so
+   the tests can pin it. A trip's total is the trip card's own sum (paid +
+   credits + due, credits stored negative); a trip with no year has no bar to
+   stand in and is left to the "—" group below the chart. */
+function vacationYearStats(st) {
+  const byYear = new Map();
+  for (const t of ((st.vacations || {}).trips || [])) {
+    const y = String(t.year || '');
+    if (!/^\d{4}$/.test(y)) continue;
+    const total = round2((t.items || []).reduce((s, i) =>
+      s + (i.paid || 0) + (i.credits || 0) + (i.due || 0), 0));
+    if (!byYear.has(y)) byYear.set(y, { y, total: 0, nights: 0, trips: [] });
+    const rec = byYear.get(y);
+    rec.total = round2(rec.total + total);
+    rec.nights += t.nights || 0;
+    rec.trips.push({ name: t.name || '', total });
+  }
+  return [...byYear.values()].sort((a, b) => a.y.localeCompare(b.y));
+}
+
+/* Trip spending, year by year — the budget spending chart's grammar applied to
+   trips: accent bars, a dashed edge on a year whose figure can still grow (the
+   calendar year and anything after it — trips get booked and bills land), the
+   hovered bar filling solid so a wide tooltip can't misattach, and a dotted
+   neutral average over the FINISHED years only, since a year still forming
+   would drag down the line it is measured against. */
+function buildVacationsChart() {
+  const stats = vacationYearStats(state);
+  if (stats.length < 2) return;   // one year is not a trend — the giving rule
+  const thisYear = todayISO().slice(0, 4);
+  const running = stats.map(s => s.y >= thisYear);
+  const accent = cssVar('--accent'), tick = cssVar('--chart-tick');
+  const finished = stats.filter((s, i) => !running[i] && s.total).map(s => s.total);
+  const avg = finished.length > 1
+    ? round2(finished.reduce((a, b) => a + b, 0) / finished.length) : null;
+  const datasets = [{ type: 'bar', label: 'Trips', order: 2,
+    data: stats.map(s => s.total),
+    backgroundColor: cssVar('--accent-bg'),
+    borderColor: (ctx) => (ctx && running[ctx.dataIndex]) ? 'transparent' : accent,
+    _trueBorder: accent, borderWidth: 2, borderSkipped: false,
+    hoverBackgroundColor: accent, hoverBorderColor: accent, hoverBorderWidth: 2,
+    maxBarThickness: 84 }];
+  if (avg !== null) datasets.push({ type: 'line', order: 1,
+    label: `Average of the finished years (${fmtMoney(avg)})`,
+    data: stats.map(() => avg), borderColor: tick, backgroundColor: 'transparent',
+    borderDash: [2, 4], borderWidth: 2, pointRadius: 0, tension: 0 });
+  newChart('vacChart', {
+    type: 'bar',
+    data: { labels: stats.map(s => s.y), datasets },
+    options: {
+      plugins: {
+        legend: { reverse: true, display: datasets.length > 1, labels: { color: tick } },
+        dashedBarEdge: { projected: running },
+        /* The tooltip breaks the year into its trips — the question a bar
+           raises is "which trips were those". Canvas text, so a trip's name is
+           shown as typed; just trimmed, because a long name would stretch the
+           box across half the plot. */
+        tooltip: { caretSize: 8, callbacks: { label: (t) => {
+          if (t.dataset.type === 'line') return t.dataset.label;
+          const s = stats[t.dataIndex];
+          const trim = (n) => n.length > 36 ? n.slice(0, 35) + '…' : n;
+          return [`Trips: ${fmtMoney(t.parsed.y)}${
+              running[t.dataIndex] ? ' (still forming)' : ''}`,
+            ...(s.trips.length > 1
+              ? s.trips.map(tr => `${trim(tr.name)}: ${fmtMoney(tr.total)}`) : []),
+            ...(s.nights ? [`${s.nights} night${s.nights === 1 ? '' : 's'} away`] : [])];
+        } } },
+      },
+      scales: { x: chartAxes(), y: Object.assign(chartAxes(),
+        { ticks: { color: tick, callback: (v) => fmtMoney0(v) } }) },
+    },
+    plugins: [dashedBarEdge],
+  }, `Trip spending per year: ${stats.map((s, i) =>
+    `${s.y}, ${fmtMoney(s.total)}${running[i] ? ', still forming' : ''}`).join('; ')}.${
+    avg === null ? '' : ` Average of the finished years, ${fmtMoney(avg)}.`}`);
+}
+
 function renderVacations() {
   const ptoYears = Object.keys(state.vacations.pto || {}).sort().reverse();
   /* One row per year, newest first, and within a row the order you arranged
@@ -7429,10 +7506,23 @@ function renderVacations() {
     </div>`;
   };
 
+  /* The card only exists once the chart has something to say — two dated
+     years of trips. buildVacationsChart applies the same gate, so the card
+     and the canvas can never disagree. */
+  const chartCard = vacationYearStats(state).length < 2 ? '' : `<div class="card">
+    <h2>Trip Spending, Year by Year</h2>
+    <p class="sub">Each bar is a year's trips added up — money paid, minus any credits, plus
+      whatever is still due. Hover a bar for the trips inside it.</p>
+    <div class="chartbox" style="height:260px"><canvas id="vacChart"></canvas></div>
+    <p class="chartkey"><i></i> Dashed — a year still going, or trips still being planned:
+      its bar can still grow.</p>
+  </div>`;
+
   return `<div class="addbar" style="margin:0 0 14px">
       <button class="btn small" data-add="trip">＋ Add trip</button>
       <button class="btn small" data-add="ptoYear">＋ Add PTO year</button>
     </div>`
+    + chartCard
     + ptoYears.map(ptoCard).join('')
     + years.map(y => `<h2 class="yearhead">${esc(y)}</h2>
         <div class="triprow">${byYear.get(y).map(tripCard).join('')}</div>`).join('');
@@ -8280,6 +8370,7 @@ function wireView(view) {
   if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
   if (view === 'comp') buildCompChart();
   if (view === 'giving') buildGivingChart();
+  if (view === 'vacations') buildVacationsChart();
   if (view === 'investments') wireInvestments();
   /* LAST, after the charts. A canvas built inside a display:none card sizes
      itself to nothing; drawing them first and folding the box afterwards means
@@ -13374,7 +13465,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
-  netWorthParts, PROPERTY_KINDS,
+  netWorthParts, PROPERTY_KINDS, vacationYearStats,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,

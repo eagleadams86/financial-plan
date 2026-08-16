@@ -292,7 +292,11 @@ included — treat those the way you treat the figures.
   account it is, both keeping up as you type — — fetched and when, typed over a fetched one, or never
   looked up — since the line above the tables can only report the oldest fetch
   across the whole table.
-- **Vacations** — per-trip cost tables grouped into one row per year, newest
+- **Vacations** — a **Trip Spending, Year by Year** chart (once two years have
+  trips): each bar adds a year's trips up — paid, minus credits, plus still
+  due — with the trips themselves broken out in the hover, a dotted average
+  across the finished years, and a dashed edge on a year whose figure can
+  still grow. Under it, per-trip cost tables grouped into one row per year, newest
   first, reorderable within a year. A new trip starts from the lines most trips
   need (airfare, stay, transport, excursions, food, tips, spa) or from nothing,
   your choice. Each line tracks what's paid, what's credited and what's still
