@@ -155,6 +155,25 @@ family names as well as balances.
   says otherwise. Anything else coerceShape reaches for has to obey the same
   rule. It's a `console.warn`, not an error, so a console check filtered to
   errors will not show it.
+- **Undo is an in-memory ring of saved states** (`undoRing`/`undoSnapshot`,
+  cap 20, `pushSnapshot` pure and pinned). save() banks the state it REPLACES
+  unless the save is itself an undo (the `undoing` latch — without it repeated
+  presses oscillate between the last two states instead of walking back), and
+  unless nothing outside `ui` moved (`undoCore`, the state stringified with
+  ui nulled) — tab switches and box folds save too, and without that guard
+  every ⌘Z walked back through navigation before reaching the edit the
+  reader actually regrets. The restored snapshot keeps its full `ui`, which
+  helpfully lands you on the tab where the reverted change lives.
+  No redo, deliberately. finAdopt CLEARS the ring: undoing past another
+  device's adopted changes would clobber them under a newer timestamp. The
+  ring is NEVER persisted — twenty copies of a plan beside the plan is a
+  quota problem and a stale-copy problem. Undone state still passes
+  coerceShape/migrate on the way back in. ⌘Z is gated off inputs and open
+  dialogs (the browser's own undo owns a text box).
+- **`savingsPulse` / `yearIncome`** are the Progress tab's Savings Rate &
+  Runway card — yearIncome mirrors yearSpending exactly (computed cells,
+  netted, summary fallback), and a missing denominator is NULL, never 0: no
+  income has no rate, and no spending is not "0 months of runway".
 - localStorage keys: `fin-state`, `fin-theme`, `fin-updated`, `fin-zoom`. `save()` is the
   single write chokepoint (and where a future sync layer would hook in, SV
   style). `blankState()`/`coerceShape()`/`migrate()` guard every entry point;

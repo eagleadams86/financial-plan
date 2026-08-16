@@ -95,6 +95,13 @@ included — treat those the way you treat the figures.
   arrange; the ↑↓ buttons in a row's editor still work everywhere.) The account
   rows drag too, in their own block — and since accounts are one list rather
   than one per year, that order holds across every year of the plan.
+- **Undo** — every change banks the state it replaced, up to twenty deep, and
+  ⌘Z (or the ↩ Undo button that appears in the header once there is something
+  to undo) walks straight back through them, one honest step at a time. The
+  ring lives in memory for this sitting only — a reload starts fresh — and it
+  clears when another device's changes arrive, since undoing past somebody
+  else's work would overwrite it. There is no redo, on purpose: linear and
+  predictable beats a two-state seesaw.
 - **The tabs are yours to arrange** — drag one anywhere along the bar (with a
   mouse or a finger), or hold Alt and use the arrow keys. The order is saved and
   follows you to your other devices.
@@ -117,7 +124,11 @@ included — treat those the way you treat the figures.
   trip line, a comp year, a goal card, a gathered note) takes a tab stop of its
   own, so Enter or Space opens it without a mouse.
 - **Progress** — where the whole plan stands and where it has been, on one
-  tab. A **net worth strip** across the top adds up everything the plan knows
+  tab. **Savings Rate & Runway** turn the year's totals into the units the
+  questions are asked in: income minus expenses over income (money moved
+  between your own accounts never counts as spending), and liquid savings
+  against a month of expenses — both moving as real numbers land. A **net
+  worth strip** across the top adds up everything the plan knows
   about — this month's liquid total, the Investments tab's holdings, the
   retirement accounts, and the Household tab's property at your stated values
   minus anything owed. The giving fund is deliberately left out (that money is

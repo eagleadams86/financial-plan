@@ -957,6 +957,9 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
       <option value="175">175%</option>
       <option value="200">200%</option>
     </select>
+    <!-- Hidden until there is something to undo THIS SITTING — the ring lives
+         in memory, so a reload starts it empty and the button stays away. -->
+    <button class="btn small" id="undoBtn" hidden title="Put things back the way they were before the last change (⌘Z)">↩ Undo</button>
     <button class="btn small" id="prefsBtn" title="Currency, row order, rates and other app-wide settings">Preferences</button>
     <button class="btn small" id="dataBtn" title="Back up, restore or clear your data">Back up</button>
     <button class="btn small" id="shareBtn" title="Create a read-only link to show someone part of your plan">Share</button>
@@ -2948,13 +2951,75 @@ function load() {
   }
 }
 
+/* ── Undo ───────────────────────────────────────────────────────────────────
+   A ring of the last few SAVED states, in memory only and deliberately so:
+   twenty copies of a plan is megabytes, which has no business in localStorage
+   beside the plan itself, and "undo covers this sitting" is an honest promise
+   where a persisted history would be a second copy of everything waiting to
+   drift. Every save() banks the state it is overwriting; undo pops one, walks
+   the plan back, and saves — which pushes nothing (the `undoing` latch), so
+   repeated presses walk straight back through history instead of oscillating
+   between the last two states. No redo, and that is the trade: linear and
+   predictable beats a two-state seesaw. finAdopt CLEARS the ring — an undo
+   reaching back past another device's changes would clobber them under a
+   newer timestamp. */
+const UNDO_CAP = 20;
+let undoRing = [];
+let undoSnapshot = JSON.stringify(state);   // the state as of the last save/load
+/* The state MINUS `ui` — what decides whether a save is worth banking.
+   Switching tabs and folding boxes save too (they sync on purpose), and
+   without this every ⌘Z had to walk back through navigation before it
+   reached the edit the reader actually regrets. */
+let undoCore = JSON.stringify(Object.assign({}, state, { ui: null }));
+let undoing = false;
+
+/* Pure, pinned by tests: append and trim to the cap, oldest dropped first. */
+function pushSnapshot(ring, snap, cap) {
+  if (!snap) return ring;
+  const out = [...ring, snap];
+  return out.length > cap ? out.slice(out.length - cap) : out;
+}
+
+function updateUndoBtn() {
+  const btn = F('undoBtn');
+  if (btn) btn.hidden = viewOnly || !undoRing.length;
+}
+
+function undoLast() {
+  if (viewOnly || !undoRing.length) return;
+  const snap = undoRing.pop();
+  /* Its own serialization a moment ago — still through the same gate every
+     outside shape passes, because a cheap check here is cheaper than trusting
+     memory over a discipline. */
+  state = migrate(coerceShape(safeParse(snap) || {}));
+  undoing = true;
+  save();
+  undoing = false;
+  render();
+  toast(undoRing.length
+    ? `Put back the way it was — ${undoRing.length} more change${
+        undoRing.length === 1 ? '' : 's'} can be undone`
+    : 'Put back the way it was — that was the oldest change this sitting');
+  updateUndoBtn();
+}
+
 function save() {
   if (viewOnly) return;   // someone else's figures — never write them over your own
+  /* Bank the state this save is REPLACING — except when the save is itself an
+     undo (which must consume history, not mint it), and except when nothing
+     outside `ui` moved: a tab switch is not a change anybody regrets. */
+  const core = JSON.stringify(Object.assign({}, state, { ui: null }));
+  if (!undoing && core !== undoCore) {
+    undoRing = pushSnapshot(undoRing, undoSnapshot, UNDO_CAP);
+    updateUndoBtn();
+  }
+  undoCore = core;
+  undoSnapshot = JSON.stringify(state);
   /* Guarded: Safari's private mode and a full quota both throw here, and an
      unguarded throw would kill the click handler mid-save. The in-memory state
      is still good — warn and carry on. */
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(STORAGE_KEY, undoSnapshot);
     localStorage.setItem(UPDATED_KEY, String(Date.now()));
   } catch (e) {
     console.warn('Could not write saved data', e);
@@ -4581,6 +4646,32 @@ function renderGoals() {
   const totalPct = totalTarget ? Math.min(1, totalNow / totalTarget) : 0;
   const netWorthHtml = netWorthCard(totalNow, cur, c);
 
+  /* Savings rate and runway — this year's flow beside the stocks above it.
+     Skipped entirely on a year with nothing in it: two em-dash tiles would be
+     the card demanding attention before it has anything to say. */
+  const pulse = savingsPulse(yr, c, liveKey, totalNow);
+  const pulseTile = (label, value, foot) => `<div class="goal">
+    <div class="label">${label}</div>
+    <div class="value">${value}</div>
+    ${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
+  const pulseHtml = (pulse.rate === null && pulse.runwayMonths === null) ? '' : `<div class="card">
+    <h2>Savings Rate &amp; Runway</h2>
+    <p class="sub">This year's grid, projected months included — both figures move as real
+      numbers land.</p>
+    <div class="goalgrid">
+      ${pulseTile('Savings rate', pulse.rate === null ? '—'
+          : `${(pulse.rate * 100).toFixed(1)}%`,
+        pulse.rate === null ? 'No income recorded this year'
+          : `Keeping ${fmtMoney(pulse.saved)} of ${fmtMoney(pulse.income)} income — income
+             minus expenses, transfers between your own accounts not counted as spending`)}
+      ${pulseTile('Months of runway', pulse.runwayMonths === null ? '—'
+          : `${pulse.runwayMonths.toFixed(1)} mo`,
+        pulse.runwayMonths === null ? 'No expenses recorded this year'
+          : `${fmtMoney(totalNow)} liquid against ${fmtMoney(round2(pulse.spent / 12))}/mo —
+             this year's Expenses total spread over twelve months`)}
+    </div>
+  </div>`;
+
   /* EOY strip + reno pace, ported from the sheet's side table */
   const decThis = `${liveKey}-12`;
   const eoyThis = c.balances[`total|${decThis}`];
@@ -4659,7 +4750,7 @@ function renderGoals() {
   const projectedKey = `<p class="chartkey"><i></i> Dashed — projected: a year still
     being worked out, or one that hasn't arrived yet.</p>`;
 
-  return `${netWorthHtml}${goalsHtml}
+  return `${netWorthHtml}${pulseHtml}${goalsHtml}
   <div class="cards2">
     <div class="card">
       <h2>Where the Total Is Heading</h2>
@@ -8196,6 +8287,43 @@ function yearSpending(yr, computed, y) {
     if (spending.has(id) && m.startsWith(y)) out += cell.v;
   }
   return round2(-out);
+}
+
+/* The mirror of yearSpending: the income rows alone, netted across the year,
+   off the COMPUTED cells for the same reason. A summary year falls back to
+   everything positive that isn't a balance — the old sheets predate
+   sections, exactly the yearSpending arrangement. */
+function yearIncome(yr, computed, y) {
+  if (yr.kind === 'summary') {
+    let inn = 0;
+    for (const item of yr.categoryTotals || [])
+      if (!item.isBalance && item.total > 0) inn += item.total;
+    return round2(inn);
+  }
+  const cells = (computed && computed.cells) || yr.cells || {};
+  const income = new Set((yr.categories || [])
+    .filter(cat => (cat.section || 'expense') === 'income').map(cat => cat.id));
+  let out = 0;
+  for (const [key, cell] of Object.entries(cells)) {
+    const [id, m] = key.split('|');
+    if (income.has(id) && m.startsWith(y)) out += cell.v;
+  }
+  return round2(out);
+}
+
+/* Savings rate and months of runway — two divisions over figures the grid
+   already computes, which is exactly why they belong on screen: the units
+   the questions are actually asked in. NULL, never 0, when a denominator is
+   missing — a year with no income has no rate, not a rate of nothing. */
+function savingsPulse(yr, computed, y, liquid) {
+  const income = yearIncome(yr, computed, y);
+  const spent = yearSpending(yr, computed, y);
+  return {
+    income, spent,
+    saved: round2(income - spent),
+    rate: income > 0 ? (income - spent) / income : null,
+    runwayMonths: spent > 0 ? round2(liquid / (spent / 12)) : null,
+  };
 }
 
 /* The last month of a year that is a RECORD rather than a projection. Only a
@@ -12819,6 +12947,20 @@ function applyZoom(z) {
 F('zoomSel').onchange = (e) => applyZoom(e.target.value);
 
 F('prefsBtn').onclick = () => openRowEditor('prefs', {}, false);
+F('undoBtn').onclick = () => undoLast();
+/* ⌘Z / Ctrl+Z, everywhere a browser undo isn't already the right answer: not
+   while typing in a field (the browser's own undo owns that), not with a
+   dialog open (half-typed form state is not the app's to discard). */
+document.addEventListener('keydown', (e) => {
+  if ((e.key !== 'z' && e.key !== 'Z') || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey)
+    return;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (document.querySelector('dialog[open]')) return;
+  if (viewOnly || !undoRing.length) return;
+  e.preventDefault();
+  undoLast();
+});
 
 /* Arrow keys move along the tabs and switch view as they go; ALT+arrow drags
    the focused tab along instead, which is the keyboard's way in to the same
@@ -13886,7 +14028,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, KIND_LABEL,
-  allHoldings, gainText, classRollup,
+  allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,
@@ -13929,6 +14071,13 @@ window.finAdopt = (incoming, ts) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     localStorage.setItem(UPDATED_KEY, String(ts || Date.now()));
   } catch (e) { console.warn('Could not write saved data', e); }
+  /* Another device's changes are now the state — an undo reaching back past
+     them would clobber that device's work under a newer timestamp, so the
+     ring starts over from here. */
+  undoRing = [];
+  undoSnapshot = JSON.stringify(state);
+  undoCore = JSON.stringify(Object.assign({}, state, { ui: null }));
+  updateUndoBtn();
   render();
 };
 /* What the "which copy?" dialog counts. People belong here: someone who has

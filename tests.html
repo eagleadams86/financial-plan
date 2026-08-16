@@ -2265,6 +2265,58 @@ t('an empty plan charts nothing', () => {
   eq(H.vacationYearStats(H.coerceShape({})), []);
 });
 
+group('Undo');
+t('the snapshot ring appends and trims oldest-first', () => {
+  eq(H.pushSnapshot([], 'a', 3), ['a']);
+  eq(H.pushSnapshot(['a'], 'b', 3), ['a', 'b']);
+  eq(H.pushSnapshot(['a', 'b', 'c'], 'd', 3), ['b', 'c', 'd'], 'the cap drops the oldest');
+  eq(H.pushSnapshot(['a'], '', 3), ['a'], 'nothing is not a snapshot');
+  eq(H.pushSnapshot(['a'], null, 3), ['a']);
+});
+
+group('Savings rate and runway');
+function pulseFixture() {
+  return {
+    kind: 'grid',
+    categories: [
+      { id: 'pay', name: 'Paycheck', section: 'income' },
+      { id: 'rent', name: 'Rent', section: 'expense' },
+      { id: 'sweep', name: 'To savings', section: 'transfer' },
+    ],
+    cells: {},
+  };
+}
+t('the rate is income minus expenses, transfers left out', () => {
+  const yr = pulseFixture();
+  const computed = { cells: {
+    'pay|2026-01': { v: 5000 }, 'pay|2026-02': { v: 5000 },
+    'rent|2026-01': { v: -2000 }, 'rent|2026-02': { v: -1500 },
+    /* a refund nets against the year, the yearSpending rule */
+    'rent|2026-03': { v: 500 },
+    'sweep|2026-01': { v: -4000 },
+  } };
+  eq(H.yearIncome(yr, computed, '2026'), 10000);
+  const p = H.savingsPulse(yr, computed, '2026', 30000);
+  eq(p.spent, 3000, 'netted expenses, the sweep nowhere in them');
+  eq(p.saved, 7000);
+  eq(p.rate, 0.7);
+  eq(p.runwayMonths, 120, '30k liquid against 250/mo');
+});
+t('a missing denominator is null, never a confident zero', () => {
+  const yr = pulseFixture();
+  const p = H.savingsPulse(yr, { cells: {} }, '2026', 30000);
+  eq(p.rate, null, 'no income has no rate — not a rate of nothing');
+  eq(p.runwayMonths, null, 'no spending is infinite runway, which is not a number to show');
+});
+t('a summary year reads its flow totals', () => {
+  const yr = { kind: 'summary', categoryTotals: [
+    { name: 'Income', total: 40000 },
+    { name: 'Spent', total: -30000 },
+    { name: 'Checking', total: 5000, isBalance: true },
+  ] };
+  eq(H.yearIncome(yr, null, '2015'), 40000, 'balances stay out of income');
+});
+
 group('Cost basis and the holdings rollup');
 t('a cost basis is coerced like the fields beside it', () => {
   const d = H.coerceShape({ side: { portfolios: [{ id: 'a', name: 'A', rows: [
