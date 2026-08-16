@@ -36,20 +36,28 @@ def live_year_key(state):
 def strip_future_months(state):
     """Cut the live grid back to its own twelve months.
 
-    Every stored cell belonging to a later year goes, and monthCount comes down
-    to 12, so the grid ends at December. Returns (year key, cells removed,
-    previous month count).
+    Every stored figure belonging to a later year goes — cells, and the typed
+    balance overrides/adjustments beside them (statedAfter and the same-name
+    merge still read those maps, so an orphan past December is not inert) —
+    and monthCount comes down to 12, so the grid ends at December. Returns
+    (year key, entries removed, previous month count).
     """
     key = live_year_key(state)
     if not key:
         return None, 0, 0
     yr = state["years"][key]
-    doomed = [k for k in yr["cells"] if k.split("|")[1][:4] > key]
-    for k in doomed:
-        del yr["cells"][k]
+    removed = 0
+    for field in ("cells", "overrides", "balAdjust"):
+        table = yr.get(field)
+        if not isinstance(table, dict):
+            continue
+        doomed = [k for k in table if k.split("|")[1][:4] > key]
+        for k in doomed:
+            del table[k]
+        removed += len(doomed)
     was = yr.get("monthCount", 12)
     yr["monthCount"] = 12
-    return key, len(doomed), was
+    return key, removed, was
 
 
 def main(argv):
@@ -64,8 +72,8 @@ def main(argv):
     if key:
         kept = sum(1 for m in state["years"][key].get("paychecks", {})
                    if m[:4] > key)
-        print(f"{key}: removed {removed} cell(s) beyond {key} and shortened the grid "
-              f"from {was} months to 12")
+        print(f"{key}: removed {removed} stored figure(s) beyond {key} and shortened "
+              f"the grid from {was} months to 12")
         print(f"  Kept {kept} paycheck count(s) for next year — the rollover picks "
               f"them up when you press \u2295 Start {int(key) + 1}.")
         # A row with no rule now has nothing to say about next year. Name those

@@ -194,6 +194,10 @@ def slug(name):
 
 
 def round2(v):
+    # Python's round() is banker's rounding; the app's JS round2 rounds half
+    # away from zero, so the two can differ at an exact half-cent (2.675 →
+    # 2.67 here, 2.68 there). The tests compare with an epsilon, so this only
+    # matters if the output is ever diffed exactly.
     return round(v + 0.0, 2)
 
 

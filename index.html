@@ -72,6 +72,18 @@
     var z = Math.round(Number(localStorage.getItem('fin-zoom')));
     if (z >= 50 && z <= 200 && z !== 100) document.documentElement.style.zoom = z + '%';
   } catch (e) {}
+  /* Frame-buster. GitHub Pages can't send frame-ancestors (a meta CSP ignores
+     it), so any origin could iframe this page and redress the reader's own
+     figures. The ONE legitimate framer is tests.html: same-origin, so its
+     frameElement is readable and carries data-fin-tests. A cross-origin
+     framer makes window.frameElement null and top.location assignable —
+     navigating the top window away is the only counter a page can mount. */
+  try {
+    if (window.top !== window.self &&
+        !(window.frameElement && window.frameElement.hasAttribute('data-fin-tests'))) {
+      window.top.location = window.self.location;
+    }
+  } catch (e) { document.documentElement.style.display = 'none'; }
 </script>
 <link rel="stylesheet" href="theme.css">
 <!-- Vendored Chart.js (minified UMD build) — third-party library, do not hand-edit. -->
@@ -510,11 +522,14 @@ tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
 .taxyear + .taxyear { margin-top: 18px; padding-top: 16px;
   border-top: 1px solid var(--border); }
 .taxyear h3 { margin: 0 0 4px; font-size: 15px; }
-/* Small inline edit button beside a card heading (trip name, PTO year…) */
+/* Small inline edit button beside a card heading (trip name, PTO year…).
+   Visually ~20px tall, under the 24px target floor — the invisible hit-area
+   inflater is .tile-help's trick, and keeps the heading line compact. */
 .h-edit { margin-left: 8px; padding: 1px 8px; font-size: 12px;
   background: var(--bg-card-alt); color: var(--text-secondary);
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-  cursor: pointer; vertical-align: 2px; }
+  cursor: pointer; vertical-align: 2px; position: relative; }
+.h-edit::after { content: ''; position: absolute; inset: -4px; }
 .h-edit:hover { color: var(--text-primary); border-color: var(--text-muted); }
 .warn { color: var(--err); font-size: 13px; margin-top: 10px; }
 .warn:empty { display: none; }
@@ -669,6 +684,10 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .grid td.c-auto { font-style: italic; color: var(--text-secondary);
   text-decoration: underline dotted; text-underline-offset: 3px; }
 .grid td.c-missing { color: var(--text-hint); }
+/* On the current-month column's --accent-bg fill, hint (and muted) fall under
+   AA in three of the four themes; secondary is the one token that clears it
+   everywhere. Same information, same quietness rank, readable fill. */
+.grid td.now.c-missing { color: var(--text-secondary); }
 .grid td.c-pinned { font-weight: 600; }
 /* A month split into parts that disagree — some spent, some still estimated.
    A third line style, not a third colour. */
@@ -762,8 +781,11 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 .searchresults .hitwhere { font-weight: 600; display: block; }
 .searchresults .hitsnip { display: block; color: var(--text-secondary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.searchresults .hittab { display: block; font-size: 11.5px;
-  color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em;
+/* --text-secondary, not muted: this line sits on --accent-bg when the hit is
+   hovered or focused, and muted fails AA there (4.15 Midnight, 3.62 Dark).
+   12px is also the pack's floor for quiet text — 11.5 was under it. */
+.searchresults .hittab { display: block; font-size: var(--fs-sm);
+  color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em;
   margin-top: 2px; }
 #helpDialog { max-width: 46ch; }
 .checkset { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 4px 0; }
@@ -976,10 +998,10 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
       <option value="175">175%</option>
       <option value="200">200%</option>
     </select>
-    <button class="btn small" id="findBtn" title="Search every year's rows, notes, donations, trips and holdings (⌘K)">⌕ Find</button>
+    <button class="btn small" id="findBtn" title="Search every year's rows, notes, donations, trips and holdings (⌘K / Ctrl+K)">⌕ Find</button>
     <!-- Hidden until there is something to undo THIS SITTING — the ring lives
          in memory, so a reload starts it empty and the button stays away. -->
-    <button class="btn small" id="undoBtn" hidden title="Put things back the way they were before the last change (⌘Z)">↩ Undo</button>
+    <button class="btn small" id="undoBtn" hidden title="Put things back the way they were before the last change (⌘Z / Ctrl+Z)">↩ Undo</button>
     <button class="btn small" id="prefsBtn" title="Currency, row order, rates and other app-wide settings">Preferences</button>
     <button class="btn small" id="dataBtn" title="Back up, restore or clear your data">Back up</button>
     <button class="btn small" id="shareBtn" title="Create a read-only link to show someone part of your plan">Share</button>
@@ -1043,6 +1065,9 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   <label class="sr-only" for="searchBox">Search</label>
   <input type="text" id="searchBox" autocomplete="off" spellcheck="false"
     placeholder="At least two characters…">
+  <!-- The COUNT is the live region, not the list: a screen reader hears
+       "12 results" per keystroke rather than the whole list re-read. -->
+  <span id="searchCount" class="sr-only" role="status"></span>
   <div id="searchResults" class="searchresults"></div>
 </dialog>
 
@@ -1184,8 +1209,10 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
     <div class="row spread" style="margin-top:18px">
       <div class="row">
         <button type="button" class="btn" id="rowDeleteBtn" hidden>🗑 Delete</button>
-        <button type="button" class="btn" id="rowUpBtn" hidden title="Move up">↑</button>
-        <button type="button" class="btn" id="rowDownBtn" hidden title="Move down">↓</button>
+        <button type="button" class="btn" id="rowUpBtn" hidden title="Move up"
+          aria-label="Move up">↑</button>
+        <button type="button" class="btn" id="rowDownBtn" hidden title="Move down"
+          aria-label="Move down">↓</button>
       </div>
       <div class="row">
         <button type="button" class="btn" id="rowCancelBtn">Cancel</button>
@@ -2147,6 +2174,48 @@ function coerceShape(data) {
       yr.extraNotes = Array.isArray(yr.extraNotes) ? yr.extraNotes : [];
       yr.monthCount = Math.max(1, Math.min(36, +yr.monthCount || 12));
       if (!/^\d{4}-\d{2}$/.test(yr.startMonth || '')) yr.startMonth = `${y}-01`;
+      /* A live year MUST carry enteredThrough: gridCard does
+         monthAdd(yr.enteredThrough, 1) unguarded, and a truncated backup
+         without it would throw inside render() — the empty-workbook failure
+         this function exists to prevent. The month before the year starts
+         means "nothing entered yet", which is what a blank year says. */
+      if (yr.model === 'live' && !/^\d{4}-\d{2}$/.test(yr.enteredThrough || ''))
+        yr.enteredThrough = monthAdd(yr.startMonth, -1);
+      /* The grid's own figures get the same treatment as every other money
+         map. Shapes were forced above; this forces the VALUES: cells, seeds,
+         overrides and paychecks reach the engine verbatim, and one string of
+         markup in a hand-edited backup would otherwise ride into the page raw
+         and turn every balance downstream into NaN. (balAdjust needs no pass —
+         its sink already type-checks each field.) */
+      for (const [k, cell] of Object.entries(yr.cells)) {
+        if (!cell || typeof cell !== 'object') { delete yr.cells[k]; continue; }
+        const cv = num(cell.v);
+        cell.v = typeof cv === 'number' ? cv : 0;
+        if (!['actual', 'manual', 'mixed'].includes(cell.kind)) cell.kind = 'actual';
+        if (Array.isArray(cell.parts)) {
+          cell.parts = cell.parts.filter(p => p && typeof p === 'object');
+          for (const p of cell.parts) {
+            const pv = num(p.v);
+            p.v = typeof pv === 'number' ? pv : 0;
+          }
+        } else delete cell.parts;
+      }
+      for (const [k, v] of Object.entries(yr.seeds)) {
+        const n = num(v);
+        if (typeof n === 'number') yr.seeds[k] = n; else delete yr.seeds[k];
+      }
+      for (const [k, ov] of Object.entries(yr.overrides)) {
+        /* Read STRICTLY (rateOrNone), not through num(): an override PINS a
+           balance, and num would turn a corrupt field into a deliberate-
+           looking $0 statement. One that states no figure states nothing —
+           dropped, the same way the balance editor deletes a cleared one. */
+        const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
+        if (typeof n === 'number') ov.v = n; else delete yr.overrides[k];
+      }
+      for (const [m, v] of Object.entries(yr.paychecks)) {
+        const n = num(v);
+        if (typeof n === 'number') yr.paychecks[m] = n; else delete yr.paychecks[m];
+      }
       /* Rows classify into Income / Expenses / Transfers sections. Data from
          before sections existed gets a one-time guess here — transfer roles
          by role, everything else by the sign of what's stored — which sticks
@@ -2904,11 +2973,24 @@ function mergeAccountsByName(st) {
       if (ids.has(a.divTo)) a.divTo = survivor.id;
     }
     for (const [, yr] of years)
-      for (const c of (yr.categories || []))
+      for (const c of (yr.categories || [])) {
         if (ids.has(c.transferTo)) c.transferTo = survivor.id;
+        /* A dividends row's earning list names accounts too. coerceShape
+           FILTERS dangling ids from this list on the next load, so a missed
+           rewrite here doesn't dangle — it silently stops the row earning on
+           the absorbed account, which is worse: nothing ever says so. */
+        if (Array.isArray(c.accounts))
+          c.accounts = [...new Set(c.accounts.map(id => ids.has(id) ? survivor.id : id))];
+      }
     for (const g of (st.goals || []))
       if (Array.isArray(g.accounts))
         g.accounts = [...new Set(g.accounts.map(id => ids.has(id) ? survivor.id : id))];
+    /* The net-worth link: a pane saying its holdings ARE these accounts'
+       money. Same stakes as the dividends list — coerceShape deletes dangling
+       ids here, and a deleted link makes the Total count the pot twice. */
+    for (const pf of ((st.side || {}).portfolios || []))
+      if (Array.isArray(pf.accounts))
+        pf.accounts = [...new Set(pf.accounts.map(id => ids.has(id) ? survivor.id : id))];
 
     /* The merged account began when the EARLIEST of them did. A member with no
        `since` was there from the start, which outranks any date. `hub` carries
@@ -3020,8 +3102,10 @@ let undoSnapshot = JSON.stringify(state);   // the state as of the last save/loa
 /* The state MINUS `ui` — what decides whether a save is worth banking.
    Switching tabs and folding boxes save too (they sync on purpose), and
    without this every ⌘Z had to walk back through navigation before it
-   reached the edit the reader actually regrets. */
-let undoCore = JSON.stringify(Object.assign({}, state, { ui: null }));
+   reached the edit the reader actually regrets. Pure and pinned: coreOf is
+   the ONE serialization the bank decision reads. */
+function coreOf(st) { return JSON.stringify(Object.assign({}, st, { ui: null })); }
+let undoCore = coreOf(state);
 let undoing = false;
 
 /* Pure, pinned by tests: append and trim to the cap, oldest dropped first. */
@@ -3029,6 +3113,14 @@ function pushSnapshot(ring, snap, cap) {
   if (!snap) return ring;
   const out = [...ring, snap];
   return out.length > cap ? out.slice(out.length - cap) : out;
+}
+
+/* Whether THIS save mints history — pure and pinned, because both halves are
+   load-bearing: an undo must consume history rather than mint it (or repeated
+   presses oscillate between the last two states), and a ui-only save must
+   bank nothing (or ⌘Z walks back through navigation before the real edit). */
+function undoBankable(coreNow, corePrev, isUndoing) {
+  return !isUndoing && coreNow !== corePrev;
 }
 
 function updateUndoBtn() {
@@ -3059,8 +3151,8 @@ function save() {
   /* Bank the state this save is REPLACING — except when the save is itself an
      undo (which must consume history, not mint it), and except when nothing
      outside `ui` moved: a tab switch is not a change anybody regrets. */
-  const core = JSON.stringify(Object.assign({}, state, { ui: null }));
-  if (!undoing && core !== undoCore) {
+  const core = coreOf(state);
+  if (undoBankable(core, undoCore, undoing)) {
     undoRing = pushSnapshot(undoRing, undoSnapshot, UNDO_CAP);
     updateUndoBtn();
   }
@@ -3490,9 +3582,10 @@ function computeYear(st, yearKey, prior) {
 }
 
 /* Every grid year, oldest first, each handed the previous one for the
-   look-a-year-back rules. The date is still in the signature — every caller
-   passes one and the goal figures downstream need it — but the grid no longer
-   asks what day it is. */
+   look-a-year-back rules. `todayIso` is DELIBERATELY unread — the engine
+   reads the entered marker, never the clock — but it stays in the signature
+   so call sites and tests keep passing an injected date rather than
+   rediscovering Date the day someone thinks the engine needs one. */
 function computeAll(st, todayIso) {
   const out = {};
   let prior = null;
@@ -4102,7 +4195,9 @@ function summaryCard(y, yr) {
   const line = (i) => {
     const idx = yr.categoryTotals.indexOf(i);
     if (!i.name && !i.total) return `<div class="rowline" data-edit="sumrow"
-      data-year="${esc(y)}" data-idx="${idx}" style="cursor:pointer;height:14px;border-bottom:none"></div>`;
+      data-year="${esc(y)}" data-idx="${idx}" role="button"
+      aria-label="Empty line — press Enter to fill it in"
+      style="cursor:pointer;height:14px;border-bottom:none"></div>`;
     return `<div class="rowline" data-edit="sumrow" data-year="${esc(y)}"
       data-idx="${idx}" style="cursor:pointer" title="Click to edit"><span>${esc(i.name)}${
       i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''
@@ -4667,6 +4762,17 @@ function snapshotPoints(st) {
         : round2(['liquid', 'invested', 'retirement', 'property']
             .reduce((s, k) => s + (typeof r[k] === 'number' ? r[k] : 0), 0)) }))
     .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/* A second record the same day RESTATES rather than duplicating — two worths
+   for one date is not a history, it is a smudge. Pure and pinned: the Record
+   button writes permanent history through this, so the rule must not drift.
+   Returns whether it replaced, which the button's toast reads. */
+function upsertSnapshot(list, snap) {
+  const at = list.findIndex(s => s.date === snap.date);
+  if (at >= 0) { list[at] = snap; return true; }
+  list.push(snap);
+  return false;
 }
 
 function netWorthCard(liquid, cur, c) {
@@ -6995,9 +7101,14 @@ function retirementSplit(st, thisYear) {
   if (!at) return { at: null, now, then: null };
   const stopYear = +at.slice(0, 4);
   const bal = pots.map(p => p.balance);
+  /* Rounded per pot per year EXACTLY as drawdownYears does (growth to the
+     cent, then the new balance to the cent) — the two walk the same years and
+     this total must equal the pot the chart draws, which unrounded
+     compounding lets drift by cents over a long horizon. */
   for (let y = thisYear + 1; y <= stopYear; y++)
     for (let j = 0; j < pots.length; j++)
-      bal[j] = bal[j] * (1 + pots[j].rate) + (pots[j].contribs[String(y)] || 0);
+      bal[j] = round2(bal[j] + round2(bal[j] * pots[j].rate)
+        + (pots[j].contribs[String(y)] || 0));
   const sumThen = (kind) => round2(pots
     .reduce((t, p, j) => t + (p.kind === kind ? bal[j] : 0), 0));
   const then = { traditional: sumThen('traditional'), roth: sumThen('roth') };
@@ -8460,7 +8571,11 @@ function savingsPulse(yr, computed, y, liquid) {
     income, spent,
     saved: round2(income - spent),
     rate: income > 0 ? (income - spent) / income : null,
-    runwayMonths: spent > 0 ? round2(liquid / (spent / 12)) : null,
+    /* BOTH inputs can be missing: no spending is not "0 months", and no
+       liquid figure is not NaN months — null is the only honest answer to
+       either absence. */
+    runwayMonths: spent > 0 && typeof liquid === 'number'
+      ? round2(liquid / (spent / 12)) : null,
   };
 }
 
@@ -8931,12 +9046,7 @@ function wireView(view) {
       if (nw.hasInvested) snap.invested = nw.invested;
       if (nw.hasRetirement) snap.retirement = nw.retirement;
       if (nw.hasProperty) snap.property = nw.property;
-      /* A second press the same day RESTATES rather than duplicating — two
-         worths for one date is not a history, it is a smudge. */
-      const at = state.side.snapshots.findIndex(s2 => s2.date === snap.date);
-      const replaced = at >= 0;
-      if (replaced) state.side.snapshots[at] = snap;
-      else state.side.snapshots.push(snap);
+      const replaced = upsertSnapshot(state.side.snapshots, snap);
       save(); render();
       toast(replaced ? `Restated today's snapshot — ${fmtMoney(total)}`
         : `Recorded ${fmtMoney(total)} as of today`);
@@ -9491,6 +9601,11 @@ async function refreshPrices(quiet, only) {
      giving up on a ticker and coming back to it. */
   const run = { at: Date.now(), updated: [], missing: [], limited: false,
                 throttled: false, failed: false, badKey: false, left: [] };
+  /* THIS run's determinate answers. `priceAutoTried` is page-lifetime and
+     serves a different question (should the automatic pass ask again) — using
+     it for `left` under-counted: a ticker an earlier run had answered was
+     dropped from the tally even when this run's loop broke before reaching it. */
+  const attempted = new Set();
   try {
     for (const ticker of want) {
       const url = 'https://api.twelvedata.com/quote'
@@ -9515,6 +9630,7 @@ async function refreshPrices(quiet, only) {
          difference between "there is no price for this" and "we weren't
          answered just then". */
       priceAutoTried.add(ticker);
+      attempted.add(ticker);
       if (verdict.kind === 'noQuote') {
         run.missing.push(ticker);
         /* Recorded, not merely reported — see noQuoteFresh. This is the line
@@ -9544,7 +9660,7 @@ async function refreshPrices(quiet, only) {
   /* Whatever the loop never reached — recorded so the tab can say how many are
      still to come, rather than leaving a bare "5 out of date" to be read as a
      failure. */
-  run.left = want.filter(t => !priceAutoTried.has(t));
+  run.left = want.filter(t => !attempted.has(t));
   /* A run cut short holds the automatic pass off for a minute so it can't loop
      on the render below. The manual button ignores this and retries at once. */
   if (run.throttled || run.limited || run.failed || run.badKey)
@@ -9621,9 +9737,10 @@ function buildFields(fields, values, link) {
     const label = document.createElement('label');
     label.className = 'field';
     label.textContent = f.label;
-    /* A readout is a <p>, which `for` cannot point at — it names its own label
-       with aria-labelledby instead, the way `checks` does with its group. */
-    if (f.type !== 'readout') label.htmlFor = `rf-${f.key}`;
+    /* A readout is a <p> and a checks group is a <div> — `for` cannot point
+       at either, so both name their own label with aria-labelledby instead;
+       a dangling htmlFor would be a lie for AT to trip on. */
+    if (f.type !== 'readout' && f.type !== 'checks') label.htmlFor = `rf-${f.key}`;
     label.id = `rf-${f.key}-lbl`;
     cell.appendChild(label);
     let input;
@@ -9918,6 +10035,7 @@ F('rowForm').onsubmit = () => {
   const { section, ds, spec } = rowCtx;
   const said = EDITORS[section].save(ds, readFields(spec));
   save(); render();
+  refocusEditRow(rowCtx);
   if (typeof said === 'string') toast(said);
 };
 F('rowCancelBtn').onclick = () => rowDialog.close();
@@ -10366,7 +10484,10 @@ const EDITORS = {
         state.settings.filingStatus = v.filingStatus;
       if (personById(state, v.compPerson)?.role === 'adult')
         state.settings.compPerson = v.compPerson;
-      if (v.ptoAllowance) state.settings.ptoAllowance = v.ptoAllowance;
+      /* A typed 0 is a real answer (no PTO) and must stick; only an EMPTY box
+         means "leave it alone" — the zoom rule below, for the same reason. */
+      if (v.ptoAllowance !== null && v.ptoAllowance !== undefined)
+        state.settings.ptoAllowance = v.ptoAllowance;
       state.settings.rowSort = v.rowSort === 'alpha' ? 'alpha' : 'manual';
       state.settings.paycheckRule = !!v.paycheckRule;
       state.settings.givingFund = !!v.givingFund;
@@ -10569,7 +10690,13 @@ const EDITORS = {
         }
       }
       state.settings.accounts = state.settings.accounts.filter(x => x.id !== a.id);
-      for (const x of state.settings.accounts) if (x.creditTo === a.id) x.creditTo = x.id;
+      /* Both destinations an account can name — coerceShape heals a dangling
+         divTo on the next load anyway, but until then the session's dividends
+         would sweep into a deleted account. Same concept, same line. */
+      for (const x of state.settings.accounts) {
+        if (x.creditTo === a.id) x.creditTo = x.id;
+        if (x.divTo === a.id) x.divTo = x.id;
+      }
       for (const y of yearKeys()) {
         const yr = state.years[y];
         if (yr.kind !== 'grid') continue;
@@ -11193,8 +11320,23 @@ const EDITORS = {
       if (owner) row.owner = owner;
       if (old) list[+ds.idx] = row; else list.push(row);
     },
-    del: (ds) => state.side.retirementAccounts.splice(+ds.idx, 1),
-    move: (ds, dir) => listSwap(state.side.retirementAccounts, +ds.idx, dir),
+    /* Deleting or reordering shifts indexes, and the holdings panes' folded
+       state is keyed `ra-<index>` — the same trap foldAccounts hit, where a
+       stored key quietly folds a DIFFERENT account's pane on every device.
+       A delete drops the keys (foldAccounts' rule: springing open is the
+       harmless direction); a swap only exchanges two indexes, so those two
+       keys are remapped and every other fold survives. */
+    del: (ds) => {
+      state.side.retirementAccounts.splice(+ds.idx, 1);
+      state.ui.collapsed = (state.ui.collapsed || []).filter(k => !/\/ra-\d+$/.test(k));
+    },
+    move: (ds, dir) => {
+      const i = +ds.idx, j = i + dir;
+      if (!listSwap(state.side.retirementAccounts, i, dir)) return;
+      state.ui.collapsed = (state.ui.collapsed || []).map(k =>
+        k.replace(/\/ra-(\d+)$/, (whole, n) =>
+          +n === i ? `/ra-${j}` : +n === j ? `/ra-${i}` : whole));
+    },
   },
 
   /* One contribution type inside one account — a rollover, a Roth deferral, an
@@ -11750,7 +11892,13 @@ const EDITORS = {
       if (!v.year) return;
       if (ds.key !== undefined && String(v.year) !== ds.key)
         delete state.side[ds.map][ds.key];
-      state.side[ds.map][String(v.year)] = v.amount ?? 0;
+      /* The comp editor's Bonus box and this row are two doors onto the same
+         figure, and they must answer an emptied box the same way: an empty
+         box REMOVES the row ("never said"), while a typed 0 is kept as a
+         statement. Storing 0 here minted a $0 bonus the reader never claimed. */
+      if (v.amount === null || v.amount === undefined)
+        delete state.side[ds.map][String(v.year)];
+      else state.side[ds.map][String(v.year)] = v.amount;
     },
     del: (ds) => { delete state.side[ds.map][ds.key]; },
   },
@@ -12012,6 +12160,13 @@ const EDITORS = {
       if (!v.year) return;
       const y = String(v.year);
       const old = ds.year && state.vacations.pto[ds.year];
+      /* Renumbering (or adding) onto a year that already exists would replace
+         that year's entries wholesale — REFUSE and say why, the standing
+         discipline (contrib.save and donation.save move without clobbering
+         for the same reason). Same-year saves fall through: that's an
+         allowance edit. */
+      if (y !== String(ds.year || '') && state.vacations.pto[y])
+        return `${y} already has its own PTO list — nothing was changed. Open that year to edit it, or delete one of the two.`;
       if (old && y !== ds.year) delete state.vacations.pto[ds.year];
       state.vacations.pto[y] = { allowance: v.allowance ?? state.settings.ptoAllowance,
         entries: old ? old.entries : [] };
@@ -12379,6 +12534,42 @@ function wireGridKeys(grid) {
   });
 }
 
+/* After a save re-renders, the element that opened the dialog is a DEAD node:
+   the native <dialog> focus-return lands on it, falls through to <body>, and
+   wireGridKeys has re-armed the roving tabindex at cell 0 — so a keyboard
+   reader entering a month of figures tabbed back from the top of the page
+   after every save. The tab bar and the year strip both hit this exact trap
+   (see yearKeyMove); this is their hand-back, for the grid. */
+function refocusGridCell() {
+  if (!editing) return;
+  const { type, id, m } = editing;
+  const sel = type === 'cat' ? `td.cell[data-cat="${CSS.escape(id)}"][data-m="${m}"]`
+    : type === 'bal' ? `td.cell[data-bal="${CSS.escape(id)}"][data-m="${m}"]`
+    : `td.cell[data-pay="${m}"]`;
+  const td = document.querySelector(sel);
+  if (!td) return;
+  const grid = td.closest('table');
+  if (grid) grid.querySelectorAll('td.cell[tabindex="0"]')
+    .forEach(c => { c.tabIndex = -1; });
+  td.tabIndex = 0;
+  td.focus({ preventScroll: true });
+}
+
+/* The same hand-back for the row editor: the freshly drawn row matching the
+   one that opened the dialog, found by its own data keys. A row that moved
+   year or was deleted matches nothing, and focus falls where it always did —
+   a miss here must never be worse than the old behaviour. */
+function refocusEditRow(ctx) {
+  if (!ctx || !ctx.ds) return;
+  const sel = `[data-edit="${CSS.escape(ctx.section)}"]` + Object.entries(ctx.ds)
+    .filter(([k]) => !['edit', 'add', 'tip'].includes(k))
+    .map(([k, v]) => `[data-${k.replace(/[A-Z]/g, c => '-' + c.toLowerCase())
+      }="${CSS.escape(v)}"]`).join('');
+  let el = null;
+  try { el = document.querySelector(sel); } catch (e) { /* odd key — no focus */ }
+  if (el) el.focus({ preventScroll: true });
+}
+
 /* ── Splitting a month into several amounts ─────────────────────────────────
    A month is often more than one number: two grocery runs and a delivery, or
    a bill you've paid next to one you've only estimated. The parts live on the
@@ -12429,6 +12620,7 @@ function setParts(parts, canEstimate) {
     const del = document.createElement('button');
     del.type = 'button'; del.className = 'btn small'; del.textContent = '🗑';
     del.title = 'Remove this amount';
+    del.setAttribute('aria-label', `Remove amount ${i + 1}`);
     del.onclick = () => { cellParts.splice(i, 1); setParts(cellParts, canEstimate); };
     row.appendChild(del);
     list.appendChild(row);
@@ -12816,6 +13008,7 @@ F('cellForm').onsubmit = () => {
     else yr.paychecks[m] = v;
   }
   save(); render();
+  refocusGridCell();
 };
 
 F('cellCancelBtn').onclick = () => cellDialog.close();
@@ -12873,6 +13066,7 @@ F('cellRevertBtn').onclick = () => {
   }
   cellDialog.close();
   save(); render();
+  refocusGridCell();
   toast('Back to the computed number');
 };
 F('cellClearBtn').onclick = () => {
@@ -12886,6 +13080,7 @@ F('cellClearBtn').onclick = () => {
   else if (type === 'bal') delete yr.overrides[`${id}|${m}`];
   cellDialog.close();
   save(); render();
+  refocusGridCell();
   toast('Cleared');
 };
 
@@ -12952,12 +13147,13 @@ F('exportBtn').onclick = downloadBackup;
 /* One CSV cell, made safe twice over: quotes doubled inside quotes when the
    value needs quoting at all, and a TEXT field opening with a formula trigger
    gets a leading apostrophe — spreadsheet apps execute =SUM(...) on open, and
-   a row name is user text. Numbers skip that guard: a negative amount opens
-   with '-' legitimately. */
+   a row name is user text. The trigger set is OWASP's full list (= + - @ tab
+   CR): leading '-' on TEXT is a trigger too. Numbers skip that guard: a
+   negative amount opens with '-' legitimately. */
 function csvCell(v, isText) {
   let s = v === null || v === undefined ? '' : String(v);
-  if (isText && /^[=+@\t]/.test(s)) s = "'" + s;
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  if (isText && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
 /* A year's grid, the shape the screen shows: category rows by section, then
@@ -13040,13 +13236,21 @@ function downloadCsv(name, csv) {
    minimum (one matches half the plan) and a hard cap, counted so the cap is
    never silent. */
 const SEARCH_CAP = 80;
-function searchPlan(st, query) {
+function searchPlan(st, query, allowed) {
   const q = String(query || '').trim().toLowerCase();
   if (q.length < 2) return { hits: [], more: 0 };
   const hits = [];
   let dropped = 0;
   const has = (t) => t && String(t).toLowerCase().includes(q);
-  const push = (r) => { if (hits.length < SEARCH_CAP) hits.push(r); else dropped++; };
+  /* `allowed` is the shared-link fence, applied HERE rather than only at
+     navigation: a Tax link borrows retirement accounts and people
+     (SECTION_NEEDS), and without this their names surfaced as hits whose
+     clicks silently did nothing. Filtered hits don't count against the cap
+     and don't inflate `more`. Absent means unrestricted (the app's own view). */
+  const push = (r) => {
+    if (allowed && !allowed.includes(r.view)) return;
+    if (hits.length < SEARCH_CAP) hits.push(r); else dropped++;
+  };
   for (const y of Object.keys(st.years || {}).sort().reverse()) {
     const yr = st.years[y];
     if (yr.kind === 'grid') {
@@ -13128,8 +13332,16 @@ function searchPlan(st, query) {
 let searchHits = [];
 function renderSearchResults() {
   const box = F('searchBox'), out = F('searchResults');
-  const { hits, more } = searchPlan(state, box.value);
+  const { hits, more } = searchPlan(state, box.value,
+    viewOnly ? allowedViews() : null);
   searchHits = hits;
+  /* Announced through the count span (role="status") — the toast pattern's
+     quiet cousin. The list itself stays out of the live region. */
+  const count = F('searchCount');
+  if (count) count.textContent = box.value.trim().length < 2 ? ''
+    : hits.length ? `${hits.length}${more ? ` of ${hits.length + more}` : ''} result${
+        hits.length === 1 && !more ? '' : 's'}`
+    : 'Nothing matches';
   out.innerHTML = hits.length
     ? hits.map((h, i) => `<button type="button" class="hit" data-hit="${i}">
         <span class="hitwhere">${esc(h.where)}</span>${
@@ -13199,7 +13411,8 @@ F('wipeBtn').onclick = () => {
   const n = (v, w) => `${v} ${w}${v === 1 ? '' : 's'}`;
   F('clearBody').textContent =
     `This deletes ${n(nYears, 'year')} of budgets, ${n(nGoals, 'goal')}, and every trip, `
-    + `holding and table in this browser. Your theme is kept. There is no undo — an exported `
+    + `holding and table in this browser — the price-lookup key too, if you added one. `
+    + `Your theme is kept. There is no undo — an exported `
     + `backup is the only way to get any of it back.`;
   /* Said plainly, because "clear this browser" and "clear every device I own"
      are very different acts and the button looks identical either way. */
@@ -13214,6 +13427,16 @@ F('clearBackupBtn').onclick = downloadBackup;
 F('clearCancel').onclick = () => clearDialog.close();
 F('clearConfirm').onclick = () => {
   state = blankState();
+  /* The price machinery lives OUTSIDE state, so resetting state alone would
+     leave the ticker list (the quote cache and run report) and a working API
+     credential readable by every page on the shared origin — exactly what
+     "deletes every holding in this browser" promises is gone. The key goes
+     too: "delete everything" means the credential as well. */
+  try {
+    localStorage.removeItem(QUOTE_CACHE);
+    localStorage.removeItem(PRICE_RUN);
+    localStorage.removeItem(PRICE_KEY);
+  } catch (e) {}
   save();                 // the one write path, so this pushes to the cloud too
   /* …but save() debounces its push, and a delete must not sit in that window:
      clearing then closing the tab inside 1.2s would leave the cloud copy intact,
@@ -13287,7 +13510,8 @@ function closeOnBackdropClick(dlg) {
 }
 /* syncChoiceDialog is deliberately excluded: "which copy of your data?" has no
    safe default, so it must be answered rather than dismissed. */
-['dataDialog', 'clearDialog', 'rowDialog', 'cellDialog', 'helpDialog', 'shareDialog'].forEach(id =>
+['dataDialog', 'clearDialog', 'rowDialog', 'cellDialog', 'helpDialog', 'shareDialog',
+ 'searchDialog'].forEach(id =>
   closeOnBackdropClick(F(id)));
 
 /* ═════════════════════════════ Theme & chrome ═════════════════════════════ */
@@ -14050,7 +14274,10 @@ async function decodeShare(token) {
   } else {
     throw new Error('unknown format ' + marker);
   }
-  const p = JSON.parse(json);
+  /* safeParse, not JSON.parse: this is the least-trusted input the app has,
+     and coerceShape mutates in place without stripping unknown keys, so a
+     crafted __proto__ would otherwise survive into the Object.assign merges. */
+  const p = safeParse(json);
   if (!p || !Array.isArray(p.sections) || !p.data || typeof p.data !== 'object')
     throw new Error('not a share payload');
   /* Filtered against VIEWS rather than trusted: the section list decides which
@@ -14477,6 +14704,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
+  coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
   csvCell, gridToCsv, donationsToCsv, searchPlan, SEARCH_CAP, snapshotPoints,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
@@ -14778,8 +15006,10 @@ async function onClick() {
    protect — the rules and this path must always agree. */
 const docRef = () => Fs.doc(db, 'financialplan', user.uid);
 
-/* Resolves true to keep Google's copy, false to keep this device's. Escape or
-   a backdrop dismiss resolves false — the non-destructive choice. */
+/* Resolves true to keep Google's copy, false to keep this device's. Escape
+   and backdrop are DEFUSED (the cancel listener below): either copy could be
+   the one the reader means to keep, so the dialog must be answered, never
+   dismissed — the one deliberate exception to backdrop-click-cancels. */
 function chooseSyncSource(local, remote, remoteUpdatedAt) {
   return new Promise((resolve) => {
     const dlg = document.getElementById('syncChoiceDialog');

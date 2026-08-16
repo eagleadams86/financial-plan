@@ -162,7 +162,10 @@ family names as well as balances.
   unless nothing outside `ui` moved (`undoCore`, the state stringified with
   ui nulled) — tab switches and box folds save too, and without that guard
   every ⌘Z walked back through navigation before reaching the edit the
-  reader actually regrets. The restored snapshot keeps its full `ui`, which
+  reader actually regrets. Both halves of that decision are pure and pinned
+  now: `coreOf(st)` is the one ui-nulled serialization, `undoBankable(core,
+  prev, undoing)` the verdict — save() must keep reading them rather than
+  inlining either. The restored snapshot keeps its full `ui`, which
   helpfully lands you on the tab where the reverted change lives.
   No redo, deliberately. finAdopt CLEARS the ring: undoing past another
   device's adopted changes would clobber them under a newer timestamp. The
@@ -177,31 +180,51 @@ family names as well as balances.
   the card and the button share, so a snapshot states exactly what the screen
   showed. A record needs a DATE and at least one figure or coerceShape drops
   it; a stated `total` wins, absent it the parts sum (`snapshotPoints`, pure).
-  A second Record the same day RESTATES. The chart line is SOLID — recorded
-  facts, and the dash grammar must stay honest. Snapshots are dated, so the
-  share window trims them like trips.
+  A second Record the same day RESTATES (`upsertSnapshot`, pure and pinned —
+  the button writes permanent history through it). The chart line is SOLID —
+  recorded facts, and the dash grammar must stay honest. Snapshots are dated,
+  so the share window trims them like trips.
 - **CSV export is `csvCell`/`gridToCsv`/`donationsToCsv`** (pure, pinned).
-  csvCell defuses formula triggers (=+@ and tab) on TEXT fields only — a
-  negative number legitimately opens with '-'. Values export RAW; currency
-  dress is the spreadsheet's job. downloadCsv prepends a BOM (Excel reads
-  bare UTF-8 as Latin-1). The buttons are contextual — the year's grid
-  actions, the Giving note — not the Back up dialog.
-- **Search is `searchPlan(st, q)`** (pure, pinned): two characters minimum,
-  `SEARCH_CAP` with the overflow COUNTED (`more`), and a budget cell hit
-  carries `{type,id,m}` so `goToSearchHit` opens the cell editor after
-  navigating; navigation-only in viewOnly, and hits are filtered against
-  `allowedViews()` so a shared link can't be steered to a tab it doesn't
-  carry. `findBtn` stays visible in shared views — searching carried data is
-  reading. ⌘K opens; the dialog renders through esc() everywhere.
+  csvCell defuses the full OWASP formula-trigger set (`= + - @`, tab, CR) on
+  TEXT fields only — a negative NUMBER legitimately opens with '-', which is
+  why the guard asks isText. Values export RAW; currency dress is the
+  spreadsheet's job. downloadCsv prepends a BOM (Excel reads bare UTF-8 as
+  Latin-1). The buttons are contextual — the year's grid actions, the Giving
+  note — not the Back up dialog.
+- **Search is `searchPlan(st, q, allowed)`** (pure, pinned): two characters
+  minimum, `SEARCH_CAP` with the overflow COUNTED (`more`), and a budget cell
+  hit carries `{type,id,m}` so `goToSearchHit` opens the cell editor after
+  navigating; navigation-only in viewOnly. `allowed` is the shared-link
+  fence, applied INSIDE searchPlan (absent = unrestricted): a Tax link
+  borrows retirement accounts and people via SECTION_NEEDS, and filtering
+  only at navigation listed their names as hits whose clicks silently did
+  nothing. Filtered hits stay out of `more` too. `goToSearchHit` still checks
+  `allowedViews()` — belt and braces. `findBtn` stays visible in shared
+  views — searching carried data is reading. ⌘K opens (Ctrl+K off a Mac; the
+  title hints say both); a `role="status"` count span announces results to a
+  screen reader — the list itself stays out of the live region. The dialog
+  renders through esc() everywhere.
 - **`savingsPulse` / `yearIncome`** are the Progress tab's Savings Rate &
   Runway card — yearIncome mirrors yearSpending exactly (computed cells,
   netted, summary fallback), and a missing denominator is NULL, never 0: no
-  income has no rate, and no spending is not "0 months of runway".
-- localStorage keys: `fin-state`, `fin-theme`, `fin-updated`, `fin-zoom`. `save()` is the
+  income has no rate, and no spending is not "0 months of runway" — nor is a
+  missing liquid figure NaN months (both runway inputs are guarded).
+- localStorage keys: `fin-state`, `fin-theme`, `fin-updated`, `fin-zoom` —
+  plus the price machinery's `fin-pricekey`, `fin-quotes`, `fin-quote-run`
+  and sync's `fin-sync-uid`, which live OUTSIDE state on purpose (documented
+  in their own sections). "Delete everything" clears the price three as well
+  as state: the ticker list and a working credential must not outlive "every
+  holding in this browser is gone" on a shared origin. `save()` is the
   single write chokepoint (and where a future sync layer would hook in, SV
   style). `blankState()`/`coerceShape()`/`migrate()` guard every entry point;
   Restore shape-checks the RAW parse before coercing, so a wrong file is
-  refused rather than imported as nothing.
+  refused rather than imported as nothing. coerceShape also forces the GRID's
+  own values — cells (v, kind whitelist, parts), seeds, overrides, paychecks
+  — since they reach the engine and the page verbatim; overrides are read
+  strictly (rateOrNone, not num): an override PINS a balance, and a corrupt
+  field must be dropped rather than become a deliberate-looking $0. A live
+  year is also guaranteed an `enteredThrough` (the month before startMonth
+  when absent) because gridCard calls monthAdd on it unguarded.
 
 ## The engine
 
@@ -297,7 +320,9 @@ right by accident.
   `contribs` year claimed by both — the same-name merge's discipline. It also
   **drops the `ra-*` keys from `ui.collapsed`**, because splicing the array
   repoints every index-keyed folded pane; a box springing open is the harmless
-  direction.
+  direction. `retAcct.del` drops them for the same reason; `retAcct.move` is
+  a two-index swap, so it REMAPS just those two keys and every other fold
+  survives the reorder.
 **A retirement account can list its HOLDINGS**, the same `{ticker, shares,
 price}` rows an investment pane holds, keyed `ra:<index>` through the existing
 `holdingList()`. One table, one editor, one price lookup, wherever the rows
@@ -539,9 +564,14 @@ suite passed while the card was wrong.
     earliest, and a member with no `since` outranks any date. `hub` carries
     across: it is a fact about the account, not about the row that won.
   - **Every reference moves**: `creditTo`, `divTo`, a category's `transferTo`,
-    and `goal.accounts` (deduplicated — a goal naming both must not list the
-    survivor twice). Missing one leaves a row paying into an account that no
-    longer exists, which reads on screen as money vanishing.
+    `goal.accounts`, a dividends row's `cat.accounts`, and a pane's
+    `pf.accounts` (the lists deduplicated — naming both must not list the
+    survivor twice). Missing one of the first three leaves a row paying into
+    an account that no longer exists, which reads as money vanishing; missing
+    one of the two LISTS is worse — coerceShape filters dangling ids from
+    them on the next load, so the pane's net-worth link silently vanishes
+    (the Total counts the pot twice) or the dividends row quietly stops
+    earning on the absorbed account, and nothing ever says so.
   - It runs **once, under the schema 5 gate in `migrate`** — NOT in
     `coerceShape`, for the same reason schema 3's row classification isn't:
     coerceShape runs on every load and this overwrites something you can set by
@@ -788,6 +818,13 @@ handlers. New sections: register in EDITORS, stamp the attributes in the
 renderer, done. `save`/`del` may RETURN A STRING to be toasted — that is how a
 section reports something the reader can't see on the page in front of them;
 returning nothing stays silent, and `del` returning `false` still refuses.
+**A save hands focus back** (`refocusEditRow` / `refocusGridCell`): the
+re-render destroys the element that opened the dialog, the native <dialog>
+focus-return lands on the dead node, and a keyboard reader fell to <body> and
+tabbed back from the top of the page after every save — the tab bar and year
+strip's trap, hit a third time. The fresh element is found by the row's own
+data keys (or the cell's type/id/month); a miss (row deleted, year renumbered)
+focuses nothing, which is never worse than the old behaviour.
 **Budget row edits flow forward into the years built ahead** — a projection
 year's figures already track every number you type (the engine recomputes
 them), but its ROWS were a snapshot taken at rollover, so adding, deleting,
@@ -1177,7 +1214,9 @@ red-green colourblind.
   editor's Bonus box and the Bonuses-by-year row are now two doors onto the
   same figure; renumbering a comp year takes its bonus with it, deleting one
   leaves it (what landed is still true), and an empty box removes the row
-  while a typed 0 is kept as a statement. `limitsFor()` reads the map too, so
+  while a typed 0 is kept as a statement — BOTH doors (`comp.save` AND
+  `yearAmount.save`) enforce that last rule; the year-row door briefly stored
+  0 for an empty box, minting a $0 bonus the reader never claimed. `limitsFor()` reads the map too, so
   the 401(k)/MAGI calculator can borrow a bonus for a year with no comp row.
 **"Since last year" on the Comp tab is not a year-on-year comparison** — that
 is the raise itself, one row up. `sinceLastYear()` checks the JOIN between two
@@ -1404,9 +1443,13 @@ Things that are load-bearing and will look arbitrary later:
   "improve" it into a withdrawal-order strategy.
   `retirementSplit(st, thisYear)` is Traditional against Roth today AND at the
   month the pot starts paying — the mix being what decides how much of a
-  retirement is taxable, and the top-of-tab bar only ever showing today. There
-  is a test that its total equals the pot the chart draws that year; if those
-  ever disagree, one of them is lying about somebody's retirement.
+  retirement is taxable, and the top-of-tab bar only ever showing today. Its
+  loop compounds rounded-to-the-cent per pot per year EXACTLY as
+  `drawdownYears` does (it briefly compounded unrounded, which agreed on
+  round fixtures and drifted by cents on real ones). There is a test that its
+  total equals the pot the chart draws that year — cent for cent, odd rates
+  on purpose; if those ever disagree, one of them is lying about somebody's
+  retirement.
 - **`RET_TYPES` lives ABOVE `let state = load()`** because `coerceShape` reads it
   to settle an account that arrived with no `kind`. A const below that line is
   in its temporal dead zone at load time and the ReferenceError is swallowed —
@@ -1811,7 +1854,10 @@ fold and every other one does" arrives months later.
   folding a box is not an edit and shouldn't push a new version of your
   finances; that is still true, and it pushes one anyway, because "the boxes I
   never look at stay shut wherever I open this" is worth a debounced write.
-  Being in `ui` keeps it out of share links (which send `ui: {}`).
+  Being in `ui` keeps it out of share links, which send a MINIMAL `ui`
+  (`activeYear`, `activeTab`, `tabOrder` — so a shared view opens on the
+  sender's first shared tab in the sender's arrangement) with `collapsed`
+  deliberately not among them.
 - **Stored SHUT, never open.** A card that doesn't exist yet — one added in a
   later version, a year's Notes box appearing the first time a note is written —
   opens by default, and a corrupt list means everything visible rather than
@@ -1963,7 +2009,10 @@ step.
   rebuilt from the section list (a fixed vocabulary, filtered against `VIEWS`),
   and the range is two numbers — so a hand-edited link has no text to inject.
   `decodeShare` runs the payload through the same `coerceShape`/`migrate` gate a
-  restored backup gets; a link is the least trusted input the app has.
+  restored backup gets — and parses with `safeParse`, not bare JSON.parse: a
+  link is the least trusted input the app has, coerceShape mutates in place
+  without stripping unknown keys, and a crafted `__proto__` would otherwise
+  survive into the Object.assign merges downstream.
 - Tabs not in a link are REMOVED from the bar, not hidden — `render()` reads the
   bar back to decide whether to reorder, and a hidden button would still be in
   that list, so `want` and `have` could never agree and every render would
@@ -2142,6 +2191,13 @@ CSP. That is the whole feature; it adds no runtime code beyond one line in
 
 - Browser-test locally first (`.claude/launch.json` → port 8016, or
   `python3 -m http.server 8016`), then commit, push, verify the Pages deploy.
+- **The boot script carries a frame-buster** (top of `<head>`): GitHub Pages
+  cannot send `frame-ancestors` (meta CSP ignores it), so a hostile origin
+  could otherwise iframe the app and redress the reader's own figures. The
+  ONE legitimate framer is tests.html — same-origin, identified by
+  `data-fin-tests` on the frame element; a cross-origin framer reads as
+  `frameElement === null` and gets navigated over (or, if sandboxed against
+  that, the page hides itself). Don't add frames without teaching this check.
 - Commit subjects are **user-facing** (the Recent changes box lists them
   verbatim) — plain English for a reader, not a diff.
 - CSP `connect-src`: `'self'`, the Firebase/Google sign-in hosts, the GitHub
