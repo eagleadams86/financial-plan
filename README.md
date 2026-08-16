@@ -64,8 +64,13 @@ included — treat those the way you treat the figures.
   agree. Hovering one reads what the account earned that month under the
   balance — its interest, its dividend, and the account either was paid into
   when that isn't itself — which is what explains a balance moving with no
-  budget row behind it; a month that earned nothing stays quiet rather than
-  printing $0.00, and a figure you typed over the computed one says so.
+  budget row behind it. It reads from **both ends**: the account that earned
+  the money names where it went, and the account it landed in names who sent
+  it ("Paid in $102.01 from Brokerage", one line per account that swept
+  something in), so a hub balance jumping is answerable from the cell you're
+  already looking at. A month that earned and received nothing stays quiet
+  rather than printing $0.00, and a figure you typed over the computed one
+  says so.
   The cell editor shows the same and lets you override
   the interest or add a dividend — correct either and the balance recomputes
   around it, in whichever account the money is paid into, for that month and

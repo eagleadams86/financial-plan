@@ -683,10 +683,21 @@ suite passed while the card was wrong.
   over the computed one** — a stated $0.00 is a claim somebody made, and it is
   marked the way a stated balance is; and **where the money LANDED is named
   whenever it isn't this account**, since earnings paid elsewhere are the
-  likeliest reason a balance didn't move by what it earned. It deliberately
-  describes the account's OWN earnings — the sweep a destination RECEIVES shows
-  up in its balance, not as a line of its own, and "into <name>" on the source
-  is what tells that half. A pinned or summary year computes neither, so its
+  likeliest reason a balance didn't move by what it earned.
+  **It reads from BOTH ends** — the destination gets "Paid in $102.01 from
+  Brokerage", one line per account that swept something in, walking the other
+  accounts' `creditTo`/`divTo` rather than being handed a map. Without it a hub
+  balance jumps with nothing on the tab explaining why, which is the same
+  question the sending lines answer from the other side. A source's interest
+  and dividend are ONE line on purpose: the question at this end is where the
+  money came from, and how the sender split it is a fact about the sender, said
+  in full on its own cell. It mirrors `payInto` rather than assuming — earnings
+  destined for an account that isn't running yet stay with the account that
+  earned them, and the balance being drawn is the proof the destination is
+  running, since only a running account has one. The cell EDITOR deliberately
+  stays one-ended: its `rateLine` describes the rates you can correct there,
+  and a received figure belongs to the account that sent it.
+  A pinned or summary year computes neither, so its
   `interest`/`dividend` maps are empty and the extra lines fall away with no
   branch. Keep it in step with the cell editor's `rateLine`, which answers the
   same question from the account's rates rather than the month's figures.

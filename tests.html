@@ -2368,10 +2368,45 @@ t('a dividend says so on the months it lands, and names where it went', () => {
 t('an account that earned nothing says nothing', () => {
   const { tip } = tipFixture();
   eq(tip('cash', '2030-01'), '$1,000.00',
-    'no rate, so no $0.00 line — and the sweep it received is in the balance');
+    'no rate of its own, and nothing arrived this month');
   eq(tip('bank', '2030-01'), '$500.00');
   eq(tip('mid', '2030-04').includes('Dividends'), false,
     'a month off the quarterly beat is quiet rather than $0.00');
+});
+t('the receiving end names who swept money in', () => {
+  const { tip } = tipFixture();
+  eq(tip('cash', '2030-03'), '$1,102.01\nPaid in $102.01 from Brokerage',
+    'the same dividend, read from the account it landed in');
+  eq(tip('cash', '2030-02'), '$1,000.00',
+    'a month nothing arrived in is quiet, like an account that earned nothing');
+});
+t('a sender\'s interest and dividend arrive as one line', () => {
+  /* Everything Brokerage earns is swept to Cash, so March sends both — the
+     question at this end is where the money came from, not how the sender
+     split it, and the sender says that in full on its own cell. */
+  const s = H.coerceShape({
+    schema: 5,
+    settings: { accounts: [
+      { id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true },
+      { id: 'mid', name: 'Brokerage', rate: 0.12, creditTo: 'cash',
+        divRate: 0.04, divTo: 'cash', divEvery: 3 },
+    ] },
+    years: { '2030': { kind: 'grid', model: 'live', startMonth: '2030-01',
+      monthCount: 6, enteredThrough: '2030-01', categories: [], cells: {},
+      paychecks: {}, seeds: { cash: 1000, mid: 10000 }, overrides: {} } },
+  });
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const at = (id, m) => H.balanceTip(s, c, s.years['2030'],
+    s.settings.accounts.find(a => a.id === id), m);
+  eq(at('mid', '2030-01'), '$10,000.00\nInterest $100.00 into Cash',
+    'the sender says where it went, and keeps none of it');
+  eq(at('cash', '2030-01'), '$1,100.00\nPaid in $100.00 from Brokerage');
+  eq(at('cash', '2030-03'), '$1,400.00\nPaid in $200.00 from Brokerage',
+    'interest and a quarter\'s dividend, added into one arrival');
+});
+t('an account crediting itself is never listed as its own source', () => {
+  const { tip } = tipFixture();
+  eq(tip('mid', '2030-01').includes('Paid in'), false);
 });
 t('a figure typed over the computed one is marked, a stated $0.00 included', () => {
   const { tip } = tipFixture();
