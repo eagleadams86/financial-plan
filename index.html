@@ -2838,6 +2838,12 @@ function coerceShape(data) {
      OPEN rather than throwing on the way to drawing the page — the worst it can
      cost is a scroll, where a throw here costs the whole workbook. */
   d.ui.collapsed = cleanBoxKeys(d.ui.collapsed);
+  /* The flow chart's transfers switch — a plain boolean, and ABSENT rather than
+     false when it has never been touched, so an untouched plan's `ui` is the
+     same three keys it has always been (and a share link's minimal ui doesn't
+     grow a key describing how somebody else likes to read a chart). */
+  if (d.ui.flowNoTransfers === true) d.ui.flowNoTransfers = true;
+  else delete d.ui.flowNoTransfers;
   return d;
 }
 
@@ -5153,6 +5159,12 @@ function renderGoals() {
   const eoyYears = yearKeys().filter(y => state.years[y].eoyCash !== undefined);
   const projectedKey = `<p class="chartkey"><i></i> Dashed — projected: a year still
     being worked out, or one that hasn't arrived yet.</p>`;
+  /* Whether the flow bars leave internal transfers out. It lives in `ui`, with
+     the folded boxes and the tab order: it describes how you like to READ the
+     plan, so it should follow you to the phone, and `ui` is the one branch a
+     share link trims to three keys — the recipient reads the chart the way
+     they left their own. Not a `setting`: those travel in full. */
+  const noTransfers = !!(state.ui || {}).flowNoTransfers;
 
   return `${netWorthHtml}${pulseHtml}${goalsHtml}
   <div class="cards2">
@@ -5174,9 +5186,19 @@ function renderGoals() {
   <div class="cards2">
     <div class="card">
       <h2>Money in vs Money Out</h2>
-      <p class="sub">Everything that moved through the accounts each year — transfers between
-        them included, and the interest they earned counted as money in. Striped bars are
+      <p class="sub">Everything that moved through the accounts each year${
+        noTransfers ? ', apart from money moved between your own accounts' : ' — transfers between\n        them included'}, and the interest they earned counted as money in. Striped bars are
         money out. Early years are best-effort reads of the old bi-weekly sheets.</p>
+      <label class="checkline" style="margin-bottom:10px"><input type="checkbox"
+        id="flowNoTransfers"${noTransfers ? ' checked' : ''}>
+        Leave out transfers between your own accounts</label>
+      ${(() => {
+        /* Said under the switch, not in the sub: it is news about the setting
+           just chosen, and a sentence about 2011 sitting permanently in the
+           card's opening line would be describing the exception first. */
+        const note = flowTransferNote(state, yearKeys(), noTransfers);
+        return note ? `<p class="sub">${esc(note)}</p>` : '';
+      })()}
       <div class="chartbox" style="height:300px"><canvas id="flowChart"></canvas></div>
       ${projectedKey}
     </div>
@@ -8631,11 +8653,44 @@ function buildGivingChart() {
 
 /* ══════════════════ Long-run charts (on the Progress tab) ═════════════════ */
 
+const EMPTY_SET = new Set();
+
+/* The rows whose money only moves between the reader's OWN accounts — the ONE
+   test for that, read by the flow bars and by the note that says which years
+   cannot answer the question. Two answers to "is this row a transfer?" would
+   put a chart and the sentence under it at odds.
+   It asks the ROLE, never the section: the role is what says the far side is
+   an account this plan tracks. A row in the Transfers SECTION whose role is
+   `normal` — a Roth IRA contribution, where the far account isn't tracked — is
+   money genuinely leaving, and dropping it would understate money out by
+   exactly what left. (`yearSpending` reads sections for the opposite reason: it
+   must equal the Budget tab's Expenses total, which is a section figure.)
+   `transferTo` is required, since a transfer role with nowhere to go moves
+   nothing in the engine either; that it names a REAL account is guaranteed
+   upstream — deleting an account is refused while a category still points at
+   it — rather than re-checked here. */
+function internalRows(yr) {
+  return new Set((yr.categories || []).filter(cat => {
+    const r = normRole(cat);
+    return (r.role === 'transfer' || r.role === 'passthrough') && r.transferTo;
+  }).map(cat => cat.id));
+}
+
 /* Money in vs money out per year. Transfers between accounts count as flows
-   here, so this reads as "money through the accounts", not pure income and
-   spend. A summary year's balance rows stay out; a grid year has none, since
-   those became accounts. */
-function yearFlows(yr, computed, y) {
+   here by default, so this reads as "money through the accounts", not pure
+   income and spend. A summary year's balance rows stay out; a grid year has
+   none, since those became accounts.
+   `noTransfers` drops the money that only moved between the reader's OWN
+   accounts, which is the question the bars are most often misread as already
+   answering — a $16,000 sweep into savings and the $11,000 that came back are
+   both real movements, and both dwarf the rows somebody is actually looking
+   for. The old three-argument behaviour is untouched and pinned by its own
+   tests, the `limitsFor` arrangement.
+   Which rows count as internal is `internalRows` above, and the years that
+   have none come back unchanged — the old sheets and the imported history
+   grids never said which of their rows were transfers. `flowTransferNote`
+   names those years rather than letting one chart quietly draw two rules. */
+function yearFlows(yr, computed, y, noTransfers) {
   let inn = 0, out = 0;
   const add = (v) => { if (v > 0) inn += v; else out += v; };
   if (yr.kind === 'summary') {
@@ -8649,9 +8704,10 @@ function yearFlows(yr, computed, y) {
        and a year built ahead, which has nothing stored at all — show what it
        comes to rather than a bar of whatever has been typed in so far. */
     const cells = (computed && computed.cells) || yr.cells;
+    const internal = noTransfers ? internalRows(yr) : EMPTY_SET;
     for (const [key, cell] of Object.entries(cells)) {
-      const [, m] = key.split('|');
-      if (m.startsWith(y)) add(cell.v);
+      const [id, m] = key.split('|');
+      if (m.startsWith(y) && !internal.has(id)) add(cell.v);
     }
     /* What the accounts earned on their own. It lands in an account exactly
        like any other money, and it is why total liquidity climbs faster than
@@ -8665,6 +8721,32 @@ function yearFlows(yr, computed, y) {
         if (key.split('|')[1].startsWith(y)) add(v);
   }
   return { in: round2(inn), out: round2(Math.abs(out)) };
+}
+
+/* Which years the "leave transfers out" switch cannot honour, said out loud.
+   It asks the years themselves — has this one any row the switch could
+   recognise? — rather than assuming the imported years are the summary ones.
+   That distinction was found in the real data: the pinned 2020–2025 GRIDS have
+   forty-odd categories each and not one carries a transfer role, because the
+   spreadsheet import never recorded which rows were transfers. A note naming
+   only the summary years would have left six imported grid years silently
+   unchanged beside a corrected 2026, and a reader would take that flat 2024 for
+   a fact about 2024 — the exact failure this sentence exists to prevent.
+   Pure, and '' when there is nothing to say, so the caller draws no empty line.
+   Contiguous years read as a RANGE: fifteen of them comma-separated is a
+   paragraph, and they are contiguous in every real plan (history is at the
+   front, the live year at the back). */
+function flowTransferNote(st, years, noTransfers) {
+  if (!noTransfers) return '';
+  const cant = years.filter(y => !internalRows(st.years[y] || {}).size);
+  if (!cant.length) return '';
+  const at = cant.map(y => years.indexOf(y));
+  const run = at.every((i, k) => k === 0 || i === at[k - 1] + 1);
+  const which = cant.length === 1 ? cant[0]
+    : run ? `${cant[0]}–${cant[cant.length - 1]}` : andList(cant);
+  return `${which} ${cant.length === 1 ? 'has' : 'have'} no rows marked as transfers `
+    + `between your own accounts, so ${cant.length === 1 ? 'that bar counts' : 'those bars count'} `
+    + 'everything either way.';
 }
 
 /* What a year actually SPENT, which is a different question from the money-out
@@ -8839,7 +8921,8 @@ function buildHistoryCharts() {
     `${p.y}, ${fmtMoney(p.v)}${p.est ? ' projected' : ''}`).join('; ')}.`);
 
   const flowYears = yearKeys();
-  const flows = flowYears.map(y => yearFlows(state.years[y], C[y], y));
+  const noTransfers = !!(state.ui || {}).flowNoTransfers;
+  const flows = flowYears.map(y => yearFlows(state.years[y], C[y], y, noTransfers));
   /* stripes carry the in/out distinction alongside the colour (the family
      rule: never hue alone) — full-strength colour over the tint */
   const stripes = (color, tint) => {
@@ -8881,7 +8964,9 @@ function buildHistoryCharts() {
         { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
     },
     plugins: [dashedBarEdge],
-  }, `Money in and money out per year: ${flowYears.map((y, i) =>
+  }, `Money in and money out per year${
+    noTransfers ? ', leaving out transfers between your own accounts' : ''}: ${
+    flowYears.map((y, i) =>
     `${y}, in ${fmtMoney(flows[i].in)}, out ${fmtMoney(flows[i].out)}${
       projected[i] ? ', projected' : ''}`).join('; ')}.`);
 
@@ -9212,6 +9297,25 @@ function wireView(view) {
       save(); render();
       toast(replaced ? `Restated today's snapshot — ${fmtMoney(total)}`
         : `Recorded ${fmtMoney(total)} as of today`);
+    };
+    /* The flow chart's own switch. It re-renders rather than rebuilding just
+       that chart, because the card's opening sentence and the note under the
+       box both change with it — redrawing the bars alone would leave the prose
+       describing the other setting, which is the disagreement the whole
+       one-reader rule exists to avoid. */
+    const noTx = F('flowNoTransfers');
+    if (noTx) noTx.onchange = () => {
+      state.ui = state.ui || {};
+      /* Absent, not false, when it is off — coerceShape's rule, applied at the
+         point of writing so a backup made before the next load matches. */
+      if (noTx.checked) state.ui.flowNoTransfers = true;
+      else delete state.ui.flowNoTransfers;
+      save(); render();
+      /* Focus back onto the fresh box: the re-render destroys the one that was
+         just ticked, and a keyboard reader would otherwise be dropped at the
+         top of the page — the trap the tab bar, the year strip and every row
+         editor hit before this. */
+      F('flowNoTransfers')?.focus();
     };
   }
   if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
@@ -14888,7 +14992,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, balanceTip,
-  receivedInto, earningsOver, balanceYearTip, KIND_LABEL,
+  receivedInto, earningsOver, balanceYearTip, flowTransferNote, KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
   coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
   csvCell, gridToCsv, donationsToCsv, searchPlan, SEARCH_CAP, snapshotPoints,

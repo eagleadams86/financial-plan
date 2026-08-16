@@ -187,7 +187,17 @@ included — treat those the way you treat the figures.
   whether it's next month or a year you've built ahead. Under the goals sit
   the long-run charts: **total liquidity 2011→now**, and money in vs out for
   every one of those years, with the interest your accounts earned counted as
-  money in so the two charts tell the same story. Beside them, **what you
+  money in so the two charts tell the same story. Those bars count every
+  movement, so a year that swept $16,000 into savings and took $11,000 back out
+  counts both — which is why "money in" can read well above anything you'd call
+  income. A switch on that card, **"Leave out transfers between your own
+  accounts"**, takes them off; it's remembered, and follows you to the phone
+  like the folded boxes do. Rows are recognised by their role rather than the
+  section they sit in, so a Roth IRA contribution filed under Transfers still
+  counts as money out — that account isn't tracked here, so the money really
+  left. The years imported from the old spreadsheet never recorded which rows
+  were transfers, so their bars are the same either way, and a line under the
+  chart names them rather than letting them look comparable. Beside them, **what you
   actually spent each year**: the expense rows alone, so money swept into
   savings or moved between your own accounts doesn't read as a heavy year —
   each bar is the year's Expenses total from the Budget tab, with a dotted

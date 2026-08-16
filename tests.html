@@ -1932,6 +1932,69 @@ t('a summary year still leaves its balance rows out', () => {
   approx(f.in, 30000, 'the closing balance is not money that moved');
   approx(f.out, 25000);
 });
+/* A year holding all three shapes: ordinary money, an internal transfer both
+   ways, and a Transfers-section row whose role is `normal` — the Roth IRA
+   case, where the far account isn't tracked and the money really leaves. */
+function flowYear() {
+  return { kind: 'grid', model: 'live', categories: [
+    { id: 'pay', name: 'Paycheck', section: 'income', role: 'normal' },
+    { id: 'rent', name: 'Rent', section: 'expense', role: 'normal' },
+    { id: 'sweep', name: 'To savings', section: 'transfer',
+      role: 'transfer', transferTo: 'mid' },
+    { id: 'venmo', name: 'Venmo', section: 'transfer',
+      role: 'passthrough', transferTo: 'bank' },
+    { id: 'roth', name: 'Roth IRA', section: 'transfer', role: 'normal' },
+  ], cells: {
+    'pay|2030-01': { v: 4000 }, 'rent|2030-01': { v: -1500 },
+    'sweep|2030-01': { v: -1000 }, 'sweep|2030-02': { v: 400 },
+    'venmo|2030-01': { v: -200 }, 'roth|2030-01': { v: -500 },
+  } };
+}
+const FLOW_COMPUTED = { cells: flowYear().cells,
+  interest: { 'cash|2030-01': 30 }, dividend: {} };
+t('by default every movement counts, transfers included', () => {
+  const f = H.yearFlows(flowYear(), FLOW_COMPUTED, '2030');
+  approx(f.in, 4430, '4000 pay + 400 swept back + 30 interest');
+  approx(f.out, 3200, '1500 rent + 1000 out + 200 Venmo + 500 Roth');
+});
+t('leaving transfers out drops both directions of the internal ones', () => {
+  const f = H.yearFlows(flowYear(), FLOW_COMPUTED, '2030', true);
+  approx(f.in, 4030, 'the 400 that came back was your own money');
+  approx(f.out, 2000, '1500 rent + the 500 Roth');
+});
+t('a Transfers-section row that really leaves is NOT dropped', () => {
+  /* The ROLE says whether the far side is an account the plan tracks. Reading
+     the section here would take the Roth contribution out of money out, which
+     is money that genuinely left. */
+  const yr = flowYear();
+  const only = { kind: 'grid', model: 'live', categories: yr.categories,
+    cells: { 'roth|2030-01': { v: -500 } } };
+  approx(H.yearFlows(only, { cells: only.cells }, '2030', true).out, 500);
+});
+t('interest is not a transfer and survives either way', () => {
+  approx(H.yearFlows({ kind: 'grid', model: 'live', categories: [] },
+    { cells: {}, interest: { 'cash|2030-01': 30 }, dividend: { 'mid|2030-03': 10 } },
+    '2030', true).in, 40);
+});
+t('the years that cannot answer are named, and only then', () => {
+  /* The test is whether a year has a row the switch could recognise — NOT
+     whether it is a summary. An imported history GRID has categories and no
+     transfer roles, and leaving it out of the note is what would let a flat
+     2024 read as a fact about 2024. */
+  const st = { years: {
+    '2013': { kind: 'summary' },
+    '2024': { kind: 'grid', model: 'pinned',
+      categories: [{ id: 'x', name: 'Long-term transfers' }] },
+    '2030': { kind: 'grid', categories: flowYear().categories } } };
+  const ys = ['2013', '2024', '2030'];
+  eq(H.flowTransferNote(st, ys, false), '', 'nothing to say while transfers are in');
+  ok(H.flowTransferNote(st, ys, true).startsWith('2013–2024 have'),
+    'the summary year AND the imported grid, as one range');
+  eq(H.flowTransferNote({ years: { '2030': st.years['2030'] } }, ['2030'], true), '',
+    'a plan whose years can all answer says nothing at all');
+  ok(H.flowTransferNote({ years: { '2013': { kind: 'summary' } } }, ['2013'], true)
+    .startsWith('2013 has'), 'one year reads as one year');
+});
 
 group('Spending, year by year');
 /* A year of rows the sections tell apart — the same shape the Budget grid

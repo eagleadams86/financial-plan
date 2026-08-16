@@ -841,6 +841,38 @@ suite passed while the card was wrong.
   with the balances. A PINNED year adds nothing: its balances are stated, so
   what they earned is already inside them. It takes its year and computed year
   as arguments rather than reaching for globals, so the tests can pin it.
+  **A fourth argument leaves INTERNAL transfers out** — `ui.flowNoTransfers`,
+  the card's own checkbox — and the three-argument behaviour is untouched and
+  still pinned, the `limitsFor` arrangement. It exists because those bars are
+  routinely misread as income and spend: Charlie's 2026 reads $117k in against
+  $95k once his own sweeps come out, and the $16,000 that went to savings and
+  the $11,000 that came back were both in there.
+  - **`internalRows(yr)` is the ONE test for "is this row internal?"**, read by
+    the bars and by the note under them; two answers would put a chart and its
+    own caption at odds. It asks the ROLE (`transfer`/`passthrough` with a
+    `transferTo`), never the section — a Transfers-section row whose role is
+    `normal` is a Roth IRA contribution into an account the plan does NOT
+    track, so that money really left and dropping it would understate money out
+    by exactly what left. (`yearSpending` reads sections for the opposite
+    reason: it must equal the Budget tab's Expenses total.)
+  - **Interest and dividends are not transfers** and count in both settings.
+  - **`flowTransferNote` asks each year whether it has any internal row**, and
+    NOT whether it is a summary. That difference was found in the real data:
+    the pinned 2020–2025 grids carry forty-odd categories each and not one has
+    a transfer role, because the import never recorded which rows were
+    transfers. A note naming only the summary years would have left six grid
+    years silently unchanged beside a corrected 2026 — and a flat 2024 beside a
+    corrected 2026 reads as a fact about 2024.
+  - The switch lives in **`ui`**, with the folded boxes and the tab order: it
+    describes how you like to READ the plan, so it syncs and follows to the
+    phone, and `ui` is the branch a share link trims to three keys. NOT a
+    `setting` — those travel in full, and how somebody else likes their chart is
+    not something to ship them. Stored ABSENT rather than false when off (both
+    in `coerceShape` and at the point of writing), so an untouched plan's `ui`
+    is the three keys it has always been. Toggling re-renders the whole view
+    rather than rebuilding the one chart — the card's opening sentence and the
+    note both change with it — and hands focus back to the fresh checkbox,
+    the trap the tab bar and year strip hit before it.
 - **`until` closes an account**, the mirror of `since`. Set only on accounts
   built out of history, to the last month ANY year states for that name. Without
   it a bank you left in 2021 keeps its closing balance and rides forward for
