@@ -1029,6 +1029,19 @@ every option in it is a whole sentence ("Repeat on a cycle (every N months)")
 and a third of a 640px dialog cut them off mid-word. Half fits all but the
 dividends rule, whose label interpolates two account names and is long by
 nature.
+**A section may set `wide: true` for a wider dialog** (`dialog.wide`, 1100px
+against the usual 640) — **Preferences is the only one**, because it is the only
+one asking fourteen short questions at once, each with a hint of its own. Two
+things about it that will look arbitrary later. The **wider minimum track goes
+with the width** (`minmax(230px, 1fr)`, not the usual 150px): left alone, the
+extra room buys MORE columns rather than wider ones, every hint wraps harder,
+and the dialog comes out barely shorter — its height is set by the hints, not by
+the field count. And the width rule is scoped `:not(.cols2)`, because it
+outranks the two-column rule on specificity whatever the source order. It needs
+no media query: `width: calc(100% - 32px)` already wins on a small screen, and
+auto-fit falls back to fewer columns on the way down (one at 375px). The class is
+toggled per section in `openRowEditor` beside `cols2` — never left on, or the
+next dialog opened inherits a width its four fields don't need.
 A field spec may be **`type: 'readout'`** — a figure the dialog WORKS OUT and
 the reader never types. It renders as a `<p class="field-readout">` rather than
 an input, so `readFields` skips it (a `<p>` has no `.value` and asking for one
