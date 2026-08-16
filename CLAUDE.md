@@ -291,6 +291,13 @@ reader never made; an emptied box DELETES for the same reason. Drift renders
 in POINTS with the dollar move that would close it, and the Target/Drift
 columns appear only once a target exists. A target for a ticker no longer
 held stays in the map (you may be about to buy it) with no row to show on.
+**`side.classes` is the sibling map** — same key, a SHORT TYPED LABEL (40
+chars, escaped at the sink) in the reader's own words, because the app must
+not KNOW what a fund is: a shipped taxonomy is the tax-table mistake wearing
+an Investments costume. `classRollup(rows, total)` (pure) folds the rollup by
+label, case-insensitively, unclassed rows LAST under "Not classed yet" —
+"never said", not "miscellaneous". The By Class table draws only once a class
+exists, and one dialog (`target`) edits both maps — empty deletes in each.
 The linked panes' RECONCILE line compares holdingsValue against the linked
 accounts' computed balances this month — agreement is said out loud, the
 reconcileNote rule: that is the check passing, not nothing to say.

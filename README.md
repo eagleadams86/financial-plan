@@ -290,7 +290,11 @@ included — treat those the way you treat the figures.
   Click a rollup row to set the **share it should be** — a Drift column then
   shows how far each targeted ticker has wandered, in points and in the
   dollars that would bring it back; targets don't have to cover every row or
-  sum to 100%. A pane that names budget accounts also **reconciles against
+  sum to 100%. The same dialog takes an **asset class in your own words**
+  ("S&P 500", "Bonds") — the app deliberately ships no fund taxonomy, the
+  tax-table principle — and a **By Class** table then folds the rollup into
+  those labels, so three funds tracking one index read as the single bet they
+  are; anything unlabelled gathers honestly under "Not classed yet". A pane that names budget accounts also **reconciles against
   them**: its subtitle shows the budget's figure for the same pot and how far
   behind or ahead of the holdings it is, or that the two are in step. Otherwise: one pane per place you hold investments (add, rename and
   reorder them), with optional **automatic price lookups** (Twelve Data; free

@@ -1859,6 +1859,12 @@ function blankState() {
          list: one target per ticker is the whole idea, and the rollup already
          groups by that key. */
       targets: {},
+      /* Asset classes, same key — UPPER-CASED ticker → a short label in the
+         reader's own words ("S&P 500", "Bonds", "Cash"). The reader's, never
+         the app's: a shipped fund taxonomy would be quietly wrong within a
+         year while looking authoritative — the tax-table principle. Rows
+         sharing a label group together on the rollup. */
+      classes: {},
       /* The retirement spending plan. `spend` and `safeRate` are deliberately
          ABSENT rather than 0: absent means "never said", and only that keeps
          an untouched plan's projection identical to what it has always drawn.
@@ -2169,6 +2175,15 @@ function coerceShape(data) {
     const key = String(k).trim().toUpperCase().slice(0, 24);
     const pct = rateOrNone(v);
     if (key && pct !== undefined) s.targets[key] = Math.min(1, Math.max(0, pct));
+  }
+  /* Asset classes: same keys, a short typed label for a value. Escaped at the
+     sink like every typed string; emptied labels are dropped rather than
+     stored as ''. */
+  const classes = obj(s.classes); s.classes = {};
+  for (const [k, v] of Object.entries(classes)) {
+    const key = String(k).trim().toUpperCase().slice(0, 24);
+    const label = typeof v === 'string' ? v.trim().slice(0, 40) : '';
+    if (key && label) s.classes[key] = label;
   }
   /* Property: a name, a kind from the fixed list, a value and optionally what
      is still owed. Value and owed feed totals through num() (the NaN class
@@ -4773,8 +4788,30 @@ function allHoldings(st) {
     r.share = total ? r.value / total : 0;
     const t = ((st.side || {}).targets || {})[r.key];
     if (typeof t === 'number') r.target = t;
+    const cls = ((st.side || {}).classes || {})[r.key];
+    if (cls) r.cls = cls;
   }
   return { rows, total };
+}
+
+/* The rollup's rows folded into the reader's own asset classes — "how much of
+   this is really one S&P 500 bet" is the question three near-identical index
+   funds pose. Labels group case-insensitively ("s&p 500" and "S&P 500" are one
+   claim, shown as first typed); rows with no class gather at the end under a
+   name that says "never said", not "miscellaneous". Pure, pinned by tests. */
+function classRollup(rows, total) {
+  const by = new Map();
+  for (const r of rows) {
+    const key = (r.cls || '').toLowerCase() || ' none';
+    if (!by.has(key)) by.set(key, { label: r.cls || '', value: 0, tickers: [] });
+    const g = by.get(key);
+    g.value = round2(g.value + r.value);
+    g.tickers.push(r.ticker);
+  }
+  const groups = [...by.values()].sort((a, b) =>
+    (!a.label) - (!b.label) || b.value - a.value);
+  for (const g of groups) g.share = total ? g.value / total : 0;
+  return groups;
 }
 
 /* Gain over a typed cost basis, formatted once for the tables and the dialog
@@ -7514,8 +7551,9 @@ function renderInvestments() {
         <th>Value</th><th>% of holdings</th>${
         anyTarget ? '<th>Target</th><th>Drift</th>' : ''}</tr></thead>
       <tbody>${roll.rows.map(r => `<tr class="editrow" data-edit="target"
-        data-ticker="${esc(r.key)}" title="Click to set a target share">
-        <th scope="row">${esc(r.ticker)}</th>
+        data-ticker="${esc(r.key)}" title="Click to set a target share or an asset class">
+        <th scope="row">${esc(r.ticker)}${
+          r.cls ? ` <span class="muted">· ${esc(r.cls)}</span>` : ''}</th>
         <td style="text-align:left">${esc(andList(r.pots))}</td>
         <td>${fmtMoney(r.value)}</td>
         <td>${(r.share * 100).toFixed(1)}%</td>${!anyTarget ? '' : `
@@ -7525,6 +7563,23 @@ function renderInvestments() {
       <tfoot><tr><th>Total</th><td></td><td>${fmtMoney(roll.total)}</td><td></td>${
         anyTarget ? '<td></td><td></td>' : ''}</tr></tfoot>
     </table></div>
+    ${!roll.rows.some(r => r.cls) ? '' : (() => {
+      /* Only once a class exists — a table of one "Not classed yet" row would
+         be the feature demanding attention before it has anything to say. */
+      const groups = classRollup(roll.rows, roll.total);
+      return `<h3 style="margin:18px 0 4px">By Class</h3>
+      <p class="sub" style="margin-bottom:10px">The same money folded into the classes you
+        typed — three funds tracking one index read as one bet here.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th style="text-align:left">Class</th><th style="text-align:left">Tickers</th>
+          <th>Value</th><th>% of holdings</th></tr></thead>
+        <tbody>${groups.map(g => `<tr>
+          <th scope="row">${g.label ? esc(g.label) : '<span class="muted">Not classed yet</span>'}</th>
+          <td style="text-align:left">${esc(g.tickers.join(', '))}</td>
+          <td>${fmtMoney(g.value)}</td>
+          <td>${(g.share * 100).toFixed(1)}%</td></tr>`).join('')}</tbody>
+      </table></div>`;
+    })()}
   </div>` : '';
   return priceBar
     + (panes ? `<div class="cards2">${panes}</div>${rollup}`
@@ -10578,15 +10633,21 @@ const EDITORS = {
      the rollup's own grouping key (data-ticker, already upper-cased), so a
      target always finds its row however the ticker was typed in the pots. */
   target: {
-    title: (ds) => `Target for ${ds.ticker}`,
-    sub: () => 'What share of everything you hold this should be. Targets don\'t have to '
-      + 'cover every row or add up to 100% — set them only where you rebalance on a rule.',
+    title: (ds) => `${ds.ticker} on Everything You Hold`,
+    sub: () => 'What share of everything you hold this should be, and the asset class it '
+      + 'belongs to in your own words. Targets don\'t have to cover every row or add up '
+      + 'to 100% — set them only where you rebalance on a rule.',
     fields: () => [
       { key: 'pct', label: 'Target share', type: 'percent',
         hint: 'Of the Everything You Hold total. Leave the box empty to stop '
           + 'targeting this ticker.' },
+      { key: 'cls', label: 'Asset class', type: 'text',
+        hint: 'Free text — "S&P 500", "Bonds", "Cash". Rows typed with the same class '
+          + 'fold together in the By Class table (capitals don\'t matter). Empty for '
+          + 'none.' },
     ],
-    get: (ds) => ({ pct: (state.side.targets || {})[ds.ticker] }),
+    get: (ds) => ({ pct: (state.side.targets || {})[ds.ticker],
+                    cls: (state.side.classes || {})[ds.ticker] || '' }),
     save(ds, v) {
       state.side.targets = state.side.targets || {};
       if (typeof v.pct === 'number')
@@ -10594,6 +10655,12 @@ const EDITORS = {
       /* An empty box removes the target — "no longer targeted" rather than a
          stored 0% claiming the ticker shouldn't be held at all. */
       else delete state.side.targets[ds.ticker];
+      /* Same rule for the class: empty is "never said", not a '' riding in
+         every backup. */
+      state.side.classes = state.side.classes || {};
+      const cls = (v.cls || '').trim().slice(0, 40);
+      if (cls) state.side.classes[ds.ticker] = cls;
+      else delete state.side.classes[ds.ticker];
     },
   },
 
@@ -12899,7 +12966,7 @@ const SECTION_NEEDS = {
      an Investments link carries them — Retirement owns the branch, and the
      dialog names it out loud (shareCarriesNote). */
   investments: ['side.portfolios', 'side.taxable', 'side.retirementAccounts',
-                'side.targets'],
+                'side.targets', 'side.classes'],
   /* No people: the trips and PTO tables name nobody — checked, not assumed. */
   vacations:   ['vacations'],
   giving:      ['years', 'side.donations', 'side.daf', 'side.comp', 'side.bonuses'],
@@ -12917,7 +12984,7 @@ const BRANCH_OWNERS = {
   vacations: ['vacations'],
   'side.comp': ['comp'], 'side.bonuses': ['comp'],
   'side.portfolios': ['investments'], 'side.taxable': ['investments'],
-  'side.targets': ['investments'],
+  'side.targets': ['investments'], 'side.classes': ['investments'],
   'side.donations': ['giving'], 'side.daf': ['giving'],
   'side.retirementAccounts': ['retirement'], 'side.limits': ['retirement'],
   'side.drawdown': ['retirement'],
@@ -12938,6 +13005,7 @@ const BRANCH_LABEL = {
   'side.portfolios': 'your investment holdings',
   'side.taxable': 'your investment holdings',
   'side.targets': 'your allocation targets',
+  'side.classes': 'your asset classes',
   'side.donations': 'your donations',
   'side.daf': 'your giving fund',
   /* The holdings inside them travel with them, which is right — an account's
@@ -13762,7 +13830,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, KIND_LABEL,
-  allHoldings, gainText,
+  allHoldings, gainText, classRollup,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,
