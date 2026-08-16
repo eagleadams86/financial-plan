@@ -1062,9 +1062,16 @@ row of their own — Preferences' subtitle sat second and left the filing-status
 select alone, stretched across the whole dialog by `applyFieldSpans` to hide the
 gap. Preferences' own order is otherwise by SUBJECT, nearest thing to nearest
 thing: the household and tax questions, then how figures and rows read, then the
-three switches that turn a tab's machinery on, then the four assumed rates, and
-last the zoom and the price key together — the only two settings in the dialog
-that are not part of the plan at all.
+three switches that turn a tab's machinery on, then the dividend fallback rate,
+then the three retirement rates, and last the price key.
+**The zoom is the exception and is placed by LAYOUT, not by subject** — it
+belongs to no group, so it is the one field that can be spent closing a row.
+Without it the three retirement rates start one column short of a fresh row and
+`retirementReturnAnnual` is stranded at the end of the row above, away from the
+two that are read against it: "if it goes worse" and "if it goes better" mean
+nothing except beside the figure they are worse and better than. **Anything
+added to the group above the zoom must keep that in step.** The alignment is
+exact at four columns; a narrower dialog wraps as it always did.
 A field spec may be **`type: 'readout'`** — a figure the dialog WORKS OUT and
 the reader never types. It renders as a `<p class="field-readout">` rather than
 an input, so `readFields` skips it (a `<p>` has no `.value` and asking for one
