@@ -286,7 +286,13 @@ included — treat those the way you treat the figures.
   retirement accounts — into one by-ticker table with each holding's share of
   the whole, so concentration across pots is finally one number; the giving
   fund stays out (that money is already given), and a shared Investments link
-  now carries the retirement accounts and says so. Otherwise: one pane per place you hold investments (add, rename and
+  now carries the retirement accounts and your allocation targets, and says so.
+  Click a rollup row to set the **share it should be** — a Drift column then
+  shows how far each targeted ticker has wandered, in points and in the
+  dollars that would bring it back; targets don't have to cover every row or
+  sum to 100%. A pane that names budget accounts also **reconciles against
+  them**: its subtitle shows the budget's figure for the same pot and how far
+  behind or ahead of the holdings it is, or that the two are in step. Otherwise: one pane per place you hold investments (add, rename and
   reorder them), with optional **automatic price lookups** (Twelve Data; free
   key kept on the device, cached six hours, and every price still editable by
   hand). Shares, ETFs and **mutual funds** are all quoted — a fund strikes one

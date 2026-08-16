@@ -283,6 +283,17 @@ were left out. `allHoldings(st)` (pure) is the Everything You Hold rollup —
 panes + retirement accounts by upper-cased ticker, DAF excluded by
 construction; the card draws only when two pots contribute, and
 SECTION_NEEDS.investments carries `side.retirementAccounts` for it.
+**`side.targets` is UPPER-CASED ticker → share (0–1)** — the rollup's own
+grouping key, so a target typed for "voo" finds the VOO row. Values are read
+STRICTLY (rateOrNone) and clamped: num() would turn a corrupt field into a
+deliberate-looking 0% target, which is a real statement ("hold none") the
+reader never made; an emptied box DELETES for the same reason. Drift renders
+in POINTS with the dollar move that would close it, and the Target/Drift
+columns appear only once a target exists. A target for a ticker no longer
+held stays in the map (you may be about to buy it) with no row to show on.
+The linked panes' RECONCILE line compares holdingsValue against the linked
+accounts' computed balances this month — agreement is said out loud, the
+reconcileNote rule: that is the check passing, not nothing to say.
 **A RETIREMENT account has no id — it is addressed by its INDEX**, unlike a
 budget account, whose `id` is permanent and load-bearing. `retAcct.save` builds
 `{name, type, kind, amount, contribs, owner?}` and nothing anywhere adds an id;

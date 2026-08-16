@@ -1854,6 +1854,11 @@ function blankState() {
          not accounts: nothing flows through a house, so the engine never sees
          these. */
       property: [],
+      /* Allocation targets for the Everything You Hold card — UPPER-CASED
+         ticker → the share (0–1) of all holdings it should be. A map, not a
+         list: one target per ticker is the whole idea, and the rollup already
+         groups by that key. */
+      targets: {},
       /* The retirement spending plan. `spend` and `safeRate` are deliberately
          ABSENT rather than 0: absent means "never said", and only that keeps
          an untouched plan's projection identical to what it has always drawn.
@@ -2152,6 +2157,19 @@ function coerceShape(data) {
   const s = d.side;
   for (const k of ['taxable', 'otherMoney', 'hsa', 'daf', 'portfolios',
                    'retirementAccounts', 'property']) s[k] = arr(s[k]);
+  /* Allocation targets: ticker → share of all holdings. Keys are normalised
+     to the rollup's own grouping key (trimmed, upper-cased — a target typed
+     for "voo" must find the VOO row); values are read STRICTLY, the
+     account.rate discipline — num() would turn a corrupt field into a
+     deliberate-looking 0% target, which is a real statement ("shouldn't hold
+     this at all") the reader never made. Clamped to 0–1: a share of the whole
+     is what it is. */
+  const targets = obj(s.targets); s.targets = {};
+  for (const [k, v] of Object.entries(targets)) {
+    const key = String(k).trim().toUpperCase().slice(0, 24);
+    const pct = rateOrNone(v);
+    if (key && pct !== undefined) s.targets[key] = Math.min(1, Math.max(0, pct));
+  }
   /* Property: a name, a kind from the fixed list, a value and optionally what
      is still owed. Value and owed feed totals through num() (the NaN class
      fix); owed is DELETED rather than zeroed when it isn't a number, because
@@ -4740,13 +4758,23 @@ function allHoldings(st) {
   const by = new Map();
   for (const pot of pots) for (const h of pot.rows) {
     const key = String(h.ticker || '?').trim().toUpperCase();
-    if (!by.has(key)) by.set(key, { ticker: String(h.ticker || '?').trim(), value: 0, pots: [] });
+    if (!by.has(key)) by.set(key, { key, ticker: String(h.ticker || '?').trim(), value: 0, pots: [] });
     const g = by.get(key);
     g.value = round2(g.value + (h.shares || 0) * (h.price || 0));
     if (!g.pots.includes(pot.name)) g.pots.push(pot.name);
   }
   const rows = [...by.values()].sort((a, b) => b.value - a.value);
-  return { rows, total: round2(rows.reduce((s, r) => s + r.value, 0)) };
+  const total = round2(rows.reduce((s, r) => s + r.value, 0));
+  /* Each row's share of the whole, and its target where one is set — the two
+     numbers a drift is the difference of. A target for a ticker no longer
+     held anywhere stays in the map (you may be about to buy it) but has no
+     row to show on; deliberate, not an oversight. */
+  for (const r of rows) {
+    r.share = total ? r.value / total : 0;
+    const t = ((st.side || {}).targets || {})[r.key];
+    if (typeof t === 'number') r.target = t;
+  }
+  return { rows, total };
 }
 
 /* Gain over a typed cost basis, formatted once for the tables and the dialog
@@ -7417,18 +7445,39 @@ function renderInvestments() {
   ${run && run.limited && runIsToday(run) ? `<p class="sub" style="margin:-6px 0 14px"><strong>Twelve Data
     stopped answering.</strong> The free tier allows 800 lookups a day; the prices already
     fetched are kept. The allowance resets each day.</p>` : ''}`;
+  /* The reconcile line needs this month's computed balances — the same pair
+     of coordinates the net worth card reads. No live grid year, no line. */
+  const liveKey = latestGridYear();
+  const liveC = liveKey && C[liveKey];
+  const cur = liveKey && currentMonthOf(state.years[liveKey], todayISO());
   const panes = (s.portfolios || []).map(pf => {
     /* Said on the pane, not only in the dialog: a link that decides how net
        worth adds up should be visible where the holdings are. */
     const linked = (pf.accounts || [])
       .map(id => (accountById(state, id) || {}).name).filter(Boolean);
+    /* The two figures for one pot drift apart between updates — the budget's
+       balance ages while the holdings track the market. Saying the gap here
+       turns the link into a monthly reconciliation nudge; agreement is
+       reported too, the reconcileNote rule: that is the check PASSING, not
+       nothing to say. */
+    let reconcile = '';
+    if (linked.length && liveC && cur && (pf.rows || []).length) {
+      const budget = round2((pf.accounts || [])
+        .reduce((sum, id) => sum + (liveC.balances[`${id}|${cur}`] || 0), 0));
+      const gap = round2(holdingsValue(pf.rows) - budget);
+      reconcile = gap === 0
+        ? ` The budget shows the same ${fmtMoney(budget)} — the two are in step.`
+        : ` The budget shows ${fmtMoney(budget)} for it — ${fmtMoney(Math.abs(gap))} ${
+            gap > 0 ? 'behind' : 'ahead of'} these holdings${
+            viewOnly ? '.' : `; click its balance in the grid to restate it.`}`;
+    }
     return `<div class="card" data-box="pf-${esc(pf.id)}">
       <h2>${esc(pf.name)} <button class="h-edit" data-edit="portfolio"
         data-id="${esc(pf.id)}" title="Rename this account, reorder it, or delete it">✎ Edit</button></h2>
       <p class="sub">Value is shares × price.${
         viewOnly ? '' : ' Type a price over a fetched one any time.'}${
         linked.length ? ` These holdings are the budget's ${esc(andList(linked))} — the net
-        worth on Progress counts the pot once.` : ''}</p>
+        worth on Progress counts the pot once.${reconcile}` : ''}</p>
       ${holdingsTable(pf.rows, 'pf:' + pf.id)}
     </div>`;
   }).join('');
@@ -7438,20 +7487,43 @@ function renderInvestments() {
      with one, it is that pane's own table wearing a grander heading. */
   const roll = allHoldings(state);
   const potCount = new Set(roll.rows.flatMap(r => r.pots)).size;
+  /* Target and Drift columns appear once any row has a target — the column
+     rule everywhere else. Drift is POINTS (a difference of two percentages),
+     with the dollar move that would close it: share × total is what the
+     ticker holds, target × total is what it should, and the gap between them
+     is the trade you would actually place. */
+  const anyTarget = roll.rows.some(r => typeof r.target === 'number');
+  const driftCell = (r) => {
+    if (typeof r.target !== 'number') return '<span class="muted">—</span>';
+    const pts = (r.share - r.target) * 100;
+    const move = round2(r.value - r.target * roll.total);
+    if (Math.abs(move) < 0.005) return 'on target';
+    return `${pts > 0 ? '+' : ''}${pts.toFixed(1)} pts · ${fmtMoney(Math.abs(move))} ${
+      move > 0 ? 'over' : 'under'}`;
+  };
   const rollup = (roll.rows.length && potCount >= 2) ? `<div class="card">
     <h2>Everything You Hold</h2>
     <p class="sub">Every holding here and on the Retirement tab, added up by ticker.
       Retirement money counts at full value, before any tax, and the giving fund stays
-      out — that money is already given. Rows are read-only; edit a holding in its own
-      pot's table.</p>
+      out — that money is already given.${viewOnly
+        ? '' : ` Click a row to set the share it should be, and a Drift column shows how
+      far each one has wandered and the dollars that would bring it back. Holdings are
+      still edited in their own pot's table.`}</p>
     <div class="tablewrap"><table>
       <thead><tr><th style="text-align:left">Ticker</th><th style="text-align:left">Held in</th>
-        <th>Value</th><th>% of holdings</th></tr></thead>
-      <tbody>${roll.rows.map(r => `<tr><th scope="row">${esc(r.ticker)}</th>
+        <th>Value</th><th>% of holdings</th>${
+        anyTarget ? '<th>Target</th><th>Drift</th>' : ''}</tr></thead>
+      <tbody>${roll.rows.map(r => `<tr class="editrow" data-edit="target"
+        data-ticker="${esc(r.key)}" title="Click to set a target share">
+        <th scope="row">${esc(r.ticker)}</th>
         <td style="text-align:left">${esc(andList(r.pots))}</td>
         <td>${fmtMoney(r.value)}</td>
-        <td>${roll.total ? (r.value / roll.total * 100).toFixed(1) + '%' : ''}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><th>Total</th><td></td><td>${fmtMoney(roll.total)}</td><td></td></tr></tfoot>
+        <td>${(r.share * 100).toFixed(1)}%</td>${!anyTarget ? '' : `
+        <td>${typeof r.target === 'number'
+          ? (r.target * 100).toFixed(1) + '%' : '<span class="muted">—</span>'}</td>
+        <td>${driftCell(r)}</td>`}</tr>`).join('')}</tbody>
+      <tfoot><tr><th>Total</th><td></td><td>${fmtMoney(roll.total)}</td><td></td>${
+        anyTarget ? '<td></td><td></td>' : ''}</tr></tfoot>
     </table></div>
   </div>` : '';
   return priceBar
@@ -10502,6 +10574,29 @@ const EDITORS = {
     move: (ds, dir) => listSwap(holdingList(ds.list), +ds.idx, dir),
   },
 
+  /* An allocation target — one ticker's row on Everything You Hold. Keyed by
+     the rollup's own grouping key (data-ticker, already upper-cased), so a
+     target always finds its row however the ticker was typed in the pots. */
+  target: {
+    title: (ds) => `Target for ${ds.ticker}`,
+    sub: () => 'What share of everything you hold this should be. Targets don\'t have to '
+      + 'cover every row or add up to 100% — set them only where you rebalance on a rule.',
+    fields: () => [
+      { key: 'pct', label: 'Target share', type: 'percent',
+        hint: 'Of the Everything You Hold total. Leave the box empty to stop '
+          + 'targeting this ticker.' },
+    ],
+    get: (ds) => ({ pct: (state.side.targets || {})[ds.ticker] }),
+    save(ds, v) {
+      state.side.targets = state.side.targets || {};
+      if (typeof v.pct === 'number')
+        state.side.targets[ds.ticker] = Math.min(1, Math.max(0, v.pct));
+      /* An empty box removes the target — "no longer targeted" rather than a
+         stored 0% claiming the ticker shouldn't be held at all. */
+      else delete state.side.targets[ds.ticker];
+    },
+  },
+
   /* An investment pane: a named group of holdings on the Investments tab */
   portfolio: {
     title: (ds, isNew) => isNew ? 'Add an Investment Account' : 'Investment Account',
@@ -12803,7 +12898,8 @@ const SECTION_NEEDS = {
   /* Everything You Hold rolls the retirement accounts in beside the panes, so
      an Investments link carries them — Retirement owns the branch, and the
      dialog names it out loud (shareCarriesNote). */
-  investments: ['side.portfolios', 'side.taxable', 'side.retirementAccounts'],
+  investments: ['side.portfolios', 'side.taxable', 'side.retirementAccounts',
+                'side.targets'],
   /* No people: the trips and PTO tables name nobody — checked, not assumed. */
   vacations:   ['vacations'],
   giving:      ['years', 'side.donations', 'side.daf', 'side.comp', 'side.bonuses'],
@@ -12821,6 +12917,7 @@ const BRANCH_OWNERS = {
   vacations: ['vacations'],
   'side.comp': ['comp'], 'side.bonuses': ['comp'],
   'side.portfolios': ['investments'], 'side.taxable': ['investments'],
+  'side.targets': ['investments'],
   'side.donations': ['giving'], 'side.daf': ['giving'],
   'side.retirementAccounts': ['retirement'], 'side.limits': ['retirement'],
   'side.drawdown': ['retirement'],
@@ -12840,6 +12937,7 @@ const BRANCH_LABEL = {
   'side.bonuses': 'your salary and bonus history',
   'side.portfolios': 'your investment holdings',
   'side.taxable': 'your investment holdings',
+  'side.targets': 'your allocation targets',
   'side.donations': 'your donations',
   'side.daf': 'your giving fund',
   /* The holdings inside them travel with them, which is right — an account's

@@ -2301,6 +2301,30 @@ t('the rollup groups by ticker across panes and retirement accounts', () => {
 t('an empty plan rolls up to nothing', () => {
   eq(H.allHoldings(H.coerceShape({})).rows, []);
 });
+t('allocation targets are normalised at the boundary', () => {
+  const d = H.coerceShape({ side: { targets: {
+    ' voo ': 0.5, QQQM: '0.15', BAD: 'junk', OVER: 9, ' ': 0.1,
+  } } });
+  eq(d.side.targets.VOO, 0.5, 'the key is trimmed and upper-cased — the rollup\'s own key');
+  eq(d.side.targets.QQQM, 0.15, 'a string share still reads');
+  eq(d.side.targets.BAD, undefined,
+    'junk is dropped, never a manufactured 0% — that would claim "hold none"');
+  eq(d.side.targets.OVER, 1, 'a share of the whole clamps to the whole');
+  eq(Object.keys(d.side.targets).includes(''), false);
+});
+t('the rollup carries each row\'s share and its target', () => {
+  const st = H.coerceShape({ side: {
+    portfolios: [{ id: 'a', name: 'A', rows: [
+      { ticker: 'VOO', shares: 3, price: 100 }] }],
+    retirementAccounts: [{ name: '401k', type: '401k',
+      rows: [{ ticker: 'VTI', shares: 1, price: 100 }] }],
+    targets: { voo: 0.5 },
+  } });
+  const roll = H.allHoldings(st);
+  eq(roll.rows[0].share, 0.75, 'VOO is three quarters of the whole');
+  eq(roll.rows[0].target, 0.5, 'and finds its target however it was keyed');
+  eq(roll.rows[1].target, undefined, 'no target, no claim');
+});
 
 group('Property and net worth');
 t('a property row is coerced at the boundary', () => {
