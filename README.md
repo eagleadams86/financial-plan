@@ -145,7 +145,13 @@ included — treat those the way you treat the figures.
   retirement accounts, and the Household tab's property at your stated values
   minus anything owed. The giving fund is deliberately left out (that money is
   already given), and a part with nothing recorded shows no tile rather than a
-  $0.00. Money that honestly lives in two places — a brokerage tracked as a
+  $0.00. **Record today's figures** turns the strip into history: each press
+  states the card's exact figures as a dated snapshot — a deliberate act,
+  like pinning a balance; the app never records one on its own — and two or
+  more draw the net-worth-over-time line, with the parts in the hover. A
+  second press the same day restates rather than duplicating, old statements
+  can be typed in by hand to backfill the line, and every snapshot is
+  clickable to correct or delete. Money that honestly lives in two places — a brokerage tracked as a
   budget account *and* as an Investments pane — is counted **once**: the pane's
   ✎ Edit dialog lets it name the budget account(s) its holdings are, and the
   total then subtracts that overlap, keeping the pot at what the holdings are

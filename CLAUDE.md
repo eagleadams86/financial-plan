@@ -170,6 +170,16 @@ family names as well as balances.
   quota problem and a stale-copy problem. Undone state still passes
   coerceShape/migrate on the way back in. ⌘Z is gated off inputs and open
   dialogs (the browser's own undo owns a text box).
+- **`side.snapshots` is stated net worth history** — {date, total, parts…},
+  written ONLY by a deliberate act (the Record button, or a hand-typed row
+  from an old statement): the pinned-balance principle, not a breach of
+  "never persist a computed value". `netWorthTotals` is the ONE arithmetic
+  the card and the button share, so a snapshot states exactly what the screen
+  showed. A record needs a DATE and at least one figure or coerceShape drops
+  it; a stated `total` wins, absent it the parts sum (`snapshotPoints`, pure).
+  A second Record the same day RESTATES. The chart line is SOLID — recorded
+  facts, and the dash grammar must stay honest. Snapshots are dated, so the
+  share window trims them like trips.
 - **CSV export is `csvCell`/`gridToCsv`/`donationsToCsv`** (pure, pinned).
   csvCell defuses formula triggers (=+@ and tab) on TEXT fields only — a
   negative number legitimately opens with '-'. Values export RAW; currency

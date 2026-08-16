@@ -1904,6 +1904,13 @@ function blankState() {
          rules actually live at: "90% US stocks" is one target, where saying
          it per ticker would measure each fund alone against the whole. */
       classTargets: {},
+      /* Net worth SNAPSHOTS — dated statements of what the plan was worth,
+         each one recorded by a deliberate press of the button (or typed from
+         an old statement). This is the pinned-balance principle, not a breach
+         of "never persist a computed value": the app never writes one on its
+         own, and a figure you chose to state on a day is a fact about that
+         day, not a computation to refresh. */
+      snapshots: [],
       /* The retirement spending plan. `spend` and `safeRate` are deliberately
          ABSENT rather than 0: absent means "never said", and only that keeps
          an untouched plan's projection identical to what it has always drawn.
@@ -2233,6 +2240,19 @@ function coerceShape(data) {
     const pct = rateOrNone(v);
     if (key && pct !== undefined) s.classTargets[key] = Math.min(1, Math.max(0, pct));
   }
+  /* Net worth snapshots: a record with no DATE means nothing (a worth without
+     a when is not a fact) and is dropped; the five figures go through the
+     owed discipline — numbers kept, absent stays absent, and a record left
+     with no figure at all goes too. */
+  s.snapshots = arr(s.snapshots).filter(r => /^\d{4}-\d{2}-\d{2}$/.test(r.date || ''));
+  for (const r of s.snapshots) {
+    for (const k of ['total', 'liquid', 'invested', 'retirement', 'property']) {
+      const v = num(r[k]);
+      if (typeof v === 'number') r[k] = v; else delete r[k];
+    }
+  }
+  s.snapshots = s.snapshots.filter(r =>
+    ['total', 'liquid', 'invested', 'retirement', 'property'].some(k => typeof r[k] === 'number'));
   /* Property: a name, a kind from the fixed list, a value and optionally what
      is still owed. Value and owed feed totals through num() (the NaN class
      fix); owed is DELETED rather than zeroed when it isn't a number, because
@@ -4619,16 +4639,11 @@ function netWorthParts(st) {
   };
 }
 
-function netWorthCard(liquid, cur, c) {
-  const nw = netWorthParts(state);
-  /* Nothing typed beyond the budget means nothing to add up — the Savings
-     Goals card below already carries total liquidity, and a one-tile "net
-     worth" equal to it would be the same figure wearing a grander name. */
-  if (!nw.hasInvested && !nw.hasRetirement && !nw.hasProperty) return '';
-  const tile = (label, value, foot) => `<div class="goal">
-    <div class="label">${label}</div>
-    <div class="value">${fmtMoney(value)}</div>
-    ${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
+/* The card's arithmetic, shared with the Record button so a snapshot states
+   EXACTLY the figures the card was showing — two computations of one number
+   is how a recorded fact drifts from the screen it came off. */
+function netWorthTotals(st, liquid, c, cur) {
+  const nw = netWorthParts(st);
   /* Money a pane has claimed as its holdings (pf.accounts) is in the Liquid
      figure AND the Invested one — both tiles honestly match their tabs, so
      the dedupe lives in the TOTAL alone, subtracting the linked accounts'
@@ -4636,11 +4651,37 @@ function netWorthCard(liquid, cur, c) {
      worth — the priced figure, which is the net-worth question. */
   const overlap = round2(nw.linkedAccounts
     .reduce((s, id) => s + (c.balances[`${id}|${cur}`] || 0), 0));
-  const linkedNames = nw.linkedAccounts
-    .map(id => (accountById(state, id) || {}).name).filter(Boolean);
   const total = round2(liquid + (nw.hasInvested ? nw.invested : 0)
     + (nw.hasRetirement ? nw.retirement : 0) + (nw.hasProperty ? nw.property : 0)
     - overlap);
+  return { nw, overlap, total };
+}
+
+/* The snapshots as the chart reads them: dated ascending, the headline total
+   falling back to the sum of whatever parts a hand-typed record carries.
+   Pure, pinned by tests. */
+function snapshotPoints(st) {
+  return (((st.side || {}).snapshots) || [])
+    .map(r => ({ date: r.date,
+      total: typeof r.total === 'number' ? r.total
+        : round2(['liquid', 'invested', 'retirement', 'property']
+            .reduce((s, k) => s + (typeof r[k] === 'number' ? r[k] : 0), 0)) }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function netWorthCard(liquid, cur, c) {
+  /* Nothing typed beyond the budget means nothing to add up — the Savings
+     Goals card below already carries total liquidity, and a one-tile "net
+     worth" equal to it would be the same figure wearing a grander name. */
+  const probe = netWorthParts(state);
+  if (!probe.hasInvested && !probe.hasRetirement && !probe.hasProperty) return '';
+  const tile = (label, value, foot) => `<div class="goal">
+    <div class="label">${label}</div>
+    <div class="value">${fmtMoney(value)}</div>
+    ${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
+  const { nw, overlap, total } = netWorthTotals(state, liquid, c, cur);
+  const linkedNames = nw.linkedAccounts
+    .map(id => (accountById(state, id) || {}).name).filter(Boolean);
   return `<div class="card">
     <h2>Net Worth${helpBtn('netWorth', 'what counts toward net worth')}</h2>
     <p class="sub">Everything the plan knows about, added up as of ${esc(monthLabelFull(cur))}.${
@@ -4661,7 +4702,67 @@ function netWorthCard(liquid, cur, c) {
         ? `Value minus the ${fmtMoney(nw.propertyOwed)} still owed — the Household tab lists it`
         : 'What it would sell for — the Household tab lists it') : ''}
     </div>
+    ${(() => {
+      /* The history: dated snapshots you chose to record, drawn once there are
+         two to draw a line between. Newest first in the table — the recent
+         ones are the ones you check. */
+      const snaps = (state.side.snapshots || [])
+        .map((r, idx) => ({ r, idx }))
+        .sort((a, b) => b.r.date.localeCompare(a.r.date));
+      const pts = snapshotPoints(state);
+      return `
+      ${pts.length >= 2 ? `<p class="sub" style="margin-top:16px">Each point is a day you
+        pressed Record — figures stated at the time, never recomputed.</p>
+      <div class="chartbox" style="height:220px"><canvas id="worthChart"></canvas></div>` : ''}
+      ${snaps.length ? `<div class="tablewrap" style="margin-top:12px"><table>
+        <thead><tr><th style="text-align:left">Date</th><th>Total</th></tr></thead>
+        <tbody>${snaps.map(({ r, idx }) => `<tr class="editrow" data-edit="snapshot"
+          data-idx="${idx}" title="Click to correct or delete this snapshot">
+          <th scope="row">${esc(r.date)}</th>
+          <td>${fmtMoney(typeof r.total === 'number' ? r.total
+            : pts.find(p => p.date === r.date)?.total || 0)}</td></tr>`).join('')}</tbody>
+      </table></div>` : ''}
+      <div class="addbar">
+        <button class="btn small" id="recordWorthBtn"
+          title="State today's figures — exactly what this card shows — as a dated snapshot">＋ Record today's figures</button>
+        <button class="btn small" data-add="snapshot"
+          title="Type a snapshot from an old statement, to backfill the line">＋ Add a snapshot</button>
+      </div>`;
+    })()}
   </div>`;
+}
+
+/* The snapshots' line — recorded facts, so a SOLID line and round points:
+   nothing here is projected, and the dash grammar must stay honest. */
+function buildWorthChart() {
+  const pts = snapshotPoints(state);
+  if (pts.length < 2) return;
+  const snaps = (state.side.snapshots || []).slice()
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const accent = cssVar('--accent');
+  newChart('worthChart', {
+    type: 'line',
+    data: { labels: pts.map(p => p.date), datasets: [{
+      label: 'Net worth',
+      data: pts.map(p => p.total),
+      borderColor: accent, backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 3, pointBackgroundColor: accent,
+      pointHoverRadius: 5, tension: .2,
+    }]},
+    options: {
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (t) => {
+          const r = snaps[t.dataIndex] || {};
+          return [`Total: ${fmtMoney(t.parsed.y)}`,
+            ...['liquid', 'invested', 'retirement', 'property']
+              .filter(k => typeof r[k] === 'number')
+              .map(k => `${k[0].toUpperCase()}${k.slice(1)}: ${fmtMoney(r[k])}`)];
+        } } } },
+      scales: { x: chartAxes(), y: Object.assign(chartAxes(),
+        { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
+    },
+  }, `Net worth by snapshot: ${pts.map(p => `${p.date}, ${fmtMoney(p.total)}`).join('; ')}.`);
 }
 
 function renderGoals() {
@@ -8816,7 +8917,31 @@ function wireView(view) {
   if (view === 'budget') wireBudget();
   /* Progress draws the goal line AND the three long-run charts that used to be
      a History tab of their own. */
-  if (view === 'goals') { buildGoalChart(); buildHistoryCharts(); }
+  if (view === 'goals') {
+    buildGoalChart(); buildHistoryCharts(); buildWorthChart();
+    const rec = F('recordWorthBtn');
+    if (rec) rec.onclick = () => {
+      const liveKey = latestGridYear();
+      if (!liveKey) return;
+      const c = C[liveKey];
+      const cur = currentMonthOf(state.years[liveKey], todayISO());
+      const liquid = c.balances[`total|${cur}`] || 0;
+      const { nw, total } = netWorthTotals(state, liquid, c, cur);
+      const snap = { date: todayISO(), total, liquid };
+      if (nw.hasInvested) snap.invested = nw.invested;
+      if (nw.hasRetirement) snap.retirement = nw.retirement;
+      if (nw.hasProperty) snap.property = nw.property;
+      /* A second press the same day RESTATES rather than duplicating — two
+         worths for one date is not a history, it is a smudge. */
+      const at = state.side.snapshots.findIndex(s2 => s2.date === snap.date);
+      const replaced = at >= 0;
+      if (replaced) state.side.snapshots[at] = snap;
+      else state.side.snapshots.push(snap);
+      save(); render();
+      toast(replaced ? `Restated today's snapshot — ${fmtMoney(total)}`
+        : `Recorded ${fmtMoney(total)} as of today`);
+    };
+  }
   if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
   if (view === 'comp') buildCompChart();
   if (view === 'giving') {
@@ -10455,6 +10580,42 @@ const EDITORS = {
     },
     move: (ds, dir) => listSwap(state.settings.accounts,
       state.settings.accounts.findIndex(a => a.id === ds.bal), dir),
+  },
+
+  /* A net worth snapshot — recorded by the button, correctable here. Indexed
+     like property: nothing points at a snapshot. */
+  snapshot: {
+    title: (ds, isNew) => isNew ? 'Add a Snapshot' : 'Net Worth Snapshot',
+    cols: 2,
+    sub: () => 'A statement of what the plan was worth on a day. The button records '
+      + 'today\'s computed figures; typing one in by hand is how an old statement '
+      + 'backfills the line.',
+    fields: () => [
+      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'total', label: 'Total', type: 'money',
+        hint: 'The headline the chart plots. Left empty, the parts below add up to it.' },
+      { key: 'liquid', label: 'Liquid', type: 'money' },
+      { key: 'invested', label: 'Invested', type: 'money' },
+      { key: 'retirement', label: 'Retirement', type: 'money' },
+      { key: 'property', label: 'Property equity', type: 'money' },
+    ],
+    get: (ds) => ({ ...state.side.snapshots[+ds.idx] }),
+    blank: () => ({ date: todayISO() }),
+    save(ds, v) {
+      /* Refusals keep the rest of the world untouched and say why — the
+         standing refusal discipline. */
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v.date || ''))
+        return 'A snapshot needs its date — nothing was changed';
+      const row = { date: v.date };
+      for (const k of ['total', 'liquid', 'invested', 'retirement', 'property'])
+        if (typeof v[k] === 'number') row[k] = v[k];
+      if (!['total', 'liquid', 'invested', 'retirement', 'property']
+          .some(k => typeof row[k] === 'number'))
+        return 'A snapshot needs at least one figure — nothing was changed';
+      if (ds.idx !== undefined) state.side.snapshots[+ds.idx] = row;
+      else state.side.snapshots.push(row);
+    },
+    del(ds) { state.side.snapshots.splice(+ds.idx, 1); },
   },
 
   /* A piece of property — a home, a car, a boat. Addressed by INDEX like a
@@ -13420,7 +13581,7 @@ const SECTION_NEEDS = {
      the giving fund. All four belong to other tabs, so a Progress link names
      them out loud in the dialog (shareCarriesNote). */
   goals:       ['years', 'goals', 'side.portfolios', 'side.retirementAccounts',
-                'side.property', 'side.daf'],
+                'side.property', 'side.daf', 'side.snapshots'],
   household:   ['years', 'goals', 'people', 'side.property'],
   /* No 'years', deliberately, though the drawdown's spending target is SEEDED
      from the budget's own expense total: the seed fills the box, the figure is
@@ -13455,6 +13616,7 @@ const SECTION_NEEDS = {
 const BRANCH_OWNERS = {
   years: ['budget'],
   goals: ['goals'],
+  'side.snapshots': ['goals'],
   people: ['household'],
   'side.property': ['household'],
   vacations: ['vacations'],
@@ -13474,6 +13636,7 @@ const BRANCH_OWNERS = {
 const BRANCH_LABEL = {
   years: 'your budget grid',
   goals: 'your goals',
+  'side.snapshots': 'your net worth history',
   people: 'the people in your plan',
   'side.property': 'your property values',
   vacations: 'your trips and PTO',
@@ -13694,6 +13857,11 @@ function trimShareYearMaps(data, cutoff, ceiling) {
      neither old nor a plan for next summer. */
   if (Array.isArray(v.trips))
     v.trips = v.trips.filter(t => !t || !t.year || keepShareYear(t.year, cutoff, ceiling));
+  /* Net worth snapshots are dated, so the window applies — "the last 3 years"
+     must not ship a decade of worth history beside a three-year grid. */
+  if (Array.isArray(s.snapshots))
+    s.snapshots = s.snapshots.filter(r =>
+      !r || !r.date || keepShareYear(r.date.slice(0, 4), cutoff, ceiling));
   return data;
 }
 
@@ -14309,7 +14477,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
-  csvCell, gridToCsv, donationsToCsv, searchPlan, SEARCH_CAP,
+  csvCell, gridToCsv, donationsToCsv, searchPlan, SEARCH_CAP, snapshotPoints,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,
