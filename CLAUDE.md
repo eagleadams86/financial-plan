@@ -706,6 +706,24 @@ suite passed while the card was wrong.
   this month", not "Dividend paid in"**: the two boxes correct what THIS
   account earned while the line above them describes what came IN, and the two
   directions must not share a word.
+  **The YEAR-TOTAL column of an account row is its CLOSING balance, never a
+  sum** (`closingOf` in gridCard, `balanceYearTip` for the hover, and the same
+  rule in `gridToCsv` so the export can't disagree with the screen). Twelve
+  monthly balances added together is the same money counted twelve times — a
+  meaningless figure in the column a reader trusts most, which is why the
+  column sat empty for these rows. It is the last month of THIS calendar year
+  that states a balance, so a pinned year recorded through October closes in
+  October rather than reading blank. The tooltip says which figure it is and
+  at which month — that sentence is what stops the column header ("2026 total")
+  reading as a promise it doesn't keep here, and `HELP.rowTotal` carries the
+  same exception. Under it ride the YEAR's interest and dividends through
+  `earningsOver` (which reads `receivedInto` rather than re-deriving arrivals),
+  because "what did this account make me?" is the question the column can
+  honestly answer and the monthly tips only answer a twelfth at a time.
+  **The Total row drops the arrivals deliberately**: a sweep between two of the
+  reader's own accounts is already inside that figure, and naming it there
+  would read as money arriving from outside the plan. An owner subtotal shows
+  its closing figure alone — what each account earned is on its own row.
   A pinned or summary year computes neither, so its
   `interest`/`dividend` maps are empty and the extra lines fall away with no
   branch. Keep it in step with the cell editor's `rateLine`, which answers the

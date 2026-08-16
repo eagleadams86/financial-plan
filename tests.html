@@ -2352,6 +2352,7 @@ function tipFixture() {
   return {
     tip: (id, m) => H.balanceTip(s, c, yr, acct(id), m),
     got: (id, m) => H.receivedInto(s, c, acct(id), m),
+    over: (id, ms) => H.earningsOver(s, c, acct(id), ms),
   };
 }
 
@@ -2411,6 +2412,30 @@ t('a sender\'s interest and dividend arrive as one line', () => {
 t('an account crediting itself is never listed as its own source', () => {
   const { tip } = tipFixture();
   eq(tip('mid', '2030-01').includes('Paid in'), false);
+});
+t('a year of earnings adds up out of the same monthly figures', () => {
+  const { over } = tipFixture();
+  const months = ['2030-01', '2030-02', '2030-03', '2030-04', '2030-05', '2030-06'];
+  const mid = over('mid', months);
+  /* 100 + 101 + 102.01 + a stated 25 + 103.28 + 104.31 — the months' own
+     figures, the correction included, never recomputed from the rate. */
+  eq(mid.interest, 535.6);
+  eq(mid.dividend, 206.32, 'March and June, the quarterly beat');
+  eq(mid.received.length, 0);
+  const cash = over('cash', months);
+  eq(cash.interest, 0);
+  eq(cash.received.map(g => `${g.name} ${g.v}`).join('; '), 'Brokerage 206.32',
+    'every arrival from one sender, gathered onto one line');
+});
+t('the year column says it is a closing balance, not a sum', () => {
+  const { over } = tipFixture();
+  const months = ['2030-01', '2030-02', '2030-03'];
+  eq(H.balanceYearTip(over('mid', months), { m: '2030-03', v: 10303.01 }, 'closing balance'),
+    '$10,303.01 · closing balance, Mar 30\nInterest $303.01 over 2030'
+    + '\nDividends $102.01 over 2030');
+  eq(H.balanceYearTip({}, { m: '2030-03', v: 500 }, 'closing balance'),
+    '$500.00 · closing balance, Mar 30',
+    'a row with no earnings to report says only what it is');
 });
 t('the tooltip and the cell editor read the same arrivals', () => {
   /* One reader, so the hover and the dialog cannot tell different stories
@@ -2552,6 +2577,11 @@ t('a grid year exports the shape the screen shows', () => {
   eq(lines[1].startsWith('Income,"Pay, monthly",5000'), true, 'a comma\'d name survives quoted');
   ok(lines.some(l => l.startsWith('Expenses,Rent,-2000')), 'raw numbers, no currency dress');
   ok(lines.some(l => l.startsWith('Accounts,Total,')), 'the balance total rides along');
+  /* The year column matches the screen: a balance row closes rather than
+     summing, so the last column is February's figure, not both months added. */
+  const tot = lines.find(l => l.startsWith('Accounts,Total,')).split(',');
+  eq(tot[tot.length - 1], tot[tot.length - 2],
+    'the year column is the closing balance, not a sum of the months');
 });
 t('a summary year is two columns', () => {
   const st = H.coerceShape({ years: { '2015': { kind: 'summary',

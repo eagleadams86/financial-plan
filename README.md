@@ -54,7 +54,12 @@ included — treat those the way you treat the figures.
   current month reads as the estimate it is until you mark it entered, rather
   than looking like money already counted. Every figure says what it's made of,
   subtotals and year totals too: plain for what happened, italic for a
-  projection, dashed for a total spanning both. Click any cell to edit — or **split a month into several
+  projection, dashed for a total spanning both. The year-total column adds a
+  row's months up — **except an account, where it shows the balance the year
+  closed on**, since twelve monthly balances added together would be the same
+  money counted twelve times. Hovering one gives that year's interest and
+  dividends, which is what the account actually made you; the CSV export
+  carries the same figure. Click any cell to edit — or **split a month into several
   amounts**, each actual or estimated on its own, totalled on save. A row paid
   per check opens that way already, one line per payday with the amount filled
   in, so correcting a single cheque — a bonus, a missed shift — is one box to
