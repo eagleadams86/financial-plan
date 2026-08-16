@@ -71,7 +71,8 @@ included — treat those the way you treat the figures.
   already looking at. A month that earned and received nothing stays quiet
   rather than printing $0.00, and a figure you typed over the computed one
   says so.
-  The cell editor shows the same and lets you override
+  The cell editor says the same in words — the rate, what it earned, and what
+  the other accounts paid in this month — and lets you override
   the interest or add a dividend — correct either and the balance recomputes
   around it, in whichever account the money is paid into, for that month and
   every month after. **Every note you've written anywhere in a year is gathered

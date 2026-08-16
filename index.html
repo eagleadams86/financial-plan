@@ -1276,7 +1276,12 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
             style="width:160px">
         </div>
         <div>
-          <label class="field" for="cellDividend">Dividend paid in</label>
+          <!-- "Dividend this month", not "Dividend paid in": these two boxes
+               correct what THIS account earned, and the context line above them
+               now says what other accounts paid IN — two different directions
+               that must not share a word. It also pairs the label with the
+               Interest box beside it, which is what it always meant. -->
+          <label class="field" for="cellDividend">Dividend this month</label>
           <input type="text" id="cellDividend" inputmode="decimal" autocomplete="off"
             style="width:160px">
         </div>
@@ -4652,18 +4657,7 @@ function cellTip(r) {
    Where the money LANDED is named whenever it isn't this account: a brokerage
    sweeping its dividend to cash is the ordinary arrangement, and earnings paid
    elsewhere are the likeliest reason a balance didn't move by what it earned.
-   The RECEIVING end says so too — "Paid in $102.01 from Brokerage", one line
-   per account that swept something here. Without it a hub balance jumps with
-   nothing on the tab explaining why, which is the same question the sending
-   lines answer from the other side; a reader looking at the account the money
-   arrived in should not have to guess which of the others sent it. A source's
-   interest and dividend are ONE line, deliberately: the question being asked
-   here is where the money came from, and how the sender split it is a fact
-   about the sender, said in full on its own cell.
-   `payInto` is mirrored rather than assumed — earnings destined for an account
-   that isn't running yet stay with the account that earned them, so a
-   destination is only credited in the months it is actually running. The
-   balance being drawn is the proof of that: only a running account has one.
+   The RECEIVING end says so too, through `receivedInto` below.
    A pinned or summary year computes neither, so its `interest`/`dividend` maps
    are empty and every extra line falls away on its own. */
 function balanceTip(st, c, yr, a, m) {
@@ -4683,16 +4677,38 @@ function balanceTip(st, c, yr, a, m) {
   if (typeof div === 'number' && (div || typeof adj.dividend === 'number'))
     lines.push(earned('Dividends', div, typeof adj.dividend === 'number',
       (a.divTo || a.id) !== a.id ? accountName(st, a.divTo) : ''));
+  /* No esc() — the whole tip is escaped once at the sink and rendered through
+     textContent, exactly like the account names above. */
+  for (const g of receivedInto(st, c, a, m))
+    lines.push(`Paid in ${fmtMoney(g.v)} from ${g.name}`);
+  return [head, ...lines].join('\n');
+}
+
+/* What the OTHER accounts swept into this one this month — one entry per
+   account that sent something, newest question first: a hub balance jumps and
+   nothing on the tab says why. It is the same fact the sending lines carry
+   ("into Cash"), read from the end the reader is actually looking at.
+   The ONE reader for that, deliberately: the balance tooltip and the cell
+   editor both ask it, and two answers to "who paid this in" that could
+   disagree is exactly the drift `kindTotals` exists to prevent.
+   A source's interest and dividend arrive as ONE figure — the question here is
+   where the money came from, and how the sender split it is a fact about the
+   sender, said in full on its own cell.
+   `payInto` is mirrored rather than assumed: earnings destined for an account
+   that isn't running yet stay with the account that earned them, so a
+   destination is only credited in months it is actually running — and having a
+   balance to hover or edit is the proof of that, since only a running account
+   has one. Pure over the computed year, so the wording above it is testable. */
+function receivedInto(st, c, a, m) {
+  const got = [];
   for (const s of accountsOf(st)) {
     if (s.id === a.id) continue;
     const sent = round2(
       (s.creditTo === a.id ? (c.interest || {})[`${s.id}|${m}`] || 0 : 0)
       + ((s.divTo || s.id) === a.id ? (c.dividend || {})[`${s.id}|${m}`] || 0 : 0));
-    /* No esc() — the whole tip is escaped once at the sink and rendered
-       through textContent, exactly like the account names above. */
-    if (sent) lines.push(`Paid in ${fmtMoney(sent)} from ${accountName(st, s.id)}`);
+    if (sent) got.push({ id: s.id, name: accountName(st, s.id), v: sent });
   }
-  return [head, ...lines].join('\n');
+  return got;
 }
 
 /* Plain-English names for the estimate rules — shown wherever a rule needs
@@ -12932,7 +12948,12 @@ function openCellEditor(yearKey, type, id, m) {
     const paidOut = C[yearKey]?.dividend[`${id}|${m}`];
     F('cellDialogTitle').textContent = `${acct.name} — ${monthLabel(m)}`;
     /* Say where the number came from before asking to change it: the rate, what
-       that rate earned this month, and where the interest was paid. */
+       that rate earned this month, and where the interest was paid — then, from
+       the other end, what the other accounts swept IN. The received figure is
+       deliberately not editable here: it belongs to the account that sent it,
+       and the boxes below correct only what THIS account earned. Saying it out
+       loud is what stops the balance above looking wrong by exactly that sum,
+       which is the reason to open this dialog in the first place. */
     const rateLine = [
       (acct.rate || 0) ? `Grows ${round2(acct.rate * 100)}%/yr — ${fmtMoney(earned || 0)} this month${
         acct.creditTo !== acct.id ? `, into ${accountName(state, acct.creditTo)}` : ''}.` : '',
@@ -12941,6 +12962,11 @@ function openCellEditor(yearKey, type, id, m) {
           acct.divEvery || 3]} — ${paidOut ? fmtMoney(paidOut) : 'nothing'} this month${
         (acct.divTo || acct.id) !== acct.id ? `, into ${accountName(state, acct.divTo)}` : ''}.` : '',
     ].filter(Boolean).join(' ') || 'No growth or dividend rate set on this account.';
+    const gotIn = C[yearKey] ? receivedInto(state, C[yearKey], acct, m) : [];
+    const paidInLine = gotIn.length
+      ? ` Paid in this month: ${andList(gotIn.map(g => `${fmtMoney(g.v)} from ${g.name}`))} — `
+        + 'correct that where it was earned, not here.'
+      : '';
     /* A pinned year has no chain and no projection — every balance in it is a
        figure read off a statement at the time. So there is nothing to say
        about rates or what a month "should" have been: the number is the whole
@@ -12955,7 +12981,7 @@ function openCellEditor(yearKey, type, id, m) {
           ? `${acct.name} isn't tracked this early yet. Save a number here and it starts from `
             + `${monthLabel(m)}, carrying forward from what you type. `
           : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held. `)
-        + rateLine;
+        + rateLine + paidInLine;
     /* All three computed figures show as PLACEHOLDERS rather than values:
        typing one in is what makes it an override, so opening the dialog to
        correct the interest and saving can't also freeze the balance at the
@@ -14769,7 +14795,8 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
-  netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, balanceTip, KIND_LABEL,
+  netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, balanceTip,
+  receivedInto, KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
   coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
   csvCell, gridToCsv, donationsToCsv, searchPlan, SEARCH_CAP, snapshotPoints,
