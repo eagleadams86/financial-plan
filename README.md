@@ -61,7 +61,12 @@ included — treat those the way you treat the figures.
   type in rather than a lump sum to break apart first. Hovering a split month reads its amounts one per line with the total labelled last, in the grid's own tooltip — which follows the pointer, so it never goes missing after a scroll or an edit the way a browser title bubble does. A month's
   balance cell reconciles as you type — say what an account really holds and it
   tells you how far that is from what the plan expected, or confirms the two
-  agree. It also shows what the account earned that month and lets you override
+  agree. Hovering one reads what the account earned that month under the
+  balance — its interest, its dividend, and the account either was paid into
+  when that isn't itself — which is what explains a balance moving with no
+  budget row behind it; a month that earned nothing stays quiet rather than
+  printing $0.00, and a figure you typed over the computed one says so.
+  The cell editor shows the same and lets you override
   the interest or add a dividend — correct either and the balance recomputes
   around it, in whichever account the money is paid into, for that month and
   every month after. **Every note you've written anywhere in a year is gathered

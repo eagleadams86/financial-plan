@@ -673,6 +673,23 @@ suite passed while the card was wrong.
   arrangement. Every FIGURE cell carries a data-tip (category, subtotal, owner,
   balance, Total, paycheck, year-total); the row-label `th`s keep native titles
   — theirs is click-affordance prose, not data.
+  **An ACCOUNT's cell reads through `balanceTip(st, c, yr, a, m)`** — pure and
+  tested like `cellTip`, the balance then what the month EARNED on it. Interest
+  and dividends are the two figures that move a balance with no budget row
+  saying so, and reading either meant opening the cell editor. Three rules it
+  keeps, all of them the house's: **a line only appears when there is something
+  to say** (a month that earned nothing is quiet, rather than printing $0.00
+  twice on every account with no rate), the **exception being a figure typed
+  over the computed one** — a stated $0.00 is a claim somebody made, and it is
+  marked the way a stated balance is; and **where the money LANDED is named
+  whenever it isn't this account**, since earnings paid elsewhere are the
+  likeliest reason a balance didn't move by what it earned. It deliberately
+  describes the account's OWN earnings — the sweep a destination RECEIVES shows
+  up in its balance, not as a line of its own, and "into <name>" on the source
+  is what tells that half. A pinned or summary year computes neither, so its
+  `interest`/`dividend` maps are empty and the extra lines fall away with no
+  branch. Keep it in step with the cell editor's `rateLine`, which answers the
+  same question from the account's rates rather than the month's figures.
 - The month header is pinned by `pinGridHeader()`, not by CSS: `.gridwrap`
   scrolls sideways, which makes it the sticky scroll container, and giving it a
   vertical scroll of its own would put a second scrollbar on screen. The header
