@@ -156,6 +156,8 @@ included — treat those the way you treat the figures.
   it goes stale. Naming people unlocks the
   rest: every account can say whose it is — theirs, yours, **Joint**, or not
   said — and the budget grid grows a subtotal per person just above Total.
+  Accounts can be added and edited right here too — the Who Owns What list is
+  the same editor the budget grid's account rows open.
   Every account lands in exactly one of those rows (the unassigned gather under
   "Unassigned"), so **the subtotals always add up to Total**. A savings goal can
   say which child it is for, which files it under them here and suggests their
