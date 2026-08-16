@@ -204,6 +204,19 @@ select.ctl:hover { border-color: var(--text-muted); }
    drag — `none` would trap the scroll on the tab bar. */
 .tab { touch-action: pan-y; }
 .tab.dragging { opacity: .5; cursor: grabbing; }
+/* On a phone the bar was wrapping to four rows — half the first screen gone
+   before any figures appeared. One row that scrolls sideways instead; render()
+   nudges the active tab into view. `pan-x` hands sideways swipes to the
+   browser as bar-scrolling (so touch DRAG-reordering is desktop-only there —
+   Alt+arrow still works everywhere), while taps keep choosing tabs. */
+@media (max-width: 700px) {
+  .tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px;
+    scrollbar-width: thin; }
+  .tab { flex: 0 0 auto; white-space: nowrap; touch-action: pan-x pan-y; }
+  /* The quarter-step zoom picker earns no room on a phone — pinch does its
+     job there, and the exact figure still lives in Preferences. */
+  #zoomSel { display: none; }
+}
 
 /* ── Year strip ─────────────────────────────────────────────────────────────
    The Budget's years laid out the way the Numbers spreadsheet this app
@@ -482,6 +495,14 @@ tr.editrow:hover > th:first-child::after,
 tr.editrow:hover > td:first-child::after { opacity: 1; }
 tr.spacer td, tr.spacer th { border-bottom: none; height: 14px; padding: 0; }
 .addbar { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+/* The budget grid's admin buttons. On a desktop the toggle doesn't exist and
+   the row is exactly what it always was; on a phone the row hides behind it. */
+.gridactions-toggle { display: none; }
+@media (max-width: 700px) {
+  .gridactions-toggle { display: inline-block; }
+  .gridactions { display: none; }
+  .gridactions.open { display: flex; margin-top: 10px; }
+}
 /* One stored bracket table inside its jurisdiction's card. Separated by a rule
    rather than by a nested card: a card inside a card gives the reader two
    headings to fold and no way to guess which one they shut. No new colour —
@@ -761,6 +782,9 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
    second scrollbar inside it. */
 .yearhead { font-size: 13px; text-transform: uppercase; letter-spacing: .05em;
   color: var(--text-secondary); margin: 20px 0 8px; }
+/* The same heading inside a card grid (Retirement's Now / Later groups) has to
+   claim a full row of its own, or auto-placement would slot it beside a card. */
+.cards2 > .yearhead { grid-column: 1 / -1; margin: 8px 0 -8px; }
 /* stretch, not flex-start: a year's cards line up top and bottom however
    many lines each trip's table runs to. */
 .triprow { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 6px;
@@ -932,16 +956,19 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   <div id="shareBar"></div>
 
   <div class="tabs" role="tablist" aria-label="Views">
+    <!-- "Progress" is the GOALS view wearing a fuller name: it carries the
+         goal cards AND the long-run charts that used to be a History tab. The
+         id stays 'goals' because stored tab orders, folded boxes and share
+         links all speak it. -->
     <button class="tab" role="tab" id="tab-budget"     aria-controls="views" data-view="budget"     aria-selected="true"  tabindex="0">Budget</button>
-    <button class="tab" role="tab" id="tab-goals"      aria-controls="views" data-view="goals"      aria-selected="false" tabindex="-1">Goals</button>
-    <button class="tab" role="tab" id="tab-household"  aria-controls="views" data-view="household"  aria-selected="false" tabindex="-1">Household</button>
-    <button class="tab" role="tab" id="tab-retirement" aria-controls="views" data-view="retirement" aria-selected="false" tabindex="-1">Retirement</button>
-    <button class="tab" role="tab" id="tab-tax"        aria-controls="views" data-view="tax"        aria-selected="false" tabindex="-1">Tax</button>
-    <button class="tab" role="tab" id="tab-comp"       aria-controls="views" data-view="comp"       aria-selected="false" tabindex="-1">Compensation</button>
-    <button class="tab" role="tab" id="tab-investments" aria-controls="views" data-view="investments" aria-selected="false" tabindex="-1">Investments</button>
+    <button class="tab" role="tab" id="tab-goals"      aria-controls="views" data-view="goals"      aria-selected="false" tabindex="-1">Progress</button>
     <button class="tab" role="tab" id="tab-vacations"  aria-controls="views" data-view="vacations"  aria-selected="false" tabindex="-1">Vacations</button>
     <button class="tab" role="tab" id="tab-giving"     aria-controls="views" data-view="giving"     aria-selected="false" tabindex="-1">Giving</button>
-    <button class="tab" role="tab" id="tab-history"    aria-controls="views" data-view="history"    aria-selected="false" tabindex="-1">History</button>
+    <button class="tab" role="tab" id="tab-investments" aria-controls="views" data-view="investments" aria-selected="false" tabindex="-1">Investments</button>
+    <button class="tab" role="tab" id="tab-retirement" aria-controls="views" data-view="retirement" aria-selected="false" tabindex="-1">Retirement</button>
+    <button class="tab" role="tab" id="tab-household"  aria-controls="views" data-view="household"  aria-selected="false" tabindex="-1">Household</button>
+    <button class="tab" role="tab" id="tab-comp"       aria-controls="views" data-view="comp"       aria-selected="false" tabindex="-1">Compensation</button>
+    <button class="tab" role="tab" id="tab-tax"        aria-controls="views" data-view="tax"        aria-selected="false" tabindex="-1">Tax</button>
   </div>
 
   <!-- The tabpanel role goes on an inner div, not on <main> itself: putting it on
@@ -1210,8 +1237,14 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
    load()` further down — a const declared after that point would still be in
    its temporal dead zone, load() would catch the ReferenceError, and the whole
    workbook would silently come up blank. */
-const VIEWS = ['budget', 'goals', 'household', 'retirement', 'tax', 'comp', 'investments',
-  'vacations', 'giving', 'history'];
+/* 'history' is gone as a VIEW — its three charts live on the Progress tab
+   (view id 'goals', which stored tab orders and share links already speak)
+   since 2026-08-16. tabOrder() below drops the id from any stored order, so a
+   plan arranged before the merge needs no migration. The default order runs
+   roughly by how often each tab is touched: the monthly ones first, the
+   once-a-year reference tabs last. */
+const VIEWS = ['budget', 'goals', 'vacations', 'giving', 'investments',
+  'retirement', 'household', 'comp', 'tax'];
 
 /* Anything stored that is no longer a view is dropped and anything missing is
    appended, so a tab added in a later version turns up on the end rather than
@@ -1228,6 +1261,18 @@ function tabOrder(ui) {
    so the two lists could never be allowed to drift apart. UP HERE for the same
    temporal-dead-zone reason as VIEWS: coerceShape reads it. */
 const FILING_STATUSES = ['single', 'joint', 'separate'];
+
+/* What a piece of property can be. Read by coerceShape — anything stored
+   outside this list settles on 'other' — so it lives UP HERE for the same
+   temporal-dead-zone reason as VIEWS. Labels are beside the keys so the editor
+   and the table can never disagree about what a kind is called. */
+const PROPERTY_KINDS = [
+  ['home', 'Home'],
+  ['vehicle', 'Vehicle'],
+  ['boat', 'Boat'],
+  ['other', 'Other'],
+];
+const PROPERTY_KIND_LABEL = Object.fromEntries(PROPERTY_KINDS);
 
 /* Federal and state, and nothing else. Outermost key of `side.tax` because the
    two move on different clocks — a state rewrites its schedule in a year the
@@ -1783,6 +1828,12 @@ function blankState() {
       portfolios: [], taxable: [], rothContribs: {}, k401: {}, hsa: [],
       comp: {}, bonuses: {}, daf: [],
       donations: {}, limits: {}, retirementAccounts: [],
+      /* What the household OWNS outright — a home, a car, a boat. A stated
+         value and optionally what is still owed on it; the Household tab lists
+         them and the Progress tab's net worth counts the equity. Deliberately
+         not accounts: nothing flows through a house, so the engine never sees
+         these. */
+      property: [],
       /* The retirement spending plan. `spend` and `safeRate` are deliberately
          ABSENT rather than 0: absent means "never said", and only that keeps
          an untouched plan's projection identical to what it has always drawn.
@@ -2072,7 +2123,19 @@ function coerceShape(data) {
   d.side = obj(d.side);
   const s = d.side;
   for (const k of ['taxable', 'otherMoney', 'hsa', 'daf', 'portfolios',
-                   'retirementAccounts']) s[k] = arr(s[k]);
+                   'retirementAccounts', 'property']) s[k] = arr(s[k]);
+  /* Property: a name, a kind from the fixed list, a value and optionally what
+     is still owed. Value and owed feed totals through num() (the NaN class
+     fix); owed is DELETED rather than zeroed when it isn't a number, because
+     "nothing owed" and "never said" render the same and a stored 0 would be a
+     claim the reader didn't make. */
+  for (const p of s.property) {
+    p.name = String(p.name || 'Property');
+    if (!PROPERTY_KIND_LABEL[p.kind]) p.kind = 'other';
+    p.value = num(p.value);
+    const owedNum = num(p.owed);
+    if (typeof owedNum === 'number') p.owed = owedNum; else delete p.owed;
+  }
   /* Investments used to be two fixed panes, "Taxable investments" and "HSA",
      because those were the two Charlie had. They're a named list now — add as
      many as you keep, rename any of them. One-time migration; the old keys are
@@ -3298,6 +3361,16 @@ function computeGoals(st, computed, todayIso) {
    can be a paragraph and can be read on a phone. Keys are referenced by
    helpBtn(key, label) in the renderers. */
 const HELP = {
+  netWorth: { title: 'What Counts toward Net Worth',
+    body: 'Four parts, each read from a tab you fill in elsewhere. Liquid is this month\'s '
+      + 'computed total across the budget grid\'s accounts. Invested sums the Investments '
+      + 'tab\'s holdings at their listed prices. Retirement sums the retirement accounts — '
+      + 'Traditional and Roth together, before any tax, so it overstates what the pot '
+      + 'would hand you to spend. Property is the Household tab\'s list at your own stated '
+      + 'values, minus anything still owed. The giving fund is deliberately left out: that '
+      + 'money was given the day it went in, and counting it would inflate the total by '
+      + 'dollars that are no longer yours. A part with nothing recorded shows no tile at '
+      + 'all rather than a $0.00 — an empty list and a worthless one are different claims.' },
   savingFor: { title: 'Saving for a Child',
     body: 'Naming the child a goal is for does two things, and only two. It files the goal '
       + 'under them on the Household tab, and — when the target date is still empty — it '
@@ -3573,6 +3646,19 @@ function render() {
     tab.setAttribute('aria-selected', sel ? 'true' : 'false');
     tab.tabIndex = sel ? 0 : -1;
   });
+  /* On a phone the bar scrolls sideways instead of wrapping, so the chosen tab
+     can sit off an end. Nudged only when it is (the year strip's rule), by
+     rectangle rather than offsetLeft, and never smoothly. On a desktop the bar
+     never scrolls and this is a no-op. */
+  const activeTab = bar.querySelector(`.tab[data-view="${view}"]`);
+  if (activeTab && bar.scrollWidth > bar.clientWidth) {
+    const bRect = bar.getBoundingClientRect();
+    const tRect = activeTab.getBoundingClientRect();
+    if (bRect.width > 0) {
+      if (tRect.left < bRect.left) bar.scrollLeft += tRect.left - bRect.left;
+      else if (tRect.right > bRect.right) bar.scrollLeft += tRect.right - bRect.right;
+    }
+  }
   F('views').setAttribute('aria-labelledby', `tab-${view}`);
   buildMoneyFormats(state.settings.currency);
   const target = F('views');
@@ -3585,7 +3671,7 @@ function render() {
     budget: renderBudget, goals: renderGoals, household: renderHousehold,
     retirement: renderRetirement, tax: renderTax,
     comp: renderComp, investments: renderInvestments,
-    vacations: renderVacations, giving: renderGiving, history: renderHistory
+    vacations: renderVacations, giving: renderGiving
   }[view];
   target.innerHTML = fn();
   if (viewOnly) stripEditAffordances(target);
@@ -3602,7 +3688,9 @@ function render() {
    affordance, that closes the door. */
 function stripEditAffordances(root) {
   root.querySelectorAll('.addbar, [data-add], .h-edit, #deleteYearBtn, #toSummaryBtn,'
-    + '#rolloverBtn, #closeMonthBtn, #reopenMonthBtn').forEach(el => el.remove());
+    /* the whole grid-actions wrap goes, toggle included — every button in it
+       is an edit affordance, and a toggle opening an emptied box is worse */
+    + '#rolloverBtn, #closeMonthBtn, #reopenMonthBtn, .gridactions-wrap').forEach(el => el.remove());
   root.querySelectorAll('[data-edit]').forEach(el => {
     el.removeAttribute('data-edit');
     el.classList.remove('editrow');
@@ -4049,7 +4137,13 @@ function gridCard(y, yr) {
   const canReopen = live && started && yr.enteredThrough >= yr.startMonth;
   const addRowBtn = `<button class="btn small" data-add="category" data-year="${esc(y)}"
       title="Add a row to this year's grid">＋ Add row</button>`;
-  const monthControls = `<div class="row" style="margin:2px 0 12px">
+  /* On a phone the six admin buttons pushed the grid — the thing you came for —
+     below the fold, so there they fold behind one "Actions" button. Desktop is
+     untouched: the toggle only exists under the narrow-screen media query. */
+  const monthControls = `<div class="gridactions-wrap" style="margin:2px 0 12px">
+      <button class="btn small gridactions-toggle" id="gridActionsBtn" type="button"
+        aria-expanded="false" aria-controls="gridActions">⋯ Actions</button>
+      <div class="row gridactions" id="gridActions">
       ${addRowBtn}
       ${live ? `<button class="btn small" data-add="account"
         title="Track another account's balance in this grid">＋ Add account</button>` : ''}
@@ -4068,6 +4162,7 @@ function gridCard(y, yr) {
           ⇩ Convert to a summary</button>` : ''}
       <button class="btn small" id="deleteYearBtn"
         title="Remove ${esc(y)} from the app entirely">🗑 Delete ${esc(y)}</button>
+      </div>
     </div>`;
 
   return `<div class="card">
@@ -4076,7 +4171,7 @@ function gridCard(y, yr) {
       ? `Every month here is a projection, built from ${esc(String(+y - 1))}'s rules and its
          December balances — it keeps up as ${esc(String(+y - 1))} changes. ${esc(y)} takes over
          as the current year on 1 January, or as soon as you mark December ${esc(String(+y - 1))}
-         entered. Until then Goals, History and the other tabs stay on ${esc(String(+y - 1))}.${
+         entered. Until then Progress and the other tabs stay on ${esc(String(+y - 1))}.${
          ruleless.length ? ` <strong>${ruleless.length} row${ruleless.length === 1 ? '' : 's'}
            ${ruleless.length === 1 ? 'has' : 'have'} no rule</strong>, so ${
            ruleless.length === 1 ? 'it stays' : 'they stay'} blank all year and the totals here
@@ -4276,17 +4371,68 @@ function goalCard(g, idx) {
   </div>`;
 }
 
+/* ── Net worth, the parts the plan already knows ────────────────────────────
+   Pure over state so the tests can pin it. LIQUID is deliberately absent from
+   here: it is a COMPUTED figure (this month's balances out of the engine), and
+   the renderer passes it in — everything below is typed-in data summed up.
+   Each part carries `has`, because absent and zero are different answers: a
+   plan with no investment rows has nothing to say about investments, and a
+   tile reading $0.00 would say something else. The giving fund is measured but
+   NEVER added to the total — that money is already given; only its being
+   left out is worth a sentence. */
+function netWorthParts(st) {
+  const side = st.side || {};
+  const portfolios = side.portfolios || [];
+  const retAccts = side.retirementAccounts || [];
+  const property = side.property || [];
+  const invested = round2(portfolios.reduce((s, p) => s + holdingsValue(p.rows || []), 0));
+  const retirement = round2(retAccts.reduce((s, a) => s + retAcctBalance(a), 0));
+  const owed = round2(property.reduce((s, p) => s + (p.owed || 0), 0));
+  const propertyValue = round2(property.reduce((s, p) => s + (p.value || 0), 0));
+  return {
+    invested, hasInvested: portfolios.some(p => p && (p.rows || []).length),
+    retirement, hasRetirement: retAccts.length > 0,
+    property: round2(propertyValue - owed), propertyOwed: owed,
+    hasProperty: property.length > 0,
+    daf: round2(holdingsValue(side.daf || [])), hasDaf: (side.daf || []).length > 0,
+  };
+}
+
+function netWorthCard(liquid, cur) {
+  const nw = netWorthParts(state);
+  /* Nothing typed beyond the budget means nothing to add up — the Savings
+     Goals card below already carries total liquidity, and a one-tile "net
+     worth" equal to it would be the same figure wearing a grander name. */
+  if (!nw.hasInvested && !nw.hasRetirement && !nw.hasProperty) return '';
+  const tile = (label, value, foot) => `<div class="goal">
+    <div class="label">${label}</div>
+    <div class="value">${fmtMoney(value)}</div>
+    ${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
+  const total = round2(liquid + (nw.hasInvested ? nw.invested : 0)
+    + (nw.hasRetirement ? nw.retirement : 0) + (nw.hasProperty ? nw.property : 0));
+  return `<div class="card">
+    <h2>Net Worth${helpBtn('netWorth', 'what counts toward net worth')}</h2>
+    <p class="sub">Everything the plan knows about, added up as of ${esc(monthLabelFull(cur))}.${
+      nw.hasDaf ? ` The giving fund's ${fmtMoney(nw.daf)} is not counted — that money is
+      already given, and it is waiting on the Giving tab.` : ''}</p>
+    <div class="goalgrid">
+      ${tile('Total', total, 'Everything below, added up')}
+      ${tile('Liquid', liquid, 'The budget grid’s accounts this month')}
+      ${nw.hasInvested ? tile('Invested', nw.invested, 'The Investments tab’s holdings') : ''}
+      ${nw.hasRetirement ? tile('Retirement', nw.retirement, 'Traditional and Roth together') : ''}
+      ${nw.hasProperty ? tile('Property', nw.property, nw.propertyOwed
+        ? `Value minus the ${fmtMoney(nw.propertyOwed)} still owed — the Household tab lists it`
+        : 'What it would sell for — the Household tab lists it') : ''}
+    </div>
+  </div>`;
+}
+
 function renderGoals() {
   const liveKey = latestGridYear();
   if (!liveKey)
-    return `<div class="card"><div class="empty"><h2>Goals Need a Budget Year First</h2>
-      <p>Head to the Budget tab and start one — goals read their "saved so far"
-        from its computed balances.</p></div></div>`;
-  if (!state.goals.length)
-    return `<div class="card"><div class="empty"><h2>No Goals Yet</h2>
-      <p>A goal watches one of your account balances against a target and a date.</p>
-      <p style="margin-top:14px"><button class="btn primary" data-add="goal">＋ Add your first goal</button></p>
-    </div></div>`;
+    return `<div class="card"><div class="empty"><h2>Progress Needs a Budget Year First</h2>
+      <p>Head to the Budget tab and start one — everything here reads its figures
+        from the grid's computed balances.</p></div></div>`;
   const yr = state.years[liveKey];
   const c = C[liveKey];
   const goals = computeGoals(state, C, todayISO());
@@ -4296,6 +4442,7 @@ function renderGoals() {
   const totalNow = c.balances[`total|${cur}`] || 0;
   const totalTarget = state.goals.reduce((s, g) => s + (g.target || 0), 0);
   const totalPct = totalTarget ? Math.min(1, totalNow / totalTarget) : 0;
+  const netWorthHtml = netWorthCard(totalNow, cur);
 
   /* EOY strip + reno pace, ported from the sheet's side table */
   const decThis = `${liveKey}-12`;
@@ -4336,25 +4483,11 @@ function renderGoals() {
     : `Entered through <strong>${esc(monthLabel(chartPts[firstEstimate - 1].m))}</strong> —
        everything after that is the plan's own estimate, drawn dashed.`;
 
-  const yearsWithEoy = yearKeys().filter(y => state.years[y].eoyCash !== undefined);
-  const eoyRows = [...yearsWithEoy.slice(-3).map(y => ({ y, v: state.years[y].eoyCash })),
-    ...(eoyThis !== undefined ? [{ y: liveKey, v: eoyThis, est: true }] : []),
-    /* and each year built ahead of this one, which is the point of building
-       them: seeing where the plan lands two and three years out */
-    ...previewYears().flatMap(py => {
-      const v = C[py]?.balances[`total|${py}-12`];
-      return v === undefined ? [] : [{ y: py, v, est: true }];
-    })];
-  const eoyTable = `<div class="tablewrap"><table>
-    <thead><tr><th style="text-align:left">Year end</th><th>Total</th><th>Growth</th></tr></thead>
-    <tbody>${eoyRows.map((r, i) => {
-      const prev = i ? eoyRows[i - 1].v : null;
-      return `<tr><th scope="row">${esc(r.y)}${r.est ? ' <span class="muted">(projected)</span>' : ''}</th>
-        <td>${fmtMoney(r.v)}</td>
-        <td>${prev !== null ? fmtMoney(r.v - prev) : ''}</td></tr>`;
-    }).join('')}</tbody></table></div>`;
-
-  return `<div class="card">
+  /* The goals card, or its empty state — an empty state INSIDE the tab rather
+     than in place of it, because the charts below read the budget grid and
+     draw perfectly well for a plan that has never set a goal. */
+  const goalsHtml = state.goals.length
+    ? `<div class="card">
     <h2>Savings Goals</h2>
     <p class="sub">Saved figures read this month's computed balances (${esc(monthLabel(cur))}).</p>
     <div class="goalgrid">${goals.map(goalCard).join('')}</div>
@@ -4371,7 +4504,25 @@ function renderGoals() {
       </div>
     </div>
     ${paceHtml}
-  </div>
+  </div>`
+    : `<div class="card">
+    <h2>Savings Goals</h2>
+    <div class="empty"><p>A goal watches one of your account balances against a target
+      and a date.</p>
+      ${viewOnly ? '' : `<p style="margin-top:14px"><button class="btn primary"
+        data-add="goal">＋ Add your first goal</button></p>`}</div>
+  </div>`;
+
+  /* The three long-run charts that used to be a tab called History. They sit
+     under the goals because they answer the question a goal poses — "is the
+     total actually getting there?" — over every year the plan holds. */
+  const firstGrid = yearKeys().some(y => state.years[y].kind === 'summary')
+    ? yearKeys().find(y => state.years[y].kind === 'grid') : null;
+  const eoyYears = yearKeys().filter(y => state.years[y].eoyCash !== undefined);
+  const projectedKey = `<p class="chartkey"><i></i> Dashed — projected: a year still
+    being worked out, or one that hasn't arrived yet.</p>`;
+
+  return `${netWorthHtml}${goalsHtml}
   <div class="cards2">
     <div class="card">
       <h2>Where the Total Is Heading</h2>
@@ -4381,12 +4532,31 @@ function renderGoals() {
       <div class="chartbox"><canvas id="goalChart"></canvas></div>
     </div>
     <div class="card">
-      <h2>End-of-Year Liquidity</h2>
-      <p class="sub">Actuals from past years, then the plan's own projection —
-        ${eoyRows.filter(r => r.est).length > 1
-          ? `this year and the ${eoyRows.filter(r => r.est).length - 1} you've built ahead`
-          : 'this year'}.</p>
-      ${eoyTable}
+      <h2>Total Liquidity, Year by Year</h2>
+      <p class="sub">End-of-year totals${eoyYears.length ? ` — the long walk from ${
+        fmtMoney(state.years[eoyYears[0]].eoyCash)} to today` : ''}.</p>
+      <div class="chartbox"><canvas id="eoyChart"></canvas></div>
+      ${projectedKey}
+    </div>
+  </div>
+  <div class="cards2">
+    <div class="card">
+      <h2>Money in vs Money Out</h2>
+      <p class="sub">Everything that moved through the accounts each year — transfers between
+        them included, and the interest they earned counted as money in. Striped bars are
+        money out. Early years are best-effort reads of the old bi-weekly sheets.</p>
+      <div class="chartbox" style="height:300px"><canvas id="flowChart"></canvas></div>
+      ${projectedKey}
+    </div>
+    <div class="card">
+      <h2>Spending, Year by Year</h2>
+      <p class="sub">The expense rows alone — money moved between your own accounts is left
+        out, which is what makes these bars smaller than the money-out bars above. Each one
+        is the year's Expenses total on the Budget tab.${firstGrid ? ` Before ${
+          esc(firstGrid)} there were no sections to read, so those years count everything
+        the old sheets recorded going out.` : ''}</p>
+      <div class="chartbox" style="height:300px"><canvas id="spendChart"></canvas></div>
+      ${projectedKey}
     </div>
   </div>`;
 }
@@ -4503,6 +4673,40 @@ function contribYears(st, filter) {
    Who the plan is for. Everything here is a LABEL over figures the engine
    already worked out — naming people changes no arithmetic anywhere, which is
    what lets the whole feature stay out of `computeYear`. */
+/* The household's PROPERTY — a home, a car, a boat. Values you state, not
+   balances the engine computes: nothing flows through a house, so these live
+   beside the people rather than among the accounts. The Progress tab's net
+   worth counts the equity (value minus owed). */
+function propertyCard() {
+  const list = state.side.property || [];
+  const anyOwed = list.some(p => p.owed !== undefined);
+  const rows = list.map((p, idx) => {
+    const equity = round2((p.value || 0) - (p.owed || 0));
+    return `<tr class="editrow" data-edit="property" data-idx="${idx}"
+      title="Click to edit${p.note ? ' · ' + esc(p.note) : ''}">
+      <th scope="row">${esc(p.name)}${p.note ? ` <span class="muted" title="${esc(p.note)}">📝</span>` : ''}</th>
+      <td style="text-align:left">${esc(PROPERTY_KIND_LABEL[p.kind] || 'Other')}</td>
+      <td>${p.value === undefined ? '<span class="muted">—</span>' : fmtMoney(p.value)}</td>
+      ${anyOwed ? `<td>${p.owed === undefined ? '<span class="muted">—</span>' : fmtMoney(p.owed)}</td>` : ''}
+      <td>${fmtMoney(equity)}</td></tr>`;
+  }).join('');
+  const totalEquity = round2(list.reduce((s, p) => s + (p.value || 0) - (p.owed || 0), 0));
+  return `<div class="card">
+    <h2>Property</h2>
+    <p class="sub">What the household owns outright — a home, a car, a boat — at what it
+      would sell for. Equity is that value minus anything still owed, and it is what the
+      Progress tab's net worth counts.${viewOnly || !list.length ? '' : ' Click a row to update a value.'}</p>
+    ${list.length ? `<div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Property</th><th style="text-align:left">Kind</th>
+        <th>Value</th>${anyOwed ? '<th>Still owed</th>' : ''}<th>Equity</th></tr></thead>
+      <tbody>${rows}</tbody>
+      ${list.length > 1 ? `<tfoot><tr><th>Total</th><td></td><td></td>${anyOwed ? '<td></td>' : ''}
+        <td>${fmtMoney(totalEquity)}</td></tr></tfoot>` : ''}
+    </table></div>` : '<p class="sub">Nothing listed yet.</p>'}
+    <div class="addbar"><button class="btn small" data-add="property">＋ Add property</button></div>
+  </div>`;
+}
+
 function renderHousehold() {
   const people = peopleOf(state);
   if (!people.length)
@@ -4512,7 +4716,7 @@ function renderHousehold() {
       <p>Your Total doesn't move: this records who owns the money, not how much
         of it there is.</p>
       <p style="margin-top:14px"><button class="btn primary" data-add="person">＋ Add the first person</button></p>
-    </div></div>`;
+    </div></div>` + propertyCard();
 
   const now = thisMonth();
   const rows = people.map((p, idx) => {
@@ -4587,7 +4791,7 @@ function renderHousehold() {
         ${theirs.length
           ? `<div class="goalgrid">${theirs.map(([g, idx]) => goalCard(g, idx)).join('')}</div>`
           : `<p class="sub">Nothing saved under ${esc(p.name)}'s name yet${viewOnly ? '.' : ` — add a goal
-              on the Goals tab and say it is for them, or open one of their accounts.`}</p>`}`;
+              on the Progress tab and say it is for them, or open one of their accounts.`}</p>`}`;
     }).join('')}
     <div class="addbar"><button class="btn small" data-add="goal">＋ Add goal</button></div>
   </div>`;
@@ -4617,6 +4821,7 @@ function renderHousehold() {
       <tbody>${ownsHtml}</tbody>
     </table></div>
   </div>
+  ${propertyCard()}
   </div>${childrenHtml}`;
 }
 
@@ -4728,6 +4933,7 @@ function renderRetirement() {
   }).join('');
 
   return `<div class="cards2 pairs">
+    ${accts.length ? `<h2 class="yearhead">Now — Where You Stand</h2>` : ''}
     <div class="card">
       <h2>Traditional vs Roth</h2>
       <p class="sub">Your retirement accounts, split by tax treatment — the type says which
@@ -4750,8 +4956,6 @@ function renderRetirement() {
         >＋ Add a contribution</button></div>` : ''}
     </div>
     ${accts.length ? retHoldingsPanes() : ''}
-    ${accts.length ? splitAtRetirementCard() : ''}
-    ${iraAccts.length ? iraProjectionCard() : ''}
     ${limitEarners(state).map(id => `<div class="card" data-box="k401-${esc(id || 'all')}">
       <h2>401(k) Limit Check${id ? ` — ${esc(personById(state, id).name)}` : ''}${
         helpBtn('k401Limit', 'the 401(k) limit check')}</h2>
@@ -4761,6 +4965,9 @@ function renderRetirement() {
       <h2>Roth IRA Eligibility${helpBtn('magi', 'the Roth IRA income check')}</h2>
       ${magiCard(year)}
     </div>
+    ${accts.length ? `<h2 class="yearhead">Later — the Projection</h2>` : ''}
+    ${accts.length ? splitAtRetirementCard() : ''}
+    ${iraAccts.length ? iraProjectionCard() : ''}
     ${accts.length ? drawdownNote() : ''}
     <div class="card" style="grid-column:1/-1">
       <h2>Where the Pot Is Heading${helpBtn('retProjection', 'the retirement projection')}</h2>
@@ -4816,7 +5023,7 @@ function drawdownNote() {
     <p><strong>Nor does it model required minimum distributions</strong> — past a certain age the
       law makes you take money out of a pre-tax account whether you need it or not, and that age
       moves. This chart takes what you asked for and no more. Whatever sits in your everyday
-      accounts is on the Goals tab, not here.</p>
+      accounts is on the Progress tab, not here.</p>
   </div>`;
 }
 
@@ -7492,7 +7699,7 @@ function buildGivingChart() {
     t.y >= thisYear ? ', year still running' : ''}`).join('; ')}.`);
 }
 
-/* ═══════════════════════════ History view ═════════════════════════════════ */
+/* ══════════════════ Long-run charts (on the Progress tab) ═════════════════ */
 
 /* Money in vs money out per year. Transfers between accounts count as flows
    here, so this reads as "money through the accounts", not pure income and
@@ -7583,45 +7790,8 @@ function yearIsProjected(y) {
   return enteredThroughOf(state, y) < `${y}-12`;
 }
 
-function renderHistory() {
-  const eoyYears = yearKeys().filter(y => state.years[y].eoyCash !== undefined);
-  /* The spending chart measures a summary year differently from a grid one, and
-     the place to say so is under the chart. Named only where there is actually
-     a summary year to explain — a plan that starts at its first grid year has
-     nothing to warn anybody about. */
-  const firstGrid = yearKeys().some(y => state.years[y].kind === 'summary')
-    ? yearKeys().find(y => state.years[y].kind === 'grid') : null;
-  /* The three charts share one signal, so they share one key. It sat only in the
-     prose above each chart, which is not where you look when you are trying to
-     work out why two bars are drawn differently from the rest. */
-  const projectedKey = `<p class="chartkey"><i></i> Dashed — projected: a year still
-    being worked out, or one that hasn't arrived yet.</p>`;
-  return `<div class="card">
-    <h2>Total Liquidity, Year by Year</h2>
-    <p class="sub">End-of-year totals since 2011 — the long walk from ${
-      eoyYears.length ? fmtMoney(state.years[eoyYears[0]].eoyCash) : ''} to today.</p>
-    <div class="chartbox" style="height:300px"><canvas id="eoyChart"></canvas></div>
-    ${projectedKey}
-  </div>
-  <div class="card">
-    <h2>Money in vs Money Out</h2>
-    <p class="sub">Everything that moved through the accounts each year — transfers between
-      them included, and the interest they earned counted as money in. Striped bars are
-      money out. Early years are best-effort reads of the old bi-weekly sheets.</p>
-    <div class="chartbox" style="height:300px"><canvas id="flowChart"></canvas></div>
-    ${projectedKey}
-  </div>
-  <div class="card">
-    <h2>Spending, Year by Year</h2>
-    <p class="sub">The expense rows alone — money moved between your own accounts is left
-      out, which is what makes these bars smaller than the money-out bars above. Each one
-      is the year's Expenses total on the Budget tab.${firstGrid ? ` Before ${
-        esc(firstGrid)} there were no sections to read, so those years count everything
-      the old sheets recorded going out.` : ''}</p>
-    <div class="chartbox" style="height:300px"><canvas id="spendChart"></canvas></div>
-    ${projectedKey}
-  </div>`;
-}
+/* The History tab is gone as a tab — renderGoals draws its three cards on the
+   Progress tab now, and buildHistoryCharts below still fills them in. */
 
 /* Chart.js 4's bar element ignores borderDash — only lines and arcs honour it —
    so the dashed "this year is projected" edge never actually drew on the flow
@@ -8043,16 +8213,41 @@ function wireView(view) {
   if (btn) btn.onclick = () => F('dataDialog').showModal();
   wireYearStrip();
   if (view === 'budget') wireBudget();
-  if (view === 'goals') buildGoalChart();
+  /* Progress draws the goal line AND the three long-run charts that used to be
+     a History tab of their own. */
+  if (view === 'goals') { buildGoalChart(); buildHistoryCharts(); }
   if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
   if (view === 'comp') buildCompChart();
   if (view === 'giving') buildGivingChart();
   if (view === 'investments') wireInvestments();
-  if (view === 'history') buildHistoryCharts();
   /* LAST, after the charts. A canvas built inside a display:none card sizes
      itself to nothing; drawing them first and folding the box afterwards means
      each one is already the right size when its box is opened again. */
   wireBoxes(view);
+  /* AFTER wireBoxes, which is not a preference: folding the card reparents its
+     contents into `.card-body`, and reinserting the gridwrap resets its scroll
+     to 0 — a scroll set any earlier is silently thrown away. */
+  if (view === 'budget') scrollGridToNow();
+}
+
+/* A narrow screen opens the grid on January with the current month seven
+   swipes away — the one cell most visits are for. Scroll it into view when
+   it's off the visible run, measured with getBoundingClientRect against the
+   wrap (offsetLeft is relative to the PAGE here — the year strip's lesson),
+   landing it just clear of the pinned label column. Instant, never smooth: an
+   animated scroll is a silent no-op in some engines. A history year has no
+   `th.now`, a grid that fits whole never scrolls, and a folded box measures
+   zero wide — all three fall out of the guards. */
+function scrollGridToNow() {
+  const wrap = document.querySelector('.gridwrap');
+  const nowTh = wrap && wrap.querySelector('thead th.now');
+  if (!wrap || !nowTh || wrap.scrollWidth <= wrap.clientWidth) return;
+  const wrapRect = wrap.getBoundingClientRect();
+  const lbl = wrap.querySelector('thead th.lbl');
+  const lblW = lbl ? lbl.getBoundingClientRect().width : 0;
+  const r = nowTh.getBoundingClientRect();
+  if (wrapRect.width > 0 && (r.right > wrapRect.right || r.left < wrapRect.left + lblW))
+    wrap.scrollLeft += r.left - (wrapRect.left + lblW);
 }
 
 /* ── Charts ─────────────────────────────────────────────────────────────────
@@ -9643,6 +9838,45 @@ const EDITORS = {
       state.settings.accounts.findIndex(a => a.id === ds.bal), dir),
   },
 
+  /* A piece of property — a home, a car, a boat. Addressed by INDEX like a
+     retirement account (data-idx), never by an id: nothing else in the plan
+     points at these, so there is nothing an index shift could strand. */
+  property: {
+    title: (ds, isNew) => isNew ? 'Add Property' : 'Property',
+    cols: 2,
+    sub: () => 'A value you state, not a balance the app computes — update it whenever '
+      + 'your idea of what it would fetch changes. Equity (value minus owed) is what '
+      + 'the net worth on the Progress tab counts.',
+    fields: () => [
+      { key: 'name', label: 'Name', type: 'text', wide: true,
+        hint: 'Whatever you call it — "The house", "Jeep", "Sailboat".' },
+      { key: 'kind', label: 'Kind', type: 'select',
+        options: PROPERTY_KINDS.map(([v, label]) => [v, label]) },
+      { key: 'value', label: 'What it would sell for', type: 'money' },
+      { key: 'owed', label: 'Still owed on it', type: 'money',
+        hint: 'Optional — a mortgage or loan balance. Leave it empty when the thing is '
+          + 'paid off.' },
+      noteField,
+    ],
+    get: (ds) => ({ ...state.side.property[+ds.idx] }),
+    blank: () => ({ kind: 'home' }),
+    save(ds, v) {
+      if (!v.name) return;
+      const row = {
+        name: v.name,
+        kind: PROPERTY_KIND_LABEL[v.kind] ? v.kind : 'other',
+        /* An empty money box is null — keep the field absent rather than
+           storing a 0 that claims the thing is worthless / debt-free. */
+        value: typeof v.value === 'number' ? v.value : undefined,
+        owed: typeof v.owed === 'number' ? v.owed : undefined,
+        note: v.note || undefined,
+      };
+      if (ds.idx !== undefined) Object.assign(state.side.property[+ds.idx], row);
+      else state.side.property.push(row);
+    },
+    del(ds) { state.side.property.splice(+ds.idx, 1); },
+  },
+
   /* Someone this plan is for. Renaming NEVER changes the id — accounts,
      retirement accounts, goals and budget rows all point at it, and a rename
      is the ordinary thing to do (a nickname, a married name). */
@@ -11108,6 +11342,14 @@ function wireRowDrag(grid) {
 function wireBudget() {
   pinnedShift = -1;  // fresh cells, so force a write
   pinGridHeader();   // a render starts with the header wherever the page is
+  /* The phone-sized "Actions" toggle over the grid's admin buttons. */
+  const actBtn = F('gridActionsBtn');
+  if (actBtn) actBtn.onclick = () => {
+    const box = F('gridActions');
+    const open = !box.classList.contains('open');
+    box.classList.toggle('open', open);
+    actBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
   const grid = document.querySelector('.grid');
   if (grid && !viewOnly) grid.addEventListener('click', (e) => {
     const td = e.target.closest('td.cell');
@@ -11143,7 +11385,7 @@ function wireBudget() {
     const early = thisMonth() < `${next}-01`;
     if (!confirm(`Build the ${next} budget? It copies the ${from} categories and rules and `
       + `keeps any hand-typed ${next} estimates. ${from} stays exactly as it is.`
-      + (early ? `\n\n${next} won't become the current year yet — Goals, History and the `
+      + (early ? `\n\n${next} won't become the current year yet — Progress and the `
         + `other tabs carry on reading ${from}. It takes over on 1 January, or as soon as `
         + `you mark December ${from} entered.` : '')))
       return;
@@ -12149,8 +12391,13 @@ const viewLabel = (v) => VIEW_LABEL[v] || v;
    an inclusion the sender didn't ask for. */
 const SECTION_NEEDS = {
   budget:      ['years'],
-  goals:       ['years', 'goals'],
-  household:   ['years', 'goals', 'people'],
+  /* Progress reads far past its own goals: the net-worth strip sums the
+     investment panes, the retirement accounts, the property list and measures
+     the giving fund. All four belong to other tabs, so a Progress link names
+     them out loud in the dialog (shareCarriesNote). */
+  goals:       ['years', 'goals', 'side.portfolios', 'side.retirementAccounts',
+                'side.property', 'side.daf'],
+  household:   ['years', 'goals', 'people', 'side.property'],
   /* No 'years', deliberately, though the drawdown's spending target is SEEDED
      from the budget's own expense total: the seed fills the box, the figure is
      stored, and a shared Retirement tab reads the stored one. Adding the grid
@@ -12171,7 +12418,6 @@ const SECTION_NEEDS = {
   /* No people: the trips and PTO tables name nobody — checked, not assumed. */
   vacations:   ['vacations'],
   giving:      ['years', 'side.donations', 'side.daf', 'side.comp', 'side.bonuses'],
-  history:     ['years'],
 };
 
 /* Which tab a branch belongs to — the tab a reader would expect to have to pick
@@ -12179,9 +12425,10 @@ const SECTION_NEEDS = {
    anything in it at all, and to work out which branches are being carried
    beyond what the sender chose. */
 const BRANCH_OWNERS = {
-  years: ['budget', 'history'],
+  years: ['budget'],
   goals: ['goals'],
   people: ['household'],
+  'side.property': ['household'],
   vacations: ['vacations'],
   'side.comp': ['comp'], 'side.bonuses': ['comp'],
   'side.portfolios': ['investments'], 'side.taxable': ['investments'],
@@ -12198,6 +12445,7 @@ const BRANCH_LABEL = {
   years: 'your budget grid',
   goals: 'your goals',
   people: 'the people in your plan',
+  'side.property': 'your property values',
   vacations: 'your trips and PTO',
   'side.comp': 'your salary and bonus history',
   'side.bonuses': 'your salary and bonus history',
@@ -13026,6 +13274,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
+  netWorthParts, PROPERTY_KINDS,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,

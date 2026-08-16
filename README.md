@@ -69,7 +69,7 @@ included — treat those the way you treat the figures.
   grouped by month and laid out across the width of the card, so a year's worth
   reads at a glance instead of running down one long strip. Mark a month "entered" to freeze its
   estimates into numbers, like overtyping formulas in Numbers. A finished year
-  can be **converted to a yearly summary** (permanent — the History charts
+  can be **converted to a yearly summary** (permanent — the Progress charts
   carry on unchanged, and each account keeps its end-of-year balance as a
   balance row), or deleted outright. A finished year holds its account
   balances as figures you stated at the time rather than a chain to recompute,
@@ -116,15 +116,35 @@ included — treat those the way you treat the figures.
   the one you're on — and every clickable row on the other tabs (a donation, a
   trip line, a comp year, a goal card, a gathered note) takes a tab stop of its
   own, so Enter or Space opens it without a mouse.
-- **Goals** — savings goals that add up whichever accounts you tick, so
+- **Progress** — where the whole plan stands and where it has been, on one
+  tab. A **net worth strip** across the top adds up everything the plan knows
+  about — this month's liquid total, the Investments tab's holdings, the
+  retirement accounts, and the Household tab's property at your stated values
+  minus anything owed. The giving fund is deliberately left out (that money is
+  already given), and a part with nothing recorded shows no tile rather than a
+  $0.00. Then **savings goals** that add up whichever accounts you tick, so
   splitting an account is a matter of ticking the new ones. Each goal counts
   its accounts up to the target, in full, or only what another goal hasn't
-  already claimed. Plus progress, target dates, required monthly saving,
-  end-of-year liquidity, and a pace check that follows whichever goal is next:
-  the soonest deadline you haven't met yet. Its **Where the Total Is Heading**
+  already claimed. Plus progress, target dates, required monthly saving, and a
+  pace check that follows whichever goal is next: the soonest deadline you
+  haven't met yet. Its **Where the Total Is Heading**
   line goes **dashed the moment it passes the month you've entered through** —
   so a month the plan has merely worked out never reads as one that happened,
-  whether it's next month or a year you've built ahead.
+  whether it's next month or a year you've built ahead. Under the goals sit
+  the long-run charts: **total liquidity 2011→now**, and money in vs out for
+  every one of those years, with the interest your accounts earned counted as
+  money in so the two charts tell the same story. Beside them, **what you
+  actually spent each year**: the expense rows alone, so money swept into
+  savings or moved between your own accounts doesn't read as a heavy year —
+  each bar is the year's Expenses total from the Budget tab, with a dotted
+  line across the years already recorded to say what's usual, and a hover
+  giving the change on the year before. The oldest years come from bi-weekly
+  sheets whose rows the importer couldn't tell apart; they're sorted out on
+  load, and any row it reads wrong is one click to fix. Those years have no
+  Income / Expenses / Transfers split to read, so their spending bar counts
+  everything the old sheets recorded going out, and the note under the chart
+  says so. (These charts lived on a tab called History until August 2026; a
+  tab order saved before then just drops the dead entry.)
 - **Household** — who the plan is for: a partner, your children. Each person
   has a role, an optional birth month and (for an adult) a retirement age —
   halves allowed, for anyone waiting until exactly 59½ — **which month of that
@@ -141,8 +161,11 @@ included — treat those the way you treat the figures.
   say which child it is for, which files it under them here and suggests their
   18th birthday as its target date — a starting point you type straight over.
   Nothing on this tab changes a single figure the budget computes; owner is a
-  way of reading the plan, not an input to it. The whole tab stays out of the
-  way until you add someone.
+  way of reading the plan, not an input to it. The tab also lists the
+  household's **property** — a home, a car, a boat — at what you say it would
+  sell for, minus anything still owed on it. Equity, not a balance: nothing
+  flows through a house, so the budget engine never sees these rows, and the
+  Progress tab's net worth is where the figure lands.
 - **Retirement** — Traditional vs Roth split, with a per-person breakdown once
   there are two of you; retirement accounts with a type
   (401(k), Roth IRA, HSA…), an owner, and their own contribution history, so nothing
@@ -284,18 +307,6 @@ included — treat those the way you treat the figures.
   it, a chart appears above them: dollars given as bars, both percentages as
   lines over the top. Given counts what left your own accounts (fund deposits
   and cash gifts); a grant out of the fund isn't counted twice.
-- **History** — total liquidity 2011→now, and money in vs out for every one of
-  those years, with the interest your accounts earned counted as money in so the
-  two charts tell the same story. Under them, **what you actually spent each
-  year**: the expense rows alone, so money swept into savings or moved between
-  your own accounts doesn't read as a heavy year — each bar is the year's
-  Expenses total from the Budget tab, with a dotted line across the years
-  already recorded to say what's usual, and a hover giving the change on the
-  year before. The oldest years come from bi-weekly sheets
-  whose rows the importer couldn't tell apart; they're sorted out on load, and
-  any row it reads wrong is one click to fix. Those years have no Income /
-  Expenses / Transfers split to read, so their spending bar counts everything
-  the old sheets recorded going out, and the note under the chart says so.
 - **Share a read-only link** — show someone part of the plan without giving them
   an account, a file or edit rights. You pick which tabs go in and how many
   years go with them; the whole payload rides in the link's `#fragment`, so
@@ -329,7 +340,7 @@ included — treat those the way you treat the figures.
   row to this year, retire one, rename it, change its rule or move it, and next
   year is changed to match, so a year you built in advance never quietly
   describes a budget you no longer have. Anything you set up in next year alone
-  is left alone. And it doesn't become the current year — Goals, History and
+  is left alone. And it doesn't become the current year — Progress and
   the rest carry on reading this one — until 1 January, or until you mark
   December entered.
 
