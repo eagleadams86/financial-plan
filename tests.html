@@ -2825,6 +2825,100 @@ t('a summary year reads its flow totals', () => {
   eq(H.yearIncome(yr, null, '2015'), 40000, 'balances stay out of income');
 });
 
+group('What the accounts earned, as income');
+function earnFixture() {
+  return {
+    yr: { kind: 'grid', model: 'live', enteredThrough: '2026-02',
+          categories: [{ id: 'pay', name: 'Paycheck', section: 'income' }],
+          cells: {}, balAdjust: {} },
+    c: {
+      months: ['2026-01', '2026-02', '2026-03'],
+      cells: { 'pay|2026-01': { v: 5000 } },
+      interest: { 'cash|2026-01': 10, 'cash|2026-02': 12, 'cash|2026-03': 14,
+                  'mid|2026-01': 100 },
+      dividend: { 'mid|2026-03': 300 },
+      /* The MONTH's kind is what an earnings figure takes. `cash` is stated in
+         January — a pinned balance, which is exactly the case that used to drag
+         a settled month into reading part-estimated. */
+      balanceKinds: { 'total|2026-01': 'actual', 'total|2026-02': 'actual',
+                      'total|2026-03': 'auto',
+                      'cash|2026-01': 'pinned', 'cash|2026-02': 'actual',
+                      'cash|2026-03': 'auto', 'mid|2026-01': 'actual',
+                      'mid|2026-03': 'auto' },
+    },
+  };
+}
+t('every account, every month in the run, added together', () => {
+  const { yr, c } = earnFixture();
+  const e = H.accountEarnings(c, yr, ['2026-01', '2026-02', '2026-03']);
+  eq(e.interest, 136, 'both accounts, all three months');
+  eq(e.dividend, 300);
+  eq(e.v, 436, 'the two halves are one figure on the grid');
+  const jan = H.accountEarnings(c, yr, ['2026-01']);
+  eq(jan.v, 110, 'one month asks the same question of a shorter run');
+});
+t('a month that earned nothing is missing, never a confident zero', () => {
+  const { yr, c } = earnFixture();
+  const e = H.accountEarnings(c, yr, ['2026-04']);
+  eq(e.v, 0);
+  eq(e.kind, 'missing', 'so the grid draws a dot rather than $0.00');
+});
+t('earnings are as settled as the MONTH, not as the accounts under it', () => {
+  const { yr, c } = earnFixture();
+  eq(H.accountEarnings(c, yr, ['2026-01']).kind, 'actual',
+    'an entered month, even though one balance in it is stated — reading the '
+    + 'accounts called this "part actual, part estimate" over a settled January');
+  eq(H.accountEarnings(c, yr, ['2026-03']).kind, 'auto', 'a month still to come');
+  eq(H.accountEarnings(c, yr, ['2026-01', '2026-03']).kind, 'mixed',
+    'settled beside estimated is part-and-part, like every other added-up figure');
+});
+t('a figure typed over the computed one is a statement, whatever month it sits in', () => {
+  const { yr, c } = earnFixture();
+  yr.balAdjust['cash|2026-03'] = { interest: 14 };
+  eq(H.accountEarnings(c, yr, ['2026-03']).kind, 'mixed',
+    'the stated interest reads actual beside the projected dividend');
+  eq(H.accountEarnings(c, yr, ['2026-03']).v, 314, 'and the figure is unchanged');
+});
+t('a negative month nets, rather than counting as money out', () => {
+  const { yr, c } = earnFixture();
+  c.interest['cash|2026-02'] = -12;
+  eq(H.accountEarnings(c, yr, ['2026-01', '2026-02']).v, 98,
+    'a category row nets across a year and so does this — yearFlows asks the '
+    + 'direction question instead, which is why it keeps its own loop');
+});
+t('income counts what the accounts earned as well as the income rows', () => {
+  const { yr, c } = earnFixture();
+  eq(H.yearIncome(yr, c, '2026'), 5436, '5000 in pay, 436 earned');
+  const p = H.savingsPulse(yr, c, '2026', 10000);
+  eq(p.income, 5436, 'the savings rate reads the same figure the grid shows');
+  eq(p.spent, 0);
+});
+t('a pinned or summary year earns nothing here', () => {
+  const { yr } = earnFixture();
+  const pinned = { ...yr, model: 'pinned' };
+  /* computeYear fills neither map off the live branch, so there is nothing to
+     add — the same answer yearFlows gives, and for the same reason: stated
+     balances already hold whatever they earned. */
+  const c = { months: ['2026-01'], cells: {}, interest: {}, dividend: {},
+              balanceKinds: {} };
+  eq(H.accountEarnings(c, pinned, ['2026-01']).v, 0);
+  eq(H.yearIncome(pinned, c, '2026'), 0);
+});
+t('the tooltip names which half the money was', () => {
+  const { yr, c } = earnFixture();
+  eq(H.earningsTip(H.accountEarnings(c, yr, ['2026-03'])),
+    '$314.00 · auto estimate\nInterest $14.00\nDividends $300.00');
+  eq(H.earningsTip(H.accountEarnings(c, yr, ['2026-02'])),
+    '$12.00 · actual\nInterest $12.00',
+    'a half worth nothing says nothing');
+});
+t('a pinned balance under an entered month does not make it an estimate', () => {
+  const { yr, c } = earnFixture();
+  eq(H.accountEarnings(c, yr, ['2026-01']).kind,
+    (c.balanceKinds['total|2026-01']),
+    'the row and the Total under it take their mark from the same place');
+});
+
 group('Cost basis and the holdings rollup');
 t('a cost basis is coerced like the fields beside it', () => {
   const d = H.coerceShape({ side: { portfolios: [{ id: 'a', name: 'A', rows: [

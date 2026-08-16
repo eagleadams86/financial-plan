@@ -209,6 +209,43 @@ family names as well as balances.
   netted, summary fallback), and a missing denominator is NULL, never 0: no
   income has no rate, and no spending is not "0 months of runway" — nor is a
   missing liquid figure NaN months (both runway inputs are guarded).
+  **yearIncome adds what the ACCOUNTS earned** through `accountEarnings` — see
+  below. It is the one place the mirror with yearSpending is deliberately not
+  exact: an expense is always a row, income is not.
+- **`accountEarnings(c, yr, months)` is the ONE answer to "what did the
+  accounts themselves earn?"** — every account's interest and dividends over a
+  run of months. The Budget grid's Interest & dividends row, that row's year
+  column, the Income total that adds it up, the CSV and the savings rate all
+  read it, so none of them can disagree about what a year earned. Pure over the
+  computed year, and it reads the interest/dividend MAPS rather than walking
+  `accountsOf`, which is what lets `yearIncome` — holding only `(yr, computed)` —
+  ask it without a signature change.
+  - **`yearFlows` keeps its own loop on purpose.** It asks a different question:
+    which DIRECTION each figure moved, so a negative month there counts as money
+    out. `accountEarnings` nets across the run the way a category row does.
+    Merging them would silently change money in vs money out.
+  - **A PINNED or summary year earns nothing here** — computeYear fills neither
+    map off the live branch — which is the same answer `yearFlows` gives and for
+    the same reason: stated balances already hold whatever they made. So the row
+    is absent from history, with no branch anywhere saying so.
+  - **The kind is the MONTH's, `balanceKinds['total|m']` (i.e. `kindAt`), NOT
+    the assorted kinds of the accounts under it.** An account whose balance you
+    stated reads `pinned`, so reading the accounts marked an entered January
+    "part actual, part estimate" merely because one balance in it had been typed
+    in — an estimate mark on a settled month, printed directly above a Total row
+    saying `actual`. It only shows in real data; there is a test pinning it. The
+    exception is a `balAdjust` figure typed over the computed one, which is a
+    statement of fact whatever month it sits in.
+  - **The row is drawn only when something earned** (the `activeBal` rule), so a
+    plan whose accounts carry no rates is exactly what it was — and the Income
+    section draws even with no income ROWS if the accounts earned, since that
+    money is income.
+  - **The Income subtotal adds it**, which is why `subtotalRow` takes an
+    `extra`: a line printed above a total that excludes it is a subtotal you
+    cannot add up. That also makes the earnings line count towards the
+    "one row is its own subtotal" test.
+  - It is NOT part of `takeHomePay`, deliberately: that measures the giving
+    percentages against PAY, and interest is not pay.
 - localStorage keys: `fin-state`, `fin-theme`, `fin-updated`, `fin-zoom` —
   plus the price machinery's `fin-pricekey`, `fin-quotes`, `fin-quote-run`
   and sync's `fin-sync-uid`, which live OUTSIDE state on purpose (documented

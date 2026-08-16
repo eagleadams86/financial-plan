@@ -44,7 +44,15 @@ included — treat those the way you treat the figures.
   you stop using can be **closed** from the month it last held anything, so it
   drops out of Total instead of carrying its final balance forward for ever.
   A row that earns interest **names the accounts it earns on**, and any income
-  row can be marked as pay so the giving percentages count it. Giving two accounts **exactly the same
+  row can be marked as pay so the giving percentages count it. **Interest &
+  dividends** is a line of its own at the foot of Income — what every account
+  earned that month, added together, with the two halves named on hover. It is
+  worked out from each account's rates rather than typed, so you correct it on
+  the account rather than in the grid, and the Income total counts it: it is
+  money in, and money in vs money out and the savings rate had always counted it
+  while the grid itself showed it nowhere. A year whose accounts earn nothing
+  shows no such row, and a finished year has none either — a stated balance
+  already holds whatever it made. Giving two accounts **exactly the same
   name** says they are the same account under different labels — years of
   history imported under drifting names fold into one row, carrying every
   balance with them. It refuses if both hold a figure in the same month, since
@@ -163,8 +171,9 @@ included — treat those the way you treat the figures.
 - **Progress** — where the whole plan stands and where it has been, on one
   tab. **Savings Rate & Runway** turn the year's totals into the units the
   questions are asked in: income minus expenses over income (money moved
-  between your own accounts never counts as spending), and liquid savings
-  against a month of expenses — both moving as real numbers land. A **net
+  between your own accounts never counts as spending, and income is the Budget
+  tab's own Income total — the income rows plus what the accounts earned), and
+  liquid savings against a month of expenses — both moving as real numbers land. A **net
   worth strip** across the top adds up everything the plan knows
   about — this month's liquid total, the Investments tab's holdings, the
   retirement accounts, and the Household tab's property at your stated values

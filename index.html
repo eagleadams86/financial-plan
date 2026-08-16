@@ -4413,22 +4413,52 @@ function gridCard(y, yr) {
   const secheadRow = (label, extra) => `<tr class="sechead"${label ? '' : ' aria-hidden="true"'
     }><th class="lbl">${esc(label)}${extra || ''}</th>${
     months.map(m => `<td class="${m === thisM ? 'now' : ''}"></td>`).join('')}${rowTotalTd()}</tr>`;
-  const subtotalRow = (label, cats) => `<tr class="subtotal">
-    <th class="lbl" scope="row">${esc(label)}</th>${months.map(m => {
+  /* `extra` is a derived line the section adds up alongside its rows — the
+     accounts' earnings under Income, and nothing else so far. It is passed in
+     rather than looked up so this stays the one place a section total is
+     worked out: a subtotal that left out a line printed directly above it
+     would be a subtotal you cannot add up, which is worse than none. */
+  const subtotalRow = (label, cats, extra) => `<tr class="subtotal">
+    <th class="lbl" scope="row">${esc(label)}</th>${months.map((m, i) => {
       const cells = cats.map(cat => cellOf(cat.id, m));
-      const sum = round2(cells.reduce((s, r) => s + r.v, 0));
+      const add = extra ? extra.months[i] : null;
+      const sum = round2(cells.reduce((s, r) => s + r.v, 0) + (add ? add.v : 0));
       /* A subtotal says what it is made of, like the rows above it: a month of
          real figures reads plain, a month of estimates italic, and one holding
          both reads as both. */
-      const kind = sumKind(cells.map(r => r.kind));
+      const kind = sumKind(cells.map(r => r.kind).concat(add ? [add.kind] : []));
       return `<td class="c-${kind} ${m === thisM ? 'now' : ''}" data-tip="${
         esc(`${fmtMoney(sum)} · ${KIND_LABEL[kind]}`)}">${fmtCell(sum)}</td>`;
-    }).join('')}${rowTotalTd(round2(cats.reduce((s, cat) => s + catTotal(cat), 0)), false,
-      sumKind(cats.flatMap(cat => ownMonths.map(m => cellOf(cat.id, m).kind))))}</tr>`;
+    }).join('')}${rowTotalTd(
+      round2(cats.reduce((s, cat) => s + catTotal(cat), 0) + (extra ? extra.year.v : 0)),
+      false,
+      sumKind(cats.flatMap(cat => ownMonths.map(m => cellOf(cat.id, m).kind))
+        .concat(extra ? [extra.year.kind] : [])))}</tr>`;
+
+  /* The accounts' own earnings, as a line inside Income — interest and
+     dividends are money in, and every other figure that counts them (money in
+     vs money out, the savings rate) had been counting them while the Budget tab
+     itself showed them nowhere. It sits directly above the Income total and the
+     total adds it up, because a line printed above a total that excludes it is
+     the reader's problem to spot, not the app's to leave.
+     Not a category row: nothing here is stored, nothing is typed, and it opens
+     no editor — a rate is corrected on the account it belongs to, which is what
+     the row's own title says. It appears the moment anything earns, like the
+     account rows themselves, so a plan whose accounts carry no rates is exactly
+     what it was. */
+  const earnMonths = months.map(m => accountEarnings(c, yr, [m]));
+  const earnYear = accountEarnings(c, yr, ownMonths);
+  const earns = earnYear.v !== 0 || earnMonths.some(e => e.v !== 0);
+  const earnRow = () => `<tr class="derived"><th class="lbl" scope="row"
+      title="What the accounts earned — interest and dividends, added up across every account. Worked out from each account's own rate, so it is corrected there rather than here.">Interest &amp; dividends</th>${
+    months.map((m, i) => `<td class="c-${earnMonths[i].kind} ${m === thisM ? 'now' : ''}"
+      data-tip="${esc(earningsTip(earnMonths[i]))}">${fmtCell(earnMonths[i].v)}</td>`).join('')
+    }${rowTotalTd(earnYear.v, false, earnYear.kind, earningsTip(earnYear))}</tr>`;
 
   const catRows = ['income', 'expense', 'transfer'].map(sec => {
     let cats = yr.categories.filter(cat => (cat.section || 'expense') === sec);
-    if (!cats.length) return '';
+    const extra = sec === 'income' && earns ? { months: earnMonths, year: earnYear } : null;
+    if (!cats.length && !extra) return '';
     /* Alphabetical is a display choice — the stored order is left alone, so
        switching back to manual restores the order you arranged. */
     if (state.settings.rowSort === 'alpha')
@@ -4443,8 +4473,12 @@ function gridCard(y, yr) {
       + cats.map(cat => `<tr data-move="${esc(cat.id)}"${drag}>${catTh(cat)}${
           months.map(m => cellTd(cat, m)).join('')}${
           rowTotalTd(catTotal(cat), false, catTotalKind(cat))}</tr>`).join('')
-      /* One row is its own subtotal — repeating it just adds a line to read. */
-      + (cats.length > 1 ? subtotalRow(`${SECTION_LABEL[sec]} total`, cats) : '');
+      + (extra ? earnRow() : '')
+      /* One row is its own subtotal — repeating it just adds a line to read.
+         The earnings line counts towards that: one income row beside it makes
+         two figures with something to add up. */
+      + (cats.length + (extra ? 1 : 0) > 1
+          ? subtotalRow(`${SECTION_LABEL[sec]} total`, cats, extra) : '');
   }).join('');
 
   /* the live year's account balances + total are computed, not rows. A basic
@@ -4884,6 +4918,71 @@ function earningsOver(st, c, a, months) {
     received: [...from].filter(([, v]) => v).map(([name, v]) => ({ name, v })) };
 }
 
+/* What the ACCOUNTS themselves earned over a run of months — every account's
+   interest and dividends added together. This is income: it arrives in an
+   account exactly like a paycheck does, it is why total liquidity climbs faster
+   than the budget rows on their own explain, and until it had a line of its own
+   the only way to see it was to hover one account, one month at a time.
+
+   The ONE reader for that question, so the Income row, its year column and the
+   savings rate cannot disagree about what a year earned. `yearFlows` keeps a
+   loop of its own deliberately: it asks a DIFFERENT question — which DIRECTION
+   each figure moved — so a negative month there counts as money out, where this
+   nets across the run the way a category row does.
+
+   Pure over the computed year, and it reads the maps rather than walking
+   `accountsOf`, which is what lets a caller holding only `(computed, yr)` ask
+   it. A PINNED or summary year computes neither map, so it earns nothing here —
+   the same answer `yearFlows` gives, and for the same reason: stated balances
+   already hold whatever they earned.
+
+   The kind follows the house rule that every added-up figure says what it is
+   made of, through `sumKind` like every other. What a month's earnings are made
+   of is the MONTH: entered, and they are as settled as everything else in it;
+   still to come, and they are the estimate the rate implies. So the mark is the
+   one the engine already worked out for that month — `balanceKinds['total|m']`,
+   which is `kindAt` and nothing else — and NOT the assorted kinds of the
+   individual accounts. That difference is not a nicety: an account whose
+   balance you STATED reads `pinned`, so reading the accounts would have called
+   an entered January "part actual, part estimate" merely because one balance in
+   it had been typed in — an estimate mark on a settled month, sitting directly
+   above a Total row that says `actual`. Found in real data, which is the only
+   place it shows.
+   The exception is a figure the reader has typed over with what really arrived:
+   that is a statement of fact whatever month it sits in, and it is marked the
+   way a stated balance is. */
+function accountEarnings(c, yr, months) {
+  const want = new Set(months);
+  let interest = 0, dividend = 0;
+  const kinds = new Map();   // 'id|m' -> kind, so a figure is marked once
+  const take = (map, add) => {
+    for (const [key, v] of Object.entries(map || {})) {
+      const [, m] = key.split('|');
+      if (!want.has(m) || !v) continue;
+      add(v);
+      const adj = ((yr.balAdjust || {})[key]) || {};
+      kinds.set(key, typeof adj.interest === 'number' || typeof adj.dividend === 'number'
+        ? 'actual' : (c.balanceKinds || {})[`total|${m}`] || 'missing');
+    }
+  };
+  take((c || {}).interest, (v) => { interest += v; });
+  take((c || {}).dividend, (v) => { dividend += v; });
+  return { interest: round2(interest), dividend: round2(dividend),
+    v: round2(interest + dividend), kind: sumKind([...kinds.values()]) };
+}
+
+/* The earnings figure with its two halves named under it. Interest and
+   dividends are one line on the grid because they answer one question — what
+   did the accounts make? — but which of the two it was is a fact about how the
+   money arrived, and the tooltip is where that belongs. A half worth nothing
+   says nothing, the same rule the balance tooltip keeps. */
+function earningsTip(e) {
+  const lines = [`${fmtMoney(e.v)} · ${KIND_LABEL[e.kind] || KIND_LABEL.missing}`];
+  if (e.interest) lines.push(`Interest ${fmtMoney(e.interest)}`);
+  if (e.dividend) lines.push(`Dividends ${fmtMoney(e.dividend)}`);
+  return lines.join('\n');
+}
+
 /* A balance row's YEAR-TOTAL cell — the closing balance, never a sum, and the
    tooltip is where that is said out loud. Twelve monthly balances added up is
    the same money counted twelve times: a figure that means nothing, in the
@@ -5183,8 +5282,9 @@ function renderGoals() {
       ${pulseTile('Savings rate', pulse.rate === null ? '—'
           : `${(pulse.rate * 100).toFixed(1)}%`,
         pulse.rate === null ? 'No income recorded this year'
-          : `Keeping ${fmtMoney(pulse.saved)} of ${fmtMoney(pulse.income)} income — income
-             minus expenses, transfers between your own accounts not counted as spending`)}
+          : `Keeping ${fmtMoney(pulse.saved)} of ${fmtMoney(pulse.income)} income — the
+             year's income rows plus what the accounts earned, minus expenses;
+             transfers between your own accounts not counted as spending`)}
       ${pulseTile('Months of runway', pulse.runwayMonths === null ? '—'
           : `${pulse.runwayMonths.toFixed(1)} mo`,
         pulse.runwayMonths === null ? 'No expenses recorded this year'
@@ -8914,10 +9014,18 @@ function yearSpending(yr, computed, y) {
   return round2(-out);
 }
 
-/* The mirror of yearSpending: the income rows alone, netted across the year,
-   off the COMPUTED cells for the same reason. A summary year falls back to
-   everything positive that isn't a balance — the old sheets predate
-   sections, exactly the yearSpending arrangement. */
+/* The mirror of yearSpending: the income rows, netted across the year, off the
+   COMPUTED cells for the same reason — PLUS what the accounts earned on their
+   own. Interest and dividends are income wherever the app counts income: money
+   in vs money out has always added them, the Budget tab's Income total now
+   shows them on a line of their own, and a savings rate measured against a
+   denominator missing thousands a year would be the one figure on the tab
+   quietly disagreeing with the two beside it.
+   `accountEarnings` is the single reader, so the rate and the grid cannot
+   differ about what a year earned. A summary year falls back to everything
+   positive that isn't a balance — the old sheets predate sections, exactly the
+   yearSpending arrangement — and a pinned one earns nothing here, its stated
+   balances holding whatever they made. */
 function yearIncome(yr, computed, y) {
   if (yr.kind === 'summary') {
     let inn = 0;
@@ -8933,7 +9041,8 @@ function yearIncome(yr, computed, y) {
     const [id, m] = key.split('|');
     if (income.has(id) && m.startsWith(y)) out += cell.v;
   }
-  return round2(out);
+  const own = (((computed || {}).months) || []).filter(m => m.startsWith(y));
+  return round2(out + accountEarnings(computed || {}, yr, own).v);
 }
 
 /* Savings rate and months of runway — two divisions over figures the grid
@@ -13723,6 +13832,18 @@ function gridToCsv(st, computed, y) {
         ...cells.map(cell => csvCell(cell && cell.kind !== 'missing' ? cell.v : '')),
         csvCell(total)].join(','));
     }
+    /* The accounts' earnings ride under Income exactly where the screen puts
+       them — an export that quietly dropped a row the grid shows is the sort of
+       disagreement a spreadsheet gets blamed for. Drawn on the same condition:
+       nothing earned, no row. */
+    if (sec === 'income') {
+      const earned = months.map(m => accountEarnings(computed, yr, [m]));
+      const earnedYear = accountEarnings(computed, yr, own);
+      if (earnedYear.v !== 0 || earned.some(e => e.v !== 0))
+        lines.push([csvCell('Income', true), csvCell('Interest & dividends', true),
+          ...earned.map(e => csvCell(e.kind === 'missing' ? '' : e.v)),
+          csvCell(earnedYear.v)].join(','));
+    }
   }
   /* The year column carries what the grid's does — the CLOSING balance, since
      a balance row's twelve months are not a sum. It was empty here while the
@@ -15259,6 +15380,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, balanceTip,
   receivedInto, earningsOver, balanceYearTip, flowTransferNote, internalRows,
+  accountEarnings, earningsTip,
   KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
   coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
