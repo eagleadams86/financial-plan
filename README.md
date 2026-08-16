@@ -294,7 +294,11 @@ included — treat those the way you treat the figures.
   ("S&P 500", "Bonds") — the app deliberately ships no fund taxonomy, the
   tax-table principle — and a **By Class** table then folds the rollup into
   those labels, so three funds tracking one index read as the single bet they
-  are; anything unlabelled gathers honestly under "Not classed yet". A pane that names budget accounts also **reconciles against
+  are; anything unlabelled gathers honestly under "Not classed yet". Classes
+  take **targets of their own** — click a class row — which is usually where a
+  rebalancing rule actually lives: "90% US stocks" is one target at the class
+  level, where saying it per ticker would measure each fund alone against the
+  whole. A pane that names budget accounts also **reconciles against
   them**: its subtitle shows the budget's figure for the same pot and how far
   behind or ahead of the holdings it is, or that the two are in step. Otherwise: one pane per place you hold investments (add, rename and
   reorder them), with optional **automatic price lookups** (Twelve Data; free

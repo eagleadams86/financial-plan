@@ -298,6 +298,13 @@ an Investments costume. `classRollup(rows, total)` (pure) folds the rollup by
 label, case-insensitively, unclassed rows LAST under "Not classed yet" —
 "never said", not "miscellaneous". The By Class table draws only once a class
 exists, and one dialog (`target`) edits both maps — empty deletes in each.
+**`side.classTargets` is the third map** — LOWER-cased class label → share,
+the By Class grouping key, edited by clicking a class row (`classTarget`,
+data-cls key + data-label for the title). The unclassed bucket can carry no
+target — "not classed yet" is not a thing to steer toward — and classRollup
+attaches targets only to labelled groups. Ticker targets and class targets
+are independent layers on purpose; the class one is where rebalancing rules
+usually live, and each dialog's sub says so.
 The linked panes' RECONCILE line compares holdingsValue against the linked
 accounts' computed balances this month — agreement is said out loud, the
 reconcileNote rule: that is the check passing, not nothing to say.

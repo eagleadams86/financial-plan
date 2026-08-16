@@ -1865,6 +1865,11 @@ function blankState() {
          year while looking authoritative — the tax-table principle. Rows
          sharing a label group together on the rollup. */
       classes: {},
+      /* Targets at the CLASS level — lower-cased class label → share (0–1),
+         the By Class table's own grouping key. The layer most rebalancing
+         rules actually live at: "90% US stocks" is one target, where saying
+         it per ticker would measure each fund alone against the whole. */
+      classTargets: {},
       /* The retirement spending plan. `spend` and `safeRate` are deliberately
          ABSENT rather than 0: absent means "never said", and only that keeps
          an untouched plan's projection identical to what it has always drawn.
@@ -2184,6 +2189,15 @@ function coerceShape(data) {
     const key = String(k).trim().toUpperCase().slice(0, 24);
     const label = typeof v === 'string' ? v.trim().slice(0, 40) : '';
     if (key && label) s.classes[key] = label;
+  }
+  /* Class targets: keyed by the lower-cased label the By Class table groups
+     on, values with the ticker targets' discipline — strict read, clamped,
+     junk dropped rather than manufactured into a 0% claim. */
+  const classTargets = obj(s.classTargets); s.classTargets = {};
+  for (const [k, v] of Object.entries(classTargets)) {
+    const key = String(k).trim().toLowerCase().slice(0, 40);
+    const pct = rateOrNone(v);
+    if (key && pct !== undefined) s.classTargets[key] = Math.min(1, Math.max(0, pct));
   }
   /* Property: a name, a kind from the fixed list, a value and optionally what
      is still owed. Value and owed feed totals through num() (the NaN class
@@ -4799,18 +4813,24 @@ function allHoldings(st) {
    funds pose. Labels group case-insensitively ("s&p 500" and "S&P 500" are one
    claim, shown as first typed); rows with no class gather at the end under a
    name that says "never said", not "miscellaneous". Pure, pinned by tests. */
-function classRollup(rows, total) {
+function classRollup(rows, total, classTargets) {
   const by = new Map();
   for (const r of rows) {
-    const key = (r.cls || '').toLowerCase() || ' none';
-    if (!by.has(key)) by.set(key, { label: r.cls || '', value: 0, tickers: [] });
+    const key = (r.cls || '').toLowerCase() || ' none';
+    if (!by.has(key)) by.set(key, { key, label: r.cls || '', value: 0, tickers: [] });
     const g = by.get(key);
     g.value = round2(g.value + r.value);
     g.tickers.push(r.ticker);
   }
   const groups = [...by.values()].sort((a, b) =>
     (!a.label) - (!b.label) || b.value - a.value);
-  for (const g of groups) g.share = total ? g.value / total : 0;
+  for (const g of groups) {
+    g.share = total ? g.value / total : 0;
+    const t = (classTargets || {})[g.key];
+    /* The unclassed bucket can carry no target — "not classed yet" is not a
+       thing to steer toward. */
+    if (g.label && typeof t === 'number') g.target = t;
+  }
   return groups;
 }
 
@@ -7566,18 +7586,27 @@ function renderInvestments() {
     ${!roll.rows.some(r => r.cls) ? '' : (() => {
       /* Only once a class exists — a table of one "Not classed yet" row would
          be the feature demanding attention before it has anything to say. */
-      const groups = classRollup(roll.rows, roll.total);
+      const groups = classRollup(roll.rows, roll.total, (s.classTargets || {}));
+      const anyClsTarget = groups.some(g => typeof g.target === 'number');
       return `<h3 style="margin:18px 0 4px">By Class</h3>
       <p class="sub" style="margin-bottom:10px">The same money folded into the classes you
-        typed — three funds tracking one index read as one bet here.</p>
+        typed — three funds tracking one index read as one bet here.${viewOnly ? ''
+          : ' Click a class to set the share it should be; this is usually the layer a '
+          + 'rebalancing rule actually lives at.'}</p>
       <div class="tablewrap"><table>
         <thead><tr><th style="text-align:left">Class</th><th style="text-align:left">Tickers</th>
-          <th>Value</th><th>% of holdings</th></tr></thead>
-        <tbody>${groups.map(g => `<tr>
+          <th>Value</th><th>% of holdings</th>${
+          anyClsTarget ? '<th>Target</th><th>Drift</th>' : ''}</tr></thead>
+        <tbody>${groups.map(g => `<tr${!g.label ? '' : ` class="editrow"
+            data-edit="classTarget" data-cls="${esc(g.key)}" data-label="${esc(g.label)}"
+            title="Click to set this class's target share"`}>
           <th scope="row">${g.label ? esc(g.label) : '<span class="muted">Not classed yet</span>'}</th>
           <td style="text-align:left">${esc(g.tickers.join(', '))}</td>
           <td>${fmtMoney(g.value)}</td>
-          <td>${(g.share * 100).toFixed(1)}%</td></tr>`).join('')}</tbody>
+          <td>${(g.share * 100).toFixed(1)}%</td>${!anyClsTarget ? '' : `
+          <td>${typeof g.target === 'number'
+            ? (g.target * 100).toFixed(1) + '%' : '<span class="muted">—</span>'}</td>
+          <td>${driftCell(g)}</td>`}</tr>`).join('')}</tbody>
       </table></div>`;
     })()}
   </div>` : '';
@@ -10664,6 +10693,31 @@ const EDITORS = {
     },
   },
 
+  /* A class's target — one row of the By Class table. Keyed by the table's
+     own lower-cased grouping key (data-cls); data-label carries the label as
+     typed, for the title. */
+  classTarget: {
+    title: (ds) => `${ds.label} — Class Target`,
+    sub: () => 'What share of everything you hold this class should be. The layer most '
+      + 'rebalancing rules live at — a per-ticker target measures one fund alone against '
+      + 'the whole, where "90% US stocks" is usually the actual rule. Independent of any '
+      + 'per-ticker targets above.',
+    fields: () => [
+      { key: 'pct', label: 'Target share', type: 'percent',
+        hint: 'Of the Everything You Hold total. Leave the box empty to stop '
+          + 'targeting this class.' },
+    ],
+    get: (ds) => ({ pct: (state.side.classTargets || {})[ds.cls] }),
+    save(ds, v) {
+      state.side.classTargets = state.side.classTargets || {};
+      if (typeof v.pct === 'number')
+        state.side.classTargets[ds.cls] = Math.min(1, Math.max(0, v.pct));
+      /* Empty removes — "no longer targeted", never a stored 0% claiming the
+         class shouldn't be held at all. */
+      else delete state.side.classTargets[ds.cls];
+    },
+  },
+
   /* An investment pane: a named group of holdings on the Investments tab */
   portfolio: {
     title: (ds, isNew) => isNew ? 'Add an Investment Account' : 'Investment Account',
@@ -12966,7 +13020,7 @@ const SECTION_NEEDS = {
      an Investments link carries them — Retirement owns the branch, and the
      dialog names it out loud (shareCarriesNote). */
   investments: ['side.portfolios', 'side.taxable', 'side.retirementAccounts',
-                'side.targets', 'side.classes'],
+                'side.targets', 'side.classes', 'side.classTargets'],
   /* No people: the trips and PTO tables name nobody — checked, not assumed. */
   vacations:   ['vacations'],
   giving:      ['years', 'side.donations', 'side.daf', 'side.comp', 'side.bonuses'],
@@ -12985,6 +13039,7 @@ const BRANCH_OWNERS = {
   'side.comp': ['comp'], 'side.bonuses': ['comp'],
   'side.portfolios': ['investments'], 'side.taxable': ['investments'],
   'side.targets': ['investments'], 'side.classes': ['investments'],
+  'side.classTargets': ['investments'],
   'side.donations': ['giving'], 'side.daf': ['giving'],
   'side.retirementAccounts': ['retirement'], 'side.limits': ['retirement'],
   'side.drawdown': ['retirement'],
@@ -13005,6 +13060,7 @@ const BRANCH_LABEL = {
   'side.portfolios': 'your investment holdings',
   'side.taxable': 'your investment holdings',
   'side.targets': 'your allocation targets',
+  'side.classTargets': 'your allocation targets',
   'side.classes': 'your asset classes',
   'side.donations': 'your donations',
   'side.daf': 'your giving fund',
