@@ -5082,6 +5082,117 @@ t('converting warns when next year looks back into this one', () => {
   eq(H.rulesNeedingYear(s, '2030'), [], 'nothing after 2030 to break');
 });
 
+/* Marking a year as history: the step between a live grid and the pinned ones
+   the spreadsheet import produced. A frozen year is only honest if every
+   figure survives the change, so most of these compare the year with itself. */
+
+/* The fixture's live year, entered right through, which is the only state the
+   button is offered in — an unentered month still holds auto estimates, and a
+   pinned year computes none. */
+function enteredFixture() {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].enteredThrough = '2030-06';
+  return s;
+}
+
+t('freezing a year states exactly the balances it computed', () => {
+  const s = enteredFixture();
+  const before = H.computeAll(s, TODAY_FIX)['2030'];
+  s.years['2030'] = H.gridToPinned(s, before, '2030');
+  const after = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(s.years['2030'].model, 'pinned');
+  eq(Object.keys(after.balances).sort(), Object.keys(before.balances).sort(),
+    'every account keeps a figure in every month it had one');
+  eq(Object.entries(after.balances).filter(([k, v]) => before.balances[k] !== v), [],
+    'and not one of them moved');
+  eq([...new Set(Object.values(after.balanceKinds))], ['pinned'],
+    'a frozen year states them all');
+});
+
+t('a balance stated by hand is left alone, and comes back on re-opening', () => {
+  const s = enteredFixture();
+  const stated = { ...s.years['2030'].overrides };
+  s.years['2030'] = H.gridToPinned(s, H.computeAll(s, TODAY_FIX)['2030'], '2030');
+  eq(s.years['2030'].overrides['cash|2030-04'].v, 12345,
+    'the figure the reader stated, not the one the chain would have computed');
+  eq(s.years['2030'].pinnedFrom.overrides, stated, 'and it is what re-opening restores');
+  s.years['2030'] = H.pinnedToLive(s, '2030');
+  eq(s.years['2030'].model, 'live');
+  eq(s.years['2030'].overrides, stated, 'the freeze\'s own statements are gone');
+  eq(s.years['2030'].enteredThrough, '2030-06');
+  eq('pinnedFrom' in s.years['2030'], false, 'and the marker with them');
+});
+
+t('freezing stamps the end-of-year figure the chart reads', () => {
+  const s = enteredFixture();
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const frozen = H.gridToPinned(s, c, '2030');
+  eq(frozen.eoyCash, c.balances['total|2030-06'],
+    'the last month of the year, which is where this fixture ends');
+  eq(frozen.pinnedFrom.eoyStamped, true);
+  eq('eoyCash' in H.pinnedToLive({ years: { '2030': frozen } }, '2030'), false,
+    'a stamped figure goes again on re-opening — a live year draws its own December');
+});
+
+t('an end-of-year figure the year already states is never overwritten', () => {
+  const s = enteredFixture();
+  s.years['2030'].eoyCash = 4321;
+  const frozen = H.gridToPinned(s, H.computeAll(s, TODAY_FIX)['2030'], '2030');
+  eq(frozen.eoyCash, 4321);
+  eq(frozen.pinnedFrom.eoyStamped, false);
+  eq(H.pinnedToLive({ years: { '2030': frozen } }, '2030').eoyCash, 4321,
+    'the reader stated it, so re-opening keeps it');
+});
+
+t('a stamped figure the reader corrects becomes theirs, and survives re-opening', () => {
+  const s = enteredFixture();
+  s.years['2030'] = H.gridToPinned(s, H.computeAll(s, TODAY_FIX)['2030'], '2030');
+  /* what the End-of-year figure editor does to a frozen year */
+  s.years['2030'].eoyCash = 9999;
+  s.years['2030'].pinnedFrom.eoyStamped = false;
+  eq(H.pinnedToLive(s, '2030').eoyCash, 9999);
+});
+
+t('the year after a frozen one opens exactly where it did', () => {
+  const s = enteredFixture();
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  const before = H.computeAll(s, TODAY_FIX)['2031'];
+  s.years['2030'] = H.gridToPinned(s, H.computeAll(s, TODAY_FIX)['2030'], '2030');
+  const after = H.computeAll(s, TODAY_FIX)['2031'];
+  eq(Object.entries(after.balances).filter(([k, v]) => before.balances[k] !== v), [],
+    'a January opens on the December before it, frozen or not');
+});
+
+t('a freeze marker is only kept where it could be acted on', () => {
+  const mk = (extra) => H.coerceShape({ years: { '2030': {
+    kind: 'grid', model: 'pinned', startMonth: '2030-01', monthCount: 12,
+    categories: [], cells: {}, paychecks: {}, seeds: {}, overrides: {},
+    ...extra } } }).years['2030'];
+  eq('pinnedFrom' in mk({ pinnedFrom: { enteredThrough: '2030-12' } }), true);
+  eq('pinnedFrom' in mk({ pinnedFrom: { enteredThrough: 'whenever' } }), false,
+    'a marker that can\'t say when the year was entered restores nothing');
+  eq('pinnedFrom' in mk({ pinnedFrom: 'live' }), false, 'nor an older, emptier one');
+  eq('pinnedFrom' in H.coerceShape({ years: { '2030': {
+    kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 12,
+    enteredThrough: '2030-12', categories: [], cells: {}, paychecks: {},
+    seeds: {}, overrides: {}, pinnedFrom: { enteredThrough: '2030-12' } } } })
+    .years['2030'], false, 'a live year is not frozen, whatever it carries');
+  const kept = mk({ pinnedFrom: { enteredThrough: '2030-12', overrides: {
+    'cash|2030-03': { v: '1200' }, 'mid|2030-04': { v: 'nonsense' } } } });
+  eq(kept.pinnedFrom.overrides, { 'cash|2030-03': { v: 1200 } },
+    'the stored balances are read as strictly as the year\'s own are');
+});
+
+t('an end-of-year figure is a number or it is nothing', () => {
+  const eoy = (v) => H.coerceShape({ years: { '2030': { kind: 'summary',
+    categoryTotals: [], eoyCash: v } } }).years['2030'];
+  eq(eoy('1200.50').eoyCash, 1200.5, 'a hand-edited backup can carry a string');
+  eq('eoyCash' in eoy('nothing here'), false, 'junk states nothing, never $0');
+  eq('eoyCash' in H.coerceShape({ years: { '2030': { kind: 'summary',
+    categoryTotals: [] } } }).years['2030'], false, 'and a year that states none stays that way');
+  eq(eoy(0).eoyCash, 0, 'a stated zero is a statement');
+});
+
 group('Tax — the shape of a table you typed');
 
 /* EVERY figure in this group is invented, on round thousands, at rates nobody

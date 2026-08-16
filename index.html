@@ -2169,6 +2169,15 @@ function coerceShape(data) {
   for (const y of Object.keys(d.years)) {
     const yr = obj(d.years[y]);
     d.years[y] = yr;
+    /* The end-of-year figure — stated by a summary year, stamped onto a grid
+       year when it is frozen. It feeds the year-by-year chart and the pace
+       check, so a string out of a hand-edited backup would poison both. Read
+       STRICTLY, the overrides discipline: absent stays absent, because a year
+       that never stated one must not start claiming $0. */
+    if (yr.eoyCash !== undefined) {
+      const n = rateOrNone(yr.eoyCash);
+      if (typeof n === 'number') yr.eoyCash = n; else delete yr.eoyCash;
+    }
     if (yr.kind === 'grid') {
       yr.categories = arr(yr.categories);
       yr.cells = obj(yr.cells);
@@ -2220,6 +2229,27 @@ function coerceShape(data) {
       for (const [m, v] of Object.entries(yr.paychecks)) {
         const n = num(v);
         if (typeof n === 'number') yr.paychecks[m] = n; else delete yr.paychecks[m];
+      }
+      /* What a FROZEN year was before it was frozen — the balances it stated
+         by hand (the freeze wrote all the others) and whether the end-of-year
+         figure was stamped at the same time. It exists so "Re-open as live"
+         can put the year back exactly, which is why only a year the app froze
+         carries one: an IMPORTED history year states its balances outright and
+         has no chain to go back to, so it is never offered the button.
+         A marker that can't say what the year was entered through can't
+         restore anything, so it goes rather than half-works — the year stays
+         frozen, which is what the reader sees anyway. */
+      const pf = obj(yr.pinnedFrom);
+      if (yr.model === 'live' || !/^\d{4}-\d{2}$/.test(pf.enteredThrough || ''))
+        delete yr.pinnedFrom;
+      else {
+        pf.overrides = obj(pf.overrides);
+        for (const [k, ov] of Object.entries(pf.overrides)) {
+          const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
+          if (typeof n === 'number') ov.v = n; else delete pf.overrides[k];
+        }
+        pf.eoyStamped = !!pf.eoyStamped;
+        yr.pinnedFrom = pf;
       }
       /* Rows classify into Income / Expenses / Transfers sections. Data from
          before sections existed gets a one-time guess here — transfer roles
@@ -4490,6 +4520,11 @@ function gridCard(y, yr) {
      from: every month in it is still a projection of the year before. */
   const canClose = live && started && monthDiff(yr.startMonth, nextM) < yr.monthCount;
   const canReopen = live && started && yr.enteredThrough >= yr.startMonth;
+  /* Freezing is offered exactly where "Mark … entered" runs out: a year with
+     every month entered is a year with nothing left to compute. The two
+     buttons therefore never appear together, and the last press of one is what
+     brings out the other. */
+  const canFreeze = live && started && !canClose;
   const addRowBtn = `<button class="btn small" data-add="category" data-year="${esc(y)}"
       title="Add a row to this year's grid">＋ Add row</button>`;
   /* On a phone the six admin buttons pushed the grid — the thing you came for —
@@ -4508,10 +4543,23 @@ function gridCard(y, yr) {
       ${live && canReopen ? `<button class="btn small" id="reopenMonthBtn"
         title="Move the entered-through marker back a month (your numbers stay put)">
         ↩ Re-open ${esc(monthLabel(yr.enteredThrough))}</button>` : ''}
-      ${live && y === newestGridYear() && !state.years[String(+y + 1)]
+      ${canFreeze ? `<button class="btn small" id="freezeYearBtn"
+        title="Every month is entered — stop computing ${esc(y)} and keep the balances it stands at">
+        🏁 Mark ${esc(y)} as history</button>` : ''}
+      ${/* NOT gated on `live`: a year frozen with nothing after it would
+            otherwise have no way to build the year that follows it, which is
+            the one thing a reader does next. A pinned year states its
+            December, which is all the rollover needs to seed from. */''}
+      ${y === newestGridYear() && !state.years[String(+y + 1)]
         ? `<button class="btn small" id="rolloverBtn"
             title="Build the ${esc(String(+y + 1))} grid now so you can see where the plan is heading">
             ⊕ Build ${esc(String(+y + 1))}</button>` : ''}
+      ${!live && yr.pinnedFrom ? `<button class="btn small" id="reopenLiveBtn"
+          title="Compute ${esc(y)}'s balances again — your figures stay exactly as they are">
+          ↩ Re-open ${esc(y)} as live</button>` : ''}
+      ${!live ? `<button class="btn small" data-edit="sumyear" data-year="${esc(y)}"
+          title="The end-of-year total this year is drawn at on the year-by-year chart">
+          ✎ End-of-year figure</button>` : ''}
       ${!live ? `<button class="btn small" id="toSummaryBtn"
           title="Replace this year's months with its yearly totals — permanent">
           ⇩ Convert to a summary</button>` : ''}
@@ -4537,6 +4585,12 @@ function gridCard(y, yr) {
       ? `Entered through <strong>${esc(monthLabel(yr.enteredThrough))}</strong>; later months are estimates that update as real numbers land.${
           viewOnly ? '' : ' Click any cell to edit it.'}`
       : `A finished year — every figure is history.${
+          /* The same sentence a summary year opens with, and for the same
+             reason: this is the figure the year-by-year chart draws the year
+             at, and until now a grid year stated one with nothing on screen
+             saying so. */
+          yr.eoyCash !== undefined
+            ? ` End of year: <strong>${fmtMoney(yr.eoyCash)}</strong>.` : ''}${
           viewOnly ? '' : ' Click a cell to correct it.'}`}</p>
     ${monthControls}
     <div class="gridwrap"><table class="grid">
@@ -9156,6 +9210,54 @@ function gridToSummary(st, y) {
     ...(yr.eoyCash !== undefined ? { eoyCash: yr.eoyCash } : {}) };
 }
 
+/* Freezing a finished year: the balances the chain COMPUTED become balances
+   the year STATES, which is the only kind a pinned year has. Offered once
+   every month is entered, and that is what makes it cheap: an entered month's
+   cells are already stored actuals or deliberate blanks, so there is nothing
+   to materialise on the category side — the difference between the two models
+   is the account chain, and this writes it down.
+
+   A balance already stated by hand is left exactly as it is: it is the same
+   claim, made by the reader rather than the engine, and restating it from the
+   computed figure would overwrite a correction with itself. The end-of-year
+   total is stamped too — the year-by-year chart reads `eoyCash` and nothing
+   else for a year that isn't live — unless the year already states one.
+
+   Everything needed to undo it goes into `pinnedFrom`, so Re-open puts the
+   year back rather than approximately back. Pure state-in, value-out so tests
+   can pin it. */
+function gridToPinned(st, computed, y) {
+  const yr = st.years[y];
+  const own = yearMonths(yr).filter(m => m.startsWith(y));
+  const overrides = { ...(yr.overrides || {}) };
+  const bal = (computed && computed.balances) || {};
+  for (const m of yearMonths(yr))
+    for (const a of accountsOf(st)) {
+      const key = `${a.id}|${m}`;
+      if (bal[key] === undefined || overrides[key] !== undefined) continue;
+      overrides[key] = { v: round2(bal[key]) };
+    }
+  const dec = bal[`total|${own[own.length - 1]}`];
+  const stamp = yr.eoyCash === undefined && dec !== undefined;
+  return { ...yr, model: 'pinned', overrides,
+    pinnedFrom: { enteredThrough: yr.enteredThrough,
+      overrides: { ...(yr.overrides || {}) }, eoyStamped: stamp },
+    ...(stamp ? { eoyCash: round2(dec) } : {}) };
+}
+
+/* The way back, and only for a year the app itself froze — `pinnedFrom` is
+   what it was before, put back whole. The stamped end-of-year figure goes with
+   it: left behind, the year would draw a stated point AND a computed one at
+   the same place on the year-by-year chart. Pure, pinned by tests. */
+function pinnedToLive(st, y) {
+  const yr = st.years[y];
+  const pf = yr.pinnedFrom || {};
+  const { pinnedFrom, eoyCash, ...rest } = yr;
+  return { ...rest, model: 'live', enteredThrough: pf.enteredThrough,
+    overrides: { ...(pf.overrides || {}) },
+    ...(pf.eoyStamped || eoyCash === undefined ? {} : { eoyCash }) };
+}
+
 /* Rules that reach a year back need the previous year's GRID; converting it
    would quietly blank those estimates. Warn with the row names, not a shrug. */
 function rulesNeedingYear(st, y) {
@@ -9184,6 +9286,43 @@ function convertYearToSummary(y) {
   state.years[y] = gridToSummary(state, y);
   save(); render();
   toast(`${y} is a summary now`);
+}
+
+/* The year-lifecycle step the app was missing: a live year, entered right
+   through, becomes history — the same shape the 2011–2026 import produced, and
+   the state the Convert button has always expected to find. Reversible while
+   the marker lasts, so the confirm can say what CHANGES rather than warn about
+   what can't be undone. */
+function freezeYear(y) {
+  const yr = state.years[y];
+  if (!yr || yr.kind !== 'grid' || yr.model !== 'live') return;
+  /* Re-checked here and not only in the button: a year with a month still
+     unentered has AUTO estimates in it, and a pinned year computes none — its
+     unstored cells read as blank. Freezing one would blank whatever hadn't
+     been entered, which is the one thing this must never do. Entered months
+     have already materialised, so from here nothing can change. */
+  const months = yearMonths(yr);
+  if ((yr.enteredThrough || '') < months[months.length - 1]) return;
+  const stated = Object.keys(yr.overrides || {}).length;
+  if (!confirm(`Mark ${y} as history? Its balances stop being computed and become `
+    + `stated figures — exactly the ones showing now${stated ? `, and the ${stated} you `
+      + `stated by hand stay as they are` : ''}. Nothing you typed changes, and `
+    + `${y} stops keeping up with edits made after this.\n\n`
+    + `Interest and dividends sit inside those stated balances from then on, so `
+    + `Money In vs Money Out no longer counts them separately for ${y}.\n\n`
+    + `You can re-open it as a live year afterwards.`))
+    return;
+  state.years[y] = gridToPinned(state, C[y], y);
+  save(); render();
+  toast(`${y} is history now`);
+}
+
+function reopenYearAsLive(y) {
+  const yr = state.years[y];
+  if (!yr || yr.kind !== 'grid' || !yr.pinnedFrom) return;
+  state.years[y] = pinnedToLive(state, y);
+  save(); render();
+  toast(`${y} is live again — its balances are computed from here`);
 }
 
 function deleteYear(y) {
@@ -11210,14 +11349,24 @@ const EDITORS = {
     move: (ds, dir) => listSwap(state.years[ds.year].categoryTotals, +ds.idx, dir),
   },
 
-  /* Summary-year settings (the end-of-year figure) */
+  /* A finished year's end-of-year figure — a summary year states one, and so
+     does a grid year that has been marked as history. Reached from both. */
   sumyear: {
     title: (ds) => `${ds.year} settings`,
+    sub: () => 'What the accounts came to at the end of the year. It is the figure '
+      + 'Total Liquidity, Year by Year draws this year at, and the one next year\'s '
+      + 'growth is measured against. Clear the box to state nothing.',
     fields: [{ key: 'eoyCash', label: 'End-of-year total', type: 'money' }],
     get: (ds) => ({ eoyCash: state.years[ds.year].eoyCash }),
     save(ds, v) {
-      if (v.eoyCash === null) delete state.years[ds.year].eoyCash;
-      else state.years[ds.year].eoyCash = v.eoyCash;
+      const yr = state.years[ds.year];
+      if (v.eoyCash === null) delete yr.eoyCash;
+      else yr.eoyCash = v.eoyCash;
+      /* Typing over a figure the freeze stamped makes it the READER's, so
+         re-opening must leave it alone — it only clears what the app itself
+         wrote. Correcting a number and having it disappear later would be the
+         app quietly deciding the correction was its own. */
+      if (yr.pinnedFrom) yr.pinnedFrom.eoyStamped = false;
     },
   },
 
@@ -12759,6 +12908,10 @@ function wireBudget() {
   if (closeBtn) closeBtn.onclick = markMonthEntered;
   const reopenBtn = F('reopenMonthBtn');
   if (reopenBtn) reopenBtn.onclick = reopenMonth;
+  const freezeBtn = F('freezeYearBtn');
+  if (freezeBtn) freezeBtn.onclick = () => freezeYear(activeYearKey());
+  const liveBtn = F('reopenLiveBtn');
+  if (liveBtn) liveBtn.onclick = () => reopenYearAsLive(activeYearKey());
   const rollBtn = F('rolloverBtn');
   if (rollBtn) rollBtn.onclick = () => {
     const from = newestGridYear();
@@ -15000,7 +15153,8 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   mergeAccountsByName, nominateHub, hubAccount, dividendAccounts, statedAfter,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
-  normRole, gridToSummary, rulesNeedingYear, partsKind, sumKind, paycheckParts,
+  normRole, gridToSummary, gridToPinned, pinnedToLive,
+  rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
   ownerSubtotals, validOwner, accountOption, suggestedTargetDate,

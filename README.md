@@ -86,8 +86,15 @@ included — treat those the way you treat the figures.
   isn't there at all in a year you haven't annotated. They're
   grouped by month and laid out across the width of the card, so a year's worth
   reads at a glance instead of running down one long strip. Mark a month "entered" to freeze its
-  estimates into numbers, like overtyping formulas in Numbers. A finished year
-  can be **converted to a yearly summary** (permanent — the Progress charts
+  estimates into numbers, like overtyping formulas in Numbers. Once every month
+  of a year is entered you can **mark the whole year as history**: the balances
+  it computed become the balances it states, and nothing you typed changes —
+  the grid reads exactly the same the moment after as the moment before. It
+  also notes the year's end-of-year total, which is the figure the year-by-year
+  chart draws it at, and which you can correct with **✎ End-of-year figure**.
+  Nothing is lost either way: **↩ Re-open as live** puts the year back to a
+  computed one, including any balance you'd stated by hand. A finished year
+  can also be **converted to a yearly summary** (permanent — the Progress charts
   carry on unchanged, and each account keeps its end-of-year balance as a
   balance row), or deleted outright. A finished year holds its account
   balances as figures you stated at the time rather than a chain to recompute,

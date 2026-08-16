@@ -908,6 +908,38 @@ suite passed while the card was wrong.
   converted. `migrate_local_data.py` only ever does the one-off strip of
   hand-typed next-year months from the live grid — converting a year is a
   deliberate, per-year click, never something a script does behind your back.
+- **`gridToPinned()` is the step that was MISSING, and its absence was found by
+  auditing Charlie's own backup for state the app couldn't produce** (2026-08-16):
+  every pinned grid in it came from the import, because nothing anywhere
+  assigned `model` and `startFresh`/`rolloverYear` both hard-code `'live'`. So a
+  from-scratch reader could never reach a history year — and, since the Convert
+  button is only offered on a non-live one, could never reach a summary year
+  either. The same audit found `eoyCash` sitting on those grid years with its
+  only editor on the SUMMARY card, so six real figures fed the year-by-year
+  chart and the pace check while being invisible and uneditable.
+  - **Offered exactly where "Mark … entered" runs out** (`canFreeze` is `live &&
+    started && !canClose`), and `freezeYear` re-checks it. That is not
+    politeness: an unentered month holds AUTO estimates, a pinned year computes
+    none, and freezing one would blank them. Entered months have already
+    materialised, so from there the change moves no figure at all — which is
+    the promise the tests make (`freezing a year states exactly the balances it
+    computed` compares every balance and kind before and after).
+  - **A balance stated by hand is never restated** from the computed figure —
+    same claim, made by the reader — and `eoyCash` is stamped only when the
+    year states none.
+  - **`pinnedFrom` is what it was before**, `{enteredThrough, overrides,
+    eoyStamped}`, so `pinnedToLive()` puts it back rather than approximately
+    back. Only a year the app froze carries one, which is why an IMPORTED
+    history year is offered no Re-open button: it states its balances outright
+    and has no chain to go back to. coerceShape drops a marker on a live year
+    or one that can't say what the year was entered through.
+    **Correcting the stamped figure clears `eoyStamped`** (in `sumyear.save`) —
+    from then on it is the reader's number and re-opening leaves it alone.
+  - **The rollover button is deliberately NOT gated on `live`** any more: a year
+    frozen with nothing after it would otherwise have no way to build the year
+    that follows, and a pinned December is all `rolloverYear` seeds from.
+  - Freezing DOES change one thing and the confirm says so: `yearFlows` counts
+    no interest for a pinned year, because stated balances already hold it.
 
 ## Editing
 
