@@ -161,7 +161,11 @@ included — treat those the way you treat the figures.
   accounts, goals, holdings, retirement accounts, trips and their line items,
   PTO entries, donations, the old yearly summaries) to change, annotate, or
   delete it; every table has a ＋ Add button, rows reorder with ↑↓, and each
-  editor shows only the settings the current choice actually uses. Clicking
+  editor shows only the settings the current choice actually uses. **Landing on
+  a box selects what's in it**, so typing replaces the figure instead of running
+  on to the end of it — click a second time to place the cursor and edit
+  normally. (A note is the exception: those are written over several lines and
+  added to, so they're left as they are.) Clicking
   outside any dialog closes it without saving, and a small ⓘ beside a figure
   explains the arithmetic behind it. The budget grid is keyboard-operable too:
   Tab into it, move between cells with the arrow keys, and press Enter to edit

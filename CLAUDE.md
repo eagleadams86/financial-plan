@@ -990,6 +990,26 @@ handlers. New sections: register in EDITORS, stamp the attributes in the
 renderer, done. `save`/`del` may RETURN A STRING to be toasted — that is how a
 section reports something the reader can't see on the page in front of them;
 returning nothing stays silent, and `del` returning `false` still refuses.
+**A box you land on has its contents SELECTED**, so typing replaces the figure
+rather than running on to the end of it — one delegated `focusin` listener
+(`SELECT_ON_FOCUS`), which bubbles where `focus` does not, so it covers every
+field `buildFields` creates a moment before showing it with nothing to remember
+when adding one. Three things it must keep doing:
+- **A TEXTAREA is left alone.** A note is written over several lines and added
+  to over time; selecting one on focus puts the whole thing one keystroke from
+  gone, and unlike a mistyped amount there is nothing on screen to retype it
+  from. The type list is a WHITELIST for the same reason — a type nobody thought
+  about is left alone rather than silently swept in.
+- **The one-shot `mouseup` guard is load-bearing.** A click focuses on mousedown
+  and then places the caret on mouseup, which collapses the selection made a
+  moment earlier: without it the feature works from the keyboard and looks
+  broken with a mouse, which is how everybody would meet it.
+- **That guard is attached only for a POINTER-driven focus** (`focusFromPointer`,
+  set on a capturing `pointerdown`). A `{once:true}` listener left hanging after
+  a Tab would sit there until the next click on that field and eat the caret
+  placement of a later, deliberate one. Clicking a second time places the caret
+  normally — the field is focused by then, so no focusin fires — and that is the
+  way back in for editing rather than replacing.
 **A save hands focus back** (`refocusEditRow` / `refocusGridCell`): the
 re-render destroys the element that opened the dialog, the native <dialog>
 focus-return lands on the dead node, and a keyboard reader fell to <body> and
