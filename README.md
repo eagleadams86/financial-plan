@@ -8,8 +8,10 @@ spreadsheet kept since 2011. Live at
 
 **This repo is public and holds code only — never data.** Everything you see
 in the app lives in your browser's localStorage. No account is needed; without
-signing in, the only network call the page makes is to the GitHub API for the
-"Recent changes" box. **Read-only share links** carry their figures inside the
+signing in, the only network calls the page makes are to the GitHub API for
+the "Recent changes" box and — only if you've added a price-lookup key — to
+api.twelvedata.com, carrying a ticker symbol and your own key and nothing
+else. **Read-only share links** carry their figures inside the
 link's own fragment, which is never sent to any server — creating one and
 opening one both upload nothing. **Optional sync**: "Sign in to sync" (Google) mirrors
 your data to a private Firestore document in the `financialplan-60c6e`
@@ -95,7 +97,7 @@ included — treat those the way you treat the figures.
   arrange; the ↑↓ buttons in a row's editor still work everywhere.) The account
   rows drag too, in their own block — and since accounts are one list rather
   than one per year, that order holds across every year of the plan.
-- **Find (⌘K)** — one search box over all of it: every year's rows and
+- **Find (⌘K / Ctrl+K)** — one search box over all of it: every year's rows and
   notes (split-part notes and balance notes included), donations, trips and
   their line items, goals, people, property, and holdings by ticker. A budget
   hit opens straight into its cell's editor; everything else lands you on the
@@ -108,7 +110,7 @@ included — treat those the way you treat the figures.
   defused against spreadsheet formula injection; a BOM keeps Excel honest
   about UTF-8.
 - **Undo** — every change banks the state it replaced, up to twenty deep, and
-  ⌘Z (or the ↩ Undo button that appears in the header once there is something
+  ⌘Z / Ctrl+Z (or the ↩ Undo button that appears in the header once there is something
   to undo) walks straight back through them, one honest step at a time. The
   ring lives in memory for this sitting only — a reload starts fresh — and it
   clears when another device's changes arrive, since undoing past somebody
@@ -340,10 +342,10 @@ included — treat those the way you treat the figures.
   question at every visit. Prices top themselves up automatically when they are
   more than six hours old; the **Refresh prices** button ignores that and
   fetches everything on the spot. Open a holding and its Price box says where
-  that number came from — plus what the holding is worth and how much of the
-  account it is, both keeping up as you type — — fetched and when, typed over a fetched one, or never
+  that number came from — fetched and when, typed over a fetched one, or never
   looked up — since the line above the tables can only report the oldest fetch
-  across the whole table.
+  across the whole table. The box also shows what the holding is worth and how
+  much of the account it is, both keeping up as you type.
 - **Vacations** — a **Trip Spending, Year by Year** chart (once two years have
   trips): each bar adds a year's trips up — paid, minus credits, plus still
   due — with the trips themselves broken out in the hover, a dotted average
@@ -432,7 +434,8 @@ in the app shouldn't sit a mis-click away from Export. Pressing it opens a
 confirmation of its own that says exactly how much is going ("This deletes 8
 years of budgets, 3 goals…"), says out loud when you're signed in that the
 copy in your Google account goes too, and offers the same JSON export as a last
-chance to keep any of it.
+chance to keep any of it. It clears the price-lookup key and the cached ticker
+prices along with the plan — "everything" includes the credential.
 
 **You stay signed in, and the deletion reaches your other devices.** The
 emptied plan goes out through the normal save path, so the phone sees it land
@@ -510,8 +513,9 @@ Re-running it means bumping the `?v=` on every `favicon.ico` reference — two i
 One file — `index.html` — no build step, alongside `theme.css` (byte-copy
 from the private claude-theme-pack, the palette source of truth for all apps)
 and a vendored `chart.min.js`. Served by GitHub Pages from `main`. State
-schema is versioned (`schema: 2`); every entry point runs the payload through
-`coerceShape()`, whose upgrades are presence-based and safe to run twice.
+schema is versioned (`schema: 5` today); every entry point runs the payload
+through `coerceShape()`, whose upgrades are presence-based and safe to run
+twice.
 
 `computeAll()` in `index.html` is the only place numbers are calculated —
 every cell, balance, and goal figure derives from stored inputs at render

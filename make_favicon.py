@@ -139,9 +139,11 @@ def build(rounded=True, k=1.0):
 
 def main():
     art = build()
-    frames = [art.resize((s, s), Image.LANCZOS) for s in SIZES]
-    frames[-1].save('favicon.ico', format='ICO',
-                    sizes=[(s, s) for s in SIZES])
+    # Pillow's ICO writer derives every size itself from the one image it is
+    # handed — a list of pre-resized frames was built here once and all but
+    # the last discarded.
+    art.resize((SIZES[-1], SIZES[-1]), Image.LANCZOS).save(
+        'favicon.ico', format='ICO', sizes=[(s, s) for s in SIZES])
     print('favicon.ico written at ' + ', '.join(f'{s}px' for s in SIZES))
 
     square = build(rounded=False)

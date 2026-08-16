@@ -144,7 +144,11 @@ t('an unknown year kind falls back to summary', () => {
 });
 t('migrate passes a current-schema state through untouched', () => {
   const s = H.blankState();
-  eq(H.migrate(s), s);
+  /* Snapshot BEFORE the call: migrate returns the same object it was handed,
+     so comparing its return against `s` compared a reference with itself and
+     could never catch a mutation. */
+  const before = JSON.stringify(s);
+  eq(JSON.stringify(H.migrate(s)), before, 'nothing added, moved or dropped');
 });
 t('blankState carries the spreadsheet constants', () => {
   const s = H.blankState();
@@ -411,9 +415,14 @@ t('dividends read last month’s cash + mid balances at rate/12', () => {
   //                 mid  = 1000 + 500 = 1500
   approx(c.balances['cash|2030-03'], 13450);
   approx(c.balances['mid|2030-03'], 1500);
-  approx(c.cells['dividends|2030-04'].v, H.round2(0.03 / 12 * (12345 + 1500)) ,
-    'April divs read the PINNED April cash? No — March', 100);
-  approx(c.cells['dividends|2030-04'].v, H.round2(0.03 / 12 * (13450 + 1500)));
+  /* Said as a NOT-equal, because the two candidate answers differ by under
+     $3 and an approx with a wide epsilon passed for both — a check that can
+     never fail checks nothing. */
+  ok(Math.abs(c.cells['dividends|2030-04'].v
+      - H.round2(0.03 / 12 * (12345 + 1500))) > 1,
+    'April divs do NOT read the PINNED April cash');
+  approx(c.cells['dividends|2030-04'].v, H.round2(0.03 / 12 * (13450 + 1500)),
+    'they read March');
 });
 
 group('Formula engine — balances');
@@ -952,10 +961,10 @@ t('retireAge is forced to a number — it reaches the page unescaped', () => {
   eq(e.people[0].retireAge, 65, 'a numeric string still means what it says');
 });
 t('an age and a retirement year are worked out, never stored', () => {
-  const sam = { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 };
-  eq(H.ageAt(sam, '2026-08'), 40, 'four months past the birthday');
-  eq(H.ageAt(sam, '2026-03'), 39, 'one month before it');
-  eq(H.retirementYearOf(sam), 2051, '1986-04 plus 65 years');
+  const sam = { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-07', retireAge: 65 };
+  eq(H.ageAt(sam, '2026-08'), 40, 'one month past the birthday');
+  eq(H.ageAt(sam, '2026-03'), 39, 'four months before it');
+  eq(H.retirementYearOf(sam), 2051, '1986-07 plus 65 years');
   eq(H.ageAt({ id: 'n', name: 'No birthday' }, '2026-08'), null, 'no birth month, no guess');
   eq(H.retirementYearOf({ id: 'n', name: 'No birthday', retireAge: 65 }), null);
 });
@@ -964,7 +973,7 @@ t('only a child reaches 18, and only an adult retires', () => {
   eq(H.majorityMonthOf(kid), '2033-09');
   eq(H.retirementYearOf(kid), null, 'a child has no retirement year');
   eq(H.retirementMonthOf(kid), null);
-  const adult = { id: 'a', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 };
+  const adult = { id: 'a', name: 'Sam', role: 'adult', birth: '1986-07', retireAge: 65 };
   eq(H.majorityMonthOf(adult), null, 'and an adult has no 18th birthday to come');
 });
 /* "Retires at 55" is four different dates and the projection used to pick one
@@ -972,7 +981,7 @@ t('only a child reaches 18, and only an adult retires', () => {
    actually means. */
 t('the reader chooses where in the year a retirement age lands', () => {
   const p = (over) => Object.assign(
-    { id: 'c', name: 'Charlie', role: 'adult', birth: '1986-11', retireAge: 55 }, over);
+    { id: 'c', name: 'Robin', role: 'adult', birth: '1986-11', retireAge: 55 }, over);
   eq(H.retirementMonthOf(p({})), '2041-11', 'their birthday month, the default');
   eq(H.retirementMonthOf(p({ retireWhen: 'birthday' })), '2041-11', 'and said out loud');
   eq(H.retirementMonthOf(p({ retireWhen: 'jan-that-year' })), '2041-01',
@@ -983,7 +992,7 @@ t('the reader chooses where in the year a retirement age lands', () => {
     'and the year follows the month, so every marker moves with it');
 });
 t('a half year of age lands in the right month, for anyone waiting for 59 and a half', () => {
-  const p = { id: 'c', name: 'Charlie', role: 'adult', birth: '1986-11', retireAge: 59.5 };
+  const p = { id: 'c', name: 'Robin', role: 'adult', birth: '1986-11', retireAge: 59.5 };
   eq(H.retirementMonthOf(p), '2046-05', 'November plus 59 years and six months');
   eq(H.retirementMonthOf({ ...p, retireWhen: 'jan-that-year' }), '2046-01');
 });
@@ -1005,7 +1014,7 @@ t('a retirement rule is only drawn for somebody the plan can date', () => {
   const labels = [];
   for (let y = 2026; y <= 2076; y++) labels.push(String(y));
   const st = { people: [
-    { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 },
+    { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-07', retireAge: 65 },
     { id: 'no-age', name: 'Alex', role: 'adult', birth: '1990-01' },
     { id: 'no-birth', name: 'Jo', role: 'adult', retireAge: 65 },
     { id: 'ellis', name: 'Ellis', role: 'child', birth: '2015-09' },
@@ -1027,7 +1036,7 @@ t('two people retiring in the same year share one rule', () => {
 });
 t('a year the chart has not got is left undrawn rather than clamped', () => {
   const st = { people: [
-    { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 },
+    { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-07', retireAge: 65 },
   ] };
   eq(H.retirementMarkers(st, ['2026', '2027']), [],
     'no rule at all beats a rule at the wrong year');
@@ -1038,7 +1047,7 @@ t('a retirement year earns two years of headroom for its label', () => {
      here, and the plan-to end is the next test's. */
   const one = (over) => {
     const p = Object.assign({ id: 'a', name: 'A', role: 'adult',
-      birth: '1986-04', retireAge: 65 }, over);
+      birth: '1986-07', retireAge: 65 }, over);
     return { people: [{ ...p, planToAge: p.retireAge + 1 }] };
   };
   eq(H.retirementHorizon({ people: [] }, 2026), H.RET_YEARS_MIN, '25 years is the floor');
@@ -1054,7 +1063,7 @@ t('a retirement year earns two years of headroom for its label', () => {
 });
 t('the chart runs to the last plan-to age, and a mistyped one is capped', () => {
   const one = (over) => ({ people: [Object.assign(
-    { id: 'a', name: 'A', role: 'adult', birth: '1986-04', retireAge: 65 }, over)] });
+    { id: 'a', name: 'A', role: 'adult', birth: '1986-07', retireAge: 65 }, over)] });
   eq(H.retirementHorizon(one({}), 2026), 2081 - 2026,
     `the ${H.PLAN_TO_AGE_DEFAULT} default reaches further than the retirement does`);
   eq(H.retirementHorizon(one({ planToAge: 80 }), 2026), 2066 - 2026,
@@ -1062,11 +1071,11 @@ t('the chart runs to the last plan-to age, and a mistyped one is capped', () => 
   eq(H.retirementHorizon(one({ planToAge: 999 }), 2026), H.RET_YEARS_MAX,
     'a mistyped age must not flatten the real years into an inch');
   eq(H.retirementHorizon({ people: [
-    { id: 'a', name: 'A', role: 'adult', birth: '1986-04', retireAge: 65, planToAge: 80 },
+    { id: 'a', name: 'A', role: 'adult', birth: '1986-07', retireAge: 65, planToAge: 80 },
     { id: 'b', name: 'B', role: 'adult', birth: '1990-04', retireAge: 65, planToAge: 90 },
   ] }, 2026), 2080 - 2026, 'the LAST of them decides, not the first');
   eq(H.retirementHorizon({ people: [
-    { id: 'n', name: 'No age', role: 'adult', birth: '1986-04' }] }, 2026),
+    { id: 'n', name: 'No age', role: 'adult', birth: '1986-07' }] }, 2026),
     H.RET_YEARS_MIN,
     'and somebody the plan cannot date stretches nothing — the guard planToYearOf shares '
     + 'with retirementYearOf');
@@ -1208,7 +1217,7 @@ t('the suggested target date is the month they turn 18', () => {
 });
 t('there is nothing to suggest without a birth month, or for an adult', () => {
   eq(H.suggestedTargetDate({ role: 'child' }), null);
-  eq(H.suggestedTargetDate({ role: 'adult', birth: '1986-04' }), null);
+  eq(H.suggestedTargetDate({ role: 'adult', birth: '1986-07' }), null);
   eq(H.suggestedTargetDate(null), null);
 });
 t('a goal named for a child keeps the name, and computeGoals carries it through', () => {
@@ -1256,7 +1265,11 @@ function withState(patch, fn) {
     const d = H.coerceShape(JSON.parse(JSON.stringify(patch)));
     s.people = d.people;
     s.side = d.side;
-    s.settings = Object.assign({}, keep.settings, d.settings);
+    /* Over a BLANK settings, never the reader's own: merging the patch over
+       the live settings let any real key the patch didn't name (compPerson,
+       say) survive into the "fixture" — the ambient-state leak this harness
+       exists to refuse. */
+    s.settings = Object.assign({}, H.blankState().settings, d.settings);
     return fn();
   } finally {
     s.people = keep.people; s.side = keep.side; s.settings = keep.settings;
@@ -1411,7 +1424,7 @@ const restoreMerge = (incoming) => {
 t('people, owners and tags all survive the round trip', () => {
   const s = restoreMerge({
     schema: 4,
-    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1986-07', retireAge: 65 },
              { id: 'ellis', name: 'Ellis', role: 'child', birth: '2015-09' }],
     settings: { accounts: [{ id: 'cash', name: 'Cash', hub: true, owner: 'joint' },
                            { id: 'mid', name: 'Savings', owner: 'ellis' }] },
@@ -1450,10 +1463,13 @@ t('the archive keys are dropped on load, so a backup stops carrying them', () =>
 });
 t('the retirement data that matters is untouched', () => {
   /* `retirementAccounts` is the real list and reads nothing like the archive
-     key it sits beside — worth pinning that the cull took the right one. */
+     key it sits beside — worth pinning that the cull took the right one.
+     No invented id and `amount`, not `balance`: retirement accounts are
+     index-addressed and their stored figure is `amount` — a fixture claiming
+     otherwise is the exact trap the no-invented-ids rule exists for. */
   const d = H.coerceShape({ side: {
     retirement: { '2025': [['junk']] },
-    retirementAccounts: [{ id: 'r1', name: '401k', kind: 'traditional', balance: 1000 }],
+    retirementAccounts: [{ name: '401k', type: '401k', kind: 'traditional', amount: 1000 }],
     limits: { '2025': { salary: 100000 } } } });
   eq(d.side.retirementAccounts.length, 1);
   eq(d.side.retirementAccounts[0].name, '401k');
@@ -2144,6 +2160,66 @@ t('numeric fields that render unescaped are coerced to numbers', () => {
   eq(bucket.entries[0].nights, 0);
   eq(bucket.entries[0].ptoDays, 0);
 });
+t('grid figures from a hand-edited backup become numbers, not NaN', () => {
+  /* The biggest money surface of all: cells, seeds, overrides and paychecks
+     reach the engine verbatim, so one string here used to turn every
+     downstream balance into NaN — and a cell's v rides into the page raw. */
+  const evil = '<img src=x onerror=alert(1)>';
+  const d = H.coerceShape({ years: { '2030': { kind: 'grid', model: 'live',
+    startMonth: '2030-01', monthCount: 3, enteredThrough: '2030-01',
+    categories: [{ id: 'rent', name: 'Rent', rule: 'none', section: 'expense' }],
+    cells: { 'rent|2030-01': { v: evil, kind: 'actual' },
+             'rent|2030-02': { v: '25', kind: 'wat',
+               parts: [{ v: '10' }, 'junk', { v: 15, note: 'ok' }] },
+             'rent|2030-03': 'not even an object' },
+    seeds: { cash: 'junk', bank: '250' },
+    overrides: { 'cash|2030-02': { v: '500' }, 'cash|2030-03': { v: evil } },
+    paychecks: { '2030-01': evil, '2030-02': '3' } } } });
+  const yr = d.years['2030'];
+  eq(yr.cells['rent|2030-01'].v, 0, 'markup in a cell is only ever 0');
+  eq(yr.cells['rent|2030-01'].kind, 'actual');
+  eq(yr.cells['rent|2030-02'].v, 25, 'a numeric string still reads');
+  eq(yr.cells['rent|2030-02'].kind, 'actual', 'an unknown kind is not a class name');
+  eq(yr.cells['rent|2030-02'].parts.length, 2, 'a junk part is dropped');
+  eq(yr.cells['rent|2030-02'].parts[0].v, 10);
+  eq('rent|2030-03' in yr.cells, false, 'a cell that is not an object is dropped');
+  eq(yr.seeds.cash, 0, 'a junk seed does not poison the chain');
+  eq(yr.seeds.bank, 250);
+  eq(yr.overrides['cash|2030-02'].v, 500);
+  eq('cash|2030-03' in yr.overrides, false,
+     'an override that states no figure states nothing');
+  eq(yr.paychecks['2030-01'], 0);
+  eq(yr.paychecks['2030-02'], 3);
+  const c = H.computeAll(d, '2030-02-15')['2030'];
+  ok(Number.isFinite(c.balances['cash|2030-01']),
+     'the balance chain stays finite');
+  approx(c.balances['cash|2030-02'], 500, 'the numeric-string override pins');
+});
+t('a live year without enteredThrough gets the month before it starts', () => {
+  /* gridCard does monthAdd(yr.enteredThrough, 1) unguarded — a truncated
+     backup without the marker used to bring the whole workbook up empty. */
+  const d = H.coerceShape({ years: { '2030': { kind: 'grid', model: 'live',
+    startMonth: '2030-03', monthCount: 6, categories: [] } } });
+  eq(d.years['2030'].enteredThrough, '2030-02', 'nothing entered yet');
+  const kept = H.coerceShape({ years: { '2030': { kind: 'grid', model: 'live',
+    startMonth: '2030-03', monthCount: 6, enteredThrough: '2030-05', categories: [] } } });
+  eq(kept.years['2030'].enteredThrough, '2030-05', 'a real marker is untouched');
+});
+t('small guards: divEvery, dangling destinations, junk retireWhen, taxPct', () => {
+  const d = H.coerceShape({ settings: { accounts: [
+    { id: 'a', name: 'A', divEvery: 5, creditTo: 'gone', divTo: 'gone' },
+    { id: 'b', name: 'B', divEvery: 6 }] } });
+  eq(d.settings.accounts[0].divEvery, 3, 'an off-calendar beat falls back to quarterly');
+  eq(d.settings.accounts[1].divEvery, 6, 'a real beat is kept');
+  eq(d.settings.accounts[0].creditTo, 'a', 'a dangling creditTo falls back to itself');
+  eq(d.settings.accounts[0].divTo, 'a', 'and so does divTo');
+  const p = H.coerceShape({ people: [
+    { id: 's', name: 'Sam', role: 'adult', retireWhen: 'whenever' }] });
+  eq('retireWhen' in p.people[0], false, 'junk retireWhen is dropped, not stored');
+  const dd = H.coerceShape({ side: { drawdown: { income: [
+    { label: 'Pension', amount: 100, from: 2050, taxPct: 5 }] } } });
+  eq(dd.side.drawdown.income[0].taxPct, 1, 'a percent typed as 5 clamps to all of it');
+});
 t('money maps from a hand-edited backup become numbers, not $NaN', () => {
   /* These all render through fmtMoney/toFixed, so a string is never markup —
      but NaN poisons every total it reaches. Coerced like the unescaped
@@ -2202,10 +2278,12 @@ t('markup in a year key survives coerceShape as data, not as markup', () => {
   const evil = '<img src=x onerror=alert(1)>';
   const d = H.coerceShape({ years: { [evil]: { kind: 'summary', categoryTotals: [] } } });
   ok(Object.keys(d.years).includes(evil), 'kept verbatim as a key');
-  /* esc() is what stands between that key and the page — pin its behaviour */
-  const escaped = evil.replace(/[&<>"']/g, c =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  /* The REAL esc(), off the hooks — this used to pin a re-implemented copy,
+     which a change to the app's own function could never fail. */
+  const escaped = H.esc(evil);
   eq(escaped.indexOf('<'), -1, 'no angle bracket survives escaping');
+  eq(H.esc('&<>"\''), '&amp;&lt;&gt;&quot;&#39;', 'all five entities, in one pass');
+  eq(H.esc('Tom & Jerry’s 100%'), 'Tom &amp; Jerry’s 100%', 'ordinary text passes through');
 });
 
 group('The cell tooltip');
@@ -2286,6 +2364,35 @@ t('the chart points sort by date and fall back to the parts', () => {
   eq(pts[1].total, 500, 'no stated total, so the parts add up to one');
   eq(pts[0].total, 300, 'a stated total is the stated total');
 });
+t('a second record the same day restates, a new day appends', () => {
+  /* The Record button writes permanent history through upsertSnapshot — two
+     worths for one date is not a history, it is a smudge. */
+  const list = [{ date: '2026-08-01', total: 100 }];
+  eq(H.upsertSnapshot(list, { date: '2026-08-01', total: 150 }), true, 'replaced');
+  eq(list, [{ date: '2026-08-01', total: 150 }], 'one row, the second figures');
+  eq(H.upsertSnapshot(list, { date: '2026-08-02', total: 160 }), false, 'appended');
+  eq(list.length, 2);
+});
+t('the total counts a linked pot once, at what the holdings are worth', () => {
+  /* netWorthTotals is the ONE arithmetic the card and the Record button
+     share — a bug here writes wrong figures into permanent history. */
+  const st = H.coerceShape({
+    settings: { accounts: [{ id: 'long', name: 'Long-term' }] },
+    side: { portfolios: [{ id: 'cm', name: 'CM', accounts: ['long'],
+              rows: [{ ticker: 'VOO', shares: 1, price: 700 }] }],
+            property: [{ name: 'House', kind: 'home', value: 300, owed: 100 }] } });
+  const c = { balances: { 'long|2030-04': 650, 'total|2030-04': 1000 } };
+  const { nw, overlap, total } = H.netWorthTotals(st, 1000, c, '2030-04');
+  eq(overlap, 650, "the linked account's computed balance, not the holdings' price");
+  eq(nw.invested, 700);
+  eq(nw.property, 200, 'equity: value minus owed');
+  eq(total, H.round2(1000 + 700 + 200 - 650), 'liquid + invested + equity, pot once');
+  const empty = H.coerceShape({
+    settings: { accounts: [{ id: 'long', name: 'Long-term' }] },
+    side: { portfolios: [{ id: 'cm', name: 'CM', accounts: ['long'], rows: [] }] } });
+  eq(H.netWorthTotals(empty, 1000, c, '2030-04').overlap, 0,
+    'an empty pane claims nothing — its accounts stay counted as themselves');
+});
 
 group('CSV export');
 t('a cell is quoted only when it must be, and formulas are defused', () => {
@@ -2293,6 +2400,14 @@ t('a cell is quoted only when it must be, and formulas are defused', () => {
   eq(H.csvCell('has, comma', true), '"has, comma"');
   eq(H.csvCell('says "hi"', true), '"says ""hi"""');
   eq(H.csvCell('=SUM(A1:A9)', true), "'=SUM(A1:A9)", 'a formula in a name opens as text');
+  /* The WHOLE trigger set (OWASP: = + - @ tab CR), because the regex once
+     said only "=+@ and tab" and a regression on any one of these silently
+     reopens CSV injection. */
+  eq(H.csvCell('+A1', true), "'+A1");
+  eq(H.csvCell('@cmd', true), "'@cmd");
+  eq(H.csvCell('\tX', true), "'\tX", 'a leading tab is a trigger too');
+  eq(H.csvCell('-2+3+cmd', true), "'-2+3+cmd", 'leading minus on TEXT is a trigger');
+  eq(H.csvCell('\rX', true), '"\'\rX"', 'a CR is defused AND quoted');
   eq(H.csvCell(-1234.5), '-1234.5', 'a negative NUMBER keeps its sign — no apostrophe');
   eq(H.csvCell(undefined), '', 'absent is empty, not "undefined"');
 });
@@ -2369,6 +2484,23 @@ t('one character is not a search, and the cap is counted out loud', () => {
   eq(r.hits.length, H.SEARCH_CAP);
   eq(r.more, 7, 'what was dropped is said, never silent');
 });
+t('a shared link cannot surface a tab it does not carry', () => {
+  /* A Tax link BORROWS retirement accounts and people (SECTION_NEEDS), so
+     without the fence their names surfaced as hits whose clicks silently did
+     nothing. Filtered hits also stay out of the overflow count. */
+  const st = searchFixture();
+  eq(H.searchPlan(st, 'roswell', ['budget']).hits, [],
+    'the giving hit is not offered');
+  eq(H.searchPlan(st, 'roswell', ['budget', 'giving']).hits.length, 1,
+    'carried tabs still answer');
+  eq(H.searchPlan(st, 'roswell').hits.length, 1, 'no fence in the app\'s own view');
+  const wide = H.coerceShape({ vacations: { trips:
+    Array.from({ length: H.SEARCH_CAP + 7 }, (x, i) =>
+      ({ id: 't' + i, name: 'Trip ' + i, year: 2020, items: [] })) } });
+  const fenced = H.searchPlan(wide, 'trip', ['budget']);
+  eq(fenced.hits, [], 'nothing carried, nothing listed');
+  eq(fenced.more, 0, 'and nothing counted as "more" either');
+});
 
 group('Undo');
 t('the snapshot ring appends and trims oldest-first', () => {
@@ -2377,6 +2509,21 @@ t('the snapshot ring appends and trims oldest-first', () => {
   eq(H.pushSnapshot(['a', 'b', 'c'], 'd', 3), ['b', 'c', 'd'], 'the cap drops the oldest');
   eq(H.pushSnapshot(['a'], '', 3), ['a'], 'nothing is not a snapshot');
   eq(H.pushSnapshot(['a'], null, 3), ['a']);
+});
+t('a ui-only change is not a change anybody regrets', () => {
+  /* coreOf is the ONE serialization the bank decision reads: ui nulled, so a
+     tab switch or a folded box mints no history. */
+  const a = H.coreOf({ years: {}, ui: { activeTab: 'budget', collapsed: [] } });
+  const b = H.coreOf({ years: {}, ui: { activeTab: 'giving', collapsed: ['x'] } });
+  eq(a, b, 'switching tabs banks nothing');
+  const c = H.coreOf({ years: { '2026': {} }, ui: { activeTab: 'budget' } });
+  ok(a !== c, 'a real edit reads as one');
+});
+t('an undo consumes history, never mints it', () => {
+  eq(H.undoBankable('x', 'y', false), true, 'a real change banks');
+  eq(H.undoBankable('x', 'x', false), false, 'no change, nothing banked');
+  eq(H.undoBankable('x', 'y', true), false,
+    'the undoing latch — without it repeated presses oscillate between the last two states');
 });
 
 group('Savings rate and runway');
@@ -2412,6 +2559,21 @@ t('a missing denominator is null, never a confident zero', () => {
   const p = H.savingsPulse(yr, { cells: {} }, '2026', 30000);
   eq(p.rate, null, 'no income has no rate — not a rate of nothing');
   eq(p.runwayMonths, null, 'no spending is infinite runway, which is not a number to show');
+});
+t('a missing liquid figure is null runway, never NaN', () => {
+  const yr = pulseFixture();
+  const computed = { cells: { 'pay|2026-01': { v: 5000 },
+                              'rent|2026-01': { v: -2000 } } };
+  const p = H.savingsPulse(yr, computed, '2026', undefined);
+  eq(p.rate, 0.6, 'the rate needs no liquid figure');
+  eq(p.runwayMonths, null, 'both inputs can be missing, and both absences are null');
+});
+t('income nets a clawed-back month, mirroring yearSpending', () => {
+  const yr = pulseFixture();
+  const computed = { cells: { 'pay|2026-01': { v: 5000 },
+                              'pay|2026-02': { v: -500 } } };
+  eq(H.yearIncome(yr, computed, '2026'), 4500,
+    'a negative income cell subtracts — the two sides use one rule');
 });
 t('a summary year reads its flow totals', () => {
   const yr = { kind: 'summary', categoryTotals: [
@@ -2819,7 +2981,9 @@ const divState = (cat) => H.coerceShape({
     categories: [Object.assign({ id: 'div', name: 'Dividends', role: 'normal',
       section: 'income', rule: 'dividends', rate: 0.12 }, cat)] } },
 });
-const divCell = (st) => H.computeAll(st)['2026'].cells['div|2026-02'];
+/* The injected date, like everywhere else — computeAll ignores it today, but
+   the suite's stability convention is that engine time is always handed in. */
+const divCell = (st) => H.computeAll(st, '2026-06-15')['2026'].cells['div|2026-02'];
 t('a row written before the setting existed keeps earning on the old two', () => {
   const st = divState({});
   eq(H.dividendAccounts(st.years['2026'].categories[0]), ['cash', 'mid'],
@@ -2931,6 +3095,22 @@ t('every reference to an absorbed account is repointed', () => {
   eq(st.years['2022'].categories[0].transferTo, 'new');
   eq(st.goals[0].accounts, ['new'], 'and a goal naming both does not list it twice');
 });
+t('the net-worth link and a dividends row move with the merge', () => {
+  /* Both lists are FILTERED against live ids by coerceShape on the next load,
+     so a missed rewrite here does not dangle — it silently deletes: the pane
+     link goes and the Total counts the pot twice, or the dividends row quietly
+     stops earning on the absorbed account. Worse than dangling, because
+     nothing ever says so. */
+  const st = twoYears({ 'old|2021-06': { v: 1 } }, {});
+  st.side = { portfolios: [{ id: 'pf', name: 'Brokerage', accounts: ['old'],
+    rows: [{ ticker: 'VOO', shares: 1, price: 100 }] }] };
+  st.years['2022'].categories = [{ id: 'div', name: 'Dividends', role: 'normal',
+    rule: 'dividends', accounts: ['old', 'new'] }];
+  H.mergeAccountsByName(st);
+  eq(st.side.portfolios[0].accounts, ['new'], 'the pane still claims its money');
+  eq(st.years['2022'].categories[0].accounts, ['new'],
+    'the dividends row earns on the survivor, listed once');
+});
 t('different names are left well alone, and running twice changes nothing', () => {
   const st = twoYears({ 'old|2021-06': { v: 100 } }, { 'new|2022-06': { v: 400 } });
   st.settings.accounts[0].name = 'Old Savings';
@@ -3039,7 +3219,8 @@ t('their outage is not our answer, and must not mark the ticker', () => {
 group('The price lookup’s memory');
 /* A holding that can NEVER be quoted — a mutual fund on the free tier, or a row
    that isn't a security — used to be asked about on every single page load,
-   spending one of the 25 daily lookups each time and never getting anything
+   spending one of the daily lookups each time (25 a day back on Alpha Vantage,
+   where this bit; 800 on Twelve Data now) and never getting anything
    back. The marker is what stops that; its expiry is what keeps it honest. */
 t('a “no quote” marker is remembered, but only for a day', () => {
   const now = Date.now();
@@ -3270,6 +3451,17 @@ t('a split month carries into the next year on rollover', () => {
     parts: [{ v: -40, kind: 'actual' }, { v: -50, kind: 'manual' }] };
   H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
   eq(s.years['2031'].cells['cc|2031-02'].parts.length, 2);
+});
+t('the kind a set of parts adds up to', () => {
+  /* partsKind decides what the saved cell CLAIMS to be — mixed only when the
+     parts genuinely disagree, and anything that isn't a manual estimate
+     counts as actual. */
+  eq(H.partsKind([{ v: 1, kind: 'actual' }, { v: 2, kind: 'actual' }]), 'actual');
+  eq(H.partsKind([{ v: 1, kind: 'manual' }, { v: 2, kind: 'manual' }]), 'manual');
+  eq(H.partsKind([{ v: 1, kind: 'actual' }, { v: 2, kind: 'manual' }]), 'mixed');
+  eq(H.partsKind([{ v: 1 }, { v: 2, kind: 'wat' }]), 'actual',
+    'unnamed and unknown kinds are actuals, not a third thing');
+  eq(H.partsKind([]), 'actual', 'no parts claims nothing beyond actual');
 });
 
 /* ── Spending the retirement pot down ───────────────────────────────────────
@@ -3781,6 +3973,23 @@ t('a Roth account growing faster pulls the split its way', () => {
   ok(fast.then.roth / fast.then.total > even.then.roth / even.then.total);
   eq(fast.now.roth, 50000, 'while today is untouched either way');
 });
+t('the split at retirement equals the pot the chart draws that year', () => {
+  /* One arithmetic, two walkers: retirementSplit compounds each pot rounded
+     to the cent per year EXACTLY as drawdownYears does. Odd rates and odd
+     balances on purpose — unrounded compounding agreed on round fixtures and
+     drifted by cents on real ones. */
+  const s = H.coerceShape({ settings: { retirementReturnAnnual: 0.0713 },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult', birth: '1970-11', retireAge: 65 }],
+    side: { retirementAccounts: [
+      { name: 'Pre-tax', type: '401k', amount: 123456.78 },
+      { name: 'Roth', type: 'roth-401k', amount: 98765.43, rate: 0.0301 }],
+      drawdown: { income: [] } } });
+  const sp = H.retirementSplit(s, RET_FIX);
+  const rows = H.drawdownYears(s, RET_FIX, H.retirementHorizon(s, RET_FIX));
+  const row = rows.find(r => r.y === +sp.at.slice(0, 4));
+  eq(sp.then.total, H.round2(row.open + row.growth + row.contrib),
+    'cent for cent, however odd the rate');
+});
 t('401(k) contributions are all pre-tax until you say what share is Roth', () => {
   /* The accounts have said which is a pre-tax 401(k) and which is a Roth one
      since the day they had types. The LIMIT CHECK holds a single percentage
@@ -3973,7 +4182,7 @@ t('the runs-out rule lands on its own year, or is not drawn at all', () => {
     'and a pot that survives is not marked');
 });
 t('a plan-to year exists exactly where a retirement year does', () => {
-  const sam = { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-04', retireAge: 65 };
+  const sam = { id: 'sam', name: 'Sam', role: 'adult', birth: '1986-07', retireAge: 65 };
   eq(H.planToYearOf(sam), 1986 + H.PLAN_TO_AGE_DEFAULT, 'the default, applied not stored');
   eq(H.planToYearOf({ ...sam, planToAge: 90 }), 2076);
   eq(H.planToYearOf({ ...sam, retireAge: undefined }), null, 'no retirement age, no horizon');
@@ -4857,8 +5066,8 @@ function shareFixture() {
     years: { '2020': mkYear('2020'), '2024': mkYear('2024'),
              '2025': mkYear('2025'), '2026': mkYear('2026') },
     goals: [{ id: 'g1', name: 'Emergency fund', target: 10000, accounts: ['cash'],
-              count: 'cap', note: 'Goal note' }],
-    people: [{ id: 'p1', name: 'Sam', role: 'adult', birth: '1986-04', note: 'Person note' },
+              count: 'capped', note: 'Goal note' }],
+    people: [{ id: 'p1', name: 'Sam', role: 'adult', birth: '1986-07', note: 'Person note' },
              { id: 'p2', name: 'Robin', role: 'adult', birth: '1988-09' },
              { id: 'p3', name: 'Ellis', role: 'child', birth: '2017-03' }],
     side: { portfolios: [{ id: 'pf', name: 'Brokerage',
@@ -4871,7 +5080,7 @@ function shareFixture() {
                                   '2026': [{ foundation: 'New', cash: 200 }] },
             limits: { '2026': {} },
             retirementAccounts: [{ name: '401(k)', kind: 'traditional', type: '401k',
-              owner: 'p1', balance: 1000, contribs: { '2020': 15000, '2026': 20000 } }],
+              owner: 'p1', amount: 1000, contribs: { '2020': 15000, '2026': 20000 } }],
             /* Invented rates on round thousands, never a real bracket — a
                realistic-looking figure in a fixture is a shipped figure
                somebody will copy out of here one day. */
@@ -5109,7 +5318,7 @@ t('leaving the names out renames by role and keeps everything derived', () => {
   const d = H.anonymisePeople(shareFixture());
   eq(d.people.map(p => p.name), ['Adult 1', 'Adult 2', 'Child 1']);
   eq(d.people.map(p => p.id), ['p1', 'p2', 'p3'], 'ids never change — accounts point at them');
-  eq(d.people[0].birth, '1986-04', 'the birth month stays, so an age still works');
+  eq(d.people[0].birth, '1986-07', 'the birth month stays, so an age still works');
   eq(d.people[0].note, undefined, 'a note could say the name back');
   eq(d.side.retirementAccounts[0].owner, 'p1', 'and who owns what still resolves');
 });
