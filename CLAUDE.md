@@ -1179,35 +1179,44 @@ bails on a zero-width grid and `openRowEditor` runs it again after
 closes the row rather than consuming a column.
 The **category dialog is `cols: 2`** for the same reason its role field fills:
 every option in it is a whole sentence ("Repeat on a cycle (every N months)")
-and a third of a 640px dialog cut them off mid-word. Half fits all but the
+and a quarter of the dialog cuts them off mid-word. Half fits all but the
 dividends rule, whose label interpolates two account names and is long by
-nature.
-**A section may set `wide: true` for a wider dialog** (`dialog.wide`, against the
-usual 640). **Three sections do: Preferences, `account` and `donation`** (the last
-two asked for 2026-08-17), and they earn it the same way — a dozen short fields,
-most carrying a hint of its own, which at 640px stacked into narrow columns of
-heavily wrapped prose. `account` keeps its `cols: 2` and so gets two 523px columns,
-which is what puts each rate beside the account it is paid into; `donation` takes
-the auto-fit track and comes out at four.
-**The width itself is the `--dialog-w-wide` token (1100px), because the Share
-dialog is the same width and that is a rule rather than a coincidence** (asked for
-2026-08-17; at its old 820px the tab column was narrow enough to wrap most of its
-checkbox labels onto three lines, which is the same complaint that widened
-Preferences). `#shareDialog` reads the token DIRECTLY and is deliberately not given
-the `wide` class: that class also re-tracks `.grid-fields`, and the share dialog
-lays itself out with its own side-by-side panels rather than the field grid. Its
-760px two-column breakpoint is unchanged, so a phone still stacks exactly as
-before. Two
-things about it that will look arbitrary later. The **wider minimum track goes
-with the width** (`minmax(230px, 1fr)`, not the usual 150px): left alone, the
-extra room buys MORE columns rather than wider ones, every hint wraps harder,
-and the dialog comes out barely shorter — its height is set by the hints, not by
-the field count. And the width rule is scoped `:not(.cols2)`, because it
-outranks the two-column rule on specificity whatever the source order. It needs
-no media query: `width: calc(100% - 32px)` already wins on a small screen, and
-auto-fit falls back to fewer columns on the way down (one at 375px). The class is
-toggled per section in `openRowEditor` beside `cols2` — never left on, or the
-next dialog opened inherits a width its four fields don't need.
+nature. (It was measured against a third of the old 640px dialog; the reason
+outlived the figure, and the half-column is 523px now rather than 293px.)
+**EVERY dialog is one width — `--dialog-w-wide` (1100px)** — and there is no
+`dialog.wide` class and no per-section `wide` flag any more (asked for
+2026-08-17, after Share, then Account Settings and Donation, had each been
+widened one at a time; the token already existed to stop the first two drifting
+apart). One width is the rule, so there is nothing to opt into and nothing for
+whoever adds the next dialog to forget — the `applyFieldSpans` bargain again.
+It began with Preferences, which asks fourteen short questions each with a hint
+of its own and at the old 640px stacked them into three narrow columns of
+heavily wrapped prose with the thing you came to change two screens down.
+Things that go with it and will look arbitrary later:
+- **The 230px minimum grid track is the load-bearing half**, and it moved onto
+  `.grid-fields` itself rather than a `.wide` variant. Left at the old 150px the
+  extra room buys MORE columns rather than wider ones, every hint wraps harder,
+  and a dialog comes out barely shorter — its height is set by the hints, not by
+  the field count.
+- **`cols: 2` survives and now means something narrower**: two columns instead
+  of the auto-fit ones, i.e. layout INSIDE a fixed width rather than the width
+  itself. `account` uses it to put each rate beside the account it is paid into;
+  the category dialog uses it because its role options are whole sentences.
+- **`#shareDialog` and `#searchDialog` set no width of their own.** Share's two
+  side-by-side panels and a link readable in one line are what the common width
+  buys there; its own 760px two-column breakpoint is untouched, so a phone still
+  stacks as before. Search used to pin `width: min(640px, …)`, which was the one
+  thing that would now make it the odd one out.
+- **`#helpDialog` is the exception that proves the rule, and it is about the
+  TEXT, not the window.** It is the one dialog that is nothing but prose, so it
+  takes the common width like everything else and holds `.helpbody` to 66ch
+  instead: at the full 1100px its lines ran to about 150 characters, roughly
+  twice a comfortable measure. That is `.empty`'s exception applied to a dialog —
+  prose with no table under it costs nothing vertically by being wrapped, so the
+  measure is free. Left-aligned, unlike `.empty`, because a heading and a button
+  are anchored left here and centring the paragraph would set it adrift of both.
+- No media query is needed: `width: calc(100% - 32px)` already wins on a small
+  screen and auto-fit falls back to one column at 375px.
 **A BOX IS SIZED BY WHAT IT HOLDS, and by its input TYPE rather than by a
 per-field setting** — number 130px, date/month 180px, text and select 320px, all
 of them a `max-width` OVER the existing `width: 100%`, so a narrow column still
@@ -1270,8 +1279,11 @@ empty: a half-filled row has no value yet, and a confident zero is a different
 claim from "you haven't said". Its lookup checkbox is labelled "Look its price
 up", NOT "…automatically": the longer label measured 193px into a 191px column,
 wrapped, outgrew `label.field`'s `min-height: 2.5em` and pushed its checkbox
-below the two figures beside it. Watch that whenever a label is lengthened in a
-three-column dialog.
+below the two figures beside it. The column is over 230px now that every dialog
+is the one width, so that particular label fits — but the FAILURE MODE is the
+thing to remember, not the figure: a label that wraps outgrows the two-line
+allowance and drags its control out of line with its neighbours. Measure before
+lengthening one.
 A field spec may carry an **`action`** — a small button beside its box for a
 move you'd otherwise make by hand across two fields, like the trip line's
 "✓ Paid" folding Still due into Paid. It edits the FORM, like `link` does, so
