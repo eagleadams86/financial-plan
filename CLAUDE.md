@@ -1180,8 +1180,12 @@ and a third of a 640px dialog cut them off mid-word. Half fits all but the
 dividends rule, whose label interpolates two account names and is long by
 nature.
 **A section may set `wide: true` for a wider dialog** (`dialog.wide`, against the
-usual 640) — **Preferences is the only EDITORS section that does**, because it is
-the only one asking fourteen short questions at once, each with a hint of its own.
+usual 640). **Three sections do: Preferences, `account` and `donation`** (the last
+two asked for 2026-08-17), and they earn it the same way — a dozen short fields,
+most carrying a hint of its own, which at 640px stacked into narrow columns of
+heavily wrapped prose. `account` keeps its `cols: 2` and so gets two 523px columns,
+which is what puts each rate beside the account it is paid into; `donation` takes
+the auto-fit track and comes out at four.
 **The width itself is the `--dialog-w-wide` token (1100px), because the Share
 dialog is the same width and that is a rule rather than a coincidence** (asked for
 2026-08-17; at its old 820px the tab column was narrow enough to wrap most of its
@@ -1223,6 +1227,20 @@ gap. Preferences' own order is otherwise by SUBJECT, nearest thing to nearest
 thing: the household and tax questions, then how figures and rows read, then the
 three switches that turn a tab's machinery on, then the dividend fallback rate,
 then the three retirement rates, and last the price key.
+**It bit `donation` the moment that dialog went wide, which is the lesson worth
+keeping: a mid-list `wide` field is INVISIBLE at 640px and only shows up when
+there are enough columns for it to break.** `foundation` sat second and carried
+`wide: true`; at four columns it stranded Date alone on a full-width row and split
+the three amounts two-and-one, when the dialog's own sub-line tells you to choose
+between those three. Dropping the flag cost the field nothing — a text box is
+capped at 320px by type either way — and fixed both. Check every `wide` field in a
+section before widening its dialog.
+**`donation`'s two checkboxes are ordered by LAYOUT, not by subject**, the zoom
+field's precedent below: three amounts and two ticks is five things across four
+columns, so one tick always lands alone on a stretched row, and it should be the
+one with a HINT (`pending`) so that row carries a sentence rather than a bare
+checkbox with 800px of nothing beside it. `deductible` rides at the end of the
+amounts row, which is where the question belongs anyway.
 **The zoom is the exception and is placed by LAYOUT, not by subject** — it
 belongs to no group, so it is the one field that can be spent closing a row.
 Without it the three retirement rates start one column short of a fresh row and
