@@ -694,6 +694,30 @@ suite passed while the card was wrong.
   read goes through `normRole()`. **The pass-through timing is load-bearing**:
   the old `zelle` landed BEFORE its account's growth, `charitable` AFTER it —
   the real-data cross-check pins that, so never "simplify" it away.
+- **An overflow row keeps `role: 'normal'`** — the engine keys on
+  `cat.rule === 'overflow'`, never a new role, so nothing built on roles ever
+  moves its money. Its fields, valid only while the rule is `overflow` and
+  DELETED otherwise (the Firestore rule — never `undefined`): `overflowFrom`
+  (the watched source), `transferTo` (the destination — the transfer field
+  reused, so the account-delete guard and the merge already half-knew it; the
+  merge's reference-mover must also move `overflowFrom`, and the delete guard
+  refuses on BOTH ends), and exactly one of `goalId` (threshold = that goal's
+  `target`, read live) or `threshold` (a typed figure, read STRICTLY via
+  `rateOrNone` — `num()` would mint junk into a $0 "sweep everything" claim).
+  The optional destination cap is the same pair again — `capGoalId` XOR
+  `capAmount`, absent meaning uncapped (an absent cap and a $0 cap are
+  different claims, which is why junk deletes rather than zeroes).
+  coerceShape drops dangling ids on both (the goalId pass runs AFTER goal
+  coercion, since goals settle after the years loop) and the row degrades to
+  blank, never throws; save forces the Transfers section one-way, like a
+  transfer role. Deleting a goal still deletes, but toasts which budget rows
+  read its target. **Share links**: a budget-only link carries no goals, so
+  `freezeOverflowThresholds` (pure, beside `reseedShareYears`) rewrites the
+  payload — `goalId` becomes a plain `threshold` at the sender's target — so
+  the recipient's figures are IDENTICAL while goal names never leave; a link
+  that does carry goals keeps the live tie. privacy.html needed no change: the
+  fields ride inside the one `{json}` string sync already stores, no new
+  endpoint, nothing new in kind leaves the browser.
 - **The grid's hover text is `data-tip` + `wireGridTip()`, never a `title`.**
   A native title bubble needs the POINTER to cross into the cell: scroll the
   grid sideways under a parked cursor, or re-render after a save, and the cell
@@ -773,10 +797,58 @@ suite passed while the card was wrong.
   scroll event, because rAF is starved in a background tab.
 - Balance chain per month, per account: `base = prior − transfersOut +
   preCredits`; `interest = base × rate/12` (or `yr.balAdjust[bid|m].interest`)
-  credited to `creditTo`; then `+ postCredits`, `+ all flows` for the hub, and
-  `+ balAdjust.dividend`. At the defaults this reduces exactly to the old
-  four formulas — there's a test that pins it. `overrides` pin a month
-  outright; later months chain from the pin.
+  credited to `creditTo`; then `+ postCredits`, `+ all flows` for the hub,
+  `+ balAdjust.dividend`, and **± the overflow sweeps** (below). At the
+  defaults this reduces exactly to the old four formulas — there's a test that
+  pins it. `overrides` pin a month outright; later months chain from the pin.
+- **Overflow sweep rows (`rule: 'overflow'`) resolve INSIDE the balance phase,
+  after interest and credit routing — never in `RULES`**, whose entry is a
+  stub returning null, because the amount is whatever the SOURCE account would
+  end this month holding above a threshold, and that figure doesn't exist
+  until phase 2 has run. `overflowOrder(categories)` (pure, tested) walks
+  Kahn's algorithm over `overflowFrom → transferTo` edges so a sweep's arrival
+  is seen by any row watching the account it lands in — chaining in one month
+  — with list order the tie-break for rows sharing a source; a CYCLE is
+  refused deterministically (every row in or fed only from it stays blank; the
+  cell editor names the fix) rather than iterated. Rules that must hold:
+  - **One mechanism, hub included.** Overflow rows are SKIPPED in the phase-2
+    partition loop — never `hubFlow`, never `transfersOut`, stored cells
+    included — and move money through the month-local `sweepIn`/`sweepOut`
+    maps only. The hub's interest base already excludes `hubFlow`, so this is
+    arithmetically identical for a hub source, and it means the engine,
+    `internalRows`, the tips and the tests reason about one thing.
+  - **Post-interest on both ends**: the source keeps its full month of growth
+    (the sweep is exactly the excess after it — the account lands ON the
+    threshold to the cent), and the money arrives at the destination at month
+    end, earning nothing there until the month after.
+  - **The optional DESTINATION CAP** (`capGoalId` XOR `capAmount`, the
+    threshold pair's twin) clamps the sweep to
+    `max(0, cap − endOf(destination))` — Charlie's real shape: two rows both
+    drawing from the hub, the first filling Mid-term up to Renovations, the
+    row below taking the remainder to Long-term. Rows sharing a source
+    resolve in ROW order, each seeing the source already drained. The room is
+    measured against the destination's own end-of-month figure, interest
+    included, so a full account KEEPS its growth — the cap stops money going
+    in, it never sweeps money out — and one that dipped refills before
+    anything flows past it. Absent cap = uncapped; a dangling cap goal drops
+    to uncapped (coerceShape), and `freezeOverflowThresholds` freezes it like
+    the threshold, or an unfrozen cap would sweep past the goal on the
+    recipient's copy.
+  - **Under threshold → BLANK (`missing`), never $0** — the dividends rule's
+    discipline; the resolved cell is written back into `cells` with kind
+    `auto` so the grid shows it and "Mark month entered" materialises it, and
+    a stored cell beats the rule and moves the stored amount the same way.
+  - **Both ends must be `running`** (the `payInto` guard) or the month stays
+    blank; the threshold is a goal's target read live (`goalId`) or the row's
+    own `threshold`, and a missing/dangling one is blank, never zero.
+  - **Zero overflow rows must compute bit-identical results to before the
+    feature existed** — pinned by 'a sweep that never triggers changes nothing
+    at all' plus the untouched engine groups and the real-data cross-check.
+  Sign convention: negative = money leaving the source, the transfer-row
+  convention; source and destination cancel, so Total never moves. The
+  receiving end reads through `sweepArrivals` (pure) — deliberately NOT folded
+  into `receivedInto`, which is the one reader for EARNINGS arrivals; a sweep
+  has a visible budget row and "Paid in" would be the wrong claim over it.
 - **The note dot is `hasNote(cell)`** — the cell's own note OR a note on any of
   its split amounts. Asking only about `cell.note` meant a month annotated
   solely on one of its amounts drew no dot and said nothing on hover, leaving
