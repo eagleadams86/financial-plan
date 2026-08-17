@@ -1198,10 +1198,14 @@ Things that go with it and will look arbitrary later:
   extra room buys MORE columns rather than wider ones, every hint wraps harder,
   and a dialog comes out barely shorter — its height is set by the hints, not by
   the field count.
-- **`cols: 2` survives and now means something narrower**: two columns instead
-  of the auto-fit ones, i.e. layout INSIDE a fixed width rather than the width
-  itself. `account` uses it to put each rate beside the account it is paid into;
-  the category dialog uses it because its role options are whole sentences.
+- **`cols` is layout INSIDE the fixed width, never the width itself.** `2` for a
+  dialog whose fields come in pairs — `account` puts each rate beside the account
+  it is paid into, the category dialog has role options that are whole sentences.
+  `3` for a section with exactly three things to ask (`yearAmount`): auto-fit
+  gives it four tracks and leaves a quarter of the row empty, with
+  `applyFieldSpans` stretching the LAST box into the gap so the odd one out ends
+  up wider than the two beside it. Three equal columns fill the row evenly.
+  Anything else takes auto-fit.
 - **`#shareDialog` and `#searchDialog` set no width of their own.** Share's two
   side-by-side panels and a link readable in one line are what the common width
   buys there; its own 760px two-column breakpoint is untouched, so a phone still
@@ -1217,17 +1221,27 @@ Things that go with it and will look arbitrary later:
   are anchored left here and centring the paragraph would set it adrift of both.
 - No media query is needed: `width: calc(100% - 32px)` already wins on a small
   screen and auto-fit falls back to one column at 375px.
-**A BOX IS SIZED BY WHAT IT HOLDS, and by its input TYPE rather than by a
-per-field setting** — number 130px, date/month 180px, text and select 320px, all
-of them a `max-width` OVER the existing `width: 100%`, so a narrow column still
-wins and nothing can push a box past its own cell. It is the `applyFieldSpans`
-bargain a third time: an opt-in width is the one whoever adds the next field
-forgets, and then that field is the odd one out. 320px is where it is because it
-takes the longest thing any text box here really holds — a 32-character API key,
-whole. **The HINT keeps the full column width** and that is the point of the
-split: the long measure is what holds these dialogs to a few rows, while a box
-the length of a paragraph asking for four characters reads as though the app
-expects far more than it does. A checkbox (sized by the inline style that
+**A BOX IS SIZED BY ITS INPUT TYPE, never by a per-field setting** — text,
+money, number and select all 320px, date/month 180px, all of them a `max-width`
+OVER the existing `width: 100%`, so a narrow column still wins and nothing can
+push a box past its own cell. It is the `applyFieldSpans` bargain a third time:
+an opt-in width is the one whoever adds the next field forgets, and then that
+field is the odd one out. 320px is where it is because it takes the longest
+thing any text box here really holds — a 32-character API key, whole.
+**A NUMBER used to be 130px and no longer is (2026-08-17).** That figure was
+right while a dialog was 640px and a column a third of it — a box the length of
+a paragraph asking for four characters reads as though the app expects far more
+than it does. At the common 1100px a column is ~255px and the reasoning stops
+paying: a share count sat as a stub with a gap between it and the price beside
+it, and the two percentages in the contribution figures were half the width of
+the salary box next to them. Both were reported as boxes that don't line up, and
+**consistency across a ROW is what a form is read by**. The cap survives only to
+stop a box running the whole width of a two-column dialog.
+**Date and month keep their own 180px**: a date box has a fixed natural content
+width with a native picker glued to its right edge, so stretching it buys
+nothing and leaves the picker marooned.
+**The HINT keeps the full column width** and that is the point of the split: the
+long measure is what holds these dialogs to a few rows. A checkbox (sized by the inline style that
 centres it) and a textarea (prose) are caught by neither rule. The category
 dialog's documented reason for `cols: 2` survives it — 320px is wider than the
 293px half-column those sentence-long options were measured against.

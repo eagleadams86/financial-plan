@@ -538,12 +538,25 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
    The hint underneath keeps the full column width — the long measure is what
    holds these dialogs down to a few rows, and hint prose is read once where a
    box is aimed at. */
-.grid-fields input[type="number"] { max-width: 130px; }
+/* A NUMBER is capped the same as text, so every box on a row comes out the same
+   width. It was 130px, which was right when a dialog was 640px and a column was
+   a third of it — a box the length of a paragraph asking for four characters
+   reads as though the app expects far more than it does. At the common 1100px
+   the column is ~255px and that reasoning stops paying: a share count sat as a
+   stub with a visible gap between it and the price beside it, and the two
+   percentages in the contribution figures were half the width of the salary box
+   they sit next to. Reported twice, both times as boxes that don't line up.
+   Consistency across a row is what a form is read by; the cap is still there to
+   stop a box running the whole width of a two-column dialog.
+   Date and month keep their own 180px: a date box has a fixed natural content
+   width and a native picker glued to its right edge, so stretching it buys
+   nothing and leaves the picker marooned. */
 .grid-fields input[type="date"], .grid-fields input[type="month"] { max-width: 180px; }
 /* Text covers money too (a money box is a text input — it renders "$1,234.56",
    which a number input cannot). 320px takes the longest thing any of them
    really holds: a 32-character API key, whole. */
-.grid-fields input[type="text"], .grid-fields select { max-width: 320px; }
+.grid-fields input[type="text"], .grid-fields input[type="number"],
+.grid-fields select { max-width: 320px; }
 /* A checkbox is sized by the inline style that centres it; a textarea is prose
    and keeps the room it has. Neither is caught by the rules above. */
 /* A figure the dialog WORKS OUT rather than asks for. Given the same 40px an
@@ -565,7 +578,14 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
 /* Two columns exactly, for a dialog whose fields come in pairs — a rate beside
    the account it's paid into — rather than however many auto-fit chooses. */
 .grid-fields.cols2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-@media (max-width: 560px) { .grid-fields.cols2 { grid-template-columns: 1fr; } }
+/* Three exactly, for a section that has exactly three things to ask. Auto-fit
+   gives it four tracks, so the row ran Year, Amount, Bonus % and then a quarter
+   of empty — with `applyFieldSpans` stretching the LAST of them into the gap,
+   which made the odd one out wider than the two beside it. Three equal columns
+   fill the row evenly instead, which is the point. */
+.grid-fields.cols3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 560px) {
+  .grid-fields.cols2, .grid-fields.cols3 { grid-template-columns: 1fr; } }
 /* An editable row shows a hand, and its row-name cell carries the pencil
    affordance — hover alone isn't discoverable on touch. */
 tr.editrow { cursor: pointer; }
@@ -1189,9 +1209,14 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
     <button class="btn" id="importBtn">⬆ Restore JSON…</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
   </div>
-  <p class="sub muted" style="margin-top:14px">First time here? Run <code>import_xlsx.py</code>
-    (in the repo) against the Numbers export on your Mac, then Restore the file it produces.
-    Restoring replaces everything currently in this browser — you'll be asked to confirm first.</p>
+  <!-- The one-time spreadsheet import used to be explained here. It was a
+       developer instruction sitting in an everyday dialog: it names a script
+       you can only run from a checkout of the repo, and it was addressed to a
+       "first time" that has long since passed. The warning underneath it is
+       what everybody actually needs, so that stays. The script itself is
+       unchanged and still documented in the README. -->
+  <p class="sub muted" style="margin-top:14px">Restoring replaces everything currently in
+    this browser — you'll be asked to confirm first.</p>
   <details class="danger-zone">
     <summary>Start Again</summary>
     <p class="sub muted" style="margin-top:10px" id="wipeNote">Deletes every year, goal, trip and
@@ -4612,7 +4637,7 @@ function welcomeCard() {
       <button class="btn" id="welcomeRestoreBtn">Restore a backup</button></p>
     <p class="sub" style="margin-top:14px">Start fresh sets up this year's budget with a
       starter set of rows — rename, add or delete any of them. Restore reads a Financial Plan
-      export (or the JSON that <code>import_xlsx.py</code> makes from a spreadsheet).</p>
+      export.</p>
   </div></div>`;
 }
 
@@ -11202,11 +11227,14 @@ function openRowEditor(section, ds, isNew) {
     (typeof ed.title === 'function' ? ed.title(ds, isNew) : ed.title) || 'Edit';
   F('rowDialogSub').textContent =
     (typeof ed.sub === 'function' ? ed.sub(ds, isNew) : ed.sub) || '';
+  /* There is deliberately no per-section WIDTH any more: every dialog is the
+     same one. `cols` is about layout INSIDE that fixed width — a section says
+     how many columns its questions come in when auto-fit would get it wrong,
+     which is either a dialog whose fields come in pairs (2) or one that has
+     exactly three things to ask and would otherwise leave a quarter of the row
+     empty (3). Anything else takes auto-fit. */
   F('rowFields').classList.toggle('cols2', ed.cols === 2);
-  /* There is deliberately no per-section width here any more: every dialog is
-     the same one. A section that wants two columns rather than the auto-fit
-     ones still says so with `cols: 2`, which is about LAYOUT inside a fixed
-     width rather than about the width itself. */
+  F('rowFields').classList.toggle('cols3', ed.cols === 3);
   const link = ed.link && ((key) => ed.link(key, ds));
   buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds), link);
   /* Prime the linked boxes once, so a derived field arrives in the state the
@@ -12628,19 +12656,22 @@ const EDITORS = {
                    + 'Edit a holding to change it.' }]
           : [{ key: 'amount', label: 'Balance', type: 'money' }];
       })()),
-      /* Blank, not prefilled with the global: absent means "follow Preferences",
-         and a copy of today's figure sitting in the account would stop doing
-         that the moment the setting changed. */
-      { key: 'rate', label: 'Real return %/yr', type: 'percent',
-        hint: `What THIS account is assumed to grow at after inflation. Leave it empty to
-          follow the ${round2((state.settings.retirementReturnAnnual ?? 0.07) * 100)}% in
-          Preferences — worth setting only where a pot is invested differently from the
-          rest.` },
       /* A retirement account is one person's — there is no joint 401(k) or
          joint IRA — so the shared bucket is deliberately not offered here. */
       ...(adultsOf(state).length ? [{ key: 'owner', label: 'Whose', type: 'select',
         options: [['', 'Not said'], ...adultsOf(state).map(p => [p.id, p.name])],
         hint: 'Retirement accounts belong to one person — there is no joint one.' }] : []),
+      /* LAST, and that is placement by layout as much as by subject — the
+         Preferences zoom field's precedent. The four questions above say what
+         the account IS (its name, its tax treatment, what is in it, whose it
+         is) and fill the row exactly; this one is an ASSUMPTION about it, and
+         it reads better on a line of its own than squeezed onto the end of
+         them. Its hint gets the full width there rather than a quarter of it. */
+      { key: 'rate', label: 'Real return %/yr', type: 'percent',
+        hint: `What THIS account is assumed to grow at after inflation. Leave it empty to
+          follow the ${round2((state.settings.retirementReturnAnnual ?? 0.07) * 100)}% in
+          Preferences — worth setting only where a pot is invested differently from the
+          rest.` },
     ],
     get: (ds) => ({ ...state.side.retirementAccounts[+ds.idx],
                     amountRead: fmtMoney(retAcctBalance(state.side.retirementAccounts[+ds.idx])),
@@ -13222,6 +13253,10 @@ const EDITORS = {
   /* Year → amount maps: Roth contributions, bonuses (ds.map picks which) */
   yearAmount: {
     title: (ds, isNew) => isNew ? 'Add a Year' : `${ds.key}`,
+    /* Exactly three questions, so three columns — auto-fit gives four and
+       leaves a quarter of the row empty, with the last box stretched into the
+       gap and wider than the two beside it. */
+    cols: 3,
     fields: (ds) => [
       { key: 'year', label: 'Year', type: 'number', step: 1 },
       { key: 'amount', label: 'Amount', type: 'money' },
@@ -13434,13 +13469,23 @@ const EDITORS = {
       ? 'A new trip can start with the lines most trips end up having, so you fill in '
         + 'amounts instead of typing the same list out again.' : '',
     fields: (ds, isNew) => [
-      { key: 'name', label: 'Trip name (e.g. "2027 Lisbon")', type: 'text', wide: true },
+      /* NOT `wide`: a wide field ends the row it is on, and this one is first,
+         so it put the name on a line of its own and pushed Year and Nights onto
+         a second — three short questions taking two rows with most of both
+         empty. They fit on one line together. */
+      { key: 'name', label: 'Trip name (e.g. "2027 Lisbon")', type: 'text' },
       { key: 'year', label: 'Year', type: 'number', step: 1 },
       { key: 'nights', label: 'Nights', type: 'number' },
-      ...(isNew ? [{ key: 'template', label: 'Start with', type: 'select', options: [
-        ['standard', `The usual lines — ${TRIP_TEMPLATE.join(', ')}`],
-        ['blank', "Nothing, I'll add my own"],
-      ]}] : []),
+      /* The template picker IS wide, and it is last, which is where a wide
+         field belongs. Its options are whole sentences that name every line a
+         new trip starts with, and a quarter-width select cuts them off
+         mid-word — the category dialog's problem. It only shows while adding,
+         so an existing trip is the single row above. */
+      ...(isNew ? [{ key: 'template', label: 'Start with', type: 'select', wide: true,
+        options: [
+          ['standard', `The usual lines — ${TRIP_TEMPLATE.join(', ')}`],
+          ['blank', "Nothing, I'll add my own"],
+        ]}] : []),
     ],
     get(ds) {
       const t = state.vacations.trips.find(t => t.id === ds.id);
