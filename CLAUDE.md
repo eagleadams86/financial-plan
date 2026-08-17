@@ -1179,9 +1179,18 @@ every option in it is a whole sentence ("Repeat on a cycle (every N months)")
 and a third of a 640px dialog cut them off mid-word. Half fits all but the
 dividends rule, whose label interpolates two account names and is long by
 nature.
-**A section may set `wide: true` for a wider dialog** (`dialog.wide`, 1100px
-against the usual 640) — **Preferences is the only one**, because it is the only
-one asking fourteen short questions at once, each with a hint of its own. Two
+**A section may set `wide: true` for a wider dialog** (`dialog.wide`, against the
+usual 640) — **Preferences is the only EDITORS section that does**, because it is
+the only one asking fourteen short questions at once, each with a hint of its own.
+**The width itself is the `--dialog-w-wide` token (1100px), because the Share
+dialog is the same width and that is a rule rather than a coincidence** (asked for
+2026-08-17; at its old 820px the tab column was narrow enough to wrap most of its
+checkbox labels onto three lines, which is the same complaint that widened
+Preferences). `#shareDialog` reads the token DIRECTLY and is deliberately not given
+the `wide` class: that class also re-tracks `.grid-fields`, and the share dialog
+lays itself out with its own side-by-side panels rather than the field grid. Its
+760px two-column breakpoint is unchanged, so a phone still stacks exactly as
+before. Two
 things about it that will look arbitrary later. The **wider minimum track goes
 with the width** (`minmax(230px, 1fr)`, not the usual 150px): left alone, the
 extra room buys MORE columns rather than wider ones, every hint wraps harder,
