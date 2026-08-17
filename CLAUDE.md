@@ -1312,6 +1312,23 @@ remain the touch and keyboard path. Blocking `touch-action` on the pinned label
 column would have cost vertical scrolling to gain a gesture that already has a
 working alternative.
 Deleting a budget category also deletes its orphaned cells — keep that.
+**Every dialog sets `overscroll-behavior: contain`, and it is not cosmetic.** A
+scroll container that has run out of scroll hands the rest of the gesture to its
+parent, so reaching the foot of a dialog carried straight on into the page behind
+it — the plan scrolling away under a dialog still open and still covering it.
+Reported on a phone, where a dialog nearly always scrolls and the gesture is a
+flick that does not stop at the boundary. `contain`, never `none`: the dialog's
+own scrolling is untouched, only the hand-off is. **A new scrollable region that
+sits OVER the page needs the same.** The inner `.checklist` deliberately does not
+have it — chaining from it to the dialog around it is wanted, and the dialog is
+what stops the page. Mirrored into Sprint Velocity, Flow Metrics and Golf
+Handicap, which all carried the same default.
+**Verifying this needs a real device, and the desktop preview pane will lie to
+you.** Its synthetic scroll events are not hit-tested to the element under the
+cursor — they go straight to the document, so the page moves and the dialog never
+does, which looks exactly like the bug whether or not the bug is there. It was
+reproduced, and the fix confirmed, in real iOS Safari on the simulator: same five
+swipes, two of them past the dialog's end, then close and see where the page is.
 **The toast is a POPOVER (`popover="manual"`), and that is the only way it can
 be seen while a dialog is open.** A modal `<dialog>` sits in the browser's TOP
 LAYER, which paints above every z-index in the ordinary document, so a toast
