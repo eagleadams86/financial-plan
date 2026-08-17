@@ -39,13 +39,18 @@ included — treat those the way you treat the figures.
   the goal and every future month moves with it), or a plain dollar amount. It
   is worked out at the end of the month, after the account's interest, so the
   account lands exactly on the threshold; a month that ends under it stays
-  blank, because nothing to sweep is not a $0 transfer. Sweeps **chain**: one
-  row can fill an account past its own goal and a second row sweep that excess
-  onward in the same month — cash overflows into mid-term until mid-term hits
-  its goal, and the rest flows on to long-term. Two rows sweeping into each
-  other's accounts is a loop with no answer, so both stay blank and the cell
-  editor says which row to repoint. A number you type into a month always
-  beats the rule, and moves the same way. **Accounts are a list you own** — add as many as you like,
+  blank, because nothing to sweep is not a $0 transfer. A row can also **cap
+  its destination** — fill it only up to a goal's target (or an amount) — which
+  is how several rows sweep from one account the way real transfers are made:
+  the first row fills mid-term until it reaches its goal, and the row below it
+  takes whatever overflow is left to long-term, worked out in row order. An
+  account that dips under its cap refills before anything flows past it, and a
+  full one keeps its own interest — the cap stops money going in, it never
+  sweeps money out. Rows can also **chain** (one row watching the account
+  another fills, resolved in dependency order in the same month); two rows
+  sweeping into each other's accounts is a loop with no answer, so both stay
+  blank and the cell editor says which row to repoint. A number you type into
+  a month always beats the rule, and moves the same way. **Accounts are a list you own** — add as many as you like,
   each with its own name, growth rate, a choice of which account that interest
   is paid into, and a start that follows your data: an account is tracked from the first month
   you put a figure in, earlier months stay blank rather than zero, and typing

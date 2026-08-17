@@ -704,6 +704,9 @@ suite passed while the card was wrong.
   refuses on BOTH ends), and exactly one of `goalId` (threshold = that goal's
   `target`, read live) or `threshold` (a typed figure, read STRICTLY via
   `rateOrNone` — `num()` would mint junk into a $0 "sweep everything" claim).
+  The optional destination cap is the same pair again — `capGoalId` XOR
+  `capAmount`, absent meaning uncapped (an absent cap and a $0 cap are
+  different claims, which is why junk deletes rather than zeroes).
   coerceShape drops dangling ids on both (the goalId pass runs AFTER goal
   coercion, since goals settle after the years loop) and the row degrades to
   blank, never throws; save forces the Transfers section one-way, like a
@@ -818,6 +821,19 @@ suite passed while the card was wrong.
     (the sweep is exactly the excess after it — the account lands ON the
     threshold to the cent), and the money arrives at the destination at month
     end, earning nothing there until the month after.
+  - **The optional DESTINATION CAP** (`capGoalId` XOR `capAmount`, the
+    threshold pair's twin) clamps the sweep to
+    `max(0, cap − endOf(destination))` — Charlie's real shape: two rows both
+    drawing from the hub, the first filling Mid-term up to Renovations, the
+    row below taking the remainder to Long-term. Rows sharing a source
+    resolve in ROW order, each seeing the source already drained. The room is
+    measured against the destination's own end-of-month figure, interest
+    included, so a full account KEEPS its growth — the cap stops money going
+    in, it never sweeps money out — and one that dipped refills before
+    anything flows past it. Absent cap = uncapped; a dangling cap goal drops
+    to uncapped (coerceShape), and `freezeOverflowThresholds` freezes it like
+    the threshold, or an unfrozen cap would sweep past the goal on the
+    recipient's copy.
   - **Under threshold → BLANK (`missing`), never $0** — the dividends rule's
     discipline; the resolved cell is written back into `cells` with kind
     `auto` so the grid shows it and "Mark month entered" materialises it, and

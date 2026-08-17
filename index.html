@@ -2351,7 +2351,12 @@ function coerceShape(data) {
           if (!acctIds.has(cat.transferTo)) delete cat.transferTo;
           const th = rateOrNone(cat.threshold);
           if (th !== undefined) cat.threshold = th; else delete cat.threshold;
-        } else { delete cat.overflowFrom; delete cat.goalId; delete cat.threshold; }
+          const cap = rateOrNone(cat.capAmount);
+          if (cap !== undefined) cat.capAmount = cap; else delete cat.capAmount;
+        } else {
+          delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
+          delete cat.capGoalId; delete cat.capAmount;
+        }
         /* Whose row it is — a second earner's paycheck, tagged so take-home
            can be read per person. Only ever a label; the engine sums the
            household's rows regardless. */
@@ -2404,6 +2409,11 @@ function coerceShape(data) {
         if (cat.rule !== 'overflow') continue;
         if (cat.goalId !== undefined && !goalIds.has(cat.goalId)) delete cat.goalId;
         if (cat.goalId !== undefined) delete cat.threshold;
+        /* The destination cap follows the same discipline: goal wins, a
+           dangling goal drops, and absent means no cap at all. */
+        if (cat.capGoalId !== undefined && !goalIds.has(cat.capGoalId))
+          delete cat.capGoalId;
+        if (cat.capGoalId !== undefined) delete cat.capAmount;
       }
     }
   }
@@ -3771,7 +3781,25 @@ function computeYear(st, yearKey, prior) {
         const threshold = goal ? (goal.target || 0)
           : typeof cat.threshold === 'number' ? cat.threshold : undefined;
         if (threshold === undefined) continue;           // misconfigured — blank
-        const amount = round2(Math.max(0, endOf(src) - threshold));
+        let amount = round2(Math.max(0, endOf(src) - threshold));
+        /* An optional DESTINATION cap: fill the far account only up to a
+           goal's target (read live, like the threshold) or a typed figure,
+           and leave the rest of the overflow where it is. This is what lets
+           two rows draw from ONE account the way real transfers are made —
+           the first fills Mid-term until it reaches its goal, the second
+           takes whatever is left to Long-term; rows sharing a source resolve
+           in row order, each seeing the source already drained by the one
+           before. A full destination is a blank month for this row, not a
+           $0 transfer, and one that has dipped under its goal refills before
+           anything flows past it. Measured against the destination's own
+           end-of-month figure (its interest included), so a capped account's
+           growth never gets swept back out by the cap. */
+        const capGoal = cat.capGoalId
+          ? (st.goals || []).find(g => g.id === cat.capGoalId) : null;
+        const cap = capGoal ? (capGoal.target || 0)
+          : typeof cat.capAmount === 'number' ? cat.capAmount : undefined;
+        if (cap !== undefined)
+          amount = Math.min(amount, round2(Math.max(0, cap - endOf(dst))));
         if (!amount) continue;
         resolved[key] = { v: -amount, kind: 'auto' };
         sweepOut[src] = (sweepOut[src] || 0) + amount;
@@ -3934,11 +3962,16 @@ const HELP = {
       + 'the account\'s interest and dividends, so the account lands exactly on the '
       + 'threshold; the money arrives at the destination at month end too and earns '
       + 'nothing there until the month after. A month that ends under the threshold stays '
-      + 'blank — nothing to sweep is not a $0 transfer. Rows chain: one can fill an '
-      + 'account past its own goal and a second sweep that excess onward in the same '
-      + 'month. Two rows sweeping into each other\'s accounts is a loop with no answer, '
-      + 'so both stay blank until one is repointed. A number you type into a month always '
-      + 'beats the rule.' },
+      + 'blank — nothing to sweep is not a $0 transfer. A row can also CAP its '
+      + 'destination — fill it only up to a goal\'s target — which is how several rows '
+      + 'sweep from one account the way real transfers are made: the first fills '
+      + 'Mid-term until it reaches its goal, and the row below it takes whatever '
+      + 'overflow is left to Long-term. Rows are worked out in row order, an account '
+      + 'that dips under its cap refills before anything flows past it, and a full '
+      + 'destination keeps its own interest — the cap stops money going in, it never '
+      + 'sweeps money out. Two rows sweeping into each other\'s accounts is a loop with '
+      + 'no answer, so both stay blank until one is repointed. A number you type into a '
+      + 'month always beats the rule.' },
   mixedCell: { title: 'Part Actual, Part Estimate',
     body: 'A month can hold several amounts — two grocery runs and a delivery, or a bill '
       + 'you have paid next to one you have only guessed at. The cell shows their sum, and '
@@ -5222,7 +5255,11 @@ function ruleDesc(cat, st = state) {
     if (!src || !dst || above === null)
       return 'sweeps an account’s overflow — pick the account, threshold '
            + 'and destination in Row settings';
-    return `whatever ${src.name} ends the month above ${above}, moved to ${dst.name}`;
+    const cg = cat.capGoalId && (st.goals || []).find(x => x.id === cat.capGoalId);
+    const upTo = cg ? `${cg.name || cg.id} (${fmtMoney(cg.target || 0)})`
+      : typeof cat.capAmount === 'number' ? fmtMoney(cat.capAmount) : null;
+    return `whatever ${src.name} ends the month above ${above}, moved to ${dst.name}${
+      upTo === null ? '' : ` — only until it holds ${upTo}`}`;
   }
   return RULE_LABEL[r] || RULE_LABEL.none;
 }
@@ -11061,6 +11098,22 @@ const EDITORS = {
           .map(a => [a.id, accountOption(state, a)]),
         showIf: (v) => v.rule === 'overflow',
         hint: 'The money arrives at the end of the month, after the sweep is worked out.' },
+      /* The destination cap — what lets several sweep rows draw from ONE
+         account the way real transfers are made: the first fills its
+         destination up to a goal and the next row takes whatever overflow is
+         left. Rows are worked out in row order, so the capped one goes above
+         the catch-all. */
+      { key: 'capGoalId', label: 'Fill it only up to', type: 'select',
+        options: [['', 'No cap — it takes all the overflow'],
+          ...(state.goals || []).map(g => [g.id,
+            `${g.name || g.id} — ${fmtMoney(g.target || 0)}`]),
+          ['amt', 'A dollar amount instead']],
+        showIf: (v) => v.rule === 'overflow',
+        hint: 'Once the destination would end the month at this figure, the row stops '
+            + 'and the rest of the overflow stays put — for the next sweep row, if '
+            + 'there is one below it.' },
+      { key: 'capAmount', label: 'Up to this amount', type: 'money',
+        showIf: (v) => v.rule === 'overflow' && v.capGoalId === 'amt' },
       /* Behaviour is two questions, not one long list: what the money does,
          and (only then) which account it does it with. On an overflow row
          neither is asked \u2014 the rule dictates both. */
@@ -11108,8 +11161,12 @@ const EDITORS = {
         transferTo: r.transferTo, creditTiming: r.creditTiming || 'pre',
         /* The overflow destination is stored in transferTo but edited through
            its own box — normRole hands transfer roles their target and an
-           overflow row keeps role `normal`, so the two never collide. */
+           overflow row keeps role `normal`, so the two never collide. The cap
+           select's 'amt' value is how a stored dollar figure re-opens on the
+           right option. */
         overflowTo: cat.rule === 'overflow' ? cat.transferTo : undefined,
+        capGoalId: cat.capGoalId
+          || (typeof cat.capAmount === 'number' ? 'amt' : ''),
         isPay: isPayRow(cat.name, cat.rule, cat.isPay) };
     },
     blank: () => ({ rule: 'none', role: 'normal', section: 'expense',
@@ -11150,14 +11207,22 @@ const EDITORS = {
           else if (v.threshold !== null && v.threshold !== undefined) {
             cat.threshold = v.threshold; delete cat.goalId;
           } else { delete cat.goalId; delete cat.threshold; }
+          const cg = (state.goals || []).find(g => g.id === v.capGoalId);
+          if (cg) { cat.capGoalId = cg.id; delete cat.capAmount; }
+          else if (v.capGoalId === 'amt'
+                   && v.capAmount !== null && v.capAmount !== undefined) {
+            cat.capAmount = v.capAmount; delete cat.capGoalId;
+          } else { delete cat.capGoalId; delete cat.capAmount; }
         } else if (role === 'normal' || !target) {
           cat.role = 'normal'; delete cat.transferTo; delete cat.creditTiming;
           delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
+          delete cat.capGoalId; delete cat.capAmount;
         } else {
           cat.transferTo = target;
           if (role === 'passthrough') cat.creditTiming = v.creditTiming === 'post' ? 'post' : 'pre';
           else delete cat.creditTiming;
           delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
+          delete cat.capGoalId; delete cat.capAmount;
         }
         cat.note = v.note || undefined;
         /* Only when the field was offered, and only on an income row: whose
@@ -11917,12 +11982,13 @@ const EDITORS = {
       for (const [y, yr] of Object.entries(state.years)) {
         if (yr.kind !== 'grid') continue;
         for (const cat of yr.categories || [])
-          if (cat.rule === 'overflow' && cat.goalId === g.id)
+          if (cat.rule === 'overflow'
+              && (cat.goalId === g.id || cat.capGoalId === g.id))
             hit.push(`"${cat.name}" in ${y}`);
       }
       if (hit.length)
-        return `Budget row ${andList(hit)} read this goal's target — the sweep `
-          + 'stays blank until you point it at another goal or an amount';
+        return `Budget row ${andList(hit)} read this goal's target — point it `
+          + 'at another goal or an amount';
     },
     move: (ds, dir) => listSwap(state.goals, +ds.idx, dir),
   },
@@ -15206,13 +15272,21 @@ function freezeOverflowThresholds(data, goals) {
   for (const yr of Object.values(data.years || {})) {
     if (yr.kind !== 'grid') continue;
     for (const cat of yr.categories || []) {
-      if (cat.rule !== 'overflow' || cat.goalId === undefined
-          || kept.has(cat.goalId)) continue;
-      const g = (goals || []).find(x => x.id === cat.goalId);
-      /* A goalId the sender doesn't hold either was already a blank row at
-         home — deleted, so the recipient's blank matches the sender's. */
-      if (g) cat.threshold = round2(g.target || 0); else delete cat.threshold;
-      delete cat.goalId;
+      if (cat.rule !== 'overflow') continue;
+      if (cat.goalId !== undefined && !kept.has(cat.goalId)) {
+        const g = (goals || []).find(x => x.id === cat.goalId);
+        /* A goalId the sender doesn't hold either was already a blank row at
+           home — deleted, so the recipient's blank matches the sender's. */
+        if (g) cat.threshold = round2(g.target || 0); else delete cat.threshold;
+        delete cat.goalId;
+      }
+      /* The destination cap freezes the same way — an unfrozen dangling cap
+         would sweep PAST the goal on the recipient's copy, changing figures. */
+      if (cat.capGoalId !== undefined && !kept.has(cat.capGoalId)) {
+        const g = (goals || []).find(x => x.id === cat.capGoalId);
+        if (g) cat.capAmount = round2(g.target || 0); else delete cat.capAmount;
+        delete cat.capGoalId;
+      }
     }
   }
   return data;

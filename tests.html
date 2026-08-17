@@ -6132,6 +6132,93 @@ t('sweepArrivals reads the receiving end off the row’s own cell', () => {
   eq(H.sweepArrivals(s, yr, c['2026'], cash, '2026-01'), [], 'the source lists nothing');
   eq(H.sweepArrivals(s, yr, c['2026'], mid, '2026-02'), [], 'a blank month lists nothing');
 });
+/* The destination cap — several rows drawing from ONE account the way real
+   transfers are made: the first fills its destination up to a goal, the row
+   below takes whatever overflow is left. */
+function cappedFixture(midSeed) {
+  const s = overflowFixture();
+  s.years['2026'].seeds = { cash: 22000, mid: midSeed, long: 0 };
+  s.years['2026'].cells = {};
+  s.goals = [{ id: 'renov', name: 'Renovations', target: 50000,
+               accounts: ['mid'], count: 'capped' }];
+  s.years['2026'].categories = [
+    { id: 'pay', name: 'Paycheck', role: 'normal', rule: 'none', section: 'income' },
+    { id: 'tomid', name: 'To Mid-term', rule: 'overflow', role: 'normal',
+      section: 'transfer', overflowFrom: 'cash', transferTo: 'mid',
+      threshold: 20000, capGoalId: 'renov' },
+    { id: 'tolong', name: 'To Long-term', rule: 'overflow', role: 'normal',
+      section: 'transfer', overflowFrom: 'cash', transferTo: 'long',
+      threshold: 20000 },
+  ];
+  return s;
+}
+t('a capped row fills its destination to the goal and the next row takes the rest', () => {
+  const c = computeOverflow(cappedFixture(49500))['2026'];
+  eq(c.cells['tomid|2026-01'].v, -500, 'only the room left under Renovations');
+  eq(c.cells['tolong|2026-01'].v, -1500, 'the rest of the overflow, from the SAME source');
+  approx(c.balances['cash|2026-01'], 20000, 'cash still lands on its threshold');
+  approx(c.balances['mid|2026-01'], 50000, 'mid lands exactly on its goal');
+  approx(c.balances['long|2026-01'], 1500);
+});
+t('a full destination is a blank month, and everything flows past it', () => {
+  const c = computeOverflow(cappedFixture(50000))['2026'];
+  eq(c.cells['tomid|2026-01'].kind, 'missing', 'full is blank, not a $0 transfer');
+  eq(c.cells['tolong|2026-01'].v, -2000, 'the whole overflow goes on to Long-term');
+  approx(c.balances['mid|2026-01'], 50000);
+  approx(c.balances['long|2026-01'], 2000);
+});
+t('a destination that dipped under its cap refills before anything flows past', () => {
+  const c = computeOverflow(cappedFixture(40000))['2026'];
+  eq(c.cells['tomid|2026-01'].v, -2000, 'all of the overflow rebuilds Mid-term');
+  eq(c.cells['tolong|2026-01'].kind, 'missing', 'nothing left for Long-term');
+  approx(c.balances['mid|2026-01'], 42000);
+});
+t('the cap stops money going in — it never sweeps the destination’s own growth out', () => {
+  const s = cappedFixture(50000);
+  s.settings.accounts[1].rate = 0.12;   // mid grows 1%/month while full
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].kind, 'missing', 'over the cap by its own interest — still blank');
+  approx(c.balances['mid|2026-01'], 50500, 'the interest stays where it was earned');
+  eq(c.cells['tolong|2026-01'].v, -2000, 'and the catch-all is unaffected');
+});
+t('coerceShape treats the cap like the threshold — strict, goal wins, dangling drops', () => {
+  const s = cappedFixture(49500);
+  const row = s.years['2026'].categories[1];
+  row.capAmount = 45000;                 // beside capGoalId — the goal must win
+  const cat = H.coerceShape(s).years['2026'].categories[1];
+  eq(cat.capGoalId, 'renov');
+  eq(cat.capAmount, undefined, 'the live tie wins');
+  const s2 = cappedFixture(49500);
+  s2.years['2026'].categories[1].capGoalId = 'gone-goal';
+  s2.years['2026'].categories[1].capAmount = 'abc';
+  const cat2 = H.coerceShape(s2).years['2026'].categories[1];
+  eq(cat2.capGoalId, undefined, 'a dangling cap goal drops');
+  eq(cat2.capAmount, undefined, 'junk drops — absent means NO cap, never a $0 one');
+  const c2 = H.computeAll(H.coerceShape(s2), '2026-01-15')['2026'];
+  eq(c2.cells['tomid|2026-01'].v, -2000, 'and the row falls back to uncapped');
+});
+t('a dollar-amount cap works without any goal', () => {
+  const s = cappedFixture(49500);
+  const row = s.years['2026'].categories[1];
+  delete row.capGoalId;
+  row.capAmount = 50000;
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].v, -500);
+  eq(c.cells['tolong|2026-01'].v, -1500);
+});
+t('a budget link freezes the cap goal too — figures identical', () => {
+  const s = cappedFixture(49500);
+  const sender = computeOverflow(s)['2026'];
+  const payload = JSON.parse(JSON.stringify(H.coerceShape(s)));
+  payload.goals = [];
+  H.freezeOverflowThresholds(payload, s.goals);
+  const frozen = payload.years['2026'].categories[1];
+  eq(frozen.capGoalId, undefined, 'the tie never leaves');
+  eq(frozen.capAmount, 50000, 'the target travels as a plain figure');
+  const recipient = H.computeAll(H.coerceShape(payload), '2026-01-15')['2026'];
+  for (const k of Object.keys(sender.balances))
+    eq(recipient.balances[k], sender.balances[k], k);
+});
 t('ruleDesc says what the row does, with the row’s own names and figures', () => {
   const s = H.coerceShape(overflowFixture());
   s.goals = [{ id: 'emerg', name: 'Emergencies', target: 15000,
@@ -6147,6 +6234,13 @@ t('ruleDesc says what the row does, with the row’s own names and figures', () 
   const half = { rule: 'overflow', overflowFrom: 'cash' };
   ok(H.ruleDesc(half, s).includes('Row settings'),
     'a half-configured row is pointed at the fix');
+  s.goals.push({ id: 'renov', name: 'Renovations', target: 50000,
+                 accounts: ['mid'], count: 'capped' });
+  const capped = { rule: 'overflow', overflowFrom: 'cash', transferTo: 'mid',
+                   goalId: 'emerg', capGoalId: 'renov' };
+  eq(H.ruleDesc(capped, s),
+    'whatever Cash ends the month above Emergencies ($15,000.00), moved to '
+    + 'Savings — only until it holds Renovations ($50,000.00)');
 });
 
 /* ── Local-only real-data cross-check ─────────────────────────────────────────
