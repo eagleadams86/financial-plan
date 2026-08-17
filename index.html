@@ -466,7 +466,19 @@ dialog {
    Nothing here is desktop-only by a media query: `width: calc(100% - 32px)`
    above already wins on a small screen, and the field grid falls back to fewer
    columns on the way down (one at 375px). */
-dialog::backdrop { background: rgba(0,0,0,.55); }
+/* A dialog laid out TWO-UP is narrowed to fit exactly its two boxes, rather
+   than leaving each of them at the left of a 523px half with 200px of nothing
+   to its right — which is what made a two-question dialog look adrift in a
+   window built for four columns. Asked for 2026-08-17, and deliberately ONLY
+   for two: three and four columns already fill the common width, and a
+   single-column dialog never had the problem.
+   The figure is the layout written out — 20px of padding, a 320px box, 20px
+   between, a 320px box, 20px of padding — so the space left of the first box,
+   between the two, and right of the second are all the same. The COLUMN gap is
+   widened to match the padding for that; the row gap is left alone, being
+   vertical rhythm and nothing to do with this. */
+dialog.twoup { max-width: 700px; }
+dialog.twoup .grid-fields { column-gap: 20px; }
 dialog::backdrop { background: rgba(0,0,0,.55); }
 dialog h3 { margin: 0 0 12px; font-size: 17px; }
 fieldset, .formpanel { border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -11161,8 +11173,23 @@ function applyFieldSpans(fields) {
      tracks — counting words in that gives a column count of nonsense. Wait for
      a laid-out grid; openRowEditor runs this again once the dialog is up. */
   if (!wrap.getBoundingClientRect().width) return;
-  const tracks = getComputedStyle(wrap).gridTemplateColumns.split(' ').filter(Boolean);
+  /* Zero-width tracks are DROPPED, and that is not a tidy-up. `auto-fit` lays
+     out as many tracks as would fit and collapses the ones nothing lands in, so
+     a two-field section reads back as "523px 523px 0px 0px" — four tracks, two
+     of them nothing. Counting the string's words says four columns, which makes
+     every row look short and puts `oneCol` on a track that isn't there. Only
+     tracks with a width are columns. */
+  const tracks = getComputedStyle(wrap).gridTemplateColumns
+    .split(' ').filter(t => parseFloat(t) > 0);
   const cols = tracks.length;
+  /* A dialog laid out two-up is NARROWED to fit its two boxes — see the
+     `.twoup` rule. Set from the resolved grid, which is the only place that
+     knows how auto-fit actually landed; `openRowEditor` seeds the same class
+     from the spec before the dialog is shown so there is no flash of the wide
+     one. Three and four columns keep the common width, and a single column
+     never had the problem. */
+  const dlg = wrap.closest('dialog');
+  if (dlg) dlg.classList.toggle('twoup', cols === 2);
   if (cols < 2) return;                       // one column: every row is full
   /* One column's RESOLVED width, which is what a stretched field's box is held
      to below. Read from the grid rather than assumed, so it is right at two,
@@ -11302,6 +11329,15 @@ function openRowEditor(section, ds, isNew) {
   const cols = typeof ed.cols === 'function' ? ed.cols(ds, isNew) : ed.cols;
   F('rowFields').classList.toggle('cols2', cols === 2);
   F('rowFields').classList.toggle('cols3', cols === 3);
+  /* Seeded from the SPEC so the dialog opens at its final width instead of
+     appearing wide and snapping narrower a frame later. `applyFieldSpans` has
+     the authoritative answer once the grid is laid out and re-toggles this, so
+     a guess that misses (a `showIf` field hiding, say) is corrected rather than
+     left wrong. Two-up is either asked for outright, or arrived at by having
+     exactly two fields that take a column each — everything `wide` spans the
+     row and doesn't count. */
+  const inRow = spec.filter(f => f && !f.wide && f.type !== 'note').length;
+  rowDialog.classList.toggle('twoup', cols === 2 || (!cols && inRow === 2));
   const link = ed.link && ((key) => ed.link(key, ds));
   buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds), link);
   /* Prime the linked boxes once, so a derived field arrives in the state the

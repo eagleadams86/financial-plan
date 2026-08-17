@@ -1229,8 +1229,29 @@ Things that go with it and will look arbitrary later:
   prose with no table under it costs nothing vertically by being wrapped, so the
   measure is free. Left-aligned, unlike `.empty`, because a heading and a button
   are anchored left here and centring the paragraph would set it adrift of both.
+- **A dialog laid out TWO-UP is narrowed to 700px** (asked for 2026-08-17), and
+  only two: three and four columns already fill the common width, and a single
+  column never had the problem. At 1100px a two-question dialog put each box at
+  the left of a 523px half with 200px of nothing beside it, which read as adrift
+  rather than as roomy. 700px is the layout written out — 20px padding, a 320px
+  box, 20px, a 320px box, 20px padding — so the space either side of the pair
+  and between them is the same; `dialog.twoup` also widens the COLUMN gap to
+  that 20px, leaving the row gap alone since that is vertical rhythm.
+  The class is set from the RESOLVED grid in `applyFieldSpans`, which is the
+  only place that knows how auto-fit landed, and seeded from the spec in
+  `openRowEditor` so the dialog opens at its final width instead of snapping a
+  frame later. It is only ever on `rowDialog`: Share, Back up, the help sheet
+  and the rest keep the common width.
+- **Count columns by DROPPING zero-width tracks.** `auto-fit` lays out as many
+  tracks as fit and collapses the ones nothing lands in, so a two-field section
+  reads back as `"523px 523px 0px 0px"`. Counting the string's words says four,
+  which makes every row look short to `applyFieldSpans` and puts its
+  one-column measure on a track that isn't there. Only tracks with a width are
+  columns — which is also what makes the two-up test above true for a section
+  that never asked for `cols: 2`, like the PTO year.
 - No media query is needed: `width: calc(100% - 32px)` already wins on a small
-  screen and auto-fit falls back to one column at 375px.
+  screen and auto-fit falls back to one column at 375px, where `twoup` resolves
+  to false on its own.
 **A BOX IS SIZED BY ITS INPUT TYPE, never by a per-field setting** — text,
 money, number and select all 320px, date/month 180px, all of them a `max-width`
 OVER the existing `width: 100%`, so a narrow column still wins and nothing can
