@@ -1159,13 +1159,23 @@ did nothing.
 computed from. `coerceShape` deletes both keys on load so they stop riding
 along in every backup; don't reintroduce them. (`side.retirementAccounts` is
 the real retirement list and is unrelated despite the near-identical name.)
-**No dialog leaves a gap in a row, and nothing has to remember to ask.**
-`applyFieldSpans` stretches the LAST field on any row that came up short to the
-end of it. It is automatic, not opt-in, and that is the point: the same gap was
-reported twice, both times from the innocent act of adding a full-width field —
-which forces a line break and strands whatever narrow field sat above it. An
-opt-in flag would be forgotten by whoever adds the next field. Nothing in it
-knows which fields exist.
+**A field left ALONE on a row is stretched to fill it; a short row that still
+has two or three fields on it is left alone.** `applyFieldSpans` does this
+automatically, not opt-in, and that is the point: the gap was reported twice,
+both times from the innocent act of adding a full-width field — which forces a
+line break and strands whatever narrow field sat above it. An opt-in flag would
+be forgotten by whoever adds the next field. Nothing in it knows which fields
+exist.
+**The "only when alone" half was learned the hard way (2026-08-17).** It used to
+stretch the last field of ANY short row, and once every dialog went to one width
+that turned into three complaints in a row — "still due looks longer than the
+others", "same on nights", and the amounts in a donation. A box is capped at
+320px, so an ordinary quarter-width cell shows 256px and a doubled one shows the
+full 320: the stretched field ends up visibly wider than the ones beside it, and
+reads as a mistake rather than as a filled row. A LONE field has nothing beside
+it to look uneven against, and the stretch buys its HINT the full width instead
+of a quarter — that case still earns it. **A row that ought to fill the width
+says so with `cols`, which is the honest way to ask.**
 It has to be WORKED OUT rather than declared: which row a field lands on depends
 on how many optional fields above it are showing *at that moment*, and that
 changes under the reader as they pick a different rule. `applyFieldVisibility`
@@ -1261,12 +1271,12 @@ the three amounts two-and-one, when the dialog's own sub-line tells you to choos
 between those three. Dropping the flag cost the field nothing — a text box is
 capped at 320px by type either way — and fixed both. Check every `wide` field in a
 section before widening its dialog.
-**`donation`'s two checkboxes are ordered by LAYOUT, not by subject**, the zoom
-field's precedent below: three amounts and two ticks is five things across four
-columns, so one tick always lands alone on a stretched row, and it should be the
-one with a HINT (`pending`) so that row carries a sentence rather than a bare
-checkbox with 800px of nothing beside it. `deductible` rides at the end of the
-amounts row, which is where the question belongs anyway.
+**`donation`'s two checkboxes sit together on the closing line, after the
+note.** They were briefly split — one riding the end of the amounts row, the
+other alone underneath — which made the three amounts read as four things and
+gave a lone checkbox a row of its own. The note is `wide`, so it ends its row
+and the two ticks start a fresh one: two questions ABOUT the donation, asked
+together after everything the donation is.
 **The zoom is the exception and is placed by LAYOUT, not by subject** — it
 belongs to no group, so it is the one field that can be spent closing a row.
 Without it the three retirement rates start one column short of a fresh row and
