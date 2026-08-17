@@ -1216,11 +1216,16 @@ Things that go with it and will look arbitrary later:
   `applyFieldSpans` stretching the LAST box into the gap so the odd one out ends
   up wider than the two beside it. Three equal columns fill the row evenly.
   Anything else takes auto-fit.
-- **`#shareDialog` and `#searchDialog` set no width of their own.** Share's two
-  side-by-side panels and a link readable in one line are what the common width
-  buys there; its own 760px two-column breakpoint is untouched, so a phone still
-  stacks as before. Search used to pin `width: min(640px, …)`, which was the one
-  thing that would now make it the odd one out.
+- **`#shareDialog` sets no width of its own.** Its two side-by-side panels and a
+  link readable in one line are what the common width buys; its own 760px
+  two-column breakpoint is untouched, so a phone still stacks as before.
+- **`#searchDialog` is 360px — one box, sized the way a two-up dialog is sized
+  to its two**: 20px of padding, a 320px box, 20px of padding (asked for
+  2026-08-17). `#searchBox` takes the standard 320px rather than the full width
+  it used to, as a `max-width` so it still shrinks with the dialog on a phone.
+  The results list and the intro line live inside that 320px, which is the
+  trade: a hit naming a long row wraps onto a second line instead of running
+  across a window that was mostly empty.
 - **`#helpDialog` is the exception that proves the rule, and it is about the
   TEXT, not the window.** It is the one dialog that is nothing but prose, so it
   takes the common width like everything else and holds `.helpbody` to 66ch
