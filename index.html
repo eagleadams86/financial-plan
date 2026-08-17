@@ -602,11 +602,18 @@ details.danger-zone > summary { cursor: pointer; font-size: 13px; font-weight: 6
 details.danger-zone > summary:hover { color: var(--text-primary); }
 .muted { color: var(--text-secondary); }
 
+/* The toast is a POPOVER, so that it can be seen over an open modal dialog —
+   the reasoning is on toast() itself. Half of what follows undoes the UA's own
+   [popover] rules (inset: 0, margin: auto, a border and a background of its
+   own), which would otherwise park it in a box in the middle of the screen;
+   the z-index still matters on a browser with no popover support, where this
+   is the plain fixed element it has always been. */
 #toast {
-  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-  background: var(--btn-bg); color: var(--btn-text); padding: 10px 18px;
+  position: fixed; left: 50%; right: auto; top: auto; bottom: 24px;
+  margin: 0; transform: translateX(-50%);
+  background: var(--btn-bg); color: var(--btn-text); border: 0; padding: 10px 18px;
   border-radius: 999px; font-size: 14px; font-weight: 600; z-index: 100;
-  opacity: 0; pointer-events: none; transition: opacity .2s;
+  opacity: 0; pointer-events: none; overflow: visible; transition: opacity .2s;
 }
 #toast.show { opacity: 1; }
 
@@ -1130,7 +1137,7 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   </details>
 </div>
 
-<div id="toast" role="status" aria-live="polite"></div>
+<div id="toast" popover="manual" role="status" aria-live="polite"></div>
 <!-- The budget grid's own tooltip — filled by wireGridTip, aria-hidden because
      it only ever repeats what the cell dialog already offers a reader. -->
 <div id="gridTip" hidden aria-hidden="true"></div>
@@ -4356,16 +4363,54 @@ function helpBtn(key, label) {
 }
 
 /* ── Toast ──────────────────────────────────────────────────────────────── */
-let toastTimer = null;
+/* A modal <dialog> is promoted to the browser's TOP LAYER, which paints above
+   every z-index in the ordinary document — so a toast fired while a dialog was
+   open was drawn UNDER it, and under its 55%-black backdrop, which reads as no
+   feedback at all. The Share dialog's "Copy link" is the case that has to
+   work: it copies and deliberately leaves the dialog open, so the toast is the
+   only thing that says anything happened. It was reported as the button doing
+   nothing, which is exactly what it looked like.
+   A popover is the one way to put something that ISN'T a dialog into the top
+   layer, and the layer is ordered by when things joined it, so a toast raised
+   after a dialog opened sits above it. `manual` because nothing else should
+   dismiss it and Escape belongs to the dialog underneath. On a browser with no
+   popover support the attribute is inert, no UA rules apply to it, and the
+   toast is exactly the fixed element it has always been. */
+const TOAST_POPOVER = 'popover' in HTMLElement.prototype;
+let toastTimer = null, toastHideTimer = null, toastRaised = false;
+
+function raiseToast(el) {
+  if (!TOAST_POPOVER || toastRaised) return;
+  /* A failure here costs the top layer, never the toast. */
+  try { el.showPopover(); toastRaised = true; } catch (e) {}
+}
+function dropToast(el) {
+  if (!toastRaised) return;
+  try { el.hidePopover(); } finally { toastRaised = false; }
+}
+
 function toast(msg) {
   const el = F('toast');
-  el.textContent = msg;
-  el.classList.add('show');
   clearTimeout(toastTimer);
+  clearTimeout(toastHideTimer);
+  /* Raised BEFORE the text is written: a popover is display:none until it is
+     shown, and a live region announces a change it was there for. */
+  raiseToast(el);
+  el.textContent = msg;
+  /* That display flip means the opacity:0 starting state is never painted, so
+     the fade would be skipped entirely; reading a layout property in between
+     settles it and the transition runs. */
+  void el.offsetWidth;
+  el.classList.add('show');
   /* Long enough to actually read: "Saved" and a sentence explaining why
      something was refused don't deserve the same two and a half seconds. */
   const ms = Math.min(9000, Math.max(2600, String(msg).length * 55));
-  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+  toastTimer = setTimeout(() => {
+    el.classList.remove('show');
+    /* Leaves the top layer once it has faded, so a spent toast is never parked
+       above whatever opens next. Matches the .2s opacity transition. */
+    toastHideTimer = setTimeout(() => dropToast(el), 250);
+  }, ms);
 }
 
 /* ── Render skeleton ────────────────────────────────────────────────────── */

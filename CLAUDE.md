@@ -1285,6 +1285,27 @@ remain the touch and keyboard path. Blocking `touch-action` on the pinned label
 column would have cost vertical scrolling to gain a gesture that already has a
 working alternative.
 Deleting a budget category also deletes its orphaned cells — keep that.
+**The toast is a POPOVER (`popover="manual"`), and that is the only way it can
+be seen while a dialog is open.** A modal `<dialog>` sits in the browser's TOP
+LAYER, which paints above every z-index in the ordinary document, so a toast
+fired from an open dialog was drawn under it AND under its 55%-black backdrop —
+invisible, indistinguishable from a button that does nothing. It was reported
+that way, about the Share dialog's "Copy link", which is the case that has to
+work: copying deliberately leaves the dialog open, so the toast is the only
+thing that says it happened. **Anything else that has to appear over a dialog
+needs the same treatment** — a bigger z-index cannot reach the top layer. Four
+things `toast()` keeps doing: it raises the popover BEFORE writing the text (a
+popover is `display:none` until shown, and a live region announces a change it
+was present for); it reads a layout property in between, or the `display` flip
+means the `opacity:0` state is never painted and the fade is skipped; it drops
+out of the top layer 250ms after fading, so a spent toast is never parked above
+whatever opens next; and it is `manual`, so nothing else can dismiss it and
+Escape still belongs to the dialog underneath. The CSS undoes the UA's own
+`[popover]` rules (`inset: 0`, `margin: auto`, a border and a background), which
+would otherwise park it in a box in the middle of the screen. On a browser with
+no popover support the attribute is inert and the toast is exactly the fixed
+element it always was. **The same fix belongs in Sprint Velocity, Flow Metrics
+and Golf Handicap** — all four share this chrome and all four had the bug.
 
 Budget rows carry `section` (income/expense/transfer — display grouping,
 inferred once in `coerceShape` for pre-section data, a stored value is never
