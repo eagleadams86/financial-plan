@@ -81,7 +81,7 @@ family names as well as balances.
   SECTION_NEEDS.goals therefore carries those side branches, and a Progress
   link names them in the share dialog.
   **`pf.accounts` is how a pane says its holdings ARE a budget account's
-  money** — the goal-accounts shape (a ticked LIST, since one real Fidelity
+  money** — the goal-accounts shape (a ticked LIST, since one real brokerage
   account is several budget slices), a statement never a guess, coerced to ids
   that exist and ABSENT when empty. Net worth's tiles still match their tabs;
   only the TOTAL subtracts the linked accounts' computed balances, so the pot
@@ -468,14 +468,14 @@ suite passed while the card was wrong.
   carries an override**, and that exclusion is the subtle one: a stated month's
   "computed" balance IS the override, so the note compared the figure with
   itself and reported perfect agreement. It shipped saying "Matches the plan
-  exactly" over one of Charlie's Venmo months whose stated balance was $40
-  adrift from every row feeding it — agreement with yourself is not a check. Colourless by rule — the size of
+  exactly" over one of Charlie's Venmo months whose stated balance was a few
+  dollars adrift from every row feeding it — agreement with yourself is not a check. Colourless by rule — the size of
   the gap is the signal.
 - **`passthrough` is how a float is modelled, and the role picker now says so.**
   The generic role already covered it; what was missing was any hint that
   "money that lives in an app on my phone" is what it's for. Charlie's Venmo
-  balance and his Chase/M&T Zelle rails are the same shape — money that never
-  touches the Fidelity hub — and the pattern needs NO new code: `passthrough` +
+  balance and his banks' Zelle rails are the same shape — money that never
+  touches the hub account — and the pattern needs NO new code: `passthrough` +
   split amounts with per-part labels + an occasional pinned balance to
   re-anchor. Resist a named "Venmo feature": the moment there is one, PayPal and
   Cash App want theirs, and the generic role already outlives all of them.
@@ -584,8 +584,8 @@ suite passed while the card was wrong.
   it since accounts became a list. Same treatment `side.retirement` got.
 - **Accounts sharing an exact name are ONE account told over the years**
   (`mergeAccountsByName`). The history import made an account per distinct row
-  NAME per sheet, so one real brokerage account arrived as four ids —
-  "Individual TOD", "Bridge", "Invested", "Holdings" — as the spreadsheet's
+  NAME per sheet, so one real brokerage account arrived as four ids — the same
+  account under four slightly different wordings — as the spreadsheet's
   wording drifted, and the Who Owns What list read as several identical rows
   each holding a few years. Renaming them to match is how you say they are the
   same thing. Rules that must hold:
@@ -974,9 +974,9 @@ suite passed while the card was wrong.
   **A fourth argument leaves INTERNAL transfers out** — `ui.flowNoTransfers`,
   the card's own checkbox — and the three-argument behaviour is untouched and
   still pinned, the `limitsFor` arrangement. It exists because those bars are
-  routinely misread as income and spend: Charlie's 2026 reads $117k in against
-  $95k once his own sweeps come out, and the $16,000 that went to savings and
-  the $11,000 that came back were both in there.
+  routinely misread as income and spend: Charlie's 2026 read thousands high
+  on both bars until his own sweeps came out — the sweep into savings and the
+  part of it that came back were both in there.
   - **`internalRows(yr)` is the ONE test for "is this row internal?"**, read by
     the bars and by the note under them; two answers would put a chart and its
     own caption at odds. It needs **BOTH the Transfers SECTION and an internal
@@ -985,8 +985,8 @@ suite passed while the card was wrong.
     - **the section**, because that is the reader's own statement of what the
       money IS, and the role under it is only plumbing. Charlie's DAF row is
       filed as an Expense and behaves as a pass-through into Long-term; the
-      Zelle and Venmo rows are the same shape. Reading the role alone took
-      $5,961 of real 2026 spending off his money-out bar — and contradicted a
+      Zelle and Venmo rows are the same shape. Reading the role alone took a
+      real chunk of 2026 spending off his money-out bar — and contradicted a
       call `coerceShape` had already made, since the legacy `charitable` role
       is deliberately NOT among the roles it files under Transfers while
       `zelle` is. He reported it as "I have it set as an expense, why is it a
@@ -1558,7 +1558,7 @@ from the table (2021 sitting under 2019), because calling that "last year"
 without saying so is a lie.
 **Figures show cents — `fmtMoney`, everywhere a number is a value.** The
 whole-dollar `fmtMoney0` survives for exactly one job: CHART AXIS TICKS, where
-`$137,000.00` on every gridline is clutter on a scale rather than precision. If
+`$100,000.00` on every gridline is clutter on a scale rather than precision. If
 you add a table, card or chart tooltip, use `fmtMoney`. Rounding a salary to
 the dollar was hiding the cents that "salary after the raise" turns on.
 Percentages on the Comp tab are `.toFixed(2)`; the progress-bar `width:` styles

@@ -20,6 +20,11 @@
       could read from the cache is anything they couldn't read from GitHub. The
       plan itself stays in localStorage, which every page on the origin could
       already reach — installing this changes that threat model not at all.
+      The same cut goes the other way: any same-origin page can also WRITE
+      into this cache, so an XSS hole in a sibling app could poison the
+      offline shell, and the poison outlives the hole. No per-cache ACL
+      exists; the defence is the origin policy itself — a CSP on every page
+      and no third-party script anywhere.
 
    The scope is this file's own directory. Widening it past `/financial-plan/`
    would need a `Service-Worker-Allowed` header, which Pages cannot send, so
