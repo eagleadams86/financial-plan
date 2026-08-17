@@ -36,14 +36,20 @@ included — treat those the way you treat the figures.
   that never touches the main account. An **overflow sweep row** watches one
   account and moves whatever it would end the month holding above a threshold
   into another account — the threshold is a **goal's target, read live** (edit
-  the goal and every future month moves with it), or a plain dollar amount. It
-  is worked out at the end of the month, after the account's interest, so the
-  account lands exactly on the threshold; a month that ends under it stays
+  the goal and every future month moves with it), or a plain dollar amount. A
+  goal that adds up **several accounts is measured across all of them** — an
+  emergency fund living in cash plus two checking accounts is over its target
+  when those balances together are — and the transfer still leaves the one
+  watched account, which must be among the ones the goal counts. It
+  is worked out at the end of the month, after the accounts' interest, so the
+  measured pot lands exactly on the threshold; a month that ends under it stays
   blank, because nothing to sweep is not a $0 transfer. A row can also **cap
   its destination** — fill it only up to a goal's target (or an amount) — which
   is how several rows sweep from one account the way real transfers are made:
   the first row fills mid-term until it reaches its goal, and the row below it
-  takes whatever overflow is left to long-term, worked out in row order. An
+  takes whatever overflow is left to long-term, worked out in row order (a cap
+  goal spanning several accounts is full when they together reach its target,
+  and it must count the account the row fills). An
   account that dips under its cap refills before anything flows past it, and a
   full one keeps its own interest — the cap stops money going in, it never
   sweeps money out. Rows can also **chain** (one row watching the account

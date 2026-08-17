@@ -707,6 +707,11 @@ suite passed while the card was wrong.
   The optional destination cap is the same pair again — `capGoalId` XOR
   `capAmount`, absent meaning uncapped (an absent cap and a $0 cap are
   different claims, which is why junk deletes rather than zeroes).
+  `thresholdAccounts`/`capAccounts` exist ONLY as share-freeze artifacts (a
+  goal's account set carried as plain ids): coerceShape filters them to real
+  accounts and deletes empty lists, the live goal always wins over them, and
+  the row editor deletes both on save — what you saved is what the dialog
+  showed.
   coerceShape drops dangling ids on both (the goalId pass runs AFTER goal
   coercion, since goals settle after the years loop) and the row degrades to
   blank, never throws; save forces the Transfers section one-way, like a
@@ -841,6 +846,22 @@ suite passed while the card was wrong.
   - **Both ends must be `running`** (the `payInto` guard) or the month stays
     blank; the threshold is a goal's target read live (`goalId`) or the row's
     own `threshold`, and a missing/dangling one is blank, never zero.
+  - **A goal that names several accounts is measured across the LOT** —
+    `overflowMeasure(cat, goals)` (pure, tested) resolves what a row's
+    threshold and cap actually watch: the goal's account set when it has one,
+    else the row's own end; `thresholdAccounts`/`capAccounts` are the frozen
+    lists a share link writes so a recipient measures the same pot. Two
+    convergence guards, enforced in the engine and explained in the cell
+    editor: the SOURCE must be inside the threshold's measured set and the
+    DESTINATION outside it (else the sweep could run for ever and never land
+    the pot on its target — blank, deterministically); mirrored for the cap
+    (destination in, source out). Ordering edges come from the source and the
+    THRESHOLD measure only — **the cap's set is deliberately not an ordering
+    input**: a cap is a stopping condition checked in ROW order (the list is
+    the reader's transfer priority), and ordering on it would run a catch-all
+    before the capped row above it whenever the catch-all's destination sits
+    inside the cap's pot. A row below can therefore still pour into a pot a
+    row above capped against; the cap bound when its own row ran.
   - **Zero overflow rows must compute bit-identical results to before the
     feature existed** — pinned by 'a sweep that never triggers changes nothing
     at all' plus the untouched engine groups and the real-data cross-check.

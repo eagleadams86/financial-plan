@@ -6219,6 +6219,127 @@ t('a budget link freezes the cap goal too — figures identical', () => {
   for (const k of Object.keys(sender.balances))
     eq(recipient.balances[k], sender.balances[k], k);
 });
+/* A goal that adds up several accounts is measured across ALL of them — the
+   emergency fund living in cash plus a checking account is over its target
+   when the two together are, however the money is split between them. */
+t('a multi-account goal is measured as the sum of its accounts', () => {
+  const s = overflowFixture();
+  s.settings.accounts.push({ id: 'chk', name: 'Checking', rate: 0, creditTo: 'chk' });
+  s.years['2026'].seeds = { cash: 17000, chk: 4000, mid: 10000, long: 0 };
+  s.years['2026'].cells = {};
+  s.goals = [{ id: 'emerg', name: 'Emergencies', target: 20000,
+               accounts: ['cash', 'chk'], count: 'capped' }];
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'emerg';
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].v, -1000, '21,000 across the pot, 20,000 target');
+  approx(c.balances['cash|2026-01'], 16000, 'the transfer leaves the watched account');
+  approx(c.balances['chk|2026-01'], 4000, 'the other counted account is untouched');
+  approx(c.balances['mid|2026-01'], 11000);
+  approx(c.balances['cash|2026-01'] + c.balances['chk|2026-01'], 20000,
+    'the POT lands exactly on the target');
+});
+t('a sweep that cannot land the goal on its target is refused as misconfigured', () => {
+  /* Draining an account the goal doesn't count never brings the pot down;
+     filling one it does count moves nothing the goal can see. Either way the
+     row would sweep the same excess for ever — blank, deterministically. */
+  const s = overflowFixture();
+  s.settings.accounts.push({ id: 'chk', name: 'Checking', rate: 0, creditTo: 'chk' });
+  s.years['2026'].seeds = { cash: 17000, chk: 24000, mid: 10000, long: 0 };
+  s.years['2026'].cells = {};
+  s.goals = [{ id: 'emerg', name: 'Emergencies', target: 20000,
+               accounts: ['chk'], count: 'capped' }];
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'emerg';   // watches cash, but the goal counts only chk
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].kind, 'missing', 'source not counted → blank');
+  approx(c.balances['cash|2026-01'], 17000, 'and nothing moves');
+  const s2 = overflowFixture();
+  s2.years['2026'].cells = {};
+  s2.goals = [{ id: 'emerg', name: 'Emergencies', target: 15000,
+                accounts: ['cash', 'mid'], count: 'capped' }];
+  const row2 = s2.years['2026'].categories[1];
+  delete row2.threshold;
+  row2.goalId = 'emerg';   // destination mid is INSIDE the measured pot
+  const c2 = computeOverflow(s2)['2026'];
+  eq(c2.cells['tomid|2026-01'].kind, 'missing', 'destination counted → blank');
+});
+t('a multi-account cap goal is full when its accounts together reach the target', () => {
+  const s = cappedFixture(30000);
+  s.years['2026'].seeds = { cash: 22000, mid: 30000, long: 19500 };
+  s.goals[0].accounts = ['mid', 'long'];   // Renovations lives in two pots
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].v, -500, '49,500 across the cap pot leaves 500 of room');
+  eq(c.cells['tolong|2026-01'].v, -1500, 'the uncapped catch-all takes the rest');
+  approx(c.balances['cash|2026-01'], 20000);
+  approx(c.balances['mid|2026-01'], 30500);
+  approx(c.balances['long|2026-01'], 21000);
+});
+t('ordering follows the measured accounts, not just the source', () => {
+  /* Row B (listed FIRST) measures a pot that includes an account row A fills —
+     B must still run after A, or it reads the pot before the arrival. */
+  const s = overflowFixture();
+  s.settings.accounts.push({ id: 'chk', name: 'Checking', rate: 0, creditTo: 'chk' });
+  s.years['2026'].seeds = { cash: 16000, chk: 3000, mid: 12000, long: 0 };
+  s.years['2026'].cells = {};
+  s.goals = [{ id: 'emerg', name: 'Emergencies', target: 20000,
+               accounts: ['cash', 'chk'], count: 'capped' }];
+  s.years['2026'].categories = [
+    { id: 'b', name: 'B', rule: 'overflow', role: 'normal', section: 'transfer',
+      overflowFrom: 'cash', transferTo: 'long', goalId: 'emerg' },
+    { id: 'a', name: 'A', rule: 'overflow', role: 'normal', section: 'transfer',
+      overflowFrom: 'mid', transferTo: 'chk', threshold: 10000 },
+  ];
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['a|2026-01'].v, -2000, 'A fills Checking first');
+  eq(c.cells['b|2026-01'].v, -1000,
+    'B sees the pot at 16,000 + 5,000 and sweeps the 1,000 above 20,000');
+  approx(c.balances['cash|2026-01'], 15000);
+  approx(c.balances['chk|2026-01'], 5000);
+});
+t('a budget link freezes a multi-account goal’s account set beside its target', () => {
+  const s = overflowFixture();
+  s.settings.accounts.push({ id: 'chk', name: 'Checking', rate: 0, creditTo: 'chk' });
+  s.years['2026'].seeds = { cash: 17000, chk: 4000, mid: 10000, long: 0 };
+  s.years['2026'].cells = {};
+  s.goals = [{ id: 'emerg', name: 'Emergencies', target: 20000,
+               accounts: ['cash', 'chk'], count: 'capped' }];
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'emerg';
+  const sender = computeOverflow(s)['2026'];
+  const payload = JSON.parse(JSON.stringify(H.coerceShape(s)));
+  payload.goals = [];
+  H.freezeOverflowThresholds(payload, s.goals);
+  const frozen = payload.years['2026'].categories[1];
+  eq(frozen.threshold, 20000);
+  eq(frozen.thresholdAccounts, ['cash', 'chk'],
+    'the pot travels as plain ids — the goal itself never leaves');
+  const recipient = H.computeAll(H.coerceShape(payload), '2026-01-15')['2026'];
+  for (const k of Object.keys(sender.balances))
+    eq(recipient.balances[k], sender.balances[k], k);
+});
+t('coerceShape guards the frozen measure lists like every id list', () => {
+  const s = overflowFixture();
+  const row = s.years['2026'].categories[1];
+  row.thresholdAccounts = ['cash', 'gone-account'];
+  const cat = H.coerceShape(s).years['2026'].categories[1];
+  eq(cat.thresholdAccounts, ['cash'], 'dangling ids drop');
+  const s2 = overflowFixture();
+  s2.years['2026'].categories[1].thresholdAccounts = ['gone-account'];
+  eq(H.coerceShape(s2).years['2026'].categories[1].thresholdAccounts, undefined,
+    'an emptied list is deleted — absent falls back to the row’s own end');
+  const s3 = overflowFixture();
+  s3.goals = [{ id: 'emerg', name: 'E', target: 15000, accounts: ['cash'], count: 'capped' }];
+  const r3 = s3.years['2026'].categories[1];
+  delete r3.threshold;
+  r3.goalId = 'emerg';
+  r3.thresholdAccounts = ['cash', 'mid'];
+  eq(H.coerceShape(s3).years['2026'].categories[1].thresholdAccounts, undefined,
+    'the live goal wins over a frozen list');
+});
 t('ruleDesc says what the row does, with the row’s own names and figures', () => {
   const s = H.coerceShape(overflowFixture());
   s.goals = [{ id: 'emerg', name: 'Emergencies', target: 15000,

@@ -2353,9 +2353,20 @@ function coerceShape(data) {
           if (th !== undefined) cat.threshold = th; else delete cat.threshold;
           const cap = rateOrNone(cat.capAmount);
           if (cap !== undefined) cat.capAmount = cap; else delete cat.capAmount;
+          /* The frozen measure lists a share link writes — a goal's account
+             set carried as plain ids so the recipient measures the same pot.
+             Dangling ids drop, and an emptied list is deleted outright:
+             absent falls back to the row's own end, which is the honest
+             degrade. */
+          for (const k of ['thresholdAccounts', 'capAccounts']) {
+            if (!Array.isArray(cat[k])) { delete cat[k]; continue; }
+            cat[k] = cat[k].filter(id => acctIds.has(id));
+            if (!cat[k].length) delete cat[k];
+          }
         } else {
           delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
           delete cat.capGoalId; delete cat.capAmount;
+          delete cat.thresholdAccounts; delete cat.capAccounts;
         }
         /* Whose row it is — a second earner's paycheck, tagged so take-home
            can be read per person. Only ever a label; the engine sums the
@@ -2408,12 +2419,12 @@ function coerceShape(data) {
       for (const cat of yr.categories) {
         if (cat.rule !== 'overflow') continue;
         if (cat.goalId !== undefined && !goalIds.has(cat.goalId)) delete cat.goalId;
-        if (cat.goalId !== undefined) delete cat.threshold;
+        if (cat.goalId !== undefined) { delete cat.threshold; delete cat.thresholdAccounts; }
         /* The destination cap follows the same discipline: goal wins, a
            dangling goal drops, and absent means no cap at all. */
         if (cat.capGoalId !== undefined && !goalIds.has(cat.capGoalId))
           delete cat.capGoalId;
-        if (cat.capGoalId !== undefined) delete cat.capAmount;
+        if (cat.capGoalId !== undefined) { delete cat.capAmount; delete cat.capAccounts; }
       }
     }
   }
@@ -3568,26 +3579,72 @@ function resolvePaychecks(yr, months, prior) {
   return out;
 }
 
-/* Orders the overflow rows so a sweep's arrival is seen by any row watching
-   the account it lands in — Kahn's walk over the account ids, edges running
-   overflowFrom → transferTo. Rows sharing a source keep category-list order,
-   so a later row sees the source already drained by the earlier one. A row
-   whose source never reaches in-degree 0 sits in (or is fed only from) a
-   cycle: a loop has no answer, so those rows are REFUSED — blank every month,
-   deterministically, rather than whichever figure an iteration happened to
-   stop on. A row missing either end (or naming the same account twice) is no
-   edge at all: it is misconfigured, not refused — also blank, but the cell
-   editor gives it a different warning. Pure, computed once per year. */
-function overflowOrder(categories) {
+/* Which balances a sweep row MEASURES. A goal that adds up several accounts
+   is the reader's own statement of where a pot really lives — an emergency
+   fund spread over cash and two checking accounts — so a threshold tied to
+   that goal watches the SUM of those balances, not the one account the
+   transfer happens to leave; the transfer itself still moves between
+   overflowFrom and transferTo, and the measure decides only when and how
+   much. A goal with no accounts falls back to the row's own end (the target
+   is then just a figure), a manual threshold always measures the row's own
+   end, and `thresholdAccounts`/`capAccounts` are how a share link freezes a
+   goal's list so the recipient measures the same pot without the goal
+   travelling. Pure; returns null capMeasure when the row has no cap. */
+function overflowMeasure(cat, goals) {
+  const g = cat.goalId && (goals || []).find(x => x.id === cat.goalId);
+  const m = g && Array.isArray(g.accounts) && g.accounts.length ? g.accounts
+    : Array.isArray(cat.thresholdAccounts) && cat.thresholdAccounts.length
+      ? cat.thresholdAccounts
+      : cat.overflowFrom ? [cat.overflowFrom] : [];
+  const cg = cat.capGoalId && (goals || []).find(x => x.id === cat.capGoalId);
+  const hasCap = !!cg || typeof cat.capAmount === 'number';
+  const c = !hasCap ? null
+    : cg && Array.isArray(cg.accounts) && cg.accounts.length ? cg.accounts
+    : Array.isArray(cat.capAccounts) && cat.capAccounts.length
+      ? cat.capAccounts
+      : cat.transferTo ? [cat.transferTo] : [];
+  return { measure: [...new Set(m)], capMeasure: c ? [...new Set(c)] : null };
+}
+
+/* Orders the overflow rows so a sweep's arrival is seen by any row whose
+   MEASURE includes the account it lands in — Kahn's walk over the account
+   ids, with edges from every account a row DRAINS AGAINST (its source and
+   its threshold's measured set) to its destination. Rows sharing the same
+   reads keep category-list order, so a later row sees the source already
+   drained by the earlier one.
+   The CAP's measured set is deliberately NOT an ordering input: a cap is a
+   stopping condition checked in ROW order — the list is the reader's own
+   transfer priority, "fill this first, the rest goes below" — and making a
+   row wait for arrivals into its cap's pot would run the catch-all before
+   the capped row it is supposed to follow whenever the catch-all's
+   destination sits inside that pot. So a row below can still pour into a
+   pot a row above capped against; the cap bound at the moment its own row
+   ran, which is what a priority list means.
+   A row draining against any account that never reaches in-degree 0 sits in
+   (or is fed only from) a cycle: a loop has no answer, so those rows are
+   REFUSED — blank every month, deterministically, rather than whichever
+   figure an iteration happened to stop on. A row missing either end (or
+   naming the same account twice) is no edge at all: it is misconfigured,
+   not refused — also blank, but the cell editor gives it a different
+   warning. Pure, computed once per year. */
+function overflowOrder(categories, goals) {
   const cats = categories || [];
   const edges = cats.filter(c => c.rule === 'overflow'
     && c.overflowFrom && c.transferTo && c.overflowFrom !== c.transferTo);
-  const indeg = {}, outs = {};
+  const insOf = new Map();
   for (const c of edges) {
-    indeg[c.overflowFrom] = indeg[c.overflowFrom] || 0;
-    indeg[c.transferTo] = (indeg[c.transferTo] || 0) + 1;
-    (outs[c.overflowFrom] = outs[c.overflowFrom] || []).push(c.transferTo);
+    const { measure } = overflowMeasure(c, goals);
+    const ins = new Set([c.overflowFrom, ...measure]);
+    ins.delete(c.transferTo);   // no self-edges
+    insOf.set(c, [...ins]);
   }
+  const indeg = {}, outs = {};
+  for (const c of edges)
+    for (const n of insOf.get(c)) {
+      indeg[n] = indeg[n] || 0;
+      indeg[c.transferTo] = (indeg[c.transferTo] || 0) + 1;
+      (outs[n] = outs[n] || []).push(c.transferTo);
+    }
   const queue = Object.keys(indeg).filter(id => indeg[id] === 0);
   const pos = {};
   let i = 0;
@@ -3596,11 +3653,15 @@ function overflowOrder(categories) {
     pos[id] = i++;
     for (const t of outs[id] || []) if (--indeg[t] === 0) queue.push(t);
   }
-  const order = edges.filter(c => pos[c.overflowFrom] !== undefined)
-    .sort((a, b) => pos[a.overflowFrom] - pos[b.overflowFrom]
-                    || cats.indexOf(a) - cats.indexOf(b));
-  const refused = new Set(edges.filter(c => pos[c.overflowFrom] === undefined)
-                               .map(c => c.id));
+  /* A row runs once every account it reads is settled — its sort key is the
+     LATEST of them, which is what puts a row measuring a swept-into account
+     after the row that fills it. */
+  const keyOf = (c) => Math.max(...insOf.get(c).map(n => pos[n]));
+  const order = edges.filter(c => insOf.get(c).every(n => pos[n] !== undefined))
+    .sort((a, b) => keyOf(a) - keyOf(b) || cats.indexOf(a) - cats.indexOf(b));
+  const refused = new Set(edges
+    .filter(c => insOf.get(c).some(n => pos[n] === undefined))
+    .map(c => c.id));
   return { order, refused };
 }
 
@@ -3632,7 +3693,7 @@ function computeYear(st, yearKey, prior) {
   const ctx = { st, yr, months, resolved, balances, prior, paychecks };
   const live = yr.model === 'live';
   const running = {};   // account id -> tracking has begun
-  const overflow = overflowOrder(yr.categories);   // once — rows don't change mid-year
+  const overflow = overflowOrder(yr.categories, st.goals);   // once — rows don't change mid-year
 
   for (const m of months) {
     /* 1 · categories */
@@ -3781,25 +3842,44 @@ function computeYear(st, yearKey, prior) {
         const threshold = goal ? (goal.target || 0)
           : typeof cat.threshold === 'number' ? cat.threshold : undefined;
         if (threshold === undefined) continue;           // misconfigured — blank
-        let amount = round2(Math.max(0, endOf(src) - threshold));
-        /* An optional DESTINATION cap: fill the far account only up to a
-           goal's target (read live, like the threshold) or a typed figure,
-           and leave the rest of the overflow where it is. This is what lets
-           two rows draw from ONE account the way real transfers are made —
-           the first fills Mid-term until it reaches its goal, the second
-           takes whatever is left to Long-term; rows sharing a source resolve
-           in row order, each seeing the source already drained by the one
+        /* What the threshold is measured AGAINST: the goal's own account set
+           when it names one — an emergency fund living across cash and two
+           checking accounts is over its target when those balances TOGETHER
+           are — else the source account alone. Accounts not running this
+           month contribute nothing, the computeGoals rule. Two guards keep
+           the arithmetic able to land: the source must be IN the measured
+           set (draining an outside account never brings the pot down to its
+           target — each month would sweep the same excess again, for ever)
+           and the destination must be OUT of it (filling a counted account
+           moves nothing at all). Either way round the row is misconfigured
+           and stays blank; the cell editor says which. */
+        const { measure, capMeasure } = overflowMeasure(cat, st.goals);
+        const sumEnd = (ids) =>
+          ids.reduce((s, id) => running[id] ? s + endOf(id) : s, 0);
+        if (!measure.includes(src) || measure.includes(dst)) continue;
+        let amount = round2(Math.max(0, sumEnd(measure) - threshold));
+        /* An optional DESTINATION cap: fill the far side only up to a goal's
+           target (read live, like the threshold) or a typed figure, and
+           leave the rest of the overflow where it is. This is what lets two
+           rows draw from ONE account the way real transfers are made — the
+           first fills Mid-term until it reaches its goal, the second takes
+           whatever is left to Long-term; rows sharing a source resolve in
+           row order, each seeing the source already drained by the one
            before. A full destination is a blank month for this row, not a
            $0 transfer, and one that has dipped under its goal refills before
-           anything flows past it. Measured against the destination's own
-           end-of-month figure (its interest included), so a capped account's
-           growth never gets swept back out by the cap. */
+           anything flows past it. The room is measured against the cap
+           goal's own account set (or the destination alone), end-of-month
+           figures with interest included, so a capped account's growth never
+           gets swept back out by the cap — and the mirror guards apply: the
+           destination must be counted by the cap, the source must not be. */
         const capGoal = cat.capGoalId
           ? (st.goals || []).find(g => g.id === cat.capGoalId) : null;
         const cap = capGoal ? (capGoal.target || 0)
           : typeof cat.capAmount === 'number' ? cat.capAmount : undefined;
-        if (cap !== undefined)
-          amount = Math.min(amount, round2(Math.max(0, cap - endOf(dst))));
+        if (cap !== undefined) {
+          if (!capMeasure.includes(dst) || capMeasure.includes(src)) continue;
+          amount = Math.min(amount, round2(Math.max(0, cap - sumEnd(capMeasure))));
+        }
         if (!amount) continue;
         resolved[key] = { v: -amount, kind: 'auto' };
         sweepOut[src] = (sweepOut[src] || 0) + amount;
@@ -3958,7 +4038,10 @@ const HELP = {
   overflowRule: { title: 'Sweeping an Account’s Overflow',
     body: 'A row on the overflow rule watches one account and moves whatever it would end '
       + 'the month holding above a threshold — a goal\'s target, read live, or a dollar '
-      + 'amount — into another account. It is worked out at the END of the month, after '
+      + 'amount — into another account. A goal that adds up several accounts is measured '
+      + 'across all of them: the sweep fires when those balances TOGETHER would end the '
+      + 'month above the target, and the transfer still leaves the one watched account, '
+      + 'which must be among the ones the goal counts. It is worked out at the END of the month, after '
       + 'the account\'s interest and dividends, so the account lands exactly on the '
       + 'threshold; the money arrives at the destination at month end too and earns '
       + 'nothing there until the month after. A month that ends under the threshold stays '
@@ -5258,8 +5341,20 @@ function ruleDesc(cat, st = state) {
     const cg = cat.capGoalId && (st.goals || []).find(x => x.id === cat.capGoalId);
     const upTo = cg ? `${cg.name || cg.id} (${fmtMoney(cg.target || 0)})`
       : typeof cat.capAmount === 'number' ? fmtMoney(cat.capAmount) : null;
-    return `whatever ${src.name} ends the month above ${above}, moved to ${dst.name}${
-      upTo === null ? '' : ` — only until it holds ${upTo}`}`;
+    /* A goal that adds up several accounts is measured across the lot, and
+       the sentence must say so — "whatever Cash ends the month above" would
+       be describing arithmetic the row doesn't do. */
+    const grouped = g && Array.isArray(g.accounts) && g.accounts.length > 1;
+    const capGrouped = cg && Array.isArray(cg.accounts) && cg.accounts.length > 1;
+    const head = grouped
+      ? `whatever the ${g.name || g.id} accounts together end the month above ${
+          fmtMoney(g.target || 0)}, moved from ${src.name} to ${dst.name}`
+      : `whatever ${src.name} ends the month above ${above}, moved to ${dst.name}`;
+    return head + (upTo === null ? ''
+      : capGrouped
+        ? ` — only until the ${cg.name || cg.id} accounts together hold ${
+            fmtMoney(cg.target || 0)}`
+        : ` — only until it holds ${upTo}`);
   }
   return RULE_LABEL[r] || RULE_LABEL.none;
 }
@@ -11088,7 +11183,10 @@ const EDITORS = {
           ...(state.goals || []).map(g => [g.id,
             `${g.name || g.id} \u2014 ${fmtMoney(g.target || 0)}`])],
         showIf: (v) => v.rule === 'overflow',
-        hint: 'Reads the goal\u2019s target live \u2014 edit the goal and this row moves with it.' },
+        hint: 'Reads the goal\u2019s target live \u2014 edit the goal and this row moves with it. '
+            + 'A goal that adds up several accounts is measured across ALL of them; '
+            + 'the transfer still leaves the watched account, which must be one the '
+            + 'goal counts.' },
       { key: 'threshold', label: 'Above this amount', type: 'money',
         showIf: (v) => v.rule === 'overflow' && !v.goalId },
       { key: 'overflowTo', label: 'Sweeps into', type: 'select',
@@ -11111,7 +11209,9 @@ const EDITORS = {
         showIf: (v) => v.rule === 'overflow',
         hint: 'Once the destination would end the month at this figure, the row stops '
             + 'and the rest of the overflow stays put — for the next sweep row, if '
-            + 'there is one below it.' },
+            + 'there is one below it. A cap goal that adds up several accounts is '
+            + 'full when they TOGETHER reach its target; it must count the account '
+            + 'this row fills.' },
       { key: 'capAmount', label: 'Up to this amount', type: 'money',
         showIf: (v) => v.rule === 'overflow' && v.capGoalId === 'amt' },
       /* Behaviour is two questions, not one long list: what the money does,
@@ -11213,6 +11313,9 @@ const EDITORS = {
                    && v.capAmount !== null && v.capAmount !== undefined) {
             cat.capAmount = v.capAmount; delete cat.capGoalId;
           } else { delete cat.capGoalId; delete cat.capAmount; }
+          /* The frozen measure lists are a share link's artifact, not
+             something this dialog edits — what you saved is what it showed. */
+          delete cat.thresholdAccounts; delete cat.capAccounts;
         } else if (role === 'normal' || !target) {
           cat.role = 'normal'; delete cat.transferTo; delete cat.creditTiming;
           delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
@@ -13851,10 +13954,34 @@ function openCellEditor(yearKey, type, id, m) {
         + andList(overflowMissing) + (overflowMissing.length > 1 ? ' aren\'t' : ' isn\'t')
         + ' set — open Row settings.';
     else if (future && rule === 'overflow'
-             && overflowOrder(yr.categories).refused.has(cat.id))
+             && overflowOrder(yr.categories, state.goals).refused.has(cat.id))
       hint.textContent = '⚠ This row is part of a loop — overflow rows sweep into '
         + 'each other\'s accounts, and a loop has no answer, so they all stay '
         + 'blank. Change one row\'s destination.';
+    /* A goal that adds up several accounts is measured across the lot, and
+       that only works when the transfer can move the measured sum: money must
+       leave a counted account and land in an uncounted one (the mirror for
+       the cap). A row set up the other way round could sweep for ever and
+       never land the goal on its target, so it stays blank — and says why. */
+    else if (future && rule === 'overflow'
+             && !overflowMeasure(cat, state.goals).measure.includes(cat.overflowFrom))
+      hint.textContent = '⚠ The goal this row reads doesn\'t count '
+        + accountName(state, cat.overflowFrom) + ', so sweeping from it could '
+        + 'never bring the goal down to its target — the row stays blank. Tick '
+        + 'the account in the goal, or watch a different account.';
+    else if (future && rule === 'overflow'
+             && overflowMeasure(cat, state.goals).measure.includes(cat.transferTo))
+      hint.textContent = '⚠ This row sweeps into an account the goal it reads '
+        + 'counts — moving money there changes nothing the goal can see, so the '
+        + 'row stays blank. Send it to an account outside the goal.';
+    else if (future && rule === 'overflow'
+             && overflowMeasure(cat, state.goals).capMeasure
+             && (!overflowMeasure(cat, state.goals).capMeasure.includes(cat.transferTo)
+                 || overflowMeasure(cat, state.goals).capMeasure.includes(cat.overflowFrom)))
+      hint.textContent = '⚠ The cap goal has to count the account this row fills '
+        + '(and not the one it drains), or filling could never reach the cap — '
+        + 'the row stays blank. Fix the cap in Row settings, or tick the right '
+        + 'accounts in that goal.';
     else if (future && rule === 'paycheck' && !cat.perCheck)
       hint.textContent = '⚠ This row multiplies a per-check amount by the month\'s '
         + 'paychecks, and the per-check amount is $0 — open Row settings to set it '
@@ -15276,15 +15403,27 @@ function freezeOverflowThresholds(data, goals) {
       if (cat.goalId !== undefined && !kept.has(cat.goalId)) {
         const g = (goals || []).find(x => x.id === cat.goalId);
         /* A goalId the sender doesn't hold either was already a blank row at
-           home — deleted, so the recipient's blank matches the sender's. */
-        if (g) cat.threshold = round2(g.target || 0); else delete cat.threshold;
+           home — deleted, so the recipient's blank matches the sender's. The
+           goal's ACCOUNT SET freezes beside the target: a multi-account goal
+           is measured across the lot, and a frozen figure measured against
+           the wrong pot would change the recipient's balances. Plain ids —
+           the accounts themselves already travel with a budget link. */
+        if (g) {
+          cat.threshold = round2(g.target || 0);
+          if (Array.isArray(g.accounts) && g.accounts.length)
+            cat.thresholdAccounts = [...g.accounts];
+        } else delete cat.threshold;
         delete cat.goalId;
       }
       /* The destination cap freezes the same way — an unfrozen dangling cap
          would sweep PAST the goal on the recipient's copy, changing figures. */
       if (cat.capGoalId !== undefined && !kept.has(cat.capGoalId)) {
         const g = (goals || []).find(x => x.id === cat.capGoalId);
-        if (g) cat.capAmount = round2(g.target || 0); else delete cat.capAmount;
+        if (g) {
+          cat.capAmount = round2(g.target || 0);
+          if (Array.isArray(g.accounts) && g.accounts.length)
+            cat.capAccounts = [...g.accounts];
+        } else delete cat.capAmount;
         delete cat.capGoalId;
       }
     }
@@ -15846,7 +15985,7 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its
      prose over a fixture). */
-  overflowOrder, sweepArrivals, freezeOverflowThresholds, ruleDesc,
+  overflowOrder, overflowMeasure, sweepArrivals, freezeOverflowThresholds, ruleDesc,
   KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
   coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
