@@ -6412,6 +6412,180 @@ t('engine matches the spreadsheet where the import files exist', () => {
     (bad.length > 8 ? `\n…and ${bad.length - 8} more` : ''));
 });
 
+/* ── Offline: the service worker ────────────────────────────────────────────
+   These read sw.js as TEXT rather than exercising a live worker, and that is
+   the point rather than a shortcut. The suite runs the app in a hidden iframe
+   and the registration is frame-guarded, so there is no worker here to poke —
+   deliberately, because a suite that installed one would start testing whatever
+   code that worker had cached instead of the files on disk.
+
+   What is worth asserting is therefore the SHAPE of the thing: that its cache
+   list is only ever public files, and that it stays small and same-origin.
+   Cache Storage is origin-wide, shared with Sprint Velocity and Flow Metrics,
+   so "nothing private is ever cached" is the single promise holding that up. */
+group('Offline — the service worker');
+
+let SW_SRC = null, KILL_SRC = null, APP_SRC = null;
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+t('sw.js and its kill switch are both present', async () => {
+  const [a, b, c] = await Promise.all([
+    fetch('sw.js'), fetch('sw-kill.js'), fetch('index.html')]);
+  ok(a.ok, 'sw.js is missing');
+  ok(b.ok, 'sw-kill.js is missing — the escape hatch has to exist BEFORE it is needed');
+  ok(c.ok, 'index.html is missing');
+  SW_SRC = await a.text(); KILL_SRC = await b.text(); APP_SRC = await c.text();
+});
+
+t('the cache list holds only files that are already public', () => {
+  const m = SW_SRC.match(/const SHELL = \[([\s\S]*?)\]/);
+  ok(m, 'could not find the SHELL list in sw.js');
+  const shell = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  /* Exact equality, not "contains". A new entry has to be added here too, which
+     is the moment to ask whether the file is genuinely public. */
+  eq(shell.slice().sort(), [
+    './', 'apple-touch-icon.png', 'chart.min.js', 'favicon.ico', 'icon-192.png',
+    'icon-512-maskable.png', 'icon-512.png', 'manifest.webmanifest',
+    'privacy.html', 'theme.css'
+  ], 'the offline shell list changed');
+});
+
+t('nothing private can reach the cache', () => {
+  const m = SW_SRC.match(/const SHELL = \[([\s\S]*?)\]/);
+  const shell = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  /* The specific things that must never be cached: the gitignored real-data
+     files, the suite itself (which boots the app), and the repo's own notes. */
+  const banned = [/\.json$/, /^tests\.html$/, /\.py$/, /CLAUDE/i, /README/i, /data/i];
+  for (const entry of shell)
+    for (const pat of banned)
+      ok(!pat.test(entry), `"${entry}" is on the shell list but must never be cached`);
+});
+
+t('the worker touches nothing cross-origin', () => {
+  const code = stripComments(SW_SRC);
+  ok(!/https?:\/\//.test(code),
+    'sw.js names an off-origin URL in executable code — it must only ever see this origin');
+  /* No CSP applies to a worker on Pages, so these are not merely untidy here. */
+  for (const bad of ['eval(', 'importScripts(', 'new Function('])
+    ok(!code.includes(bad), `sw.js uses ${bad} — it runs with no CSP, so it must not`);
+});
+
+t('the worker deletes only its own caches', () => {
+  const code = stripComments(SW_SRC);
+  /* Cache Storage is origin-wide: an unguarded "delete every cache that is not
+     mine" on activate would wipe a future Sprint Velocity or Flow Metrics one. */
+  ok(/startsWith\(PREFIX\)/.test(code) || /startsWith\('fin-shell-'\)/.test(code),
+    'the activate handler must guard caches.delete with this app\'s prefix');
+});
+
+t('the worker is network-first, so cached code needs a failed network', () => {
+  const code = stripComments(SW_SRC);
+  ok(/Promise\.race/.test(code) && /cache\.match/.test(code),
+    'expected the network-first race with a cache fallback');
+  /* The tell for cache-first is answering from the cache before the network is
+     tried at all. If that ever appears, the staleness argument has to be had
+     again — see the reasoning at the top of sw.js. */
+  ok(!/caches\.match\(req\)\s*\.then\(\s*\(?r\)?\s*=>\s*r\s*\|\|/.test(code),
+    'this looks cache-first — the whole design rests on network-first');
+});
+
+t('a missing shell file can be repaired without a new worker version', () => {
+  const code = stripComments(SW_SRC);
+  /* install fires ONCE per script version, so a cache evicted later would never
+     be rebuilt if install were the only thing that filled it. */
+  ok(/addEventListener\(\s*'message'/.test(code) && /'shell-check'/.test(code),
+    'the worker must accept a shell-check message so the page can repair the cache');
+  ok(/if \(reg\.active\) reg\.active\.postMessage\(\{ type: 'shell-check' \}\)/.test(APP_SRC),
+    'the page must ask for a shell check on load');
+  /* addAll is all-or-nothing: one 404 and there is no offline at all, silently. */
+  ok(!/addAll/.test(code),
+    'addAll rejects the whole precache on a single 404 — fetch entries one by one');
+  ok(/e\.waitUntil\(topUp\(\)/.test(code), 'install must fill the cache via topUp');
+});
+
+t('the message handler accepts only its own signal', () => {
+  const code = stripComments(SW_SRC);
+  /* The worker has no CSP and postMessage is reachable from any page on the
+     shared origin, so the handler must ignore everything but the one type and
+     must never take a URL or a cache name out of the message. */
+  ok(/e\.data\.type !== 'shell-check'\) return;/.test(code),
+    'the message handler must reject anything but shell-check');
+  ok(!/e\.data\.(url|urls|path|cache|key)/.test(code),
+    'the worker must never read a URL or cache name out of a message');
+});
+
+t('the kill switch stays a pure uninstaller', () => {
+  const code = stripComments(KILL_SRC);
+  ok(/unregister\(\)/.test(code), 'sw-kill.js must unregister itself');
+  ok(!/addEventListener\(\s*'fetch'/.test(code),
+    'sw-kill.js must not intercept requests — inert is the entire point');
+  ok(!/cache\.put|addAll/.test(code), 'sw-kill.js must never cache anything');
+  ok(/startsWith\('fin-shell-'\)/.test(code),
+    'sw-kill.js must clear only this app\'s caches, never a sibling\'s');
+});
+
+t('the page declares worker-src and registration is frame-guarded', () => {
+  const csp = APP_SRC.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/);
+  ok(csp, 'no CSP meta tag found');
+  ok(/worker-src 'self'/.test(csp[1]),
+    "CSP must spell out worker-src 'self' rather than lean on the fallback chain");
+  ok(!/worker-src[^;]*https?:/.test(csp[1]),
+    'worker-src must not admit any off-origin host');
+  ok(/window\.top !== window\.self/.test(APP_SRC),
+    'the registration must skip frames, or this suite would install a worker on itself');
+  ok(/if \(window\.finViewOnly\) return;/.test(APP_SRC),
+    'a shared view must not install a worker in the reader\'s browser');
+});
+
+/* ── Offline: a plan from the future ────────────────────────────────────────
+   The other half of the offline change. Cached code can be a build behind, and
+   sync can hand that build a plan a newer one wrote. */
+group('Offline — a plan from a newer build');
+
+t('migrate cannot help with a newer schema, which is why the guard exists', () => {
+  /* Every gate in migrate() is a `<`, so a future plan passes straight through
+     untouched — no error, no downgrade, just fields this build has never heard
+     of being rendered by code that predates them. This test is here to fail
+     loudly if someone ever "fixes" migrate to clamp the number instead, which
+     would hide the problem rather than catch it. */
+  const future = H.migrate({ schema: 99 });
+  eq(future.schema, 99, 'migrate must leave a newer schema alone, not clamp it');
+});
+
+t('a blank plan is stamped with the schema this build understands', () => {
+  eq(H.blankState().schema, H.SCHEMA);
+});
+
+t('the halt fires above the current schema and not at or below it', () => {
+  /* The comparison the guard makes, asserted directly — an off-by-one here
+     would either halt on every ordinary load or never halt at all. */
+  const halts = (s) => (s || 1) > H.SCHEMA;
+  ok(!halts(H.SCHEMA), 'must not halt on a plan this build wrote');
+  ok(!halts(H.SCHEMA - 1), 'must not halt on an older plan — that is migrate\'s job');
+  ok(!halts(undefined), 'a plan with no schema at all is old, not new');
+  ok(halts(H.SCHEMA + 1), 'must halt on a plan from a newer build');
+});
+
+t('the halt refuses to write and takes the sync module down with it', () => {
+  /* It reuses finViewOnly rather than inventing a second flag, so the promise
+     is only as good as that flag still being the write chokepoint. */
+  ok(/window\.finViewOnly = true;/.test(APP_SRC),
+    'haltForNewerData must set finViewOnly, the existing no-write guard');
+  ok(/!window\.finViewOnly && !inTestHarness/.test(APP_SRC),
+    'the sync module must still refuse to start under finViewOnly');
+  ok(/haltForNewerData\(peek\.schema\)/.test(APP_SRC), 'load() must call the guard');
+  /* Outside the try whose catch returns blankState(), or that catch swallows the
+     halt and hands back a blank plan the app would then save over the real one.
+     Anchored on the catch itself rather than on `try {`, because the guard's own
+     one-line try for the peek would otherwise match first. */
+  const guardAt = APP_SRC.indexOf('haltForNewerData(peek.schema)');
+  const tryAt = APP_SRC.indexOf('try {\n    const raw = localStorage.getItem(STORAGE_KEY);');
+  ok(guardAt > -1, 'load() must call haltForNewerData');
+  ok(tryAt > -1, "load()'s main try block has moved — recheck this test");
+  ok(guardAt < tryAt,
+    'the guard must run BEFORE the try whose catch returns a blank state');
+});
+
 /* ── Runner ───────────────────────────────────────────────────────────────── */
 window.addEventListener('load', async () => {
   /* No iframe means the localhost gate below refused; its message is showing. */

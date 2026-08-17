@@ -24,8 +24,17 @@
      manifest.webmanifest, is refused, and installing silently degrades to a
      plain shortcut with the wrong name and icon. It permits one same-origin
      JSON file and nothing else — a manifest executes nothing and reads no
-     storage, which is why this is the whole security cost of installing. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://api.github.com https://api.twelvedata.com; manifest-src 'self'; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
+     storage, which is why this is the whole security cost of installing.
+     worker-src is 'self' for sw.js (offline). It is spelled out rather than
+     left to resolve through the worker-src → child-src → script-src fallback
+     chain, which would reach 'self' anyway but only by accident of ordering —
+     and it deliberately does NOT inherit script-src's gstatic/accounts hosts,
+     so no third-party script can ever be installed as a resident worker on
+     this origin. Note the limit of this line: it governs REGISTERING the
+     worker, not the worker's own execution. A worker takes its policy from its
+     script's HTTP response headers, and Pages cannot set headers, so sw.js
+     itself runs with no CSP — which is why it is kept tiny and same-origin. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://api.github.com https://api.twelvedata.com; manifest-src 'self'; worker-src 'self'; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Financial Plan</title>
 <meta name="description" content="A personal financial planner: monthly budget with projections, savings goals, retirement, vacations and giving.">
@@ -1436,6 +1445,12 @@ const PROPERTY_KIND_LABEL = Object.fromEntries(PROPERTY_KINDS);
 const TAX_JURISDICTIONS = ['federal', 'state'];
 
 const STORAGE_KEY = 'fin-state';
+/* The newest schema this build of the app understands, and the version
+   `blankState` stamps. `migrate` walks a plan UP to it. Reading it back out
+   here is what lets `load` spot the opposite case — a plan from the FUTURE,
+   saved by a newer build — which migrate cannot help with and must not guess
+   at. Bump it in the same commit as the migration step that earns it. */
+const SCHEMA = 5;
 const UPDATED_KEY = 'fin-updated';   // written by save(); the hook a future sync layer keys off
 const THEME_KEY   = 'fin-theme';
 /* How big this device draws the app. Beside the theme rather than in the state
@@ -1942,7 +1957,7 @@ const retKind = (a) => a.kind === 'roth' ? 'roth' : 'traditional';
 
 function blankState() {
   return {
-    schema: 5,
+    schema: SCHEMA,
     settings: {
       midTermRateAnnual: 0.03,   // dividend estimate: rate/12 × prior (cash+mid)
       ptoAllowance: 32,
@@ -3233,6 +3248,27 @@ window.finViewOnly = viewOnly;
 let state = load();
 
 function load() {
+  /* ── The plan-from-the-future check ───────────────────────────────────────
+     `migrate` walks an OLD plan up to the current schema. It has no answer for
+     the reverse — a plan saved by a newer build — because every one of its
+     gates is a `<` and simply won't fire, so the newer plan sails through and
+     is rendered by code that predates the fields in it. Silently misreading
+     figures is the worst outcome this app has, so it stops instead.
+
+     This became reachable the day the service worker landed: offline you can be
+     running yesterday's cached code, and sync can hand you a plan today's build
+     wrote on another device. Network-first caching makes that narrow; this
+     makes it safe.
+
+     Deliberately OUTSIDE the try below. That catch returns blankState(), which
+     is right for corrupt JSON and catastrophic for this case — a blank state
+     that the app then SAVES would overwrite the good plan with nothing. */
+  let peek = null;
+  try { peek = safeParse(localStorage.getItem(STORAGE_KEY) || 'null'); }
+  catch (e) { peek = null; }   // unparseable is the try's problem, not this one
+  if (peek && typeof peek === 'object' && (peek.schema || 1) > SCHEMA) {
+    haltForNewerData(peek.schema);
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return blankState();
@@ -3246,6 +3282,84 @@ function load() {
     console.warn('Could not read saved data', e);
     return blankState();
   }
+}
+
+/* Stop the app dead, with the plan untouched, and say why.
+   Called only from load(), only for a plan written by a newer build. It does
+   three things in a deliberate order:
+
+   1. Sets finViewOnly, which is the EXISTING, tested chokepoint — save() is
+      already a no-op under it and the sync module already refuses to start.
+      Reusing the share-view guard beats inventing a second halt flag that
+      every future write path would have to remember to check.
+   2. Draws the message with textContent, never innerHTML. The schema number
+      comes out of localStorage, and data from storage is data, not markup.
+   3. THROWS, which aborts the rest of this script block, so nothing after
+      `let state = load()` ever initialises. Silence is the point: a half-booted
+      app with handlers attached is one stray click away from a save. */
+function haltForNewerData(found) {
+  window.finViewOnly = true;
+  const wrap = document.createElement('div');
+  wrap.setAttribute('style', 'position:fixed;inset:0;z-index:99999;display:flex;'
+    + 'align-items:center;justify-content:center;padding:24px;'
+    + 'background:var(--bg,#0a0e1a);color:var(--text-primary,#e7eaf6);'
+    + 'font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif');
+  const card = document.createElement('div');
+  card.setAttribute('style', 'max-width:34em;border:1px solid var(--border,#262f4a);'
+    + 'border-radius:12px;padding:24px 26px;background:var(--surface,#121829)');
+  const h = document.createElement('h1');
+  h.setAttribute('style', 'margin:0 0 12px;font-size:20px');
+  h.textContent = 'This Plan Was Saved by a Newer Version';
+  const p1 = document.createElement('p');
+  p1.setAttribute('style', 'margin:0 0 12px');
+  p1.textContent = 'Your saved plan uses data format ' + String(found)
+    + ', and the copy of the app running here only understands ' + String(SCHEMA)
+    + '. Reading it with this older code could misread your figures, so it has '
+    + 'stopped instead.';
+  const p2 = document.createElement('p');
+  p2.setAttribute('style', 'margin:0 0 12px');
+  p2.textContent = 'Nothing has been changed or deleted — your plan is exactly '
+    + 'as you left it. This usually means another device saved it after an '
+    + 'update, and this one is still running the older version from its offline '
+    + 'cache.';
+  const p3 = document.createElement('p');
+  p3.setAttribute('style', 'margin:0 0 18px;color:var(--text-secondary,#aab2d0)');
+  p3.textContent = 'Connect to the internet and reload to get the current version.';
+  const btn = document.createElement('button');
+  btn.setAttribute('style', 'font:inherit;font-weight:600;padding:9px 18px;'
+    + 'border:0;border-radius:8px;cursor:pointer;'
+    + 'background:var(--btn-bg,#e7eaf6);color:var(--btn-text,#0a0e1a)');
+  btn.textContent = 'Reload';
+  /* A plain reload can be answered by the worker out of its cache — the same
+     stale code that got us here — and `location.reload(true)` does NOT fix
+     that: the force-reload argument is non-standard and today's browsers
+     ignore it. So take the worker out of the loop properly first, then reload.
+     Uninstalling it is safe to do here and needs no undoing: the page
+     re-registers a fresh one on the next successful load, which by then is the
+     current build. Deleting only the `fin-shell-` caches keeps this off the
+     sibling apps' storage, the same rule the worker itself follows. */
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Reloading…';
+    try {
+      if (navigator.serviceWorker) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      }
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((k) => k.startsWith('fin-shell-'))
+          .map((k) => caches.delete(k)));
+      }
+    } catch (e) { /* nothing to clear, or storage refused — reload anyway */ }
+    location.reload();
+  });
+  card.append(h, p1, p2, p3, btn);
+  wrap.appendChild(card);
+  const attach = () => document.body.appendChild(wrap);
+  if (document.body) attach();
+  else document.addEventListener('DOMContentLoaded', attach, { once: true });
+  throw new Error('fin: plan schema ' + found + ' is newer than this build (' + SCHEMA + ')');
 }
 
 /* ── Undo ───────────────────────────────────────────────────────────────────
@@ -15949,7 +16063,7 @@ booted = true;
 
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
-window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
+window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
   afterRaise, bonusBase, bonusShare, yearFlows, yearSpending, summaryRowIsFlow, notesOfYear,
   givenOutOfPocket, grossIncome, takeHomePay, givingStats, givingCeiling, isPayRow,
   hasNote,
@@ -16481,6 +16595,52 @@ addEventListener('pagehide', flushPush);
         });
       })
       .catch(function(){list.innerHTML='<li>Changelog unavailable right now (offline?).</li>';});
+  });
+})();
+</script>
+<!-- ── Offline ────────────────────────────────────────────────────────────────
+     Registering sw.js is the whole of the offline feature on this side; the
+     strategy, the allowlist and the reasoning all live in sw.js, which is worth
+     reading before changing anything here.
+
+     Three guards, each earning its place:
+
+     • NOT IN A FRAME. tests.html boots the app in a hidden iframe, and a suite
+       run has no business installing a resident worker — nor picking up one
+       another run left behind, which is how a green suite starts lying about
+       which code it tested. Same reason the sync module checks for the harness.
+
+     • NOT IN A SHARED VIEW. A share link opens somebody else's browser. Caching
+       public files there would be harmless but it is still installing a resident
+       process on a stranger's machine to no benefit — a borrowed read of a plan
+       should leave nothing behind.
+
+     • AFTER LOAD. Registration competes with the app's own first paint
+       otherwise, and offline is worth nothing on the visit where you are online
+       anyway.
+
+     No `updatefound` prompt, deliberately. Under network-first there is nothing
+     to prompt about: the page you are reading came off the network, so it is
+     already current, and the worker only ever matters on a visit where the
+     network failed. -->
+<script>
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+  if (window.top !== window.self) return;
+  if (window.finViewOnly) return;
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js', { scope: './' })
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function (reg) {
+        /* Ask the worker to repair any missing shell file. The install event
+           that first filled the cache fires ONCE per script version, so if the
+           cache is later evicted nothing would ever rebuild it — offline would
+           quietly rot to "whatever the last visit happened to request". This
+           runs while we are demonstrably online, which is the only time the
+           repair can work. */
+        if (reg.active) reg.active.postMessage({ type: 'shell-check' });
+      })
+      .catch(function (e) { console.warn('Offline unavailable:', e); });
   });
 })();
 </script>

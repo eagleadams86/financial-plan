@@ -2487,15 +2487,66 @@ CSP. That is the whole feature; it adds no runtime code beyond one line in
   every sibling app.
 - **No `file_handlers`, `protocol_handlers` or `share_target`.** They deliver
   outside data into a page on an origin holding work figures. Nothing needs them.
-- **NO SERVICE WORKER, deliberately** — so the app does not open offline, and
-  that is the accepted cost. There are none anywhere in the family. A worker is
-  a resident process on the shared origin; its caches are ORIGIN-wide, not
-  per app, so this app's worker could read a future SV/TD one's; and a caching
-  bug serves stale code to an app whose data schema moves, which is the failure
-  mode this repo can least afford. (One structural comfort if it is ever
-  reconsidered: widening a worker's scope past its own directory needs the
-  `Service-Worker-Allowed` header, and GitHub Pages cannot set headers, so a
-  worker here could never reach the sibling apps.)
+- **There IS a service worker now (`sw.js`), and this app is the only one in the
+  family with one.** It was refused for a long time, and the three objections on
+  record were right to be made — what changed is that two of them turned out to
+  be answerable by design rather than by abstention. Recorded in full because
+  the next person to touch this needs the reasoning, not just the outcome:
+  - *"A resident process on the shared origin."* Bounded, in the end. A worker's
+    scope cannot exceed its own directory without the `Service-Worker-Allowed`
+    header, and GitHub Pages cannot send headers — so this one structurally
+    cannot see Sprint Velocity or Flow Metrics traffic. Locally, where the app
+    is served from the root, it does control `tests.html`; the allowlist is what
+    makes that harmless, not the scope.
+  - *"Caches are ORIGIN-wide, not per app."* True, and it does not go away — any
+    page on the origin can read this cache, and a future SV/TD worker could too.
+    The answer is the rule in `sw.js`: **only files that are already public in
+    this repo are ever cached.** Nothing in there is anything an attacker could
+    not read straight off GitHub. The plan stays in localStorage, which every
+    page on the origin could already reach, so the threat model does not move.
+    It cuts the other way too — `activate` must only ever delete caches with
+    this app's `fin-shell-` prefix, or it would wipe a sibling's.
+  - *"A caching bug serves stale code to an app whose data schema moves."* Still
+    the real risk, and the one the design is built around. **The worker is
+    network-first for everything**: the cache is a fallback for a network that
+    actually failed, never a first choice. You can only be served cached code
+    on a visit where the network did not answer. The braces to that belt is
+    `haltForNewerData` in index.html — if a plan turns out to carry a NEWER
+    schema than the running build knows, the app refuses to open it rather than
+    letting `migrate` (whose gates are all `<`) wave it through to be rendered
+    by code that predates its fields.
+- **The page's CSP does not apply to the worker.** A worker takes its policy
+  from the HTTP response headers of its own script, and Pages cannot set
+  headers, so `sw.js` runs with **no CSP at all**, permanently installed. That
+  is why it is tiny, has no `eval`/`importScripts`/dynamic import, and never
+  touches a cross-origin URL — and why the CSP now spells out `worker-src
+  'self'` instead of letting it resolve through the `worker-src → child-src →
+  script-src` fallback chain (which reaches `'self'` anyway, but only by
+  accident of ordering, and would otherwise inherit script-src's gstatic and
+  accounts.google.com hosts).
+- **`sw-kill.js` is the escape hatch, and it exists BEFORE it is needed.** A bad
+  page is fixed by pushing a new one; a bad worker is resident and can keep
+  serving itself. `cp sw-kill.js sw.js`, commit, push — every installed copy
+  then clears this app's caches, unregisters itself and reloads its windows, and
+  the app is back to being the ordinary online-only page it was before.
+- **Two traps found while building it, both of which fail silently:**
+  `cache.addAll` is all-or-nothing (one 404 rejects the whole precache, install
+  fails, and there is no offline at all while the app looks perfectly healthy
+  online); and **`install` fires once per script version**, so if the cache is
+  later evicted nothing rebuilds it and offline quietly decays to "whatever the
+  last online visit happened to request". Hence `topUp()`, which fetches
+  entries individually and is pinged by the page on every load via a
+  `shell-check` message — the repair has to be able to run without a new worker
+  version to hang it on.
+- Registration is guarded three ways, all load-bearing: **not in a frame** (or a
+  `tests.html` run would install a worker and then start testing whatever that
+  worker had cached), **not in a shared view** (a borrowed read of a plan should
+  leave nothing resident in a stranger's browser), and **on `load`**.
+- **Testing it locally will mislead you.** The browser holds its own copy of
+  `sw.js` and a byte-identical script fires no `install`, so edits appear to do
+  nothing and an emptied cache appears not to refill. `await reg.update()`
+  before judging any of it — this cost an hour, and the symptom looks exactly
+  like a broken worker.
 - **Installing is a window, not a sandbox.** Chrome's installed app shares the
   browser's profile storage — it reads `sv-state` and `td-state` exactly like
   any tab on the origin already can. Don't describe it as isolation anywhere.

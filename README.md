@@ -565,11 +565,41 @@ carries **no `file_handlers`, `protocol_handlers` or `share_target`**: those han
 outside data to a page on a shared origin, and nothing here needs them. The CSP
 gained exactly one directive for all this, `manifest-src 'self'`.
 
-There is deliberately **no service worker**, so the app does not open offline.
-A worker is a resident process on an origin that holds work data, its caches are
-origin-wide rather than per app, and a caching bug serves stale code to a
-planner whose data schema moves — none of which is worth trading for launching
-without wifi.
+### Working Offline
+
+The app opens and works with no connection — on a plane, on the Tube, on hotel
+wifi that has stopped answering. Your plan was always stored in the browser
+rather than fetched from anywhere, so once the app itself loads, everything
+except the online-only extras behaves normally: every tab, every projection,
+every edit, saved as usual. What needs the network still needs it — signing in
+to sync, holding price lookups, and the changelog box — and each says so rather
+than failing quietly.
+
+This is `sw.js`, a small service worker, and it was refused here for a long
+time. Two rules make it safe enough to have changed that:
+
+**It only ever caches files that are already public in this repo** — the page
+itself, the vendored chart library, the stylesheet, the icons. Never your plan,
+never a sync reply, never a price quote. That matters because these apps share
+one browser origin, and a cache is shared across the whole origin rather than
+belonging to one app: keeping it to public files means there is nothing in there
+that could not be read straight off GitHub anyway.
+
+**It always tries the network first.** The cache is a fallback for a connection
+that actually failed, never a shortcut taken while you are online. So you can
+never be quietly running yesterday's version — if the network answers, you get
+the current app, every time. Offline costs you a few seconds' wait before it
+gives up and uses the saved copy.
+
+Belt and braces on the one risk that remains: if this device is running an older
+version from its cache and finds a plan saved by a newer one — another device
+updated first, then synced — it stops and says so rather than reading your
+figures with code that predates them. Nothing is changed or deleted; connect and
+reload and it picks up the current version.
+
+If the worker ever misbehaves, `sw-kill.js` is the switch that removes it: copy
+it over `sw.js` and push, and every installed copy uninstalls itself and goes
+back to being an ordinary online-only page.
 
 ## Architecture
 
@@ -585,11 +615,14 @@ Re-running it means bumping the `?v=` on every `favicon.ico` reference — two i
 `index.html`, one in `privacy.html` — or the old icon stays cached for months.
 
 One file — `index.html` — no build step, alongside `theme.css` (byte-copy
-from the private claude-theme-pack, the palette source of truth for all apps)
-and a vendored `chart.min.js`. Served by GitHub Pages from `main`. State
-schema is versioned (`schema: 5` today); every entry point runs the payload
-through `coerceShape()`, whose upgrades are presence-based and safe to run
-twice.
+from the private claude-theme-pack, the palette source of truth for all apps),
+a vendored `chart.min.js`, and `sw.js` with its `sw-kill.js` escape hatch.
+Served by GitHub Pages from `main`. State schema is versioned (`schema: 5`
+today, as the `SCHEMA` constant); every entry point runs the payload through
+`coerceShape()`, whose upgrades are presence-based and safe to run twice.
+`migrate()` walks an older plan up to the current schema — and because all of
+its gates are `<`, a plan from a NEWER build would sail through untouched, so
+`load()` checks for that case first and halts instead.
 
 `computeAll()` in `index.html` is the only place numbers are calculated —
 every cell, balance, and goal figure derives from stored inputs at render
