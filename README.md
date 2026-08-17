@@ -31,9 +31,21 @@ included — treat those the way you treat the figures.
   section holding a single row skips its subtotal) and a year-total column
   pinned to the right. Each row has a type (which section), a projection rule
   (repeat last month, cycle, average so far, **average of last year**, same
-  month last year, interest, per-check × paychecks), and a behaviour: ordinary
-  money, a transfer with another account, or a pass-through that never touches
-  the main account. **Accounts are a list you own** — add as many as you like,
+  month last year, interest, per-check × paychecks, **overflow sweep**), and a
+  behaviour: ordinary money, a transfer with another account, or a pass-through
+  that never touches the main account. An **overflow sweep row** watches one
+  account and moves whatever it would end the month holding above a threshold
+  into another account — the threshold is a **goal's target, read live** (edit
+  the goal and every future month moves with it), or a plain dollar amount. It
+  is worked out at the end of the month, after the account's interest, so the
+  account lands exactly on the threshold; a month that ends under it stays
+  blank, because nothing to sweep is not a $0 transfer. Sweeps **chain**: one
+  row can fill an account past its own goal and a second row sweep that excess
+  onward in the same month — cash overflows into mid-term until mid-term hits
+  its goal, and the rest flows on to long-term. Two rows sweeping into each
+  other's accounts is a loop with no answer, so both stay blank and the cell
+  editor says which row to repoint. A number you type into a month always
+  beats the rule, and moves the same way. **Accounts are a list you own** — add as many as you like,
   each with its own name, growth rate, a choice of which account that interest
   is paid into, and a start that follows your data: an account is tracked from the first month
   you put a figure in, earlier months stay blank rather than zero, and typing

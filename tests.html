@@ -5889,6 +5889,266 @@ t('the recipient banner is built from numbers, never from the sender words', () 
   eq(H.shareRangeNote({ kind: 'sneaky' }), '');
 });
 
+/* ── Overflow sweep rows ──────────────────────────────────────────────────────
+   A row that moves whatever its source account would END the month holding
+   above a threshold — after interest, in dependency order, blank under the
+   threshold. Three accounts, whole dollars, no rates unless a test sets one,
+   so every landing can be asserted to the cent. Every test builds its own
+   state — the ambient-state rule. */
+group('Overflow sweep rows');
+
+function overflowFixture() {
+  return {
+    schema: 5,
+    settings: { accounts: [
+      { id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true },
+      { id: 'mid', name: 'Savings', rate: 0, creditTo: 'mid' },
+      { id: 'long', name: 'Investments', rate: 0, creditTo: 'long' },
+    ], currency: 'USD' },
+    years: { '2026': {
+      kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 3,
+      enteredThrough: '2025-12',
+      categories: [
+        { id: 'pay', name: 'Paycheck', role: 'normal', rule: 'none', section: 'income' },
+        { id: 'tomid', name: 'To Mid-term', rule: 'overflow', role: 'normal',
+          section: 'transfer', overflowFrom: 'cash', transferTo: 'mid',
+          threshold: 15000 },
+      ],
+      cells: { 'pay|2026-01': { v: 894, kind: 'manual' } },
+      paychecks: {}, seeds: { cash: 17000, mid: 10000, long: 0 },
+      overrides: {}, balAdjust: {},
+    } },
+    goals: [], people: [], side: {}, vacations: { trips: [], pto: {} }, ui: {},
+  };
+}
+const computeOverflow = (s) => H.computeAll(H.coerceShape(s), '2026-01-15');
+
+t('sweeps exactly the excess and the source lands on the threshold to the cent', () => {
+  const c = computeOverflow(overflowFixture())['2026'];
+  eq(c.cells['tomid|2026-01'], { v: -2894, kind: 'auto' }, 'the exact excess, negative = leaving');
+  approx(c.balances['cash|2026-01'], 15000, 'cash lands exactly on the threshold');
+  approx(c.balances['mid|2026-01'], 12894, 'the destination receives exactly the spillover');
+  approx(c.balances['total|2026-01'], 27894, 'a sweep between own accounts moves no Total');
+});
+t('a month under the threshold stays blank — nothing to sweep is not a $0 transfer', () => {
+  const s = overflowFixture();
+  s.years['2026'].categories[1].threshold = 20000;
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].kind, 'missing', '17,894 is under 20,000');
+  approx(c.balances['cash|2026-01'], 17894, 'nothing moved');
+  approx(c.balances['mid|2026-01'], 10000);
+});
+t('a goal-tied threshold reads the goal’s target live', () => {
+  const s = overflowFixture();
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'emerg';
+  s.goals = [{ id: 'emerg', name: 'Emergencies', target: 15000,
+               accounts: ['cash'], count: 'capped' }];
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].v, -2894, 'the goal’s target is the threshold');
+  const s2 = overflowFixture();
+  const row2 = s2.years['2026'].categories[1];
+  delete row2.threshold;
+  row2.goalId = 'emerg';
+  s2.goals = [{ id: 'emerg', name: 'Emergencies', target: 16000,
+                accounts: ['cash'], count: 'capped' }];
+  eq(computeOverflow(s2)['2026'].cells['tomid|2026-01'].v, -1894,
+    'edit the goal and the row moves with it');
+});
+t('the sweep runs AFTER interest: the source keeps its full month of growth', () => {
+  const s = overflowFixture();
+  s.settings.accounts[1].rate = 0.12;   // Savings grows 1%/month
+  s.years['2026'].categories = [
+    { id: 'tolong', name: 'To Long-term', rule: 'overflow', role: 'normal',
+      section: 'transfer', overflowFrom: 'mid', transferTo: 'long',
+      threshold: 10000 },
+  ];
+  const c = computeOverflow(s)['2026'];
+  approx(c.interest['mid|2026-01'], 100, 'interest on the UNSWEPT base — 1% of 10,000');
+  eq(c.cells['tolong|2026-01'].v, -100, 'the sweep is exactly the growth above the threshold');
+  approx(c.balances['mid|2026-01'], 10000, 'and Savings lands exactly on the threshold');
+  approx(c.balances['long|2026-01'], 100, 'arriving post-interest — it earns nothing this month');
+});
+t('rows chain in the same month, in dependency order, not list order', () => {
+  const s = overflowFixture();
+  s.years['2026'].seeds = { cash: 22000, mid: 49500, long: 0 };
+  /* The downstream row is DECLARED FIRST — the topological walk has to see
+     cash → mid → long whatever order the list holds. */
+  s.years['2026'].categories = [
+    { id: 'tolong', name: 'To Long-term', rule: 'overflow', role: 'normal',
+      section: 'transfer', overflowFrom: 'mid', transferTo: 'long',
+      threshold: 50000 },
+    { id: 'tomid', name: 'To Mid-term', rule: 'overflow', role: 'normal',
+      section: 'transfer', overflowFrom: 'cash', transferTo: 'mid',
+      threshold: 20000 },
+  ];
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].v, -2000, 'cash spills 2,000 into Savings');
+  eq(c.cells['tolong|2026-01'].v, -1500, 'which pushes Savings 1,500 past ITS threshold');
+  approx(c.balances['cash|2026-01'], 20000);
+  approx(c.balances['mid|2026-01'], 50000, 'Savings lands exactly on its own threshold');
+  approx(c.balances['long|2026-01'], 1500, 'the excess cascades on in the same month');
+});
+t('a loop is refused deterministically — both rows blank, nothing moves', () => {
+  const s = overflowFixture();
+  s.years['2026'].categories = [
+    { id: 'a', name: 'A', rule: 'overflow', role: 'normal', section: 'transfer',
+      overflowFrom: 'cash', transferTo: 'mid', threshold: 10 },
+    { id: 'b', name: 'B', rule: 'overflow', role: 'normal', section: 'transfer',
+      overflowFrom: 'mid', transferTo: 'cash', threshold: 10 },
+  ];
+  const cs = H.coerceShape(s);
+  const o = H.overflowOrder(cs.years['2026'].categories);
+  eq(o.order.length, 0, 'no row in a two-cycle can be ordered');
+  eq([...o.refused].sort(), ['a', 'b'], 'both are refused, not one winner');
+  const c = H.computeAll(cs, '2026-01-15')['2026'];
+  eq(c.cells['a|2026-01'].kind, 'missing');
+  eq(c.cells['b|2026-01'].kind, 'missing');
+  approx(c.balances['cash|2026-01'], 17000, 'balances as if the rows were deleted');
+  approx(c.balances['mid|2026-01'], 10000);
+});
+t('a stored cell beats the rule and moves the stored amount the same way', () => {
+  const s = overflowFixture();
+  s.years['2026'].enteredThrough = '2026-01';
+  s.years['2026'].cells['pay|2026-01'] = { v: 894, kind: 'actual' };
+  s.years['2026'].cells['tomid|2026-01'] = { v: -1234, kind: 'actual' };
+  s.years['2026'].cells['tomid|2026-02'] = { v: -500, kind: 'manual' };
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].v, -1234, 'the actual stands');
+  approx(c.balances['cash|2026-01'], 16660, '17,000 + 894 − 1,234');
+  approx(c.balances['mid|2026-01'], 11234);
+  eq(c.balanceKinds['cash|2026-01'], 'actual', 'an entered month’s balance is a fact');
+  eq(c.cells['tomid|2026-02'].v, -500, 'a manual in a future month beats the rule too');
+  approx(c.balances['cash|2026-02'], 16160, 'and moves exactly what it says');
+  approx(c.balances['mid|2026-02'], 11734);
+});
+t('a sweep that never triggers changes nothing at all', () => {
+  /* The bit-identity promise, from the live side: the fixture that pins the
+     old four formulas (transfers, pre/post pass-throughs, an override, the
+     dividends rule), with an overflow row present but never firing, computes
+     every balance and kind it computed without the row. */
+  const before = computeFixture()['2030'];
+  const s = fixtureState();
+  s.years['2030'].categories.push({ id: 'sweep', name: 'Sweep', rule: 'overflow',
+    role: 'normal', section: 'transfer', overflowFrom: 'cash', transferTo: 'mid',
+    threshold: 999999999 });
+  const after = H.computeAll(H.coerceShape(s), TODAY_FIX)['2030'];
+  for (const k of Object.keys(before.balances))
+    eq(after.balances[k], before.balances[k], k);
+  for (const k of Object.keys(before.balanceKinds))
+    eq(after.balanceKinds[k], before.balanceKinds[k], k + ' kind');
+  eq(after.cells['sweep|2030-04'].kind, 'missing', 'the row itself stays blank');
+});
+t('coerceShape drops what dangles and reads the threshold strictly', () => {
+  const s = overflowFixture();
+  const row = s.years['2026'].categories[1];
+  row.overflowFrom = 'gone-account';
+  row.threshold = 'abc';
+  row.goalId = 'gone-goal';
+  const cs = H.coerceShape(s);
+  const cat = cs.years['2026'].categories[1];
+  eq(cat.overflowFrom, undefined, 'a dangling source is deleted');
+  eq(cat.threshold, undefined, 'junk is DELETED, never minted into a $0 "sweep everything"');
+  eq(cat.goalId, undefined, 'a dangling goal is deleted');
+  const c = H.computeAll(cs, '2026-01-15')['2026'];
+  eq(c.cells['tomid|2026-01'].kind, 'missing', 'the row degrades to blank, never throws');
+  approx(c.balances['cash|2026-01'], 17894, 'and moves nothing');
+});
+t('exactly one of goalId and threshold survives — the goal wins', () => {
+  const s = overflowFixture();
+  s.goals = [{ id: 'emerg', name: 'Emergencies', target: 16000,
+               accounts: ['cash'], count: 'capped' }];
+  s.years['2026'].categories[1].goalId = 'emerg';   // threshold: 15000 also set
+  const cat = H.coerceShape(s).years['2026'].categories[1];
+  eq(cat.goalId, 'emerg');
+  eq(cat.threshold, undefined, 'the live tie wins over the frozen figure');
+  const carry = { id: 'x', name: 'X', rule: 'carry', role: 'normal',
+    section: 'expense', overflowFrom: 'cash', goalId: 'emerg', threshold: 5 };
+  const s2 = overflowFixture();
+  s2.years['2026'].categories.push(carry);
+  const cat2 = H.coerceShape(s2).years['2026'].categories[2];
+  eq(cat2.overflowFrom, undefined, 'a non-overflow rule carries none of the three');
+  eq(cat2.goalId, undefined);
+  eq(cat2.threshold, undefined);
+});
+t('a sweep is internal — it leaves the money-out bar when transfers are left out', () => {
+  const s = H.coerceShape(overflowFixture());
+  const c = H.computeAll(s, '2026-01-15');
+  ok(H.internalRows(s.years['2026']).has('tomid'), 'both ends are the reader’s own accounts');
+  const withT = H.yearFlows(s.years['2026'], c['2026'], '2026', false);
+  const without = H.yearFlows(s.years['2026'], c['2026'], '2026', true);
+  approx(withT.out - without.out, 2894, 'leaving transfers out drops exactly the sweep');
+  approx(withT.in, without.in, 'money in never counted it — the sweep is an outflow');
+});
+t('a destination not yet running receives nothing, and the month stays blank', () => {
+  const s = overflowFixture();
+  s.settings.accounts.push({ id: 'late', name: 'New Pot', rate: 0, creditTo: 'late' });
+  s.years['2026'].categories[1].transferTo = 'late';
+  /* The account joins in March — a balAdjust entry is how tracking begins
+     without pinning the balance. */
+  s.years['2026'].balAdjust = { 'late|2026-03': { interest: 0 } };
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].kind, 'missing', 'nowhere to put it yet');
+  eq(c.cells['tomid|2026-02'].kind, 'missing');
+  eq(c.cells['tomid|2026-03'].v, -2894, 'sweeps the moment the destination is running');
+  approx(c.balances['cash|2026-03'], 15000);
+  approx(c.balances['late|2026-03'], 2894);
+});
+t('a budget link without the goals freezes the threshold — figures identical', () => {
+  const s = overflowFixture();
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'emerg';
+  s.goals = [{ id: 'emerg', name: 'Emergencies', target: 15000,
+               accounts: ['cash'], count: 'capped' }];
+  const sender = computeOverflow(s)['2026'];
+  /* The payload a budget-only link carries: years, no goals. */
+  const payload = JSON.parse(JSON.stringify(H.coerceShape(s)));
+  payload.goals = [];
+  H.freezeOverflowThresholds(payload, s.goals);
+  const frozen = payload.years['2026'].categories[1];
+  eq(frozen.goalId, undefined, 'the tie itself never leaves');
+  eq(frozen.threshold, 15000, 'the target travels as a plain figure');
+  const recipient = H.computeAll(H.coerceShape(payload), '2026-01-15')['2026'];
+  for (const k of Object.keys(sender.balances))
+    eq(recipient.balances[k], sender.balances[k], k);
+  /* A goalId the sender no longer holds either was a blank row at home —
+     the freeze deletes rather than inventing a figure. */
+  const p2 = JSON.parse(JSON.stringify(H.coerceShape(s)));
+  p2.goals = [];
+  H.freezeOverflowThresholds(p2, []);
+  eq(p2.years['2026'].categories[1].threshold, undefined);
+  eq(p2.years['2026'].categories[1].goalId, undefined);
+});
+t('sweepArrivals reads the receiving end off the row’s own cell', () => {
+  const s = H.coerceShape(overflowFixture());
+  const c = H.computeAll(s, '2026-01-15');
+  const yr = s.years['2026'];
+  const mid = s.settings.accounts.find(a => a.id === 'mid');
+  const cash = s.settings.accounts.find(a => a.id === 'cash');
+  eq(H.sweepArrivals(s, yr, c['2026'], mid, '2026-01'),
+    [{ name: 'Cash', row: 'To Mid-term', v: 2894 }]);
+  eq(H.sweepArrivals(s, yr, c['2026'], cash, '2026-01'), [], 'the source lists nothing');
+  eq(H.sweepArrivals(s, yr, c['2026'], mid, '2026-02'), [], 'a blank month lists nothing');
+});
+t('ruleDesc says what the row does, with the row’s own names and figures', () => {
+  const s = H.coerceShape(overflowFixture());
+  s.goals = [{ id: 'emerg', name: 'Emergencies', target: 15000,
+               accounts: ['cash'], count: 'capped' }];
+  const row = { rule: 'overflow', overflowFrom: 'cash', transferTo: 'mid',
+                goalId: 'emerg' };
+  eq(H.ruleDesc(row, s),
+    'whatever Cash ends the month above Emergencies ($15,000.00), moved to Savings');
+  const manual = { rule: 'overflow', overflowFrom: 'cash', transferTo: 'mid',
+                   threshold: 15000 };
+  eq(H.ruleDesc(manual, s),
+    'whatever Cash ends the month above $15,000.00, moved to Savings');
+  const half = { rule: 'overflow', overflowFrom: 'cash' };
+  ok(H.ruleDesc(half, s).includes('Row settings'),
+    'a half-configured row is pointed at the fix');
+});
+
 /* ── Local-only real-data cross-check ─────────────────────────────────────────
    Fetches the two gitignored import files. On this Mac, with a fresh import
    run, it diffs the JS engine against the spreadsheet's own cached values.

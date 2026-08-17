@@ -2340,6 +2340,18 @@ function coerceShape(data) {
           cat.accounts = ['cash', 'mid'].filter(id => acctIds.has(id));
         if (Array.isArray(cat.accounts))
           cat.accounts = cat.accounts.filter(id => acctIds.has(id));
+        /* An overflow row names a source, a destination and a threshold. A
+           dangling account id is deleted — the row degrades to blank rather
+           than breaking, the goal-accounts rule — and the threshold is read
+           STRICTLY: num() would turn junk into 0, and a $0 threshold is a
+           real-looking claim ("sweep everything") the reader never made.
+           goalId is checked after the goals themselves are settled, below. */
+        if (cat.rule === 'overflow') {
+          if (!acctIds.has(cat.overflowFrom)) delete cat.overflowFrom;
+          if (!acctIds.has(cat.transferTo)) delete cat.transferTo;
+          const th = rateOrNone(cat.threshold);
+          if (th !== undefined) cat.threshold = th; else delete cat.threshold;
+        } else { delete cat.overflowFrom; delete cat.goalId; delete cat.threshold; }
         /* Whose row it is — a second earner's paycheck, tagged so take-home
            can be read per person. Only ever a label; the engine sums the
            household's rows regardless. */
@@ -2377,6 +2389,23 @@ function coerceShape(data) {
     /* Who the goal is for — a child, usually, for a college pot. Only ever a
        label and a target-date suggestion; `computeGoals` never reads it. */
     if (g.for && !peopleIds.has(g.for)) delete g.for;
+  }
+  /* Overflow rows that tie their threshold to a goal — checked here, after
+     the goals are settled, because the years loop above runs first. A deleted
+     goal leaves the row blank rather than broken, and exactly one of goalId /
+     threshold survives: the goal wins, since it is the live tie the reader
+     asked for and a stale frozen figure beside it would be the one that got
+     read the day the goal moved. */
+  {
+    const goalIds = new Set(d.goals.map(g => g.id));
+    for (const yr of Object.values(d.years)) {
+      if (yr.kind !== 'grid') continue;
+      for (const cat of yr.categories) {
+        if (cat.rule !== 'overflow') continue;
+        if (cat.goalId !== undefined && !goalIds.has(cat.goalId)) delete cat.goalId;
+        if (cat.goalId !== undefined) delete cat.threshold;
+      }
+    }
   }
   d.side = obj(d.side);
   const s = d.side;
@@ -3085,6 +3114,10 @@ function mergeAccountsByName(st) {
     for (const [, yr] of years)
       for (const c of (yr.categories || [])) {
         if (ids.has(c.transferTo)) c.transferTo = survivor.id;
+        /* An overflow row's watched account — same stakes as transferTo:
+           coerceShape deletes a dangling id on the next load and the sweep
+           silently stops, with nothing on screen saying why. */
+        if (ids.has(c.overflowFrom)) c.overflowFrom = survivor.id;
         /* A dividends row's earning list names accounts too. coerceShape
            FILTERS dangling ids from this list on the next load, so a missed
            rewrite here doesn't dangle — it silently stops the row earning on
@@ -3374,6 +3407,13 @@ const priorYearLast = (cat, m, ctx) => priorYearRun(cat, m, ctx).slice(-1)[0] ||
 const RULES = {
   none: () => null,
 
+  /* Overflow sweeps can't be worked out here: the amount is whatever the
+     source account ends THIS month above a threshold, and this table runs
+     before the month's balances exist. The stub keeps the rule dispatch from
+     crashing; the real resolution happens inside computeYear's balance phase,
+     after interest, in dependency order — see the sweep step there. */
+  overflow: () => null,
+
   /* Internet & friends: repeat the nearest earlier stored value. A year built
      ahead of time starts with nothing stored, so January reaches back over the
      year boundary into the year before — December, or the nearest month before
@@ -3518,6 +3558,42 @@ function resolvePaychecks(yr, months, prior) {
   return out;
 }
 
+/* Orders the overflow rows so a sweep's arrival is seen by any row watching
+   the account it lands in — Kahn's walk over the account ids, edges running
+   overflowFrom → transferTo. Rows sharing a source keep category-list order,
+   so a later row sees the source already drained by the earlier one. A row
+   whose source never reaches in-degree 0 sits in (or is fed only from) a
+   cycle: a loop has no answer, so those rows are REFUSED — blank every month,
+   deterministically, rather than whichever figure an iteration happened to
+   stop on. A row missing either end (or naming the same account twice) is no
+   edge at all: it is misconfigured, not refused — also blank, but the cell
+   editor gives it a different warning. Pure, computed once per year. */
+function overflowOrder(categories) {
+  const cats = categories || [];
+  const edges = cats.filter(c => c.rule === 'overflow'
+    && c.overflowFrom && c.transferTo && c.overflowFrom !== c.transferTo);
+  const indeg = {}, outs = {};
+  for (const c of edges) {
+    indeg[c.overflowFrom] = indeg[c.overflowFrom] || 0;
+    indeg[c.transferTo] = (indeg[c.transferTo] || 0) + 1;
+    (outs[c.overflowFrom] = outs[c.overflowFrom] || []).push(c.transferTo);
+  }
+  const queue = Object.keys(indeg).filter(id => indeg[id] === 0);
+  const pos = {};
+  let i = 0;
+  while (queue.length) {
+    const id = queue.shift();
+    pos[id] = i++;
+    for (const t of outs[id] || []) if (--indeg[t] === 0) queue.push(t);
+  }
+  const order = edges.filter(c => pos[c.overflowFrom] !== undefined)
+    .sort((a, b) => pos[a.overflowFrom] - pos[b.overflowFrom]
+                    || cats.indexOf(a) - cats.indexOf(b));
+  const refused = new Set(edges.filter(c => pos[c.overflowFrom] === undefined)
+                               .map(c => c.id));
+  return { order, refused };
+}
+
 /* No `today`: what a year computes depends on what you have entered, not on
    what day it is. computeAll still takes one — the goal figures and the live
    year's own months are read as of a date — but the grid itself isn't. */
@@ -3546,6 +3622,7 @@ function computeYear(st, yearKey, prior) {
   const ctx = { st, yr, months, resolved, balances, prior, paychecks };
   const live = yr.model === 'live';
   const running = {};   // account id -> tracking has begun
+  const overflow = overflowOrder(yr.categories);   // once — rows don't change mid-year
 
   for (const m of months) {
     /* 1 · categories */
@@ -3589,6 +3666,12 @@ function computeYear(st, yearKey, prior) {
       let hubFlow = 0;
       const transfersOut = {}, preIn = {}, postIn = {};
       for (const cat of yr.categories) {
+        /* An overflow row never lands here — not through hubFlow, not through
+           transfersOut, stored cells included. Its money moves through the
+           sweep step below, after interest, and ONE mechanism only: two paths
+           for one row kind is how a stored actual and the rule it replaced
+           come to move different money. */
+        if (cat.rule === 'overflow') continue;
         const v = resolved[`${cat.id}|${m}`].v;
         const r = normRole(cat);
         if (r.role === 'passthrough' && r.transferTo) {
@@ -3653,10 +3736,52 @@ function computeYear(st, yearKey, prior) {
         const dTo = payInto(a.divTo || a.id, a.id);
         creditedTo[dTo] = (creditedTo[dTo] || 0) + earnedDiv[a.id];
       }
+      /* 2b · overflow sweeps — worked out at the END of the month, after the
+         accounts' own interest and dividends, in dependency order. Each row
+         moves exactly what its source would otherwise close the month holding
+         above the threshold (a goal's target, read live, or a typed figure);
+         the money arrives at the destination at month end too, so it earns
+         nothing there until the month after. Under the threshold the month
+         stays BLANK: nothing to sweep is not a $0 transfer. The resolved cell
+         is written back so the grid shows the figure and "Mark month entered"
+         materialises it like any other estimate — and a stored cell (an
+         actual, or a figure typed over the rule) moves the same way with the
+         stored amount, negative meaning money leaving the source. */
+      const sweepIn = {}, sweepOut = {};
+      const endOf = (bid) =>
+        base[bid] + (creditedTo[bid] || 0) + (postIn[bid] || 0)
+        + (hub && bid === hub.id ? hubFlow : 0)
+        + (sweepIn[bid] || 0) - (sweepOut[bid] || 0);
+      for (const cat of overflow.order) {
+        const key = `${cat.id}|${m}`;
+        const src = cat.overflowFrom, dst = cat.transferTo;
+        if (yr.cells[key]) {
+          if (running[src] && running[dst]) {
+            const s = -resolved[key].v;
+            sweepOut[src] = (sweepOut[src] || 0) + s;
+            sweepIn[dst] = (sweepIn[dst] || 0) + s;
+          }
+          continue;
+        }
+        if (m <= (yr.enteredThrough || '')) continue;   // phase 1's own gate
+        if (overflow.refused.has(cat.id)) continue;      // a loop has no answer
+        if (!running[src] || !running[dst]) continue;    // both ends must be live
+        const goal = cat.goalId
+          ? (st.goals || []).find(g => g.id === cat.goalId) : null;
+        const threshold = goal ? (goal.target || 0)
+          : typeof cat.threshold === 'number' ? cat.threshold : undefined;
+        if (threshold === undefined) continue;           // misconfigured — blank
+        const amount = round2(Math.max(0, endOf(src) - threshold));
+        if (!amount) continue;
+        resolved[key] = { v: -amount, kind: 'auto' };
+        sweepOut[src] = (sweepOut[src] || 0) + amount;
+        sweepIn[dst] = (sweepIn[dst] || 0) + amount;
+      }
       let total = 0;
       for (const a of accounts) {
         const computed = base[a.id] + (creditedTo[a.id] || 0) + (postIn[a.id] || 0)
-          + (hub && a.id === hub.id ? hubFlow : 0);
+          + (hub && a.id === hub.id ? hubFlow : 0)
+          + (sweepIn[a.id] || 0) - (sweepOut[a.id] || 0);
         const ov = yr.overrides[`${a.id}|${m}`];
         const v = round2(ov ? ov.v : computed);
         balances[`${a.id}|${m}`] = v;
@@ -3802,6 +3927,18 @@ const HELP = {
       + 'be the same money counted twelve times. Those rows show where the year ended '
       + 'instead — the last month that states a balance — and hovering one gives the '
       + 'year\'s interest and dividends, which is what the account really made.' },
+  overflowRule: { title: 'Sweeping an Account’s Overflow',
+    body: 'A row on the overflow rule watches one account and moves whatever it would end '
+      + 'the month holding above a threshold — a goal\'s target, read live, or a dollar '
+      + 'amount — into another account. It is worked out at the END of the month, after '
+      + 'the account\'s interest and dividends, so the account lands exactly on the '
+      + 'threshold; the money arrives at the destination at month end too and earns '
+      + 'nothing there until the month after. A month that ends under the threshold stays '
+      + 'blank — nothing to sweep is not a $0 transfer. Rows chain: one can fill an '
+      + 'account past its own goal and a second sweep that excess onward in the same '
+      + 'month. Two rows sweeping into each other\'s accounts is a loop with no answer, '
+      + 'so both stay blank until one is repointed. A number you type into a month always '
+      + 'beats the rule.' },
   mixedCell: { title: 'Part Actual, Part Estimate',
     body: 'A month can hold several amounts — two grocery runs and a delivery, or a bill '
       + 'you have paid next to one you have only guessed at. The cell shows their sum, and '
@@ -4481,7 +4618,12 @@ function gridCard(y, yr) {
        reader's own — alphabetical is a display sort over an untouched stored
        order, so dragging there would move a row that then springs back. */
     const drag = state.settings.rowSort === 'alpha' || viewOnly ? '' : ` data-sec="${sec}"`;
-    return secheadRow(SECTION_LABEL[sec])
+    /* The overflow help lives on the Transfers band, and only once such a row
+       exists — its cells are the ones that fill themselves in from a balance
+       rather than a stored figure, which earns an explanation where it shows. */
+    return secheadRow(SECTION_LABEL[sec],
+        sec === 'transfer' && cats.some(cat => cat.rule === 'overflow')
+          ? ' ' + helpBtn('overflowRule', 'overflow sweep rows') : '')
       + cats.map(cat => `<tr data-move="${esc(cat.id)}"${drag}>${catTh(cat)}${
           months.map(m => cellTd(cat, m)).join('')}${
           rowTotalTd(catTotal(cat), false, catTotalKind(cat))}</tr>`).join('')
@@ -4504,6 +4646,11 @@ function gridCard(y, yr) {
     || stated(a)
     || Object.keys(yr.balAdjust || {}).some(k => k.startsWith(a.id + '|'))
     || yr.categories.some(cat => normRole(cat).transferTo === a.id)
+    /* An overflow row's two ends keep their rows visible — a fresh sweep
+       destination has no seed, pin or transfer-role feeder, and its balance
+       would otherwise grow quietly with no row on screen. */
+    || yr.categories.some(cat => cat.rule === 'overflow'
+         && (cat.transferTo === a.id || cat.overflowFrom === a.id))
     || accounts.some(o => o.id !== a.id && o.creditTo === a.id);
   /* A PINNED year shows only the accounts it actually holds figures for. The
      live year's rules don't apply to history: the hub wasn't necessarily the
@@ -4881,6 +5028,8 @@ function balanceTip(st, c, yr, a, m) {
      textContent, exactly like the account names above. */
   for (const g of receivedInto(st, c, a, m))
     lines.push(`Paid in ${fmtMoney(g.v)} from ${g.name}`);
+  for (const g of sweepArrivals(st, yr, c, a, m))
+    lines.push(`Swept in ${fmtMoney(g.v)} from ${g.name} (${g.row})`);
   return [head, ...lines].join('\n');
 }
 
@@ -4907,6 +5056,22 @@ function receivedInto(st, c, a, m) {
       (s.creditTo === a.id ? (c.interest || {})[`${s.id}|${m}`] || 0 : 0)
       + ((s.divTo || s.id) === a.id ? (c.dividend || {})[`${s.id}|${m}`] || 0 : 0));
     if (sent) got.push({ id: s.id, name: accountName(st, s.id), v: sent });
+  }
+  return got;
+}
+
+/* What the overflow rows swept into this account this month — the receiving
+   end of the sweep step, read off the row's own resolved cell so the tip and
+   the grid cannot disagree. Deliberately NOT folded into `receivedInto`: that
+   is the ONE reader for EARNINGS arrivals (creditTo/divTo), and a sweep is row
+   money — it has a visible budget row of its own, so "Paid in" would be the
+   wrong claim over it. Pure over the computed year. */
+function sweepArrivals(st, yr, c, a, m) {
+  const got = [];
+  for (const cat of yr.categories || []) {
+    if (cat.rule !== 'overflow' || cat.transferTo !== a.id) continue;
+    const v = round2(-(((c.cells || {})[`${cat.id}|${m}`] || {}).v || 0));
+    if (v) got.push({ name: accountName(st, cat.overflowFrom), row: cat.name, v });
   }
   return got;
 }
@@ -5029,21 +5194,35 @@ const RULE_LABEL = {
   avglastyear: 'average of last year',
   samemonth: 'same month last year',
   dividends: 'interest on the chosen account balances',
+  overflow: 'sweeps what an account ends the month above a threshold',
   paycheck: 'per-check amount × paychecks',
 };
 
 /* The label with the row's own numbers filled in — what the cell editor and
-   row tooltips show, so a rule is never a mystery. */
-function ruleDesc(cat) {
+   row tooltips show, so a rule is never a mystery. Takes the state as an
+   argument (defaulting to the live one) so the tests can pin the prose over a
+   fixture instead of whatever the browser happens to hold. */
+function ruleDesc(cat, st = state) {
   const r = cat.rule || 'none';
   if (r === 'paycheck')
     return `${fmtMoney(cat.perCheck || 0)} per check × that month's paychecks`;
   if (r === 'quarterly')
     return `repeats every ${Math.max(1, Math.round(cat.every || 3))} months`;
   if (r === 'dividends') {
-    const on = dividendAccounts(cat).map(id => accountName(state, id));
-    return `${round2(((cat.rate ?? state.settings.midTermRateAnnual) || 0) * 100)}%/yr interest on ${
+    const on = dividendAccounts(cat).map(id => accountName(st, id));
+    return `${round2(((cat.rate ?? st.settings.midTermRateAnnual) || 0) * 100)}%/yr interest on ${
       on.length ? andList(on) : 'nothing yet — pick the accounts in Row settings'}`;
+  }
+  if (r === 'overflow') {
+    const src = cat.overflowFrom && accountById(st, cat.overflowFrom);
+    const dst = cat.transferTo && accountById(st, cat.transferTo);
+    const g = cat.goalId && (st.goals || []).find(x => x.id === cat.goalId);
+    const above = g ? `${g.name || g.id} (${fmtMoney(g.target || 0)})`
+      : typeof cat.threshold === 'number' ? fmtMoney(cat.threshold) : null;
+    if (!src || !dst || above === null)
+      return 'sweeps an account’s overflow — pick the account, threshold '
+           + 'and destination in Row settings';
+    return `whatever ${src.name} ends the month above ${above}, moved to ${dst.name}`;
   }
   return RULE_LABEL[r] || RULE_LABEL.none;
 }
@@ -8919,6 +9098,10 @@ const EMPTY_SET = new Set();
 function internalRows(yr) {
   return new Set((yr.categories || []).filter(cat => {
     if ((cat.section || 'expense') !== 'transfer') return false;
+    /* An overflow sweep is internal by construction — both ends are the
+       reader's own accounts, and save forces the section. Its role is
+       `normal`, so the role test below would miss it. */
+    if (cat.rule === 'overflow') return !!cat.transferTo;
     const r = normRole(cat);
     return (r.role === 'transfer' || r.role === 'passthrough') && r.transferTo;
   }).map(cat => cat.id));
@@ -10820,6 +11003,7 @@ const EDITORS = {
         ['avglastyear', 'Average of last year'],
         ['samemonth', 'Same month last year'],
         ['dividends', 'Interest on chosen account balances'],
+        ['overflow', 'Sweep what an account holds above a goal'],
         ...(state.settings.paycheckRule
           ? [['paycheck', 'Per-check amount × paychecks']] : []),
       ]},
@@ -10847,8 +11031,39 @@ const EDITORS = {
         showIf: (v) => v.rule === 'dividends',
         hint: 'Last month\u2019s balances in these are what the rate is applied to. '
             + 'Pick none and the row stays blank rather than reading as zero.' },
+      /* The overflow rule's own three questions: which account is watched,
+         what counts as full, and where the excess goes. The threshold ties to
+         a GOAL by preference \u2014 reads its target live, so editing the goal
+         moves the row \u2014 with a typed figure as the fallback; the plain-amount
+         option doubles as the path for a plan with no goals yet. Closed
+         accounts are left out the way the transfer target leaves them out,
+         and a row already pointing at one keeps it. */
+      { key: 'overflowFrom', label: 'Watches this account', type: 'select',
+        options: accountsOf(state)
+          .filter(a => !a.until || a.id === (ds.id
+            && (state.years[ds.year].categories.find(c => c.id === ds.id) || {}).overflowFrom))
+          .map(a => [a.id, accountOption(state, a)]),
+        showIf: (v) => v.rule === 'overflow',
+        hint: 'Each future month sweeps whatever this account would end the month '
+            + 'holding above the threshold \u2014 worked out after its interest.' },
+      { key: 'goalId', label: 'Above this goal\u2019s target', type: 'select',
+        options: [['', 'A dollar amount instead'],
+          ...(state.goals || []).map(g => [g.id,
+            `${g.name || g.id} \u2014 ${fmtMoney(g.target || 0)}`])],
+        showIf: (v) => v.rule === 'overflow',
+        hint: 'Reads the goal\u2019s target live \u2014 edit the goal and this row moves with it.' },
+      { key: 'threshold', label: 'Above this amount', type: 'money',
+        showIf: (v) => v.rule === 'overflow' && !v.goalId },
+      { key: 'overflowTo', label: 'Sweeps into', type: 'select',
+        options: accountsOf(state)
+          .filter(a => !a.until || a.id === (ds.id
+            && (state.years[ds.year].categories.find(c => c.id === ds.id) || {}).transferTo))
+          .map(a => [a.id, accountOption(state, a)]),
+        showIf: (v) => v.rule === 'overflow',
+        hint: 'The money arrives at the end of the month, after the sweep is worked out.' },
       /* Behaviour is two questions, not one long list: what the money does,
-         and (only then) which account it does it with. */
+         and (only then) which account it does it with. On an overflow row
+         neither is asked \u2014 the rule dictates both. */
       { key: 'role', label: 'Behaves as', type: 'select', options: [
         ['normal', `Ordinary ${hubAccount(state)?.name || 'cash'} money — the usual`],
         ['transfer', `Moves ${hubAccount(state)?.name || 'cash'} into another account`],
@@ -10861,7 +11076,8 @@ const EDITORS = {
            sentences in the dialog — get as much room as there is going. */
         hint: `The last is money kept somewhere else — a Venmo balance you spend straight `
           + `out of, or an account you keep only for something ${
-            hubAccount(state)?.name || 'cash'} can't do, like Zelle.` },
+            hubAccount(state)?.name || 'cash'} can't do, like Zelle.`,
+        showIf: (v) => v.rule !== 'overflow' },
       /* Closed accounts are left out: money can't move into a bank you no
          longer have, and after a history import they would outnumber the
          live ones in this list. One already pointed at a closed account
@@ -10871,11 +11087,11 @@ const EDITORS = {
           .filter(a => !a.hub && (!a.until || a.id === (ds.id
             && (state.years[ds.year].categories.find(c => c.id === ds.id) || {}).transferTo)))
           .map(a => [a.id, accountOption(state, a)]),
-        showIf: (v) => v.role !== 'normal' },
+        showIf: (v) => v.rule !== 'overflow' && v.role !== 'normal' },
       { key: 'creditTiming', label: 'Counted against that account', type: 'select', options: [
         ['pre', 'Before its monthly interest'],
         ['post', 'After its monthly interest'],
-      ], showIf: (v) => v.role === 'pass' },
+      ], showIf: (v) => v.rule !== 'overflow' && v.role === 'pass' },
       noteField,
     ],
     get(ds) {
@@ -10890,6 +11106,10 @@ const EDITORS = {
          nothing. */
       return { ...cat, role: r.role === 'passthrough' ? 'pass' : r.role,
         transferTo: r.transferTo, creditTiming: r.creditTiming || 'pre',
+        /* The overflow destination is stored in transferTo but edited through
+           its own box — normRole hands transfer roles their target and an
+           overflow row keeps role `normal`, so the two never collide. */
+        overflowTo: cat.rule === 'overflow' ? cat.transferTo : undefined,
         isPay: isPayRow(cat.name, cat.rule, cat.isPay) };
     },
     blank: () => ({ rule: 'none', role: 'normal', section: 'expense',
@@ -10902,19 +11122,42 @@ const EDITORS = {
          The reverse is deliberately allowed — a Transfers-section row may
          behave as ordinary Cash money when the other side of the transfer
          (a Roth IRA, someone else's account) isn't tracked here. */
-      const role = v.role === 'transfer' ? 'transfer'
+      /* An overflow row's behaviour is dictated by the rule: role `normal`
+         (so nothing built on roles ever moves its money — the sweep step is
+         the one mechanism) and the Transfers section, the same one-way
+         consistency a transfer role gets. */
+      const isOverflow = v.rule === 'overflow';
+      const role = isOverflow ? 'normal' : v.role === 'transfer' ? 'transfer'
         : v.role === 'pass' ? 'passthrough' : 'normal';
       const target = accountById(state, v.transferTo) ? v.transferTo : null;
       let section = v.section;
-      if (section !== 'transfer' && role === 'transfer') section = 'transfer';
+      if (section !== 'transfer' && (role === 'transfer' || isOverflow))
+        section = 'transfer';
       const apply = (cat) => {
         Object.assign(cat, { name: v.name, rule: v.rule, role, section });
-        if (role === 'normal' || !target) {
+        if (isOverflow) {
+          /* Every inapplicable field is DELETED, never set undefined — the
+             Firestore rule — and both ends must be real, different accounts
+             or the end is dropped and the row degrades to blank. */
+          cat.role = 'normal'; delete cat.creditTiming;
+          const src = accountById(state, v.overflowFrom) ? v.overflowFrom : null;
+          const dst = accountById(state, v.overflowTo) && v.overflowTo !== src
+            ? v.overflowTo : null;
+          if (src) cat.overflowFrom = src; else delete cat.overflowFrom;
+          if (dst) cat.transferTo = dst; else delete cat.transferTo;
+          const g = (state.goals || []).find(g => g.id === v.goalId);
+          if (g) { cat.goalId = g.id; delete cat.threshold; }
+          else if (v.threshold !== null && v.threshold !== undefined) {
+            cat.threshold = v.threshold; delete cat.goalId;
+          } else { delete cat.goalId; delete cat.threshold; }
+        } else if (role === 'normal' || !target) {
           cat.role = 'normal'; delete cat.transferTo; delete cat.creditTiming;
+          delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
         } else {
           cat.transferTo = target;
           if (role === 'passthrough') cat.creditTiming = v.creditTiming === 'post' ? 'post' : 'pre';
           else delete cat.creditTiming;
+          delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
         }
         cat.note = v.note || undefined;
         /* Only when the field was offered, and only on an income row: whose
@@ -11325,11 +11568,17 @@ const EDITORS = {
         const yr = state.years[y];
         if (yr.kind !== 'grid') continue;
         const used = (yr.categories || [])
-          .filter(cat => normRole(cat).transferTo === a.id).map(cat => cat.name);
+          .filter(cat => normRole(cat).transferTo === a.id
+            /* An overflow row holds the account at BOTH ends — watched or
+               receiving, deleting it under the row leaves the sweep blank
+               with nothing saying why. */
+            || (cat.rule === 'overflow'
+                && (cat.transferTo === a.id || cat.overflowFrom === a.id)))
+          .map(cat => cat.name);
         if (used.length) {
           toast(`${a.name} still has ${y} rows pointing at it — open ${
             used.slice(0, 3).join(', ')}${used.length > 3 ? ` and ${used.length - 3} more` : ''
-            } and change "The other account"`);
+            } and change which accounts they use`);
           return false;
         }
       }
@@ -11655,7 +11904,26 @@ const EDITORS = {
       }
       g.note = v.note || undefined;
     },
-    del: (ds) => state.goals.splice(+ds.idx, 1),
+    /* Deleting still deletes — dangling ids degrade, they don't block, the
+       house rule — but the budget rows reading this goal's target as their
+       sweep threshold go blank the moment it's gone, on tabs you may not be
+       looking at, so the toast names them. coerceShape clears the dangling
+       goalId on the next load. */
+    del(ds) {
+      const g = state.goals[+ds.idx];
+      state.goals.splice(+ds.idx, 1);
+      if (!g) return;
+      const hit = [];
+      for (const [y, yr] of Object.entries(state.years)) {
+        if (yr.kind !== 'grid') continue;
+        for (const cat of yr.categories || [])
+          if (cat.rule === 'overflow' && cat.goalId === g.id)
+            hit.push(`"${cat.name}" in ${y}`);
+      }
+      if (hit.length)
+        return `Budget row ${andList(hit)} read this goal's target — the sweep `
+          + 'stays blank until you point it at another goal or an amount';
+    },
     move: (ds, dir) => listSwap(state.goals, +ds.idx, dir),
   },
 
@@ -13501,7 +13769,27 @@ function openCellEditor(yearKey, type, id, m) {
       || paycheckParts(cat, C[yearKey]?.paychecks[m] ?? 2, future), future);
     revertBtn.hidden = !(stored && future && hasRule);
     clearBtn.hidden = !stored;
-    if (future && rule === 'paycheck' && !cat.perCheck)
+    /* The overflow warnings come first — a half-configured sweep, or one
+       caught in a loop, stays blank every month, and a blank with nothing
+       saying why reads as the feature being broken. */
+    const overflowMissing = [];
+    if (rule === 'overflow') {
+      if (!cat.overflowFrom) overflowMissing.push('the account it watches');
+      if (!(state.goals || []).some(g => g.id === cat.goalId)
+          && typeof cat.threshold !== 'number')
+        overflowMissing.push('the threshold');
+      if (!cat.transferTo) overflowMissing.push('where the money goes');
+    }
+    if (future && rule === 'overflow' && overflowMissing.length)
+      hint.textContent = '⚠ This row sweeps an account\'s overflow, and '
+        + andList(overflowMissing) + (overflowMissing.length > 1 ? ' aren\'t' : ' isn\'t')
+        + ' set — open Row settings.';
+    else if (future && rule === 'overflow'
+             && overflowOrder(yr.categories).refused.has(cat.id))
+      hint.textContent = '⚠ This row is part of a loop — overflow rows sweep into '
+        + 'each other\'s accounts, and a loop has no answer, so they all stay '
+        + 'blank. Change one row\'s destination.';
+    else if (future && rule === 'paycheck' && !cat.perCheck)
       hint.textContent = '⚠ This row multiplies a per-check amount by the month\'s '
         + 'paychecks, and the per-check amount is $0 — open Row settings to set it '
         + '(or switch the rule to "repeats the last month").';
@@ -13542,6 +13830,14 @@ function openCellEditor(yearKey, type, id, m) {
       ? ` Paid in this month: ${andList(gotIn.map(g => `${fmtMoney(g.v)} from ${g.name}`))} — `
         + 'correct that where it was earned, not here.'
       : '';
+    /* The sweep arrivals get the same sentence from the receiving end — the
+       figure belongs to the overflow row's own cell, so the reader is pointed
+       there rather than left hunting for a box that corrects it here. */
+    const sweptIn = C[yearKey] ? sweepArrivals(state, yr, C[yearKey], acct, m) : [];
+    const sweptInLine = sweptIn.length
+      ? ` Swept in this month: ${andList(sweptIn.map(g =>
+          `${fmtMoney(g.v)} from ${g.name} by "${g.row}"`))} — correct the row's cell, not here.`
+      : '';
     /* A pinned year has no chain and no projection — every balance in it is a
        figure read off a statement at the time. So there is nothing to say
        about rates or what a month "should" have been: the number is the whole
@@ -13556,7 +13852,7 @@ function openCellEditor(yearKey, type, id, m) {
           ? `${acct.name} isn't tracked this early yet. Save a number here and it starts from `
             + `${monthLabel(m)}, carrying forward from what you type. `
           : `Computed: ${fmtMoney(cur || 0)}. Save a number to pin what the account really held. `)
-        + rateLine + paidInLine;
+        + rateLine + paidInLine + sweptInLine;
     /* All three computed figures show as PLACEHOLDERS rather than values:
        typing one in is what makes it an override, so opening the dialog to
        correct the interest and saving can't also freeze the balance at the
@@ -14894,6 +15190,34 @@ function reseedShareYears(data) {
   return data;
 }
 
+/* An overflow row ties its threshold to a goal, and a budget link doesn't
+   carry the goals — SECTION_NEEDS.budget is `years` alone, and shipping every
+   goal's name and target in every budget link forever would be the wrong trade.
+   Leaving the row dangling instead would change the recipient's computed
+   balances, which breaks the reseedShareYears promise above: trimming shortens
+   the LINK, never the figures. So the threshold is FROZEN into the payload —
+   the goal's target as a plain figure, read from the sender's goals, the tie
+   itself deleted. Figures identical, goal names never leave; the one thing the
+   recipient loses is the live tie they couldn't have had anyway. A link that
+   DOES carry the goals resolves the id and nothing is frozen. Pure over the
+   payload, like reseedShareYears — it never touches the real state. */
+function freezeOverflowThresholds(data, goals) {
+  const kept = new Set((data.goals || []).map(g => g.id));
+  for (const yr of Object.values(data.years || {})) {
+    if (yr.kind !== 'grid') continue;
+    for (const cat of yr.categories || []) {
+      if (cat.rule !== 'overflow' || cat.goalId === undefined
+          || kept.has(cat.goalId)) continue;
+      const g = (goals || []).find(x => x.id === cat.goalId);
+      /* A goalId the sender doesn't hold either was already a blank row at
+         home — deleted, so the recipient's blank matches the sender's. */
+      if (g) cat.threshold = round2(g.target || 0); else delete cat.threshold;
+      delete cat.goalId;
+    }
+  }
+  return data;
+}
+
 /* Names are the most sensitive thing this app holds — children's among them —
    so they are the one field that leaves by default. Ages, birth months and who
    owns which account all still work: everything person-shaped keys off the id,
@@ -14961,7 +15285,7 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
      and shipping the names of somebody's accounts alongside a holdings table
      they didn't ask about is a leak with no upside. */
   if (!need.has('years')) data.settings.accounts = [];
-  else reseedShareYears(data);
+  else { reseedShareYears(data); freezeOverflowThresholds(data, state.goals); }
   if (!includeNotes) stripNotes(data);
   if (!includeNames) anonymisePeople(data);
 
@@ -15445,6 +15769,10 @@ window.__finTestHooks = { round2, roundTo, raiseFor, sinceLastYear,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, balanceTip,
   receivedInto, earningsOver, balanceYearTip, flowTransferNote, internalRows,
   accountEarnings, earningsTip,
+  /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
+     freeze, and ruleDesc (which takes a state precisely so tests can pin its
+     prose over a fixture). */
+  overflowOrder, sweepArrivals, freezeOverflowThresholds, ruleDesc,
   KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
   coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
