@@ -538,24 +538,28 @@ legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
    The hint underneath keeps the full column width — the long measure is what
    holds these dialogs down to a few rows, and hint prose is read once where a
    box is aimed at. */
-/* A NUMBER is capped the same as text, so every box on a row comes out the same
-   width. It was 130px, which was right when a dialog was 640px and a column was
-   a third of it — a box the length of a paragraph asking for four characters
-   reads as though the app expects far more than it does. At the common 1100px
-   the column is ~255px and that reasoning stops paying: a share count sat as a
-   stub with a visible gap between it and the price beside it, and the two
-   percentages in the contribution figures were half the width of the salary box
-   they sit next to. Reported twice, both times as boxes that don't line up.
-   Consistency across a row is what a form is read by; the cap is still there to
-   stop a box running the whole width of a two-column dialog.
-   Date and month keep their own 180px: a date box has a fixed natural content
-   width and a native picker glued to its right edge, so stretching it buys
-   nothing and leaves the picker marooned. */
-.grid-fields input[type="date"], .grid-fields input[type="month"] { max-width: 180px; }
-/* Text covers money too (a money box is a text input — it renders "$1,234.56",
-   which a number input cannot). 320px takes the longest thing any of them
-   really holds: a 32-character API key, whole. */
+/* ONE cap for every box, whatever it holds, so a row of them lines up. Text
+   covers money too (a money box is a text input — it renders "$1,234.56", which
+   a number input cannot). 320px takes the longest thing any of them really
+   holds: a 32-character API key, whole.
+   Both the exceptions this used to carry are gone, and both went for the same
+   reason — a box that doesn't match the ones beside it reads as a mistake:
+   - a NUMBER was 130px, which was right when a dialog was 640px and a column a
+     third of it (a box the length of a paragraph asking for four characters
+     claims the app expects far more than it does). At 1100px the column is
+     ~255px and that stopped paying: a share count sat as a stub beside the
+     price, and the contribution percentages were half the width of the salary
+     box next to them;
+   - a DATE was 180px, on the reasoning that it has a fixed natural content
+     width with a picker glued to its right edge, so widening it only opens a
+     gap between the text and the icon. True, and it lost anyway: in a donation
+     the Date box was visibly shorter than Foundation, Event and Cause on the
+     same line, and one short box in a row of four is more obviously wrong than
+     a little air inside it.
+   The cap survives only to stop a box running the whole width of a two-column
+   dialog. */
 .grid-fields input[type="text"], .grid-fields input[type="number"],
+.grid-fields input[type="date"], .grid-fields input[type="month"],
 .grid-fields select { max-width: 320px; }
 /* A checkbox is sized by the inline style that centres it; a textarea is prose
    and keeps the room it has. Neither is caught by the rules above. */
@@ -7056,13 +7060,18 @@ function limitsCard(year, personId) {
    differs by filing status, and this app has no tax tables and shouldn't grow
    any — so filing status decides WHOSE income is counted, and the card says
    plainly that the number beneath it is yours to check. */
-function magiCard(year) {
-  const joint = state.settings.filingStatus === 'joint' && adultsOf(state).length > 1;
-  /* One earner or both, the arithmetic below is the same sum over a list —
-     which is what keeps the single-earner answer bit-for-bit what it was. */
-  const each = (joint ? adultsOf(state).map(p => p.id) : [compPersonId(state)])
-    .map(id => limitsFor(year, id));
-  const L = limitsFor(year, compPersonId(state));
+/* What a year's income comes to once the pre-tax money is out of it — gross
+   pay less the pre-tax 401(k) and the pre-tax HSA. It is the ONE answer: the
+   MAGI card reads it, and so does the "Use this year" button on the income
+   check, which would otherwise be a second sum of the same figures free to
+   drift from the card sitting above it — the `kindTotals` rule. Pure over the
+   state so it can be tested without the page. */
+function magiFor(st, year) {
+  const joint = st.settings.filingStatus === 'joint' && adultsOf(st).length > 1;
+  /* One earner or both, the arithmetic is the same sum over a list — which is
+     what keeps the single-earner answer bit-for-bit what it was. */
+  const each = (joint ? adultsOf(st).map(p => p.id) : [compPersonId(st)])
+    .map(id => limitsForIn(st, year, id));
   const sum = (f) => round2(each.reduce((t, x) => t + f(x), 0));
   const gross = sum(x => x.salary + x.bonus);
   /* Only the PRE-TAX part of the 401(k) contribution comes off. A Roth 401(k)
@@ -7074,7 +7083,12 @@ function magiCard(year) {
   const pretax = sum(x =>
     (x.salary * x.pretaxPct + x.bonus * x.bonusPct) * (1 - (x.rothShare || 0)));
   const hsa = sum(x => x.hsaPretax);
-  const magi = round2(gross - pretax - hsa);
+  return { joint, gross, pretax, hsa, magi: round2(gross - pretax - hsa) };
+}
+
+function magiCard(year) {
+  const { joint, gross, pretax, hsa, magi } = magiFor(state, year);
+  const L = limitsFor(year, compPersonId(state));
   const band = L.magiLimit + L.magiPhaseOut;
   const verdict = magi < L.magiLimit ? ['good', '✓', 'Full contribution']
     : magi < band ? ['warn', '!', 'Reduced contribution (in the phase-out band)']
@@ -11147,16 +11161,45 @@ function applyFieldSpans(fields) {
      tracks — counting words in that gives a column count of nonsense. Wait for
      a laid-out grid; openRowEditor runs this again once the dialog is up. */
   if (!wrap.getBoundingClientRect().width) return;
-  const cols = getComputedStyle(wrap).gridTemplateColumns.split(' ').filter(Boolean).length;
+  const tracks = getComputedStyle(wrap).gridTemplateColumns.split(' ').filter(Boolean);
+  const cols = tracks.length;
   if (cols < 2) return;                       // one column: every row is full
+  /* One column's RESOLVED width, which is what a stretched field's box is held
+     to below. Read from the grid rather than assumed, so it is right at two,
+     three or four columns and at any dialog width. */
+  const oneCol = parseFloat(tracks[0]);
+  const boxIn = (cell) => cell.querySelector('input:not([type="checkbox"]), select');
   const cells = [];
   for (const f of fields) {
     const cell = wrap.querySelector(`[data-field="${CSS.escape(f.key)}"]`);
     if (cell && !cell.hidden) cells.push(cell);
   }
+  /* A cell that spans the whole row keeps that width for its HINT — a long
+     explanation reading across the dialog instead of wrapping in a quarter of
+     it is the good half of spanning — but its BOX is held to one column so it
+     matches every other box in the dialog. That covers both ways a cell comes
+     to span: a `wide` field, which CSS spans on its own and which therefore
+     never reaches the row logic below, and a lone field stretched by it. */
+  const holdBox = (cell) => {
+    const b = boxIn(cell);
+    if (!b || !Number.isFinite(oneCol)) return;
+    /* The SMALLER of the two, never just the column: at two or three columns a
+       column is wider than the stylesheet's own cap, and an inline max-width
+       set to the column would override that cap upwards — which made the boxes
+       in a spanning cell BIGGER than the ones beside them, the exact fault this
+       is here to fix. Read after the inline style is cleared, so this is the
+       cap the stylesheet actually applies. */
+    const cap = parseFloat(getComputedStyle(b).maxWidth);
+    b.style.maxWidth = `${Number.isFinite(cap) ? Math.min(cap, oneCol) : oneCol}px`;
+  };
   /* Cleared first: a field that was stretched while another was hidden must
      not stay stretched once that one comes back. */
-  for (const c of cells) c.style.gridColumn = '';
+  for (const c of cells) {
+    c.style.gridColumn = '';
+    const b = boxIn(c);
+    if (b) b.style.maxWidth = '';
+    if (c.classList.contains('wide')) holdBox(c);
+  }
   let row = [];
   /* ONLY a field alone on its row is stretched. Stretching the last of two or
      three makes that one box wider than the ones beside it — a box is capped at
@@ -11169,7 +11212,17 @@ function applyFieldSpans(fields) {
      the dialog. A short row simply ends early now, which is what a form looks
      like; a row that should fill the width says so with `cols`. */
   const closeRow = () => {
-    if (row.length === 1) row[0].style.gridColumn = `span ${cols}`;
+    if (row.length === 1) {
+      row[0].style.gridColumn = `span ${cols}`;
+      /* The CELL spans the row so the hint underneath gets the full width —
+         which is the good half of the stretch, and what makes a long
+         explanation readable instead of wrapping in a quarter of the dialog.
+         The BOX does not: held to one column, it stays the same width as every
+         other box in the dialog. Letting it grow to its 320px cap made it wider
+         than the boxes above and below it, which is the same "why is this one
+         longer?" the row-mate case was. */
+      holdBox(row[0]);
+    }
     row = [];
   };
   for (const cell of cells) {
@@ -11241,9 +11294,14 @@ function openRowEditor(section, ds, isNew) {
      how many columns its questions come in when auto-fit would get it wrong,
      which is either a dialog whose fields come in pairs (2) or one that has
      exactly three things to ask and would otherwise leave a quarter of the row
-     empty (3). Anything else takes auto-fit. */
-  F('rowFields').classList.toggle('cols2', ed.cols === 2);
-  F('rowFields').classList.toggle('cols3', ed.cols === 3);
+     empty (3). Anything else takes auto-fit.
+     It may be a FUNCTION of (ds, isNew), like `title`, `sub` and `fields` are,
+     because the field count can depend on both: a trip is three questions when
+     you are editing one and four while adding, and the tidy answer is three
+     across then two-by-two. */
+  const cols = typeof ed.cols === 'function' ? ed.cols(ds, isNew) : ed.cols;
+  F('rowFields').classList.toggle('cols2', cols === 2);
+  F('rowFields').classList.toggle('cols3', cols === 3);
   const link = ed.link && ((key) => ed.link(key, ds));
   buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds), link);
   /* Prime the linked boxes once, so a derived field arrives in the state the
@@ -12116,7 +12174,10 @@ const EDITORS = {
       + 'your idea of what it would fetch changes. Equity (value minus owed) is what '
       + 'the net worth on the Progress tab counts.',
     fields: () => [
-      { key: 'name', label: 'Name', type: 'text', wide: true,
+      /* NOT `wide`: a wide field takes a row to itself, which left Name alone
+         above and Kind stranded beside an empty half. The four questions pair
+         up two by two — what it is, then what it is worth. */
+      { key: 'name', label: 'Name', type: 'text',
         hint: 'Whatever you call it — "The house", "Jeep", "Sailboat".' },
       { key: 'kind', label: 'Kind', type: 'select',
         options: PROPERTY_KINDS.map(([v, label]) => [v, label]) },
@@ -13069,7 +13130,10 @@ const EDITORS = {
       { key: 'deduction', label: 'Deduction', type: 'money',
         hint: 'Taken off before the bands are applied. Leave it empty for a schedule that '
           + 'taxes from the first dollar.' },
-      { key: 'source', label: 'Where it came from', type: 'text', wide: true,
+      /* NOT `wide`: it took a row to itself and left Deduction with an empty
+         half beside it. The two short questions pair up, and the paste box
+         below is the one that really needs the width. */
+      { key: 'source', label: 'Where it came from', type: 'text',
         hint: 'For your own reference — “IRS Rev. Proc. 2025-32”, or the page you copied it '
           + 'from. Never sent anywhere.' },
       { key: 'paste', label: 'Paste a schedule (optional)', type: 'note', rows: 7, wide: true,
@@ -13173,8 +13237,27 @@ const EDITORS = {
   taxCheck: {
     title: () => 'Check an income',
     sub: () => 'Worked against your own tables. Nothing here touches the projection.',
-    fields: () => [{ key: 'income', label: 'Taxable income', type: 'money', wide: true,
-      hint: 'What the brackets are measured against, before the deduction above them.' }],
+    fields: () => {
+      /* The figure the plan already expects this year, offered as a button
+         rather than left to be copied across by hand from the card above.
+         `magiFor` is the SAME function the MAGI card is drawn from, so the two
+         can never disagree about what the year comes to. Only offered when
+         there is something to pull: with no salary typed for the year it would
+         fill the box with $0.00, which is a worse answer than no button. */
+      const y = String(new Date().getFullYear());
+      const expected = magiFor(state, y).magi;
+      return [{ key: 'income', label: 'Taxable income', type: 'money', wide: true,
+        hint: 'What the brackets are measured against, before the deduction above them.'
+          + (expected > 0
+            ? ` "Use ${y}" fills in what the plan expects this year — salary and bonus`
+              + ' less the pre-tax 401(k) and HSA, the same figure the Roth IRA check is'
+              + ' judged on.' : ''),
+        ...(expected > 0 ? { action: {
+          label: `↓ Use ${y}`,
+          title: `Fill in ${fmtMoney(expected)} — this year's expected income, before the deduction`,
+          run: (val, set) => set('income', expected),
+        } } : {}) }];
+    },
     get: () => ({ income: ((state.side.tax || {}).check || {}).income }),
     save(ds, v) {
       if (typeof v.income === 'number') state.side.tax.check = { income: v.income };
@@ -13479,9 +13562,11 @@ const EDITORS = {
   /* Vacations: the trip itself, and its line items */
   trip: {
     title: (ds, isNew) => isNew ? 'Add a Trip' : 'Trip',
-    /* Three questions, three columns — at the auto-fit four they were three
-       boxes and a quarter of empty, with Nights the odd one out on the end. */
-    cols: 3,
+    /* Three questions when you are editing a trip, four while adding one — so
+       three across, or a 2×2. Either way the row fills and every box matches;
+       at the auto-fit four, editing gave three boxes and a quarter of empty
+       with Nights the odd one out on the end. */
+    cols: (ds, isNew) => isNew ? 2 : 3,
     sub: (ds, isNew) => isNew
       ? 'A new trip can start with the lines most trips end up having, so you fill in '
         + 'amounts instead of typing the same list out again.' : '',
@@ -13493,14 +13578,22 @@ const EDITORS = {
       { key: 'name', label: 'Trip name (e.g. "2027 Lisbon")', type: 'text' },
       { key: 'year', label: 'Year', type: 'number', step: 1 },
       { key: 'nights', label: 'Nights', type: 'number' },
-      /* The template picker IS wide, and it is last, which is where a wide
-         field belongs. Its options are whole sentences that name every line a
-         new trip starts with, and a quarter-width select cuts them off
-         mid-word — the category dialog's problem. It only shows while adding,
-         so an existing trip is the single row above. */
-      ...(isNew ? [{ key: 'template', label: 'Start with', type: 'select', wide: true,
+      /* NOT `wide` — a wide field takes a row to itself, which left it sitting
+         under a three-across row rather than completing a 2×2. Its options are
+         whole sentences naming every line a new trip starts with, so it wants
+         room; half of the dialog is 523px and the select caps at 320px, which
+         holds them. It only shows while adding, which is exactly why `cols` is
+         a function here. */
+      ...(isNew ? [{ key: 'template', label: 'Start with', type: 'select',
+        /* The list of lines moved OUT of the option and into the hint. Seven of
+           them never fitted a 320px select — it read "…Airfare, Stay, Transport,
+           E…", cut off mid-word — and it only looked whole while the field was
+           wide enough to take a row of its own. A hint has the full column and
+           wraps, so the option can say what it IS and the hint can say what you
+           get. */
+        hint: `The usual lines: ${TRIP_TEMPLATE.join(', ')}.`,
         options: [
-          ['standard', `The usual lines — ${TRIP_TEMPLATE.join(', ')}`],
+          ['standard', 'The usual lines'],
           ['blank', "Nothing, I'll add my own"],
         ]}] : []),
     ],
@@ -16331,7 +16424,7 @@ window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
   retirementMarkers, retirementHorizon, RET_YEARS_MIN, RET_YEARS_MAX,
   planToYearOf, PLAN_TO_AGE_DEFAULT, SAFE_RATE_DEFAULT, contribYears,
   retirementMonthOf, RETIRE_WHEN, retiredShareOf, drawdownFromMonth,
-  limitsForIn, plannedDeferral, plannedContribs,
+  limitsForIn, magiFor, plannedDeferral, plannedContribs,
   isIra, iraAccountsOf, latestContrib, contribStopMonth, iraOutlook,
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,

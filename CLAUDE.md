@@ -1247,9 +1247,20 @@ it, and the two percentages in the contribution figures were half the width of
 the salary box next to them. Both were reported as boxes that don't line up, and
 **consistency across a ROW is what a form is read by**. The cap survives only to
 stop a box running the whole width of a two-column dialog.
-**Date and month keep their own 180px**: a date box has a fixed natural content
-width with a native picker glued to its right edge, so stretching it buys
-nothing and leaves the picker marooned.
+**A DATE was 180px and no longer is either.** Same reasoning, same outcome: a
+date box does have a fixed natural content width with a picker glued to its
+right edge, so widening it only opens a gap between the text and the icon — and
+it lost anyway, because in a donation the Date box was visibly shorter than
+Foundation, Event and Cause on the same line, and one short box in a row of four
+is more obviously wrong than a little air inside it.
+**A cell that SPANS the row keeps that width for its hint and not for its box.**
+`applyFieldSpans` writes an inline `max-width` of one column onto the box in any
+spanning cell — a `wide` field, or a lone field it stretched — so a long
+explanation still reads across the dialog while the box matches every other box.
+It clamps to the SMALLER of the column and the stylesheet's own cap, which is
+not fussiness: at two or three columns a column is wider than the cap, and an
+inline width set to the column would override that cap upwards and make the box
+bigger than its neighbours — the very fault it exists to fix.
 **The HINT keeps the full column width** and that is the point of the split: the
 long measure is what holds these dialogs to a few rows. A checkbox (sized by the inline style that
 centres it) and a textarea (prose) are caught by neither rule. The category
