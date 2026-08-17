@@ -2019,6 +2019,16 @@ function blankState() {
        point INTO it by id, which is what keeps it out of `settings` (the
        app-preferences bag) and out of the engine entirely. */
     people: [],
+    /* The price cache: UPPER-CASED ticker → {price, ts} or {noQuote, ts}. It is
+       the six-hour freshness clock, and it is HERE — in state, so it syncs —
+       rather than in localStorage beside the key, because the timer is a fact
+       about the QUOTE and the quote is the same on every device. Left local it
+       meant the laptop fetched a price, the phone got the price (holdings sync)
+       but not the timestamp, decided everything was stale and spent the
+       allowance fetching it all again. Top level and not in `settings`, which
+       travels in every share link, and not in `side`, which is tab data.
+       The KEY still lives in localStorage and must stay there — see PRICE_KEY. */
+    quotes: {},
     side: {
       portfolios: [], taxable: [], rothContribs: {}, k401: {}, hsa: [],
       comp: {}, bonuses: {}, daf: [],
@@ -3033,7 +3043,43 @@ function coerceShape(data) {
      grow a key describing how somebody else likes to read a chart). */
   if (d.ui.flowNoTransfers === true) d.ui.flowNoTransfers = true;
   else delete d.ui.flowNoTransfers;
+  d.quotes = coerceQuotes(d.quotes);
   return d;
+}
+
+/* The synced price cache, read the way every other boundary here is read —
+   pure and pinned, because it arrives from Firestore, a restored backup and a
+   hand-edited file, and a wrong shape must cost a re-fetch rather than the
+   workbook. Rules that carry their weight:
+   - a PRICE is read strictly, never through num(): a corrupt field turned into
+     a deliberate-looking $0.00 would be copied straight onto a holding by the
+     write-back in refreshPrices, and a $0 holding is a wrong figure that looks
+     like a real one. Junk drops the entry instead;
+   - a `noQuote` marker keeps its own branch and carries NO price — the two are
+     different answers ("it's worth this" against "there is no quote for this")
+     and letting a marker hold a price would let quoteFresh read one;
+   - `ts` must be a finite number or the entry goes: without it the six-hour
+     clock has nothing to measure and the entry would read as fresh for ever;
+   - a ts far in the FUTURE is dropped rather than trusted. Two devices are two
+     clocks, and this is the one field where the far end's clock reaches ours —
+     a badly-set one could otherwise pin a price as "fresh" for years. An hour
+     of slack absorbs ordinary skew;
+   - keys are upper-cased and capped, matching the tickers `allTickers()` hands
+     in, so a lower-case key can't sit in the cache being missed for ever. */
+function coerceQuotes(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  const horizon = Date.now() + 60 * 60 * 1000;
+  for (const [k, v] of Object.entries(raw)) {
+    const t = String(k || '').trim().toUpperCase().slice(0, 24);
+    if (!t || !v || typeof v !== 'object' || Array.isArray(v)) continue;
+    const ts = typeof v.ts === 'number' && Number.isFinite(v.ts) ? v.ts : null;
+    if (ts === null || ts > horizon) continue;
+    if (v.noQuote === true) { out[t] = { noQuote: true, ts }; continue; }
+    if (typeof v.price === 'number' && Number.isFinite(v.price))
+      out[t] = { price: v.price, ts };
+  }
+  return out;
 }
 
 /* Which rows of a yearly summary are money that MOVED, and which are closing
@@ -3407,7 +3453,15 @@ let undoSnapshot = JSON.stringify(state);   // the state as of the last save/loa
    without this every ⌘Z had to walk back through navigation before it
    reached the edit the reader actually regrets. Pure and pinned: coreOf is
    the ONE serialization the bank decision reads. */
-function coreOf(st) { return JSON.stringify(Object.assign({}, st, { ui: null })); }
+/* `quotes` is nulled alongside `ui` for the same reason: undo is about what the
+   READER changed, and a price cache is machinery. Without this a quiet refresh
+   that learned nothing but a "no quote for that" marker would mint an undo
+   entry, so ⌘Z would walk back through lookups before reaching the edit
+   somebody actually regrets. The snapshot still carries the cache — restoring
+   an older one at worst costs a re-fetch. */
+function coreOf(st) {
+  return JSON.stringify(Object.assign({}, st, { ui: null, quotes: null }));
+}
 let undoCore = coreOf(state);
 let undoing = false;
 
@@ -10433,12 +10487,35 @@ function setPriceKey(k) {
     else localStorage.removeItem(PRICE_KEY);
   } catch (e) { /* private mode — lookups just stay off */ }
 }
-function quoteCache() {
-  try { return safeParse(localStorage.getItem(QUOTE_CACHE) || '{}') || {}; }
-  catch (e) { return {}; }
-}
+/* The cache is `state.quotes` — synced, so a price fetched on the laptop is
+   still fresh on the phone. These two are the only readers and writers, which
+   is what let it move house without anything else learning where it lives. */
+function quoteCache() { return (state && state.quotes) || {}; }
+/* Returns whether anything actually MOVED, so the caller can save once for the
+   cache and the write-back together. A quiet pass that learned nothing must
+   not save: it would push a byte-identical document to Firestore on a timer. */
 function writeQuoteCache(c) {
-  try { localStorage.setItem(QUOTE_CACHE, JSON.stringify(c)); } catch (e) {}
+  const next = coerceQuotes(c);
+  if (JSON.stringify(next) === JSON.stringify(state.quotes || {})) return false;
+  state.quotes = next;
+  return true;
+}
+/* The cache used to live in localStorage under `fin-quotes`, which is why it
+   did not sync. Fold a browser's existing one in ONCE rather than making
+   everybody's holdings look stale on the morning this shipped — entries already
+   in state win, since those came from a device that has the newer arrangement.
+   Removing the old key is what stops this running twice; if the removal throws
+   (private mode) the second run is a no-op anyway, because every entry it finds
+   is already there. */
+function adoptLegacyQuoteCache() {
+  let legacy = null;
+  try { legacy = safeParse(localStorage.getItem(QUOTE_CACHE) || 'null'); }
+  catch (e) { return false; }
+  if (!legacy || typeof legacy !== 'object') return false;
+  const merged = Object.assign({}, coerceQuotes(legacy), state.quotes || {});
+  const moved = writeQuoteCache(merged);
+  try { localStorage.removeItem(QUOTE_CACHE); } catch (e) {}
+  return moved;
 }
 const freshWithin = (q, ms) => !!q && typeof q.price === 'number'
   && (Date.now() - (q.ts || 0)) < ms;
@@ -10766,7 +10843,12 @@ async function refreshPrices(quiet, only) {
      on the render below. The manual button ignores this and retries at once. */
   if (run.throttled || run.limited || run.failed || run.badKey)
     priceCoolOffUntil = Date.now() + PRICE_COOL_OFF_MS;
-  writeQuoteCache(cache);
+  const cacheMoved = writeQuoteCache(cache);
+  /* The run REPORT stays local, deliberately, and it is the one price thing
+     that should not travel: it says what happened on THIS device a moment ago —
+     throttled, out of credits, offline — and its notes are aged by runIsToday /
+     runIsRecent. Syncing it would have the phone announce a throttle it never
+     hit, against an allowance it never spent. */
   try { localStorage.setItem(PRICE_RUN, JSON.stringify(run)); } catch (e) {}
   if (run.updated.length) {
     /* A run for NAMED tickers writes back only those. A whole-table refresh
@@ -10783,8 +10865,12 @@ async function refreshPrices(quiet, only) {
         const q = cache[t];
         if (quoteFresh(q)) h.price = q.price;
       }
-    save();
   }
+  /* ONE save for both halves — the write-back above and the cache itself, which
+     is synced state now rather than a local scratch file. A run that learned
+     nothing at all writes nothing, so the quiet pass can keep running without
+     pushing an identical document to Firestore every time. */
+  if (cacheMoved || run.updated.length) save();
   render();
   const named = run.updated.map(u => `${u.ticker} ${fmtMoney(u.price)}`).join(', ');
   const rest = run.left.length
@@ -14811,11 +14897,13 @@ F('clearBackupBtn').onclick = downloadBackup;
 F('clearCancel').onclick = () => clearDialog.close();
 F('clearConfirm').onclick = () => {
   state = blankState();
-  /* The price machinery lives OUTSIDE state, so resetting state alone would
-     leave the ticker list (the quote cache and run report) and a working API
-     credential readable by every page on the shared origin — exactly what
-     "deletes every holding in this browser" promises is gone. The key goes
-     too: "delete everything" means the credential as well. */
+  /* The quote cache is inside state now, so blankState() has already taken it.
+     What is left outside is the run report and the API credential, and both
+     still have to go by hand: a ticker list and a working key readable by every
+     page on the shared origin is exactly what "deletes every holding in this
+     browser" promises is gone. `QUOTE_CACHE` is still cleared because a browser
+     that has not been opened since the cache moved house still has the old key
+     sitting there. */
   try {
     localStorage.removeItem(QUOTE_CACHE);
     localStorage.removeItem(PRICE_RUN);
@@ -15675,6 +15763,13 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
        nor Firestore. That is why it is kept there — see PRICE_KEY. The same
        goes for the zoom, which describes a screen rather than a plan.
 
+       `state.quotes` — the price cache — is state and therefore syncs and rides
+       in a backup, but it is NOT in the list below and must not be added: this
+       object is built from an explicit whitelist of top-level keys, so the
+       cache is kept out of a share link by construction. It is a list of the
+       tickers somebody holds, and a Budget-only link has no business carrying
+       one. There is a test.
+
        The one thing trimmed below is `settings.accounts`, when no grid is
        going: shipping the names of somebody's bank accounts alongside a
        holdings table they didn't ask about is a leak with no upside. Anything
@@ -16115,6 +16210,9 @@ F('shareOpenBtn').onclick = () => {
 };
 
 /* ── Boot ───────────────────────────────────────────────────────────────── */
+/* One-off, and never in a shared view — that plan belongs to somebody else and
+   nothing about this browser's lookups should be folded into it. */
+if (!viewOnly && adoptLegacyQuoteCache()) save();
 applyTheme();
 /* The head script has already scaled the page; this re-applies the same figure
    to bring the picker into line with it. */
@@ -16166,6 +16264,7 @@ window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
      were got wrong in ways that only showed up a day later. */
   quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote,
   priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
+  coerceQuotes,
   fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
   reconcileNote,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,

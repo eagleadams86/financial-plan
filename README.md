@@ -415,7 +415,10 @@ included — treat those the way you treat the figures.
   remembered for the day rather than spending the allowance on the same
   question at every visit. Prices top themselves up automatically when they are
   more than six hours old; the **Refresh prices** button ignores that and
-  fetches everything on the spot. Open a holding and its Price box says where
+  fetches everything on the spot. **The six-hour cache syncs**, so a price
+  fetched on the laptop is still fresh on the phone rather than being fetched
+  again out of the same daily allowance — the key itself stays on each device,
+  which is why you enter it once per device but only ever pay for a lookup once. Open a holding and its Price box says where
   that number came from — fetched and when, typed over a fetched one, or never
   looked up — since the line above the tables can only report the oldest fetch
   across the whole table. The box also shows what the holding is worth and how

@@ -5831,6 +5831,65 @@ t('the price key is unreachable from anything that leaves the browser', () => {
   eq(H.blankState().settings.hasOwnProperty('zoom'), false);
 });
 
+group('The synced price cache');
+
+t('the cache is state, so it syncs', () => {
+  /* It moved out of localStorage on 2026-08-17 for exactly one reason: the
+     six-hour clock is a fact about the QUOTE, and the quote is the same on
+     every device. Left local, the laptop fetched a price, the phone received
+     the price (holdings are state) but not its timestamp, judged everything
+     stale and spent the allowance fetching it all again. */
+  eq(H.blankState().hasOwnProperty('quotes'), true, 'a fresh plan has the branch');
+  eq(H.blankState().quotes, {}, 'and it starts empty');
+  eq(H.coerceShape({}).quotes, {}, 'a plan that predates it gets one');
+});
+
+t('a cache entry is read strictly at the boundary', () => {
+  const now = Date.now();
+  /* A PRICE never goes through num(): a corrupt field turned into a
+     deliberate-looking 0 is copied straight onto a holding by the write-back
+     in refreshPrices, and a $0 holding is a wrong figure that looks real. */
+  eq(H.coerceQuotes({ VOO: { price: 'junk', ts: now } }), {}, 'junk drops, never becomes $0');
+  eq(H.coerceQuotes({ VOO: { price: 0, ts: now } }), { VOO: { price: 0, ts: now } },
+    'but a real 0 is a real statement and is kept');
+  eq(H.coerceQuotes({ VOO: { price: 12.5 } }), {},
+    'no timestamp means no clock to measure, so the entry goes');
+  eq(H.coerceQuotes({ VOO: { noQuote: true, ts: now } }), { VOO: { noQuote: true, ts: now } });
+  eq(H.coerceQuotes({ VOO: { noQuote: true, price: 9, ts: now } }),
+    { VOO: { noQuote: true, ts: now } },
+    'a marker carries no price — "no quote for this" is not "it is worth 9"');
+  eq(H.coerceQuotes({ voo: { price: 3, ts: now } }), { VOO: { price: 3, ts: now } },
+    'keys are upper-cased to match what allTickers hands in');
+  eq(H.coerceQuotes(null), {});
+  eq(H.coerceQuotes([{ price: 1, ts: now }]), {}, 'an array is not a cache');
+});
+
+t('a clock from the future is not trusted', () => {
+  /* The one field where another device's clock reaches ours. A badly-set one
+     could otherwise pin a price as "fresh" for years, because freshWithin
+     measures now - ts and a future stamp makes that negative. An hour of slack
+     absorbs ordinary skew between two NTP-synced machines. */
+  const soon = Date.now() + 5 * 60 * 1000;
+  const far = Date.now() + 48 * 60 * 60 * 1000;
+  eq(Object.keys(H.coerceQuotes({ VOO: { price: 1, ts: soon } })), ['VOO'],
+    'ordinary skew is fine');
+  eq(H.coerceQuotes({ VOO: { price: 1, ts: far } }), {}, 'a year-out clock is not');
+});
+
+t('the cache is a top-level key, which is what keeps it out of a share link', () => {
+  /* buildSharePayload reads the global `state`, so it can't be called from here
+     without the ambient-state trap this suite exists to avoid. What IS pinnable
+     is the placement the guarantee rests on: that function assembles its payload
+     from a WHITELIST of top-level keys, so anything top-level and unlisted
+     cannot travel — whereas `settings` travels in full, and a cache tidied in
+     there would start shipping the tickers somebody holds inside a Budget-only
+     link. This fails the day it moves. */
+  eq(Object.keys(H.blankState()).includes('quotes'), true, 'top level');
+  eq(H.blankState().settings.hasOwnProperty('quotes'), false, 'and never a setting');
+  eq(H.blankState().side.hasOwnProperty('quotes'), false,
+    'nor a side branch — those are tab data, gated by SECTION_NEEDS');
+});
+
 t('a link survives the round trip', async () => {
   const payload = { v: 1, sharedAt: 1750000000000, sections: ['budget', 'goals'],
     anon: true, notes: false, range: { kind: 'year', n: 3 }, data: shareFixture() };

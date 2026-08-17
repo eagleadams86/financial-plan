@@ -247,11 +247,14 @@ family names as well as balances.
   - It is NOT part of `takeHomePay`, deliberately: that measures the giving
     percentages against PAY, and interest is not pay.
 - localStorage keys: `fin-state`, `fin-theme`, `fin-updated`, `fin-zoom` —
-  plus the price machinery's `fin-pricekey`, `fin-quotes`, `fin-quote-run`
-  and sync's `fin-sync-uid`, which live OUTSIDE state on purpose (documented
-  in their own sections). "Delete everything" clears the price three as well
-  as state: the ticker list and a working credential must not outlive "every
-  holding in this browser is gone" on a shared origin. `save()` is the
+  plus the price machinery's `fin-pricekey` and `fin-quote-run` and sync's
+  `fin-sync-uid`, which live OUTSIDE state on purpose (documented in their own
+  sections). "Delete everything" clears those as well as state: the ticker list
+  and a working credential must not outlive "every holding in this browser is
+  gone" on a shared origin. **`fin-quotes` is GONE — the price cache is
+  `state.quotes` now (2026-08-17), and the whole point is that it syncs**; the
+  removal of the old key is still attempted on delete-all, for a browser that
+  has not been opened since it moved. `save()` is the
   single write chokepoint (and where a future sync layer would hook in, SV
   style). `blankState()`/`coerceShape()`/`migrate()` guard every entry point;
   Restore shape-checks the RAW parse before coercing, so a wrong file is
@@ -1401,6 +1404,50 @@ re-testing CORS first.
 - The key lives in localStorage **`fin-pricekey`** (named for the job, not the
   supplier). The old `fin-avkey` is deleted on load: nothing can call that host
   any more, and a credential that can't be used is only a liability.
+- **The CACHE, unlike the key, is `state.quotes` and therefore SYNCS** (asked for
+  2026-08-17). The six-hour clock is a fact about the QUOTE, and the quote is the
+  same on every device — left in localStorage it meant the laptop fetched a
+  price, the phone received the price (holdings are state) but not its
+  timestamp, judged the lot stale and spent the allowance fetching it all again.
+  Things that hold it together:
+  - **The key stays local and must never follow it.** That is the security rule
+    above, not an oversight, and it is why the two live in different places
+    despite being one feature. The consequence is worth knowing: a second device
+    with no key still shows the synced prices and their "as of" line, and simply
+    cannot refresh — which is the right trade.
+  - **Top level, not `settings` and not `side`.** `settings` travels in FULL in
+    every share link, and the cache is a list of the tickers somebody holds;
+    `side` is tab data gated by SECTION_NEEDS. `buildSharePayload` assembles from
+    a WHITELIST of top-level keys, so being top-level and unlisted keeps it out
+    of a link by construction. There is a test on the placement, because the
+    whitelist itself can't be reached from the harness.
+  - **`coerceQuotes` is the boundary** — pure and pinned. A price is read
+    STRICTLY, never through `num()`: a corrupt field turned into a
+    deliberate-looking 0 is copied straight onto a holding by the write-back in
+    `refreshPrices`, and a $0 holding is a wrong figure that looks like a real
+    one. A `noQuote` marker carries no price. No `ts` means no clock, so the
+    entry goes. **A ts more than an hour in the FUTURE is dropped** — this is the
+    one field where another device's clock reaches ours, and a badly-set one
+    would otherwise pin a price as "fresh" for years, since `freshWithin`
+    measures `now - ts`.
+  - **`coreOf` nulls `quotes` alongside `ui`**, or a quiet pass that learned
+    nothing but a "no quote" marker mints an undo entry and ⌘Z walks back
+    through lookups before reaching the edit somebody regrets.
+  - **`writeQuoteCache` returns whether anything MOVED, and `refreshPrices`
+    saves once** for the cache and the price write-back together. Without that a
+    quiet pass pushes a byte-identical document to Firestore on a timer.
+  - **The run report `fin-quote-run` deliberately stays local.** It says what
+    happened on THIS device a moment ago — throttled, out of credits, offline —
+    and `runIsToday`/`runIsRecent` age it; syncing it would have the phone
+    announce a throttle it never hit against an allowance it never spent.
+  - `adoptLegacyQuoteCache()` folds a browser's old `fin-quotes` in ONCE and
+    removes the key. Entries already in state win (they came from a device on
+    the newer arrangement), and a second run is a no-op, so a failed removal in
+    private mode costs nothing.
+  - Adopting a cloud copy written by a build that predates this EMPTIES the
+    cache, because `finAdopt` assigns top-level keys wholesale and old builds
+    carry no `quotes`. That costs one refresh, never a figure — the prices
+    themselves live on the holdings — and it stops once both devices are current.
 - **`priceProvenance()` puts the fetch time in the holding editor**, as the
   Price field's own `hint`, and the holding editor's `fields` is a FUNCTION
   rather than a list so it can be computed per row. This exists because the bar
@@ -2343,6 +2390,12 @@ step.
   link nor a backup nor Firestore. That is the whole reason it is kept there
   rather than in `settings`, and it must stay there. The zoom is out for the
   same reason in a smaller key: it describes a screen, not a plan.
+  **`state.quotes` is the case that shows why the whitelist matters**: the price
+  cache IS state — it syncs and rides in a backup on purpose — but it is a list
+  of the tickers somebody holds, so it must never reach a link. It is kept out
+  by being a top-level key `buildSharePayload` does not name, which is why that
+  object is assembled from a whitelist rather than by copying `state` and
+  deleting from it.
   **So anything added to `settings` is shared by default — if it must not be,
   it does not belong in `settings`.** That is why the drawdown's spending target
   is `side.drawdown` and not a setting: it is data about a household, gated per
