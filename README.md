@@ -141,6 +141,12 @@ included — treat those the way you treat the figures.
   for the oldest). A year kept as a yearly summary is set in italics, one built
   before it has started is underlined with dots, and hovering either says which
   in words.
+- **The header buttons wear a glyph each** — ⌕ Find, ↩ Undo, ⚙ Preferences,
+  ⇩ Back up, ↗ Share. They are plain text characters rather than an icon font
+  or emoji, so nothing extra is fetched for a header that paints before
+  anything else runs, and each takes the theme's own text colour — no meaning
+  ever rides on hue alone. A screen reader is told to skip them; the word
+  beside each one is the whole label.
 - **Zoom** — scale the whole app from the header in quarter steps, or type an
   exact percentage in Preferences (50–200%). It belongs to the device you set
   it on: never synced, never in a backup, so a laptop and a desk monitor can
@@ -170,7 +176,11 @@ included — treat those the way you treat the figures.
   ring lives in memory for this sitting only — a reload starts fresh — and it
   clears when another device's changes arrive, since undoing past somebody
   else's work would overwrite it. There is no redo, on purpose: linear and
-  predictable beats a two-state seesaw.
+  predictable beats a two-state seesaw. Because there is no redo the **button
+  asks before it acts** — it sits among the other header buttons and a mis-click
+  would cost you an edit you'd have to retype. ⌘Z / Ctrl+Z goes straight back
+  without asking: a modifier chord isn't pressed by accident, and it's the way
+  to walk back several steps at a time.
 - **The tabs are yours to arrange** — drag one anywhere along the bar (with a
   mouse or a finger), or hold Alt and use the arrow keys. The order is saved and
   follows you to your other devices.
