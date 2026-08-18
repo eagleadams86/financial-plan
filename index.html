@@ -4911,6 +4911,34 @@ function summaryCard(y, yr) {
   </div>`;
 }
 
+/* Whether an account earns a row in a LIVE year's grid — pure and pinned, and
+   shared with the cell editor so the grid and the button that empties a cell
+   can never disagree about whether a row is about to vanish.
+   A basic budget (Start fresh) has no transfer rows, seeds or pins for the
+   accounts beside the hub, so those would sit at $0 forever — hide them rather
+   than show dead rows. They appear the moment anything feeds them.
+   The LAST test is the one that was missing (added 2026-08-17, from "I hit back
+   to estimate and the whole line disappeared"): an account that HOLDS MONEY
+   always earns its row. Every other test here asks whether something points at
+   the account, and none of them notices a balance that simply carried in — so
+   reverting a stated balance could take the row away while the account still
+   had a figure to show, which reads as the money going with it. */
+function accountShowsInYear(a, yr, c, months, accounts) {
+  const keyed = (map) => Object.keys(map || {}).some(k => k.startsWith(a.id + '|'));
+  return a.hub
+    || (yr.seeds[a.id] || 0) !== 0
+    || keyed(yr.overrides)
+    || keyed(yr.balAdjust)
+    || (yr.categories || []).some(cat => normRole(cat).transferTo === a.id)
+    /* An overflow row's two ends keep their rows visible — a fresh sweep
+       destination has no seed, pin or transfer-role feeder, and its balance
+       would otherwise grow quietly with no row on screen. */
+    || (yr.categories || []).some(cat => cat.rule === 'overflow'
+         && (cat.transferTo === a.id || cat.overflowFrom === a.id))
+    || accounts.some(o => o.id !== a.id && o.creditTo === a.id)
+    || months.some(m => (c.balances[`${a.id}|${m}`] || 0) !== 0);
+}
+
 function gridCard(y, yr) {
   const c = C[y];
   const months = c.months;
@@ -5074,17 +5102,7 @@ function gridCard(y, yr) {
      show dead rows. They appear the moment anything feeds them. */
   const accounts = accountsOf(state);
   const stated = (a) => Object.keys(yr.overrides).some(k => k.startsWith(a.id + '|'));
-  const activeBal = (a) => a.hub
-    || (yr.seeds[a.id] || 0) !== 0
-    || stated(a)
-    || Object.keys(yr.balAdjust || {}).some(k => k.startsWith(a.id + '|'))
-    || yr.categories.some(cat => normRole(cat).transferTo === a.id)
-    /* An overflow row's two ends keep their rows visible — a fresh sweep
-       destination has no seed, pin or transfer-role feeder, and its balance
-       would otherwise grow quietly with no row on screen. */
-    || yr.categories.some(cat => cat.rule === 'overflow'
-         && (cat.transferTo === a.id || cat.overflowFrom === a.id))
-    || accounts.some(o => o.id !== a.id && o.creditTo === a.id);
+  const activeBal = (a) => accountShowsInYear(a, yr, c, months, accounts);
   /* A PINNED year shows only the accounts it actually holds figures for. The
      live year's rules don't apply to history: the hub wasn't necessarily the
      hub in 2020, and an account that exists today didn't exist then — showing
@@ -14764,6 +14782,21 @@ F('cellSplitBtn').onclick = () => {
     && round2(checks.reduce((s, p) => s + p.v, 0)) === round2(start);
   setParts(isRuleTotal ? checks : [{ v: start, kind }], future);
 };
+/* Emptying the last figure an account had this year takes its ROW off the grid
+   — `accountShowsInYear` stops being true — and a row vanishing from under the
+   cursor reads as data loss, which is the same complaint the donation editor's
+   "Moved to 2025" toast answers. So the toast says it happened and how to undo
+   it. Measured AFTER the render, off the same predicate the grid just used, so
+   the message can't claim a disappearance the grid didn't perform. */
+function balRowGoneNote(yearKey, id) {
+  const yr = state.years[yearKey], c = C[yearKey];
+  const a = accountsOf(state).find(x => x.id === id);
+  if (!a || !yr || !c || yr.model !== 'live') return '';
+  if (accountShowsInYear(a, yr, c, c.months, accountsOf(state))) return '';
+  return ` — that was the only figure ${a.name} had in ${yearKey}, so its row has `
+    + 'gone. State a balance again, or send something into it, to bring it back.';
+}
+
 F('cellRevertBtn').onclick = () => {
   const { yearKey, type, id, m } = editing;
   const yr = state.years[yearKey];
@@ -14775,7 +14808,8 @@ F('cellRevertBtn').onclick = () => {
   cellDialog.close();
   save(); render();
   refocusGridCell();
-  toast('Back to the computed number');
+  toast('Back to the computed number'
+    + (type === 'bal' ? balRowGoneNote(yearKey, id) : ''));
 };
 F('cellClearBtn').onclick = () => {
   const { yearKey, type, id, m } = editing;
@@ -14789,7 +14823,7 @@ F('cellClearBtn').onclick = () => {
   cellDialog.close();
   save(); render();
   refocusGridCell();
-  toast('Cleared');
+  toast('Cleared' + (type === 'bal' ? balRowGoneNote(yearKey, id) : ''));
 };
 
 /* Marking a month entered materialises its auto estimates into stored actuals
@@ -16541,7 +16575,7 @@ window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
   retirementMarkers, retirementHorizon, RET_YEARS_MIN, RET_YEARS_MAX,
   planToYearOf, PLAN_TO_AGE_DEFAULT, SAFE_RATE_DEFAULT, contribYears,
   retirementMonthOf, RETIRE_WHEN, retiredShareOf, drawdownFromMonth,
-  limitsForIn, magiFor, plannedDeferral, plannedContribs,
+  limitsForIn, magiFor, accountShowsInYear, plannedDeferral, plannedContribs,
   isIra, iraAccountsOf, latestContrib, contribStopMonth, iraOutlook,
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,

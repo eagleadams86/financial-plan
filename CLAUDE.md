@@ -921,6 +921,24 @@ suite passed while the card was wrong.
   that no longer exists contributes nothing rather than breaking the goal —
   splitting one account into several is normal, and the goal has to keep
   working while you repoint it.
+- **`accountShowsInYear(a, yr, c, months, accounts)` decides whether an account
+  earns a ROW in a live year** — pure and pinned, and shared with the cell
+  editor so the grid and the button that empties a cell cannot disagree about
+  whether a row is about to vanish. A Start-fresh budget has no transfers,
+  seeds or pins for the accounts beside the hub, and those would sit at $0 for
+  ever, so they are hidden until something feeds them.
+  **The last test — "it holds money" — was missing until 2026-08-17**, reported
+  as "I hit back to estimate and the whole line disappeared". Every other test
+  asks whether something POINTS AT the account (a seed, a pin, an adjustment, a
+  transfer row, an overflow end, another account's `creditTo`); none noticed a
+  balance that had simply carried in, so reverting a stated balance could take
+  the row away while the account still had a figure to show.
+  **And when the row does legitimately go, the toast says so** (`balRowGoneNote`,
+  on both Revert and Clear): emptying the last figure an account had takes its
+  row off the grid, and a row vanishing from under the cursor reads as data loss
+  — the donation editor's "Moved to 2025" discipline. It is measured AFTER the
+  render off the same predicate the grid just used, so the message can never
+  claim a disappearance the grid didn't perform.
 - **A year can be built before it arrives.** `yearStarted(st, y, today)` is
   derived, never stored: a grid year has begun once today reaches its own
   first month, or once the year before it is entered through December.

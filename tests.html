@@ -5851,6 +5851,47 @@ t('the price key is unreachable from anything that leaves the browser', () => {
   eq(H.blankState().settings.hasOwnProperty('zoom'), false);
 });
 
+group('Which accounts earn a row');
+
+t('an account that holds money always earns its row', () => {
+  /* Reported 2026-08-17: opening M&T Savings, pressing "Back to auto estimate"
+     and watching the whole LINE disappear. Every other test here asks whether
+     something POINTS AT the account — a seed, a pin, a transfer, another
+     account crediting into it — and none of them noticed a balance that had
+     simply carried in, so removing the pin took the row away while the account
+     still had a figure to show. */
+  const yr = { seeds: {}, overrides: {}, balAdjust: {}, categories: [] };
+  const a = { id: 'mts', name: 'M&T Savings' };
+  const months = ['2026-01', '2026-02'];
+  const broke = { balances: { 'mts|2026-01': 0, 'mts|2026-02': 0 } };
+  const holds = { balances: { 'mts|2026-01': 0, 'mts|2026-02': 12000 } };
+  eq(H.accountShowsInYear(a, yr, broke, months, [a]), false,
+    'nothing points at it and it holds nothing — a dead row, still hidden');
+  eq(H.accountShowsInYear(a, yr, holds, months, [a]), true,
+    'it holds money, so it gets a row whatever else is or is not pointing at it');
+});
+
+t('the old reasons to show a row all still hold', () => {
+  const empty = { balances: {} };
+  const months = ['2026-01'];
+  const base = { seeds: {}, overrides: {}, balAdjust: {}, categories: [] };
+  const a = { id: 'x', name: 'X' };
+  eq(H.accountShowsInYear({ ...a, hub: true }, base, empty, months, [a]), true, 'the hub');
+  eq(H.accountShowsInYear(a, { ...base, seeds: { x: 5 } }, empty, months, [a]), true, 'a seed');
+  eq(H.accountShowsInYear(a, { ...base, seeds: { x: 0 } }, empty, months, [a]), false,
+    'a ZERO seed is not a reason — that is the dead row the rule exists to hide');
+  eq(H.accountShowsInYear(a, { ...base, overrides: { 'x|2026-03': { v: 1 } } }, empty, months, [a]),
+    true, 'a stated balance, in any month of the year');
+  eq(H.accountShowsInYear(a, { ...base, balAdjust: { 'x|2026-03': { interest: 1 } } }, empty, months, [a]),
+    true, 'a corrected interest or dividend figure');
+  eq(H.accountShowsInYear(a, { ...base, categories: [{ role: 'transfer', transferTo: 'x' }] },
+    empty, months, [a]), true, 'a row that moves money into it');
+  eq(H.accountShowsInYear(a, { ...base, categories: [{ rule: 'overflow', overflowFrom: 'x' }] },
+    empty, months, [a]), true, 'an overflow sweep drawing FROM it');
+  eq(H.accountShowsInYear(a, base, empty, months, [a, { id: 'y', creditTo: 'x' }]), true,
+    'another account paying its interest in');
+});
+
 group('The income the year is expected to come to');
 
 t('magiFor is the one answer the MAGI card and the Use-this-year button share', () => {
