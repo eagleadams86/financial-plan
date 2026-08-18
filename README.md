@@ -91,7 +91,9 @@ in the app lives in your browser's localStorage.
   arrived they can also hold family members' names and birth months,
   children's included — treat those the way you treat the figures.
 
-Full detail in [privacy.html](privacy.html).
+Full detail in [privacy.html](privacy.html). The app's footer links to it, beside a
+**How it works** link back to this README on GitHub (the repo front page renders it) —
+the manual for anything the in-app ⓘ dialogs don't cover.
 
 ---
 
