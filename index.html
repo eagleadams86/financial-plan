@@ -9286,6 +9286,92 @@ function plannedOutOfPocket(items) {
     .reduce((t, i) => t + Math.abs(i.funding || 0) + Math.abs(i.cash || 0), 0));
 }
 
+/* Where a clone lands: the first year after this one with no giving in it.
+
+   NOT simply `from + 1`. Cloning 2026 forward when 2027 already holds a plan
+   would drop a second copy on top of the first — every figure doubled, in a
+   year whose whole purpose is to be a statement of what you intend to give,
+   and no warning that it had happened. Walking to the first empty year means a
+   clone can only ever CREATE, never overwrite, which is what makes the button
+   safe to put beside "Add donation" and what lets it say its own destination
+   out loud rather than surprising you with one.
+
+   It terminates on its own: `donations` has finitely many keys, so at worst
+   this walks past every one of them and stops on the gap after the last. A
+   year key that isn't a number (a hand-edited backup) has no "next" and gets
+   no button. */
+function nextUnplannedYear(donations, fromYear) {
+  let y = +fromYear + 1;
+  if (!Number.isFinite(y)) return null;
+  while (((donations || {})[String(y)] || []).length) y++;
+  return String(y);
+}
+
+const isLeapYear = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+
+/* Re-date a donation into another year, by STRING — never by building a Date.
+   A bare ISO day parses as UTC midnight and renders as the day before west of
+   Greenwich, which is the rule every date in this app is formatted by, and
+   `new Date(d).setFullYear()` would walk straight into it.
+   29 February is the one day that may not exist in the year it is going to. It
+   lands on the 28th; letting it roll into 1 March would move a gift into
+   another month to preserve a day-of-year nobody chose. Anything that isn't a
+   full ISO day — including nothing at all — stays dateless, and a dateless
+   donation keeps sitting in the bucket it was put in. */
+function reDate(date, toYear) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return '';
+  const md = date.slice(5);
+  return `${toYear}-${md === '02-29' && !isLeapYear(+toYear) ? '02-28' : md}`;
+}
+
+/* Copy a year's giving forward as the next empty year's PLAN.
+
+   EVERYTHING comes across — the gifts already made and the ones that were only
+   ever planned — because what is being cloned is the SHAPE of a year's giving,
+   and last year's intentions are as much a part of that shape as its receipts.
+   Every copy lands `pending`, which is the entire point rather than a detail:
+   until it is unticked it stays out of the year's totals, out of the deductible
+   line and out of `givenOutOfPocket`, so a clone can never inflate a figure.
+   It feeds the PROJECTION instead, which is the honest place for a year of
+   giving you have decided on and not yet done.
+
+   Dates move to the target year and keep their day, so an appeal you give to
+   every February stays in February. Deductible carries: a fund deposit you
+   intend to repeat is intended to be deductible too, and it is your own record
+   either way. The source year is not touched. */
+function cloneDonationsForward(st, fromYear) {
+  const src = ((st.side.donations || {})[fromYear] || []);
+  if (!src.length) return null;
+  const to = nextUnplannedYear(st.side.donations, fromYear);
+  if (!to) return null;
+  const rows = src.map((r) => {
+    const row = { date: reDate(r.date, to), foundation: r.foundation || '?',
+      event: r.event || '', cause: r.cause || '',
+      funding: r.funding || 0, grant: r.grant || 0, cash: r.cash || 0,
+      deductible: !!r.deductible, pending: true };
+    if (r.note) row.note = r.note;
+    return row;
+  });
+  yearBucket(st.side.donations, to).push(...rows);
+  return { to, count: rows.length };
+}
+
+/* Take a whole year of giving out at once — the counterpart to the clone, and
+   the only way out of a cloned year you have thought better of that isn't
+   deleting a dozen rows one at a time.
+
+   The BUCKET goes, not just its rows, for the reason `dropDonation` takes it:
+   an emptied bucket left behind would ride along in a backup taken before the
+   next reload and bring the card back on restore. Returns the count removed,
+   or null where there was nothing to remove — absent rather than 0, so the
+   caller can tell "I deleted none" from "there was nothing there". */
+function dropDonationYear(st, y) {
+  const rows = ((st.side.donations || {})[y] || []);
+  if (!rows.length) return null;
+  delete st.side.donations[y];
+  return rows.length;
+}
+
 /* Gross income is the Comp tab's total comp: the salary this year's raise
    landed on, plus the bonus. Read through afterRaise() like every other
    consumer, never written out again. A year with no comp record has no gross —
@@ -9487,6 +9573,11 @@ function renderGiving() {
   const donTable = (y) => {
     const items = s.donations[y];
     const gone = items.filter(i => !i.pending);   // what has actually left
+    /* The clone button names its own destination rather than saying "next
+       year" and landing somewhere else — the year it copies into is the first
+       one with nothing in it, which may be two or three along once a plan is
+       already sitting in 2027. A year key that isn't a number gets no button. */
+    const cloneTo = nextUnplannedYear(s.donations, y);
     const sum = (rows, k) => round2(rows.reduce((t, i) => t + (i[k] || 0), 0));
     const planned = round2(items.filter(i => i.pending)
       .reduce((t, i) => t + Math.abs(i.funding || 0) + Math.abs(i.grant || 0)
@@ -9533,7 +9624,13 @@ function renderGiving() {
         }).join('')}</tbody>
       </table></div>
       <div class="addbar"><button class="btn small" data-add="donation"
-        data-year="${esc(y)}">＋ Add donation</button></div>
+        data-year="${esc(y)}">＋ Add donation</button>${cloneTo ? `
+        <button class="btn small" data-clone-donations="${esc(y)}"
+          title="Copy these ${items.length} donation${items.length === 1 ? '' : 's'} into ${
+        esc(cloneTo)} as that year's plan. Every copy lands Planned, so it changes nothing you have given; ${
+        esc(y)} is left exactly as it is.">⧉ Clone to ${esc(cloneTo)}</button>` : ''}
+        <button class="btn small" data-delete-donations="${esc(y)}"
+          title="Remove all ${items.length} of ${esc(y)}'s donations at once. Undo is in the header if you change your mind.">🗑 Delete ${esc(y)}</button></div>
     </div>`;
   };
 
@@ -10494,6 +10591,54 @@ function wireView(view) {
     if (csvBtn) csvBtn.onclick = () =>
       downloadCsv(`financial-plan-donations-${todayISO()}.csv`,
         donationsToCsv(state.side.donations));
+    /* One button per year card, so they're found by attribute rather than id.
+       `.addbar` is stripped wholesale in a shared view, which takes this with
+       it — a read-only link must not offer to write a year. */
+    document.querySelectorAll('[data-clone-donations]').forEach((btn) => {
+      btn.onclick = () => {
+        const from = btn.dataset.cloneDonations;
+        const n = (state.side.donations[from] || []).length;
+        const to = nextUnplannedYear(state.side.donations, from);
+        if (!n || !to) return;
+        /* Native confirm, the way the year rollover asks — the one action this
+           most resembles. It names the count and the destination because the
+           destination is the part that can surprise: it is the first EMPTY
+           year, not always the next one. */
+        if (!confirm(`Copy ${n} donation${n === 1 ? '' : 's'} from ${from} into ${to}?\n\n`
+          + `Every copy lands as Planned, so it counts towards what ${to} is heading `
+          + `for and towards nothing you have actually given. ${from} is not touched.`))
+          return;
+        const done = cloneDonationsForward(state, from);
+        if (!done) return;
+        save(); render();
+        toast(`${done.count} donation${done.count === 1 ? '' : 's'} copied into ${
+          done.to} — all Planned, so edit the dates and amounts to suit`);
+        /* Back onto the button that was just pressed. The re-render destroyed
+           it, and without this a keyboard reader is dropped at the top of the
+           page — the trap every other re-rendering control here already
+           avoids. It now points one year further on, which is the truth. */
+        [...document.querySelectorAll('[data-clone-donations]')]
+          .find(b => b.dataset.cloneDonations === from)?.focus();
+      };
+    });
+    document.querySelectorAll('[data-delete-donations]').forEach((btn) => {
+      btn.onclick = () => {
+        const y = btn.dataset.deleteDonations;
+        const n = (state.side.donations[y] || []).length;
+        if (!n) return;
+        /* Says that undo covers it, and it genuinely does: `coreOf` excludes
+           only `ui` and `quotes`, so a year of giving is in the ring like any
+           other edit. Don't copy the budget year's "no undo beyond a backup
+           file" wording across — for this it would be false. */
+        if (!confirm(`Delete all ${n} of ${y}'s donation${n === 1 ? '' : 's'}?\n\n`
+          + `The year's card goes with them. Undo (↩ in the header) brings it back.`))
+          return;
+        const gone = dropDonationYear(state, y);
+        if (gone === null) return;
+        save(); render();
+        toast(`${y} cleared — ${gone} donation${gone === 1 ? '' : 's'} deleted. ↩ Undo brings them back`);
+      };
+    });
   }
   if (view === 'vacations') buildVacationsChart();
   if (view === 'investments') wireInvestments();
@@ -16716,6 +16861,7 @@ window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
   afterRaise, bonusBase, bonusShare, yearFlows, yearSpending, summaryRowIsFlow, notesOfYear,
   givenOutOfPocket, plannedOutOfPocket, grossIncome, takeHomePay, givingStats,
   givingCeiling, isPayRow,
+  nextUnplannedYear, isLeapYear, reDate, cloneDonationsForward, dropDonationYear,
   hasNote,
   cleanBoxKeys, isBoxShut, withBox, boxKey,
   zoomPct, ZOOM_MIN, ZOOM_MAX,

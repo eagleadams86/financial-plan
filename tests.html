@@ -1804,6 +1804,130 @@ t('a projected share is a dash wherever the actual one is', () => {
   eq(t26.takePct, null);
   eq(t26.projTakePct, null);
 });
+group('Cloning a year of giving forward');
+t('a clone lands in the first year with nothing in it', () => {
+  /* Not from + 1. Dropping a second copy on a year that already holds a plan
+     would double every figure in it, silently. */
+  const don = { '2025': [{ cash: -100 }], '2026': [{ cash: -100 }],
+    '2027': [{ cash: -100 }] };
+  eq(H.nextUnplannedYear(don, '2026'), '2028');
+  eq(H.nextUnplannedYear(don, '2024'), '2028', 'walks past every year that has one');
+  eq(H.nextUnplannedYear(don, '2027'), '2028');
+  eq(H.nextUnplannedYear({}, '2026'), '2027', 'nothing anywhere: straight next year');
+});
+t('an emptied bucket counts as unplanned', () => {
+  /* coerceShape prunes these on load, but deleting the last row of a year
+     empties one mid-session, and an empty year is an empty year. */
+  eq(H.nextUnplannedYear({ '2027': [] }, '2026'), '2027');
+});
+t('a year key that is not a number has no next year', () => {
+  eq(H.nextUnplannedYear({ 'sometime': [{ cash: -1 }] }, 'sometime'), null);
+});
+t('a date moves year and keeps its day', () => {
+  eq(H.reDate('2026-02-13', '2027'), '2027-02-13');
+  eq(H.reDate('2026-12-01', '2029'), '2029-12-01', 'more than one year forward');
+});
+t('29 February lands on the 28th, never in March', () => {
+  /* Rolling into 1 March would move a gift to another month to preserve a
+     day-of-year nobody chose. */
+  ok(H.isLeapYear(2028) && !H.isLeapYear(2027), 'the fixture years are what I think');
+  eq(H.reDate('2028-02-29', '2027'), '2027-02-28');
+  eq(H.reDate('2028-02-29', '2032'), '2032-02-29', 'leap to leap keeps the day');
+  eq(H.isLeapYear(2100), false, 'a century is not a leap year');
+  eq(H.isLeapYear(2000), true, 'but every fourth one is');
+});
+t('a dateless donation stays dateless', () => {
+  eq(H.reDate('', '2027'), '');
+  eq(H.reDate(undefined, '2027'), '');
+  eq(H.reDate('2026', '2027'), '', 'a year alone is not a date');
+});
+t('everything comes across, and all of it lands Planned', () => {
+  /* Last year's intentions are as much the shape of a year's giving as its
+     receipts, so the planned rows are cloned too — as planned rows. */
+  const st = { side: { donations: { '2026': [
+    { date: '2026-02-13', foundation: 'Fidelity Charitable', cause: 'DAF Funding',
+      funding: 5000, deductible: true },
+    { date: '2026-05-10', foundation: 'Roswell Park Alliance', event: 'Ride for Roswell',
+      cause: 'Cancer', grant: -1000, note: 'team page' },
+    { date: '2026-11-25', foundation: 'Together for Youth', cause: 'Kids',
+      grant: -1000, pending: true },
+  ] } } };
+  const out = H.cloneDonationsForward(st, '2026');
+  eq(out.to, '2027');
+  eq(out.count, 3);
+  const rows = st.side.donations['2027'];
+  eq(rows.length, 3);
+  ok(rows.every(r => r.pending === true), 'every copy is Planned');
+  eq(rows.map(r => r.date), ['2027-02-13', '2027-05-10', '2027-11-25']);
+  eq(rows[0].funding, 5000);
+  eq(rows[0].deductible, true, 'a deposit meant to repeat is meant to be deductible');
+  eq(rows[1].event, 'Ride for Roswell');
+  eq(rows[1].note, 'team page');
+  eq(rows[2].grant, -1000, 'a row that was only planned is cloned as one');
+});
+t('the source year is not touched', () => {
+  const st = { side: { donations: { '2026': [
+    { date: '2026-02-13', foundation: 'Fund', funding: 5000, deductible: true }] } } };
+  H.cloneDonationsForward(st, '2026');
+  const src = st.side.donations['2026'][0];
+  eq(src.date, '2026-02-13');
+  eq(!!src.pending, false, 'what you gave is still what you gave');
+});
+t('a clone counts towards the projection and towards nothing given', () => {
+  /* The whole reason every copy lands planned: it must not be able to inflate
+     a figure of record, only say where the year is heading. */
+  const st = { side: { comp: {}, bonuses: {}, donations: { '2026': [
+    { date: '2026-02-13', foundation: 'Fund', funding: 5000 }] } }, years: {} };
+  H.cloneDonationsForward(st, '2026');
+  const t27 = H.givingStats(st, {}, '2026-08-18').find(r => r.y === '2027');
+  eq(t27.given, 0, 'nothing has been given in 2027');
+  eq(t27.planned, 5000);
+  eq(t27.projected, 5000, 'it is all projection');
+});
+t('cloning twice makes two plans, never one doubled', () => {
+  const st = { side: { donations: { '2026': [
+    { date: '2026-02-13', foundation: 'Fund', funding: 5000 }] } } };
+  eq(H.cloneDonationsForward(st, '2026').to, '2027');
+  eq(H.cloneDonationsForward(st, '2026').to, '2028', 'the second lands further on');
+  eq(st.side.donations['2027'].length, 1);
+  eq(st.side.donations['2028'].length, 1);
+});
+t('a year with nothing in it clones nothing', () => {
+  eq(H.cloneDonationsForward({ side: { donations: { '2026': [] } } }, '2026'), null);
+  eq(H.cloneDonationsForward({ side: { donations: {} } }, '2026'), null);
+});
+t('deleting a year takes the BUCKET, not just its rows', () => {
+  /* An emptied bucket left behind would ride along in a backup taken before
+     the next reload and bring the card back on restore — dropDonation's rule. */
+  const st = { side: { donations: { '2026': [{ cash: -100 }, { cash: -200 }],
+    '2027': [{ cash: -50 }] } } };
+  eq(H.dropDonationYear(st, '2026'), 2, 'the count removed');
+  eq('2026' in st.side.donations, false, 'the key is gone, not left empty');
+  eq(st.side.donations['2027'].length, 1, 'and no other year is touched');
+});
+t('deleting a year that has nothing in it is null, not 0', () => {
+  /* Absent, so the caller can tell "I deleted none" from "there was nothing
+     there" and skip the toast rather than announcing an edit that never was. */
+  eq(H.dropDonationYear({ side: { donations: {} } }, '2026'), null);
+  eq(H.dropDonationYear({ side: { donations: { '2026': [] } } }, '2026'), null);
+});
+t('a deleted year is off the chart and out of every total', () => {
+  const st = { side: { comp: {}, bonuses: {}, donations: {
+    '2025': [{ cash: -100 }], '2026': [{ cash: -900 }] } }, years: {} };
+  H.dropDonationYear(st, '2026');
+  eq(H.givingStats(st, {}, '2026-08-18').map(r => r.y), ['2025']);
+});
+t('a cloned year can be deleted again, and the clone target moves back', () => {
+  /* The round trip: clone, think better of it, delete, and the button is
+     offering the same year again rather than skipping past a hole. */
+  const st = { side: { donations: { '2026': [
+    { date: '2026-02-13', foundation: 'Fund', funding: 5000 }] } } };
+  eq(H.cloneDonationsForward(st, '2026').to, '2027');
+  eq(H.nextUnplannedYear(st.side.donations, '2026'), '2028');
+  eq(H.dropDonationYear(st, '2027'), 1);
+  eq(H.nextUnplannedYear(st.side.donations, '2026'), '2027', 'back where it was');
+});
+
 t('a year of the future is running, not finished', () => {
   /* Giving planned for next year is the most forward-looking thing on the tab
      and would be the easiest to drop by testing `=== thisYear`. */

@@ -1918,6 +1918,42 @@ so the tile underneath renders its dash with no `.foot` at all — repeating "No
 salary recorded for this year" directly below itself says nothing and reads as
 two separate faults rather than one. This is the case a 2027 with planned
 giving and no comp record hits, so it is not hypothetical.
+**A year of giving CLONES FORWARD, and the copy is a plan.** Each year card's
+addbar carries "⧉ Clone to 2027" beside Add donation, and the button names the
+year it will write — because that year is `nextUnplannedYear()`, the first one
+with NOTHING in it, which is two along once 2027 already holds a plan. That
+walk is the safety property, not a nicety: cloning into a year that already had
+one would double every figure in it silently, so a clone can only ever CREATE.
+It also means the button can be sat next to Add donation without a guard.
+`cloneDonationsForward(st, from)` copies EVERY row, the done ones and the ones
+already only planned — what is being cloned is the SHAPE of a year's giving,
+and last year's intentions are as much a part of that as its receipts. Every
+copy lands `pending`, which is the point rather than a detail: it can never
+inflate a figure of record, and it feeds the PROJECTION instead, which is the
+honest place for giving you have decided on and not yet done. `deductible` and
+`note` carry; the source year is not touched.
+**`reDate` moves a date by STRING and never builds a Date** — a bare ISO day
+parses as UTC midnight and renders as the day before west of Greenwich, the
+rule this whole app formats dates by, and `setFullYear` walks straight into it.
+**29 February lands on the 28th**, never 1 March: rolling forward would move a
+gift into another month to preserve a day-of-year nobody chose. Anything that
+isn't a full ISO day stays dateless and keeps sitting in the bucket it is in.
+**`dropDonationYear(st, y)` is the counterpart** — "🗑 Delete 2026", the house
+shape `deleteYearBtn` already uses. It takes the BUCKET, not just the rows, for
+the reason `dropDonation` does: an emptied bucket would ride along in a backup
+taken before the next reload and bring the card back on restore. It returns the
+count removed and **null, never 0, when there was nothing there**, so the
+caller can tell "I deleted none" from "there was nothing to delete" and skip
+announcing an edit that never happened.
+**Its confirm says undo covers it, and that is TRUE here** — `coreOf` excludes
+only `ui` and `quotes`, so a year of giving is in the undo ring like any other
+edit (proven on screen: delete, ↩, all seven rows back and still planned).
+Don't copy the budget year's "no undo beyond a backup file" wording across;
+for this action it would be a lie.
+Both buttons live inside `.addbar`, which `stripEditAffordances` removes
+wholesale — so a shared read-only link carries neither, with nothing extra to
+remember. Both refocus the button that was pressed after the re-render, the
+trap every other re-rendering control here already avoids.
 **On the chart the projection is DRAWN, not plotted**, so `dashedBarEdge` grew
 `opts.to` — per-index values the dashed rectangle reaches instead of the bar's
 own top, absent everywhere else so the two Progress charts are bit-for-bit what

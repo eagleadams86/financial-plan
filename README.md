@@ -464,6 +464,13 @@ included — treat those the way you treat the figures.
   left out of the projection the same way a made one is — that money left your
   account when its deposit did — so the projection can be smaller than the
   "more is planned" figure above the table, which counts every planned row.
+  Each year can be **cloned forward** as next year's plan: the button names the
+  year it writes into — the first one with nothing in it yet — and every copy
+  lands **Planned**, dates moved to the new year and their day kept, so an
+  appeal you give every February stays in February. Nothing you've actually
+  given can be changed by it, and the year you cloned from is untouched. A
+  whole year's donations can also be **deleted at once**, card and all; undo
+  in the header brings them back.
 - **Share a read-only link** — show someone part of the plan without giving them
   an account, a file or edit rights. You pick which tabs go in and how many
   years go with them; the whole payload rides in the link's `#fragment`, so
