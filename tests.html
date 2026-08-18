@@ -1514,7 +1514,7 @@ t('a box key survives the year picker and the note count', () => {
   eq(H.boxKey('budget', '2026 Budget'), H.boxKey('budget', '2025 Budget'));
   eq(H.boxKey('budget', 'Notes for 2026 (5)'), H.boxKey('budget', 'Notes for 2025 (12)'));
   eq(H.boxKey('budget', '2026 Budget'), 'budget/budget');
-  eq(H.boxKey('goals', 'Money in vs Money Out'), 'goals/money-in-vs-money-out');
+  eq(H.boxKey('goals', 'Money In vs Money Out'), 'goals/money-in-vs-money-out');
   eq(H.boxKey('budget', '2026'), 'budget/box', 'a heading of nothing but digits still has a key');
   eq(H.boxKey('goals', 'Goals') === H.boxKey('household', 'Goals'), false,
     'the same heading on two tabs is two boxes');
@@ -6640,6 +6640,10 @@ t('the worker is network-first, so cached code needs a failed network', () => {
      again — see the reasoning at the top of sw.js. */
   ok(!/caches\.match\(req\)\s*\.then\(\s*\(?r\)?\s*=>\s*r\s*\|\|/.test(code),
     'this looks cache-first — the whole design rests on network-first');
+  /* An answered-but-failed network is the third case: a transient 404/500 from
+     Pages inside the race window must not beat a good cached shell. */
+  ok(/!res\.ok && cached/.test(code),
+    'a same-origin error reply with a cached copy in hand must serve the cache');
 });
 
 t('a missing shell file can be repaired without a new worker version', () => {
@@ -6690,6 +6694,17 @@ t('the page declares worker-src and registration is frame-guarded', () => {
     'a shared view must not install a worker in the reader\'s browser');
 });
 
+t('the frame-buster stands, with tests.html the one framer', () => {
+  /* Pages cannot send frame-ancestors (a meta CSP ignores it), so the boot
+     script's buster is the only counter to a hostile origin redressing the
+     reader's figures — and its exemption must stay keyed on data-fin-tests,
+     or this suite would bust itself out of its own frame. */
+  ok(/window\.top\.location = window\.self\.location/.test(APP_SRC),
+    'a cross-origin framer must be navigated over');
+  ok(/frameElement\.hasAttribute\('data-fin-tests'\)/.test(APP_SRC),
+    'the same-origin exemption must key on the data-fin-tests attribute');
+});
+
 /* ── Offline: a plan from the future ────────────────────────────────────────
    The other half of the offline change. Cached code can be a build behind, and
    sync can hand that build a plan a newer one wrote. */
@@ -6737,6 +6752,40 @@ t('the halt refuses to write and takes the sync module down with it', () => {
   ok(tryAt > -1, "load()'s main try block has moved — recheck this test");
   ok(guardAt < tryAt,
     'the guard must run BEFORE the try whose catch returns a blank state');
+});
+
+t('the Restore path refuses a backup from a newer build', () => {
+  /* The handler is FileReader UI all the way down, so pin the source the way
+     the halt tests above do: the same (schema || 1) > SCHEMA comparison, and
+     it must sit BEFORE the coerceShape that would strip the very fields that
+     make the file newer. */
+  const at = APP_SRC.indexOf('safeParse(reader.result)');
+  ok(at > -1, 'the restore handler has moved — recheck this test');
+  const body = APP_SRC.slice(at, at + 2500);
+  const guard = body.search(/\(rawParsed\.schema \|\| 1\) > SCHEMA/);
+  const coerce = body.indexOf('migrate(coerceShape(rawParsed))');
+  ok(guard > -1, 'the restore handler must refuse a schema newer than this build');
+  ok(coerce > -1, 'the restore handler must still coerce the raw parse — has it moved?');
+  ok(guard < coerce, 'the refusal must come before coerceShape sees the file');
+});
+
+t('finAdopt halts on a plan from a newer build instead of adopting it', () => {
+  /* Not exercised live, deliberately: the real finAdopt writes this browser's
+     fin-state and the halt THROWS with its card drawn over the frame, which
+     would take the rest of the suite down with it. Pinned as source instead:
+     the guard, the verbatim store, then the halt — all before coerceShape. */
+  const at = APP_SRC.indexOf('window.finAdopt =');
+  ok(at > -1, 'finAdopt has moved — recheck this test');
+  const body = APP_SRC.slice(at, APP_SRC.indexOf('window.finCounts'));
+  const guard = body.search(/\(\(incoming && incoming\.schema\) \|\| 1\) > SCHEMA/);
+  const store = body.indexOf('JSON.stringify(incoming)');
+  const halt = body.indexOf('haltForNewerData(incoming.schema)');
+  const coerce = body.indexOf('migrate(coerceShape(incoming');
+  ok(guard > -1, 'finAdopt must refuse a schema newer than this build');
+  ok(store > guard && store < halt && halt > -1,
+    'the newer plan must be stored VERBATIM before the halt — coercion would lose its fields');
+  ok(coerce > -1 && halt < coerce,
+    'the halt must fire before coerceShape ever sees the newer plan');
 });
 
 /* ── Runner ───────────────────────────────────────────────────────────────── */
@@ -6858,10 +6907,12 @@ async function run() {
    /financial-plan/tests.html, and on that origin the invisible frame is a real
    session — a signed-in browser would start Firestore sync traffic, or raise a
    which-copy dialog nobody can see. So the iframe is created here or not at
-   all. '' covers file://, which has no host: the suite can't work there either
-   way (file:// iframes are blocked), so it gets the ordinary "serve it over
-   localhost" message. Ported from Team Dashboard's gate; same shape in Sprint
-   Velocity, PAPTrack and Golf Handicap. */
+   all. file:// has no hostname, so it fails the includes() and lands in the
+   else branch, where location.protocol tells it apart from a published copy —
+   it gets its own message (browsers block file:// iframes, so the suite can't
+   run there anyway) rather than being sent down the iframe branch to blame
+   the app for a frame that never loaded. Ported from Team Dashboard's gate;
+   same shape in Sprint Velocity, PAPTrack and Golf Handicap. */
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
 if (LOCAL_HOSTS.includes(location.hostname)) {

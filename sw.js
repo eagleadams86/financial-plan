@@ -170,13 +170,19 @@ self.addEventListener('fetch', (e) => {
 async function networkFirst(req, key) {
   const cache = await caches.open(CACHE);
   const cacheKey = self.location.origin + key;
+  /* Read the cache BEFORE starting the fetch, so the handler below can consult
+     it: a same-origin error page — a transient 404/500 from Pages mid-deploy —
+     is a network that answered and still failed, and with a good copy in hand
+     the shell should win. Only allowlisted shell files ever reach here, so no
+     real missing page is being papered over. */
+  const cached = await cache.match(cacheKey);
   const fresh = fetch(req).then((res) => {
     /* Only a real, same-origin 200 is worth keeping. `basic` excludes opaque
        cross-origin replies, which we should never see here anyway. */
     if (res && res.ok && res.type === 'basic') cache.put(cacheKey, res.clone());
+    if (res && !res.ok && cached) return cached;
     return res;
   });
-  const cached = await cache.match(cacheKey);
   /* Nothing to fall back to: let the network answer, or fail honestly. */
   if (!cached) return fresh;
   /* Offline rejects fast, but the case that actually matters is the slow, alive

@@ -6068,7 +6068,7 @@ function renderGoals() {
   </div>
   <div class="cards2">
     <div class="card">
-      <h2>Money in vs Money Out</h2>
+      <h2>Money In vs Money Out</h2>
       <p class="sub">Everything that moved through the accounts each year${
         noTransfers ? ', apart from money moved between your own accounts' : ' — transfers between\n        them included'}, and the interest they earned counted as money in. Striped bars are
         money out. Early years are best-effort reads of the old bi-weekly sheets.</p>
@@ -15230,6 +15230,17 @@ F('importFile').onchange = (e) => {
       if (!rawParsed || typeof rawParsed !== 'object'
           || typeof rawParsed.years !== 'object' || Array.isArray(rawParsed.years))
         throw new Error('not a Financial Plan file');
+      /* The plan-from-the-future check, restore edition. load() halts at boot,
+         but a backup file arrives HERE, on a session that booted fine — and
+         migrate's gates are all `<`, so a file a newer build exported would
+         coerce, render and cloud-push on offline-cached code that predates its
+         fields. Refused before coerceShape, which would strip the very fields
+         that make it newer. A return, not a throw: the catch below would call
+         a refusal a broken file. */
+      if ((rawParsed.schema || 1) > SCHEMA) {
+        toast('This backup was saved by a newer version of the app — reload to update, then restore it');
+        return;
+      }
       const parsed = migrate(coerceShape(rawParsed));
       const nYears = Object.keys(parsed.years).length;
       const msg = `Replace everything in this browser with ${nYears} year(s) of data from this file? `
@@ -16620,6 +16631,19 @@ window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
    The module is a separate <script type="module"> and can't see this scope. */
 window.finGet = () => state;
 window.finAdopt = (incoming, ts) => {
+  /* The plan-from-the-future check, live edition. load() only guards BOOT, but
+     onSnapshot can hand a page running yesterday's cached code a doc today's
+     build wrote on another device, mid-session. Stored VERBATIM first —
+     coerceShape would strip the fields that make it newer, and localStorage is
+     the source of truth the fresh build will migrate from — then the same halt
+     as boot: it sets finViewOnly and THROWS, so nothing below ever adopts. */
+  if (((incoming && incoming.schema) || 1) > SCHEMA) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(incoming));
+      localStorage.setItem(UPDATED_KEY, String(ts || Date.now()));
+    } catch (e) { console.warn('Could not write saved data', e); }
+    haltForNewerData(incoming.schema);
+  }
   incoming = migrate(coerceShape(incoming || {}));
   state = Object.assign(blankState(), incoming, {
     settings: Object.assign(blankState().settings, incoming.settings || {}),
