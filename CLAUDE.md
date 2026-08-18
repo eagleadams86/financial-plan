@@ -1892,11 +1892,32 @@ first. A planned row in a year that is OVER is stale, not forward-looking:
 `planned` still counts it so the sub can name it, `projected` stays null.
 `givingCeiling` takes the projected shares into its max or the biggest figure
 on the tab is the one thing the scale wasn't drawn to hold.
-**The projection never displaces a figure of record.** The Given tile and both
-percentage headlines stay on what has actually gone; the projection rides in a
-fourth tile and in a second `.foot` under each meter, italic (`.goal .value.est`
-/ `.goal .foot.est`) — the estimate convention, never a colour. Four tiles land
-2 × 2 for free: `.goalgrid:has(> :nth-child(4):last-child)` was already there.
+**The projection never displaces a figure of record, and it is read DOWN a
+column.** The row of three actuals is exactly what it was; a year with giving
+still planned in it grows a SECOND ROW under it saying the same three things
+about where the year is heading — dollars over dollars, share over share, so a
+projection sits directly beneath the figure it projects. Six tiles or three,
+never a mixture, and no second figure hidden inside a tile: the first attempt
+folded the projected shares into the actual tiles' feet and it was overlooked
+on screen, because a foot is where a tile explains itself, not where it makes a
+second claim.
+`.goalgrid.pairs` is `repeat(3, minmax(0, 1fr))` — FIXED thirds, never
+auto-fit, for the reason `.cards2.pairs` is fixed halves: auto-fit would put
+all six on one line on a wide screen and break the pairing at most widths in
+between, and the whole point is that the columns line up. One breakpoint at
+760px drops it to a single column rather than letting it pass through two,
+which would pair each tile with the wrong partner.
+A projected tile is the SAME tile with `est` on it — one shape, so the two ends
+of a column cannot drift into being different things. `est` carries the
+estimate convention: italic figures and a DASHED meter rail (`.goal.est .bar`),
+which is the charts' "dashed means not settled yet" said in the vocabulary a
+tile has. Never a colour.
+**A missing denominator is explained ONCE per column, on the actual tile.**
+`givingStats` guarantees a projected share is null wherever its actual one is,
+so the tile underneath renders its dash with no `.foot` at all — repeating "No
+salary recorded for this year" directly below itself says nothing and reads as
+two separate faults rather than one. This is the case a 2027 with planned
+giving and no comp record hits, so it is not hypothetical.
 **On the chart the projection is DRAWN, not plotted**, so `dashedBarEdge` grew
 `opts.to` — per-index values the dashed rectangle reaches instead of the bar's
 own top, absent everywhere else so the two Progress charts are bit-for-bit what

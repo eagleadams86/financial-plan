@@ -1081,11 +1081,20 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   font-variant-numeric: tabular-nums; }
 .goal .value .of { font-size: 14px; font-weight: 500; color: var(--text-secondary); }
 .goal .foot { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
-/* A tile carrying a projection says so in ITALIC — the estimate convention the
-   grid's auto cells and a planned donation's row already use, and the only one
-   available here: hue alone can never carry a meaning in this app. */
-.goal .value.est, .goal .foot.est { font-style: italic; }
-.goal .value.est { color: var(--text-secondary); }
+/* A tile carrying a projection says so in ITALIC, and its meter rail is
+   DASHED — the estimate convention the grid's auto cells, a planned donation's
+   row and the charts' projected bars already use, and the only one available
+   here: hue alone can never carry a meaning in this app. */
+.goal.est .value, .goal.est .foot { font-style: italic; }
+.goal.est .value { color: var(--text-secondary); }
+.goal.est .bar { border-style: dashed; }
+/* Two rows that MIRROR each other — three actuals, then the three projections
+   under them — so the columns have to line up: a projection is read straight
+   down from the figure it projects. Fixed thirds, never auto-fit, for the
+   reason `.cards2.pairs` is fixed halves; auto-fit would put all six on one
+   line on a wide screen and break the pairing at every width in between. */
+.goalgrid.pairs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 760px) { .goalgrid.pairs { grid-template-columns: minmax(0, 1fr); } }
 /* A pill in a tile's foot carries a whole sentence rather than the two-word
    verdict `.pill` is shaped for, so it takes a line of its own with room above
    it, and it may WRAP — the global `nowrap` is what pushed it out through the
@@ -4461,8 +4470,9 @@ const HELP = {
       + 'guessed at. The current year measures what you have given so far against the '
       + 'whole year\'s income, so it reads low until December — which is what the '
       + 'projection is for. Where the year still running has giving planned in it, a '
-      + 'fourth tile adds those deposits and cash gifts to what has already gone, and '
-      + 'each percentage says the share it is heading for underneath the one it is at. '
+      + 'second row of tiles adds those deposits and cash gifts to what has already '
+      + 'gone, and says the share each percentage is heading for directly under the '
+      + 'one it is at. '
       + 'A planned grant is left out of that, the same way a made one is: the money left '
       + 'your account when its deposit did. So the projection can be smaller than the '
       + '"more is planned" figure above the table, which counts every planned row.' },
@@ -9417,36 +9427,37 @@ function renderGiving() {
   const shareTiles = (y) => {
     const t = byYear.get(y);
     if (!t) return '';
-    /* The meter and the headline stay on what has actually been GIVEN — that
-       is the figure of record, and an estimate must never take the place of
-       one. Where a projection exists it rides in the foot underneath, in the
-       italic the whole app gives an estimate, so the two are read in the order
-       they are true in. */
-    const tile = (label, pct, of, ofLabel, why, projPct) => `<div class="goal">
+    /* A projected tile is the SAME tile with `est` on it — one shape, so the
+       pair either side of a row can't drift into being two different things.
+       `est` is what carries the estimate convention throughout: italic figures
+       and a dashed meter rail, the chart's own "dashed means not settled yet"
+       said in the vocabulary a tile has. Never a colour. */
+    const pctTile = (label, pct, of, ofLabel, why, est) => `<div class="goal${
+      est ? ' est' : ''}">
       <div class="label">${label}</div>
       ${pct === null
-        ? `<div class="value muted">—</div><div class="foot">${why}</div>`
+        /* The reason is given ONCE per column, on the actual tile above. A
+           missing denominator is missing for both halves — `givingStats`
+           guarantees a projected share is null wherever its actual one is — so
+           repeating the sentence in the tile directly beneath says nothing and
+           reads as two separate faults. */
+        ? `<div class="value muted">—</div>${est ? '' : `<div class="foot">${why}</div>`}`
         : `<div class="value">${(pct * 100).toFixed(2)}%</div>
            <div class="bar" role="meter" aria-valuemin="0"
              aria-valuemax="${(ceiling * 100).toFixed(0)}"
              aria-valuenow="${(pct * 100).toFixed(2)}"
-             aria-label="${esc(y)} giving as a share of ${ofLabel}">
+             aria-label="${esc(y)} ${est ? 'projected ' : ''}giving as a share of ${ofLabel}">
              <i style="width:${Math.min(100, pct / ceiling * 100).toFixed(1)}%"></i></div>
-           <div class="foot">${fmtMoney(t.given)} of ${fmtMoney(of)} ${ofLabel}</div>${
-        projPct === null || projPct === undefined ? ''
-          : `<div class="foot est">Heading for ${(projPct * 100).toFixed(2)}% —
-               ${fmtMoney(t.projected)} of ${fmtMoney(of)} ${ofLabel}</div>`}`}
+           <div class="foot">${fmtMoney(est ? t.projected : t.given)} of ${
+        fmtMoney(of)} ${ofLabel}</div>`}
     </div>`;
-    /* A fourth tile only where there is something to project, which is what
-       makes it 2 × 2 exactly when it appears — `.goalgrid` already lays four
-       tiles out that way, and three go back to a single row on their own. */
-    const projTile = t.projected === null ? '' : `<div class="goal">
-      <div class="label">Projected for the Year</div>
-      <div class="value est">${fmtMoney(t.projected)}</div>
-      <div class="foot">Given, plus ${fmtMoney(t.planned)} planned still to leave
-        your accounts. A planned grant isn’t added — its deposit already is.</div>
-    </div>`;
-    return `<div class="goalgrid" style="margin-bottom:12px">
+    /* The row of three is untouched, and a year with giving still planned in it
+       gets a SECOND row underneath saying the same three things about where it
+       is heading. Column by column: dollars over dollars, share over share —
+       so the projection is read straight down from the figure it projects,
+       and a year with nothing planned looks exactly as it always did. */
+    const proj = t.projected !== null;
+    return `<div class="goalgrid${proj ? ' pairs' : ''}" style="margin-bottom:12px">
       <div class="goal">
         <!-- The dot rides the LABEL, the way Sprint Velocity and Team Dashboard
              put one on a tile: trailing the foot it landed wherever the sentence
@@ -9456,11 +9467,20 @@ function renderGiving() {
         <div class="value">${fmtMoney(t.given)}</div>
         <div class="foot">Fund deposits and cash gifts — what left your own accounts</div>
       </div>
-      ${projTile}
-      ${tile('% of Gross Income', t.grossPct, t.gross, 'gross',
-        'No salary recorded for this year on the Comp tab.', t.projGrossPct)}
-      ${tile('% of Take-Home Pay', t.takePct, t.take, 'take-home',
-        'No pay row in this year’s budget to measure against.', t.projTakePct)}
+      ${pctTile('% of Gross Income', t.grossPct, t.gross, 'gross',
+        'No salary recorded for this year on the Comp tab.', false)}
+      ${pctTile('% of Take-Home Pay', t.takePct, t.take, 'take-home',
+        'No pay row in this year’s budget to measure against.', false)}
+      ${!proj ? '' : `<div class="goal est">
+        <div class="label">Projected for the Year</div>
+        <div class="value">${fmtMoney(t.projected)}</div>
+        <div class="foot">Given, plus ${fmtMoney(t.planned)} planned still to leave
+          your accounts. A planned grant isn’t added — its deposit already is.</div>
+      </div>
+      ${pctTile('Projected % of Gross Income', t.projGrossPct, t.gross, 'gross',
+        '', true)}
+      ${pctTile('Projected % of Take-Home Pay', t.projTakePct, t.take, 'take-home',
+        '', true)}`}
     </div>`;
   };
 

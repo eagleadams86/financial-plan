@@ -449,9 +449,13 @@ included — treat those the way you treat the figures.
   lines over the top. Given counts what left your own accounts (fund deposits
   and cash gifts); a grant out of the fund isn't counted twice.
   A year still running that has giving **planned** in it also shows where it's
-  **heading**: the planned fund deposits and cash gifts added to what's already
-  gone, in a fourth tile, with the share each percentage is heading for under
-  the one it's at. On the chart that year's bar is filled and outlined solid to
+  **heading**: a second row of tiles under the first, saying the same three
+  things about the year's projected total — the planned fund deposits and cash
+  gifts added to what's already gone, and the share that comes to of each kind
+  of income. The columns line up, so a projection reads straight down from the
+  figure it projects, and it's marked as an estimate the way everything else in
+  the app is: italic figures, a dashed meter rail, never a colour. On the chart
+  that year's bar is filled and outlined solid to
   what's been given, and a dashed box carries on above it to the projected
   total — the gap between them is the giving still to come. It's the missing
   half of the fraction: take-home pay is already read from the whole year,
