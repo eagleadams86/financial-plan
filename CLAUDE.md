@@ -737,15 +737,23 @@ suite passed while the card was wrong.
   positioned with the zoom rules — event/viewport in screen px, fixed styles in
   pre-zoom px, divide by `zoomScale`; measure at the ORIGIN first, since a tip
   parked against the right edge is squeezed narrow and a width read there
-  wraps every later tip into a sliver. `cellTip(cell)` is pure and tested: a
-  split month reads one amount per line with "Total …" last, the trip-table
-  arrangement. **The NOTE is always its own line, never joined onto the figure
-  with a "·"** (2026-08-17): a note is prose the reader wrote and is routinely
-  several lines of it — a list of what made the month up — so hanging its first
-  line off the end of "-$7,900.00 · your estimate" ran the amount, the kind and
-  the first item together as one sentence and left the rest dangling under
-  them. It goes LAST, after the Total on a split month, so the figure hovered
-  for is the first thing in the block. Every FIGURE cell carries a data-tip (category, subtotal, owner,
+  wraps every later tip into a sliver. **`cellTip(cell)` is pure and tested, and
+  reads as THREE BLOCKS separated by a blank line** (settled 2026-08-17), each
+  dropped when it has nothing to say: the FIGURE, the amounts it is made of, and
+  the NOTE.
+  - The figure leads. It is what the pointer was aimed at, so it must not be
+    hunted for under a list of six. That is why "Total …" sits ABOVE its amounts
+    now rather than under them as a sum being built up — they read as the
+    working, not the arithmetic.
+  - A split month breaks its amounts out one per line; they were once joined
+    with " + ", which a three-check month made unreadable.
+  - The note is never joined onto the figure with a "·". It is prose the reader
+    wrote and is routinely several lines of it — a list of what made the month
+    up — so hanging its first line off the end of "-$7,900.00 · your estimate"
+    ran the amount, the kind and the first item together as one sentence and
+    left the rest dangling under them.
+  With no amounts to break out, the note follows the figure directly: one blank
+  line, and no gap where a breakdown would have been. Every FIGURE cell carries a data-tip (category, subtotal, owner,
   balance, Total, paycheck, year-total); the row-label `th`s keep native titles
   — theirs is click-affordance prose, not data.
   **An ACCOUNT's cell reads through `balanceTip(st, c, yr, a, m)`** — pure and
