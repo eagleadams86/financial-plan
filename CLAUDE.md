@@ -739,7 +739,13 @@ suite passed while the card was wrong.
   parked against the right edge is squeezed narrow and a width read there
   wraps every later tip into a sliver. `cellTip(cell)` is pure and tested: a
   split month reads one amount per line with "Total …" last, the trip-table
-  arrangement. Every FIGURE cell carries a data-tip (category, subtotal, owner,
+  arrangement. **The NOTE is always its own line, never joined onto the figure
+  with a "·"** (2026-08-17): a note is prose the reader wrote and is routinely
+  several lines of it — a list of what made the month up — so hanging its first
+  line off the end of "-$7,900.00 · your estimate" ran the amount, the kind and
+  the first item together as one sentence and left the rest dangling under
+  them. It goes LAST, after the Total on a split month, so the figure hovered
+  for is the first thing in the block. Every FIGURE cell carries a data-tip (category, subtotal, owner,
   balance, Total, paycheck, year-total); the row-label `th`s keep native titles
   — theirs is click-affordance prose, not data.
   **An ACCOUNT's cell reads through `balanceTip(st, c, yr, a, m)`** — pure and
