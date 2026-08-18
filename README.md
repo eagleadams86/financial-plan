@@ -18,7 +18,8 @@ your data to a private Firestore document in the `financialplan-60c6e`
 Firebase project — security rules confine every account to its own document,
 sign-in uses Google Identity Services (works on corporate networks that block
 firebaseapp.com), and "Delete all data" empties the synced copy too. See
-[privacy.html](privacy.html). The import files (`financial-plan-data.json`,
+[privacy.html](privacy.html), and *Cross-Device Sync* below for how the two
+copies are reconciled. The import files (`financial-plan-data.json`,
 `expected-2026.json`) are gitignored from the very first commit; `git status`
 must never show them. Since the Household tab arrived, a backup file or a
 screenshot can also carry family members' names and birth months, children's
@@ -507,6 +508,95 @@ included — treat those the way you treat the figures.
   is left alone. And it doesn't become the current year — Progress and
   the rest carry on reading this one — until 1 January, or until you mark
   December entered.
+
+## Themes and How It Looks
+
+Four themes, shared with every other app in this family and listed
+alphabetically in the header dropdown: Dark, Light, **Midnight** (deep
+indigo/navy — the default) and Sepia. The palettes come from `theme.css`, a
+byte-copy of the generated file in the private `claude-theme-pack` repo, which
+is the source of truth for every app here — a colour is changed in the pack's
+`tokens.json` and rebuilt, never retuned in this file. The pack's own gate
+checks every token for WCAG AA contrast on each surface it can sit on, which is
+what lets the grid lean on colour at all.
+
+Your theme belongs to the device, like the zoom: it lives under its own
+localStorage key rather than with the plan, so it is never synced, never in a
+backup, and a share link never carries the sender's theme. Anything
+unrecognised falls back to Midnight, and the picker's own options are the only
+list of themes the app has.
+
+Colour is never the only thing saying what a figure is. A projection is
+**italic**, a total spanning actual and projected months is **dashed**, a
+snapshot's estimate carries a dashed rail — the same conventions read the same
+way in all four palettes.
+
+## Preferences
+
+The header's **Preferences** button opens one editor holding the settings that
+apply across the whole app rather than to a row:
+
+- **Subtitle** — your own words beside "Financial Plan" in the header and the
+  browser tab.
+- **You file taxes as** — filing jointly makes the Roth IRA (MAGI) check count
+  both incomes.
+- **Compensation tab follows** — which person that tab's salary history is
+  about, once there are two of you.
+- **Currency** — a three-letter code (USD, EUR, GBP, CAD). It changes how
+  figures read, not what they are.
+- **Budget row order** — your own arrangement, or alphabetical within a section
+  (which turns dragging off and leaves your order stored underneath).
+- **Paychecks vary by month** — three some months, two in others; this is what
+  lets a row be an amount per check.
+- **Donor-advised fund** — whether the Giving tab shows a fund's holdings.
+  Donations are tracked either way.
+- **PTO days a year** — what each new holiday-planner year starts with.
+- **Dividend row interest %/yr** — the rate a dividend row uses when it has
+  none of its own.
+- **Zoom** — the exact percentage (50–200%), the quarter steps in the header
+  being the everyday version.
+
+## Cross-Device Sync (Firebase, Free Tier — Optional)
+
+Signing in with Google is entirely optional and does one thing: puts the same
+plan on your other devices. Without it the app is fully usable and fully local.
+Sync is **enabled** in this deployment, backed by the `financialplan-60c6e`
+Firebase project — `FIREBASE_CONFIG` in the sync module at the bottom of
+`index.html` points at it, and setting that constant back to `null` returns the
+app to local-only mode and hides all sync UI. The whole state travels as **one
+JSON string** in a `financialplan/{uid}` document, because Firestore refuses
+arrays nested inside arrays and this plan's tables are exactly that;
+[`firestore.rules`](firestore.rules) is the checked-in copy of what the console
+enforces, confining every account to its own document.
+
+Sign-in goes through **Google Identity Services** — a popup straight to
+`accounts.google.com`, exchanged for a Firebase session — rather than
+`signInWithPopup`, which opens at `<project>.firebaseapp.com` and dies on the
+corporate networks that block those hostnames one at a time. Same account, same
+data, same rules; only the doorway differs. This is why `GOOGLE_CLIENT_ID` is a
+separate constant: it is not part of `firebaseConfig` and can't be derived from
+it.
+
+**`localStorage` stays in charge and the cloud only mirrors it.** The first time
+a given Google account signs in on a browser, if both sides already hold
+something, a dialog asks **which copy to keep** and names what is in each —
+years, goals, people, trips — rather than guessing by timestamp. It is the one
+dialog in the app that a click outside will not close: "which copy of your
+data?" has no safe default. After that, whichever side changed most recently
+wins, and an update pushed from another device arrives live.
+
+Underneath that, **an empty copy never beats a copy with data in it**, whichever
+looks newer — otherwise signing in on a fresh browser would push its emptiness,
+stamped `now`, over the device that actually holds the plan. Naming your
+household counts as data, not just budget years. Clearing everything
+deliberately still reaches your other devices, but each one asks before it
+follows (see *Delete all data* below).
+
+**When sync stops working, it says so.** The button reads **⚠️ Not syncing**,
+and the note at the foot of the page gives the cause and the fix. Nothing is
+lost when it happens — this browser is still the source of truth. There is no
+retry button on purpose: Google retries the transient causes itself, and the
+state clears the moment a save gets through.
 
 ## Getting Started
 
