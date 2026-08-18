@@ -2548,8 +2548,6 @@ fold and every other one does" arrives months later.
   there. No new colour is invented — `--accent` on `--accent-bg` is the pack's
   own contrast-checked pairing — and open-or-shut is carried by the ANGLE of the
   chevron, never by hue.
-- The changelog box is deliberately NOT part of this: it fetches the GitHub API
-  when opened, and remembering it would fire that request on every page load.
 
 The Venmo and large-purchase ledgers are gone entirely, entries
 included; `coerceShape` also strips the copies an earlier version folded into
@@ -2689,9 +2687,7 @@ step.
   is omitted from the render — every line of it describes the reader's own cache,
   key and last run measured against the sender's tickers, so each would be
   meaningless or a lie. Before adding anything that fetches, ask what it does in
-  a shared view. The changelog box is the one deliberate exception: it fetches
-  this repo's own public commit list, carries nothing about anybody, and only on
-  expand.
+  a shared view.
 - **`squeeze()` catches the WRITER's promises as well as awaiting the reader.** A
   truncated link reaches `DecompressionStream` as invalid deflate and the writable
   side rejects too; only the readable side is awaited, so without those catches
@@ -2909,11 +2905,11 @@ CSP. That is the whole feature; it adds no runtime code beyond one line in
   `data-fin-tests` on the frame element; a cross-origin framer reads as
   `frameElement === null` and gets navigated over (or, if sandboxed against
   that, the page hides itself). Don't add frames without teaching this check.
-- Commit subjects are **user-facing** (the Recent changes box lists them
-  verbatim) — plain English for a reader, not a diff.
-- CSP `connect-src`: `'self'`, the Firebase/Google sign-in hosts, the GitHub
-  API (changelog) and `https://api.twelvedata.com` (holding prices — ticker
-  only). A new feature that talks to a new endpoint must add it to the CSP in
+- Commit subjects are plain English for a reader, not a diff. The Recent
+  changes box that listed them verbatim was removed 2026-08-18, across the
+  whole app family, and the GitHub API went out of the CSP with it.
+- CSP `connect-src`: `'self'`, the Firebase/Google sign-in hosts and
+  `https://api.twelvedata.com` (holding prices — ticker only). A new feature that talks to a new endpoint must add it to the CSP in
   the same commit, and update `privacy.html` if it changes what leaves the
   browser. **Every page in this repo ships its own CSP meta tag** — index.html,
   privacy.html AND tests.html (which GitHub Pages publishes beside the app, so

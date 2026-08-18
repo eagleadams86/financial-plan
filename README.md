@@ -70,10 +70,9 @@ Three things worth knowing on day one:
 **This repo is public and holds code only — never data.** Everything you see
 in the app lives in your browser's localStorage.
 
-- **Without signing in, the page calls out to exactly two places**: the
-  GitHub API, for the "Recent changes" box; and api.twelvedata.com, only if
-  you have added a price-lookup key, carrying a ticker symbol and your own
-  key and nothing else.
+- **Without signing in, the page calls out to exactly one place**:
+  api.twelvedata.com, and only if you have added a price-lookup key, carrying
+  a ticker symbol and your own key and nothing else.
 - **Read-only share links upload nothing.** The figures ride inside the
   link's own `#fragment`, which browsers never send to a server. Creating one
   and opening one are both entirely local, and opening one leaves whatever
@@ -1059,8 +1058,8 @@ rather than fetched from anywhere, so once the app itself loads, everything
 except the online-only extras behaves normally: every tab, every projection,
 every edit, saved as usual.
 
-What needs the network still needs it — signing in to sync, holding price
-lookups, and the changelog box — and each says so rather than failing quietly.
+What needs the network still needs it — signing in to sync and holding price
+lookups — and each says so rather than failing quietly.
 
 This is `sw.js`, a small service worker, and it was refused here for a long
 time. Two rules make it safe enough to have changed that:
