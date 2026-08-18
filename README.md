@@ -448,6 +448,18 @@ included — treat those the way you treat the figures.
   it, a chart appears above them: dollars given as bars, both percentages as
   lines over the top. Given counts what left your own accounts (fund deposits
   and cash gifts); a grant out of the fund isn't counted twice.
+  A year still running that has giving **planned** in it also shows where it's
+  **heading**: the planned fund deposits and cash gifts added to what's already
+  gone, in a fourth tile, with the share each percentage is heading for under
+  the one it's at. On the chart that year's bar is filled and outlined solid to
+  what's been given, and a dashed box carries on above it to the projected
+  total — the gap between them is the giving still to come. It's the missing
+  half of the fraction: take-home pay is already read from the whole year,
+  projected months included, so measuring eight months of giving against twelve
+  months of pay read low all year and jumped in December. A planned *grant* is
+  left out of the projection the same way a made one is — that money left your
+  account when its deposit did — so the projection can be smaller than the
+  "more is planned" figure above the table, which counts every planned row.
 - **Share a read-only link** — show someone part of the plan without giving them
   an account, a file or edit rights. You pick which tabs go in and how many
   years go with them; the whole payload rides in the link's `#fragment`, so

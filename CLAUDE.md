@@ -1864,6 +1864,58 @@ the calendar year rather than `yearIsProjected` — what matters there is that t
 DONATIONS are partial, not that the grid is. `dashedBarEdge` skips non-bar
 datasets: a line's points have no `base` or `width`, and `strokeRect` would be
 handed NaN on every frame.
+**A year still running PROJECTS to what it is heading for, because the two
+halves of that fraction were being measured over different spans.**
+`takeHomePay` reads the COMPUTED cells, so the denominator has always been the
+whole year — twelve months of pay, most of them projected. The numerator was
+what had actually left by today. Eight months of giving over twelve months of
+pay is not a share of anything: it read low all year and jumped in December,
+which is the one shape a reader takes as news. `plannedOutOfPocket` is the
+mirror of `givenOutOfPocket` — planned fund deposits and cash gifts,
+magnitudes, **a planned GRANT deliberately left out for exactly the reason a
+made one is**: that dollar left the account the day its deposit did, and
+folding it in would count the deposit twice. This is why the projected tile and
+the sub's "more is planned" line name different figures without either being
+wrong, and both say which they are counting; don't "fix" the discrepancy by
+making them agree.
+`givingStats` grew `running`, `planned`, `projected`, `projGrossPct` and
+`projTakePct`, and took an injectable `today` for the reason `drawdownYears`
+has one — whether a year is running decides whether it projects, and a test
+that cannot move the date can only pin the answer for the year it runs in.
+`buildGivingChart` reads `running` off the stats instead of working it out
+again; the tiles and the chart answering that question separately is exactly
+how the two would come to disagree. **`projected` is ABSENT, never equal to
+`given`, when there is nothing to project** — a finished year, or a running one
+with nothing planned — which is what leaves the tab untouched for anyone who
+doesn't plan giving ahead, and what stops a fourth tile appearing to repeat the
+first. A planned row in a year that is OVER is stale, not forward-looking:
+`planned` still counts it so the sub can name it, `projected` stays null.
+`givingCeiling` takes the projected shares into its max or the biggest figure
+on the tab is the one thing the scale wasn't drawn to hold.
+**The projection never displaces a figure of record.** The Given tile and both
+percentage headlines stay on what has actually gone; the projection rides in a
+fourth tile and in a second `.foot` under each meter, italic (`.goal .value.est`
+/ `.goal .foot.est`) — the estimate convention, never a colour. Four tiles land
+2 × 2 for free: `.goalgrid:has(> :nth-child(4):last-child)` was already there.
+**On the chart the projection is DRAWN, not plotted**, so `dashedBarEdge` grew
+`opts.to` — per-index values the dashed rectangle reaches instead of the bar's
+own top, absent everywhere else so the two Progress charts are bit-for-bit what
+they were. Two traps, both found on screen:
+- **the bar's own top must be stroked SOLID first** (`if (top !== y)`). A
+  running bar carries a transparent border — this plugin is what outlines it —
+  so with only the dashed rectangle the end of the real figure was marked by a
+  change of fill two shades apart, the gap the caption promises was invisible,
+  and the whole bar read as the projected total. Solid box below, dashed box
+  carrying on above; they share a base and a width, so the sides say the same
+  thing as the tops.
+- **the y scale has to be told**, via `suggestedMax`. No dataset holds the
+  projected value, so the scale would happily end below the dashed outline and
+  clip the one thing it is there to show.
+The two percentage LINES stay on the actual figures — a line point cannot be
+two values at one x, and a second dashed line on a plot whose lines are already
+told apart by dash would be two signals in one costume. The percentages get
+their projection in the tiles, the tooltip (in whichever unit the hovered
+dataset is in) and the aria summary.
 **A projection is marked per MONTH, not per year — `enteredThroughOf(st, y)` is
 the one boundary and `yearIsProjected` is now just a question asked of it.**
 The Goals tab's "Where the Total Is Heading" line dashed whole years built ahead

@@ -1081,6 +1081,11 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   font-variant-numeric: tabular-nums; }
 .goal .value .of { font-size: 14px; font-weight: 500; color: var(--text-secondary); }
 .goal .foot { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
+/* A tile carrying a projection says so in ITALIC — the estimate convention the
+   grid's auto cells and a planned donation's row already use, and the only one
+   available here: hue alone can never carry a meaning in this app. */
+.goal .value.est, .goal .foot.est { font-style: italic; }
+.goal .value.est { color: var(--text-secondary); }
 /* A pill in a tile's foot carries a whole sentence rather than the two-word
    verdict `.pill` is shaped for, so it takes a line of its own with room above
    it, and it may WRAP — the global `nowrap` is what pushed it out through the
@@ -4454,7 +4459,13 @@ const HELP = {
       + 'a reimbursement is not counted as pay. A percentage is left as a dash where the '
       + 'year has no salary recorded or no pay row to measure against, rather than being '
       + 'guessed at. The current year measures what you have given so far against the '
-      + 'whole year\'s income, so it reads low until December.' },
+      + 'whole year\'s income, so it reads low until December — which is what the '
+      + 'projection is for. Where the year still running has giving planned in it, a '
+      + 'fourth tile adds those deposits and cash gifts to what has already gone, and '
+      + 'each percentage says the share it is heading for underneath the one it is at. '
+      + 'A planned grant is left out of that, the same way a made one is: the money left '
+      + 'your account when its deposit did. So the projection can be smaller than the '
+      + '"more is planned" figure above the table, which counts every planned row.' },
   priceLookup: { title: 'Looking up Prices',
     body: 'Prices come from Twelve Data, which needs a free API key (Preferences). Only '
       + 'the ticker is sent. Shares, ETFs and mutual funds are all quoted, though a fund '
@@ -9251,6 +9262,20 @@ function givenOutOfPocket(items) {
     .reduce((t, i) => t + Math.abs(i.funding || 0) + Math.abs(i.cash || 0), 0));
 }
 
+/* The other half of the same question: what a year's giving is STILL GOING to
+   cost you. Same arithmetic on the rows still marked planned — fund deposits
+   and cash gifts, magnitudes, a grant deliberately left out for exactly the
+   reason it is left out above. A planned grant is a dollar that left your
+   account the day its deposit did; folding it in here would count that deposit
+   twice and project a year half again as generous as it is. This is why the
+   projected tile and the "more is planned" line in the sub can name different
+   figures without either being wrong — the sub counts every planned ROW, this
+   counts only the planned money that has yet to leave your own accounts. */
+function plannedOutOfPocket(items) {
+  return round2((items || []).filter(i => i.pending)
+    .reduce((t, i) => t + Math.abs(i.funding || 0) + Math.abs(i.cash || 0), 0));
+}
+
 /* Gross income is the Comp tab's total comp: the salary this year's raise
    landed on, plus the bonus. Read through afterRaise() like every other
    consumer, never written out again. A year with no comp record has no gross —
@@ -9318,16 +9343,46 @@ function takeHomePay(st, computed, y, personId) {
    cards and the over-time chart are two views of exactly these figures, and
    working them out twice is how the two would drift apart. Pure over state and
    the computed years, so the tests can pin it. A percentage is null wherever
-   its denominator is unknown or nil; nothing here invents one. */
-function givingStats(st, computed) {
+   its denominator is unknown or nil; nothing here invents one.
+
+   `today` is injectable for the same reason `drawdownYears`' is: whether a year
+   is still RUNNING decides whether it gets a projection, and a test that can't
+   move the date can only pin the answer for the year it happens to be run in.
+
+   **The projection exists because the two halves of this fraction were being
+   measured over different spans.** `takeHomePay` reads the COMPUTED cells, so
+   the denominator is already the whole year — twelve months of pay, most of
+   them projected. The numerator was what had actually left by today. August's
+   giving over the whole year's income is not a share of anything: it reads low
+   all year and snaps up in December, which is the one shape a reader takes as
+   news. `projected` closes it from the other end, counting the deposits and
+   cash gifts already planned, so the year can be read as where it is HEADING
+   against the income it is heading there on.
+
+   `projected` and its two shares are ABSENT, never equal to `given`, when
+   there is nothing to project — a finished year, or a running one with nothing
+   planned in it. Absent is what leaves the tab exactly as it was for everybody
+   who doesn't plan giving ahead, and it is what stops a fourth tile appearing
+   to say the same thing the first one just said. A planned row sitting in a
+   year that is OVER is stale rather than forward-looking, and projecting from
+   it would be a claim about a year nobody can change. */
+function givingStats(st, computed, today) {
   const don = st.side.donations || {};
+  const thisYear = (today || todayISO()).slice(0, 4);
   return Object.keys(don).filter(y => (don[y] || []).length).sort().map(y => {
     const given = givenOutOfPocket(don[y]);
     const gross = grossIncome(st, y);
     const take = takeHomePay(st, (computed || {})[y], y);
-    return { y, given, gross, take,
+    /* Not "is the grid projected" — what matters here is that the DONATIONS
+       are part of a year, so the share reads low until December. */
+    const running = y >= thisYear;
+    const planned = plannedOutOfPocket(don[y]);
+    const projected = running && planned > 0 ? round2(given + planned) : null;
+    return { y, given, gross, take, running, planned, projected,
       grossPct: gross > 0 ? given / gross : null,
-      takePct: take > 0 ? given / take : null };
+      takePct: take > 0 ? given / take : null,
+      projGrossPct: projected !== null && gross > 0 ? projected / gross : null,
+      projTakePct: projected !== null && take > 0 ? projected / take : null };
   });
 }
 
@@ -9337,8 +9392,11 @@ function givingStats(st, computed) {
    less than 5% — otherwise a first year of modest giving would fill its bar to
    the end and read as complete. */
 function givingCeiling(stats) {
-  const top = stats.reduce((m, t) =>
-    Math.max(m, t.grossPct || 0, t.takePct || 0), 0);
+  /* The PROJECTED shares are in here too, or the running year's projected
+     figure — the biggest number on the tab — would be the one thing the scale
+     wasn't drawn to hold, and its meter would run off the end of the bar. */
+  const top = stats.reduce((m, t) => Math.max(m, t.grossPct || 0, t.takePct || 0,
+    t.projGrossPct || 0, t.projTakePct || 0), 0);
   return Math.max(0.05, Math.ceil(top * 100) / 100);
 }
 
@@ -9359,7 +9417,12 @@ function renderGiving() {
   const shareTiles = (y) => {
     const t = byYear.get(y);
     if (!t) return '';
-    const tile = (label, pct, of, ofLabel, why) => `<div class="goal">
+    /* The meter and the headline stay on what has actually been GIVEN — that
+       is the figure of record, and an estimate must never take the place of
+       one. Where a projection exists it rides in the foot underneath, in the
+       italic the whole app gives an estimate, so the two are read in the order
+       they are true in. */
+    const tile = (label, pct, of, ofLabel, why, projPct) => `<div class="goal">
       <div class="label">${label}</div>
       ${pct === null
         ? `<div class="value muted">—</div><div class="foot">${why}</div>`
@@ -9369,7 +9432,19 @@ function renderGiving() {
              aria-valuenow="${(pct * 100).toFixed(2)}"
              aria-label="${esc(y)} giving as a share of ${ofLabel}">
              <i style="width:${Math.min(100, pct / ceiling * 100).toFixed(1)}%"></i></div>
-           <div class="foot">${fmtMoney(t.given)} of ${fmtMoney(of)} ${ofLabel}</div>`}
+           <div class="foot">${fmtMoney(t.given)} of ${fmtMoney(of)} ${ofLabel}</div>${
+        projPct === null || projPct === undefined ? ''
+          : `<div class="foot est">Heading for ${(projPct * 100).toFixed(2)}% —
+               ${fmtMoney(t.projected)} of ${fmtMoney(of)} ${ofLabel}</div>`}`}
+    </div>`;
+    /* A fourth tile only where there is something to project, which is what
+       makes it 2 × 2 exactly when it appears — `.goalgrid` already lays four
+       tiles out that way, and three go back to a single row on their own. */
+    const projTile = t.projected === null ? '' : `<div class="goal">
+      <div class="label">Projected for the Year</div>
+      <div class="value est">${fmtMoney(t.projected)}</div>
+      <div class="foot">Given, plus ${fmtMoney(t.planned)} planned still to leave
+        your accounts. A planned grant isn’t added — its deposit already is.</div>
     </div>`;
     return `<div class="goalgrid" style="margin-bottom:12px">
       <div class="goal">
@@ -9381,10 +9456,11 @@ function renderGiving() {
         <div class="value">${fmtMoney(t.given)}</div>
         <div class="foot">Fund deposits and cash gifts — what left your own accounts</div>
       </div>
+      ${projTile}
       ${tile('% of Gross Income', t.grossPct, t.gross, 'gross',
-        'No salary recorded for this year on the Comp tab.')}
+        'No salary recorded for this year on the Comp tab.', t.projGrossPct)}
       ${tile('% of Take-Home Pay', t.takePct, t.take, 'take-home',
-        'No pay row in this year’s budget to measure against.')}
+        'No pay row in this year’s budget to measure against.', t.projTakePct)}
     </div>`;
   };
 
@@ -9461,7 +9537,9 @@ function renderGiving() {
       against the right one.${helpBtn('givingShare', 'the two percentages')}</p>
     <div class="chartbox" style="height:320px"><canvas id="givingChart"></canvas></div>
     <p class="chartkey"><i></i> Dashed bar and diamond points — a year still running:
-      what you have given so far, measured against the whole year's income.</p>
+      what you have given so far, measured against the whole year's income. Where the
+      dashed outline stands clear of the filled bar, that gap is giving you have
+      planned but not yet made.</p>
   </div>`;
 
   /* How the year tables work, which is a note about the page rather than a
@@ -9489,9 +9567,14 @@ function buildGivingChart() {
   const stats = givingStats(state, C);
   if (stats.length < 2) return;
   const thisYear = todayISO().slice(0, 4);
-  /* Not "is the grid projected" — what matters here is that the DONATIONS are
-     part of a year, so the share reads low until December. */
-  const running = stats.map(t => t.y >= thisYear);
+  /* `running` comes off the stats rather than being worked out again here —
+     the tiles and the chart answering "is this year still going?" separately
+     is exactly how the two would come to disagree. */
+  const running = stats.map(t => t.running);
+  /* Where the dashed outline reaches: the projected total on a year with
+     giving still planned in it, and null everywhere else, which leaves the
+     outline hugging the bar as it always did. */
+  const heading = stats.map(t => t.projected);
   const accent = cssVar('--accent'), ok = cssVar('--ok');
   const points = (color) => ({
     pointRadius: 4, pointBackgroundColor: color,
@@ -9529,14 +9612,29 @@ function buildGivingChart() {
            dollars they are worked out from. Reversed, it reads in the order
            the sentence above the chart does. */
         legend: { reverse: true, labels: { color: cssVar('--chart-tick') } },
-        dashedBarEdge: { projected: running },
-        tooltip: { callbacks: { label: (t) =>
-          `${t.dataset.label}: ${t.dataset.yAxisID === 'pct'
-            ? t.parsed.y.toFixed(2) + '%' : fmtMoney(t.parsed.y)}`
-          + (running[t.dataIndex] ? ' (year still running)' : '') } } },
+        dashedBarEdge: { projected: running, to: heading },
+        tooltip: { callbacks: { label: (t) => {
+          const st = stats[t.dataIndex];
+          const val = `${t.dataset.label}: ${t.dataset.yAxisID === 'pct'
+            ? t.parsed.y.toFixed(2) + '%' : fmtMoney(t.parsed.y)}`;
+          if (!running[t.dataIndex]) return val;
+          /* The dashed outline says a projection exists; the tooltip is where
+             it gets a number, in whichever unit the hovered dataset is in. */
+          const proj = st.projected === null ? null
+            : t.dataset.yAxisID === 'pct'
+              ? (t.dataset.label.includes('gross') ? st.projGrossPct : st.projTakePct)
+              : st.projected;
+          return proj === null || proj === undefined ? `${val} (year still running)`
+            : `${val} — heading for ${t.dataset.yAxisID === 'pct'
+                ? (proj * 100).toFixed(2) + '%' : fmtMoney(proj)}`;
+        } } } },
       scales: {
         x: chartAxes(),
+        /* The projection is DRAWN, not plotted — no dataset holds it, so the
+           scale knows nothing about it and would happily end below the dashed
+           outline, clipping the very thing the outline is there to show. */
         y: Object.assign(chartAxes(), { position: 'left',
+          suggestedMax: heading.reduce((m, v) => Math.max(m, v || 0), 0) || undefined,
           ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }),
         /* The percentage scale carries no gridlines of its own: two sets of
            lines across one plot area is a grid you can't read either way. */
@@ -9549,7 +9647,10 @@ function buildGivingChart() {
   }, `Giving by year: ${stats.map(t => `${t.y}, ${fmtMoney(t.given)} given${
     t.grossPct === null ? '' : `, ${(t.grossPct * 100).toFixed(2)}% of gross income`}${
     t.takePct === null ? '' : `, ${(t.takePct * 100).toFixed(2)}% of take-home pay`}${
-    t.y >= thisYear ? ', year still running' : ''}`).join('; ')}.`);
+    t.y >= thisYear ? ', year still running' : ''}${
+    t.projected === null ? '' : `, heading for ${fmtMoney(t.projected)}${
+      t.projGrossPct === null ? '' : ` and ${(t.projGrossPct * 100).toFixed(2)}% of gross income`}`
+    }`).join('; ')}.`);
 }
 
 /* ══════════════════ Long-run charts (on the Progress tab) ═════════════════ */
@@ -9787,6 +9888,16 @@ const dashedBarEdge = {
   id: 'dashedBarEdge',
   afterDatasetsDraw(chart, args, opts) {
     const projected = (opts && opts.projected) || [];
+    /* `to` lets the dashed outline reach PAST the filled bar, to a value the
+       bar itself isn't drawn at. That is the whole of the Giving chart's
+       projection: the fill stops at what has been given, the dashed rectangle
+       carries on to where the year is heading, and the gap between them is the
+       giving still only planned. One vocabulary doing two jobs — "dashed means
+       not settled yet" already meant exactly this — rather than a second bar,
+       a second colour or a stacked segment the reader has to learn.
+       Absent (or a null entry) is the old behaviour: outline the bar as drawn,
+       which is what the two Progress charts still ask for. */
+    const to = (opts && opts.to) || [];
     const { ctx } = chart;
     chart.data.datasets.forEach((ds, di) => {
       const meta = chart.getDatasetMeta(di);
@@ -9795,15 +9906,35 @@ const dashedBarEdge = {
          has no `base` or `width` — strokeRect would be handed NaN and paint
          nothing while quietly erroring on every frame. */
       if ((ds.type || meta.type || chart.config.type) !== 'bar') return;
+      const scale = chart.scales[ds.yAxisID || meta.yAxisID || 'y'];
       meta.data.forEach((bar, i) => {
         if (!projected[i]) return;
         const { x, y, base, width } = bar.getProps(['x', 'y', 'base', 'width'], true);
+        /* Only ever OUTWARD. A projection below the bar would draw a dashed
+           box inside a solid one, which reads as a correction downwards —
+           and `getPixelForValue` on a missing scale returns undefined, so the
+           guard is doing two jobs. */
+        let top = y;
+        if (to[i] !== null && to[i] !== undefined && scale) {
+          const py = scale.getPixelForValue(to[i]);
+          if (Number.isFinite(py)) top = Math.min(top, py);
+        }
         const half = width / 2;
         ctx.save();
         ctx.lineWidth = 2;
         ctx.strokeStyle = ds._trueBorder || ds.borderColor;
+        /* Where the outline has been pushed OUTWARD, the bar's own top is
+           drawn solid first. A running bar carries a transparent border (this
+           plugin is what outlines it), so with the dashed rectangle alone the
+           only thing marking the end of the real figure was a change of fill
+           two shades apart — the gap the caption promises was invisible, and
+           the whole bar read as $6,185 given. Solid box: what has gone.
+           Dashed box carrying on above it: where the year is heading. The two
+           share a base and a width, so the sides tell the same story as the
+           tops — settled below, not settled above. */
+        if (top !== y) ctx.strokeRect(x - half, Math.min(y, base), width, Math.abs(base - y));
         ctx.setLineDash([5, 3]);
-        ctx.strokeRect(x - half, Math.min(y, base), width, Math.abs(base - y));
+        ctx.strokeRect(x - half, Math.min(top, base), width, Math.abs(base - top));
         ctx.restore();
       });
     });
@@ -16563,7 +16694,8 @@ booted = true;
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
   afterRaise, bonusBase, bonusShare, yearFlows, yearSpending, summaryRowIsFlow, notesOfYear,
-  givenOutOfPocket, grossIncome, takeHomePay, givingStats, givingCeiling, isPayRow,
+  givenOutOfPocket, plannedOutOfPocket, grossIncome, takeHomePay, givingStats,
+  givingCeiling, isPayRow,
   hasNote,
   cleanBoxKeys, isBoxShut, withBox, boxKey,
   zoomPct, ZOOM_MIN, ZOOM_MAX,

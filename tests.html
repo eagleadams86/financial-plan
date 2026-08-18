@@ -1720,6 +1720,101 @@ t('every meter is drawn against one ceiling', () => {
   eq(H.givingCeiling([{ grossPct: null, takePct: null }]), 0.05,
     'nothing to scale to');
 });
+t('the ceiling holds the PROJECTED shares too', () => {
+  /* The projected figure is the biggest number on the tab. Scaling to the
+     actual ones only would run its meter off the end of the bar. */
+  eq(H.givingCeiling([{ grossPct: 0.031, takePct: 0.041, projGrossPct: 0.052,
+    projTakePct: 0.088 }]), 0.09);
+});
+
+group('Giving still planned, in a year still running');
+t('planned out of pocket is deposits and cash gifts, never a grant', () => {
+  /* Exactly the rule givenOutOfPocket follows, for exactly the reason: the
+     dollar behind a planned grant left the account when its deposit did, so
+     projecting with it would count that deposit twice. */
+  eq(H.plannedOutOfPocket([
+    { funding: 1000, pending: true },
+    { grant: -1000, pending: true },
+    { grant: -2000, pending: true },
+    { cash: -250, pending: true },
+  ]), 1250);
+});
+t('a donation already made is not still planned', () => {
+  eq(H.plannedOutOfPocket([{ funding: 5000 }, { funding: 1000, pending: true }]), 1000);
+  eq(H.givenOutOfPocket([{ funding: 5000 }, { funding: 1000, pending: true }]), 5000,
+    'and the two halves do not overlap');
+});
+t('a running year projects to what it is heading for', () => {
+  const st = { side: {
+    comp: { '2026': { salary: 100000, raisePct: 0 } }, bonuses: {},
+    donations: { '2026': [
+      { foundation: 'Fund', funding: 5000 },
+      { foundation: 'Fund', funding: 1000, pending: true },
+      { foundation: 'A Cause', grant: -1000, pending: true },
+    ] } },
+    years: { '2026': { kind: 'grid', categories: [
+      { id: 'paycheck', name: 'Paycheck', rule: 'paycheck', section: 'income' },
+    ], cells: { 'paycheck|2026-01': { v: 60000 } } } } };
+  const t26 = H.givingStats(st, {}, '2026-08-18')[0];
+  eq(t26.given, 5000, 'what has actually gone is untouched');
+  eq(t26.grossPct, 0.05, 'and so is the share it is at');
+  eq(t26.planned, 1000, 'the planned GRANT is not in here');
+  eq(t26.projected, 6000);
+  eq(t26.projGrossPct, 0.06);
+  eq(t26.projTakePct, 0.1);
+  ok(t26.running, 'and the year knows it is still going');
+});
+t('a year that is over gets no projection, however stale the row in it', () => {
+  /* A planned donation left in a finished year is a plan that was never
+     carried out. Projecting from it would be a claim about a year nobody can
+     change now. */
+  const st = { side: { comp: {}, bonuses: {}, donations: { '2024': [
+    { foundation: 'Fund', funding: 3000 },
+    { foundation: 'Fund', funding: 1000, pending: true },
+  ] } }, years: {} };
+  const t24 = H.givingStats(st, {}, '2026-08-18')[0];
+  eq(t24.given, 3000);
+  eq(t24.planned, 1000, 'still counted, so the sub can name it');
+  eq(t24.projected, null, 'but nothing is projected from it');
+  eq(t24.projGrossPct, null);
+  eq(t24.running, false);
+});
+t('a running year with nothing planned projects nothing rather than itself', () => {
+  /* projected === given would put a fourth tile on the card saying exactly
+     what the first one just said. Absent is what keeps the tab as it was for
+     everybody who does not plan giving ahead. */
+  const st = { side: { comp: {}, bonuses: {},
+    donations: { '2026': [{ foundation: 'Fund', funding: 5000 }] } }, years: {} };
+  const t26 = H.givingStats(st, {}, '2026-08-18')[0];
+  eq(t26.planned, 0);
+  eq(t26.projected, null);
+  ok(t26.running, 'running all the same');
+});
+t('a projected share is a dash wherever the actual one is', () => {
+  /* Nothing here invents a denominator, and a projection is not a reason to
+     start: no comp record is no comp record. */
+  const st = { side: { comp: {}, bonuses: {}, donations: { '2026': [
+    { foundation: 'Fund', funding: 5000 },
+    { foundation: 'Fund', funding: 1000, pending: true },
+  ] } }, years: {} };
+  const t26 = H.givingStats(st, {}, '2026-08-18')[0];
+  eq(t26.projected, 6000, 'the dollars still project');
+  eq(t26.grossPct, null);
+  eq(t26.projGrossPct, null, 'the share does not');
+  eq(t26.takePct, null);
+  eq(t26.projTakePct, null);
+});
+t('a year of the future is running, not finished', () => {
+  /* Giving planned for next year is the most forward-looking thing on the tab
+     and would be the easiest to drop by testing `=== thisYear`. */
+  const st = { side: { comp: {}, bonuses: {}, donations: { '2027': [
+    { foundation: 'Fund', funding: 2000, pending: true },
+  ] } }, years: {} };
+  const t27 = H.givingStats(st, {}, '2026-08-18')[0];
+  eq(t27.given, 0);
+  eq(t27.projected, 2000);
+  ok(t27.running);
+});
 
 group('A month with a note is marked as one');
 t('a note on a split amount earns the dot, same as a note on the cell', () => {
