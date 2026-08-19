@@ -166,10 +166,22 @@ family names as well as balances.
     `user-scalable=no` stops it by taking pinch-zoom from everyone — a real
     accessibility loss, and modern iOS ignores it anyway. The viewport meta
     stays `width=device-width, initial-scale=1.0`.
-  - **The media query's selector mirrors the base rule directly above it.** An
-    input type added there and not here is a field that zooms again, so they
-    move together. (Rendered types are text/number/date/month, plus textarea
-    and select — `percent` and `money` are `number` and `text`.)
+  - **The block is the FAMILY's, byte-identical in all five web apps** (added
+    across Sprint Velocity, Flow Metrics, Golf Handicap and PAPTrack the same
+    day — every one of them had the bug). It lists every control that raises a
+    keyboard rather than this app's own selector list, so it cannot drift from a
+    base rule that gains a type later. Checkbox and radio are absent on purpose.
+  - **It sits LAST in the stylesheet, and that is load-bearing.** Several
+    controls carry a smaller size from a rule of EQUAL specificity further down
+    (Flow Metrics' `textarea`, SV's `#jiraBlock textarea`), and source order is
+    what settles those — the block lost to them until it was moved. Anything
+    added after it can silently undo it.
+  - **Left alone on purpose: the header theme/zoom/team pickers and the
+    read-only share link.** The pickers are `<select>`s pinned to
+    `--chrome-h` (30px), so 16px would break the header, and a select opens a
+    picker rather than a keyboard; `#shareLink` is `readonly`, which suppresses
+    the keyboard on iOS. If a phone ever IS seen zooming on those, the finding
+    beats the reasoning — but don't "fix" them speculatively.
   - **Known uncovered edge, deliberately:** the app's own zoom is CSS `zoom` on
     the root, so Preferences below 100% renders these under 16px again and iOS
     may resume. Holding the boxes at a fixed size while everything around them
