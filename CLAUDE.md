@@ -805,6 +805,15 @@ suite passed while the card was wrong.
   that isn't running yet stay with the account that earned them, and having a
   balance to hover or edit is the proof the destination is running, since only
   a running account has one.
+  **The balance branch carries `⚙ Account settings`**, the mirror of the
+  category branch's `⚙ Row settings` — same place in the dialog, same shape of
+  edit (the month's figure here, the thing's own rules there). It opens
+  `EDITORS.account` through `openRowEditor('account', { bal: id })`, the same
+  dataset the account row's LABEL carries, so the two ways in cannot drift. It
+  closes the cell dialog first: two open `<dialog>`s stack, and the second's
+  Cancel would drop the reader onto a stale copy of the first. Hidden when the
+  id names no account — a hand-edited backup can leave a cell behind, and a
+  settings button that opens nothing is worse than none.
   **The received figure is deliberately NOT editable in the dialog** — it
   belongs to the account that sent it, and the sentence says so out loud
   ("correct that where it was earned, not here") rather than leaving a reader

@@ -150,6 +150,9 @@ moves with it — or a plain dollar amount.
 
 **Accounts are a list you own** — add as many as you like, each with its own
 name, growth rate, and a choice of which account that interest is paid into.
+Open one by clicking its name at the left of the grid, or with **⚙ Account
+settings** in any of its balance cells — the same button "⚙ Row settings" is
+on a budget row.
 
 - **They start where your data starts.** An account is tracked from the first
   month you put a figure in; earlier months stay blank rather than zero, and
