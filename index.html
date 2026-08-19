@@ -10667,7 +10667,7 @@ function wireView(view) {
   const sumBtn = F('toSummaryBtn');
   if (sumBtn) sumBtn.onclick = () => convertYearToSummary(activeYearKey());
   const btn = F('welcomeRestoreBtn');
-  if (btn) btn.onclick = () => F('dataDialog').showModal();
+  if (btn) btn.onclick = () => openModal(F('dataDialog'));
   wireYearStrip();
   if (view === 'budget') wireBudget();
   /* Progress draws the goal line AND the three long-run charts that used to be
@@ -11845,7 +11845,7 @@ function openRowEditor(section, ds, isNew) {
      the row wouldn't move. Preferences is where that switches back. */
   const canMove = ed.move && !(section === 'category' && state.settings.rowSort === 'alpha');
   F('rowUpBtn').hidden = F('rowDownBtn').hidden = isNew || !canMove;
-  rowDialog.showModal();
+  openModal(rowDialog);
   /* Only now is the grid laid out and its columns measurable — see the guard
      in applyFieldSpans. */
   applyFieldSpans(spec);
@@ -14328,7 +14328,7 @@ F('views').addEventListener('click', (e) => {
      when there's no data), so its buttons must be handled here, in the one
      listener that survives every re-render. */
   if (e.target.closest('#startFreshBtn')) { startFresh(); return; }
-  if (e.target.closest('#welcomeRestoreBtn')) { F('dataDialog').showModal(); return; }
+  if (e.target.closest('#welcomeRestoreBtn')) { openModal(F('dataDialog')); return; }
   const add = e.target.closest('[data-add]');
   if (add) { openRowEditor(add.dataset.add, add.dataset, true); return; }
   const row = e.target.closest('[data-edit]');
@@ -14373,7 +14373,7 @@ function openHelp(key) {
   F('helpTitle').textContent = h.title;
   /* textContent, never markup: help text is copy, not a template. */
   F('helpBody').textContent = h.body;
-  helpDialog.showModal();
+  openModal(helpDialog);
 }
 F('helpCloseBtn').onclick = () => helpDialog.close();
 
@@ -15124,7 +15124,7 @@ function openCellEditor(yearKey, type, id, m) {
     clearBtn.hidden = stored === undefined;
   }
   updateReconcile();   // a balance already typed over shows its gap on opening
-  cellDialog.showModal();
+  openModal(cellDialog);
 }
 F('cellValue').addEventListener('input', updateReconcile);
 
@@ -15342,7 +15342,7 @@ function reopenMonth() {
 /* ═══════════════════════════ Backup & restore ═════════════════════════════ */
 
 const dataDialog = F('dataDialog');
-F('dataBtn').onclick = () => dataDialog.showModal();
+F('dataBtn').onclick = () => openModal(dataDialog);
 F('dataCloseBtn').onclick = () => dataDialog.close();
 
 /* Its own function because the delete-all dialog offers the same download as its
@@ -15618,7 +15618,10 @@ function goToSearchHit(h) {
 }
 F('findBtn').onclick = () => {
   const dlg = F('searchDialog');
-  dlg.showModal();
+  /* Through openModal like every other dialog — and the focus() below then
+     takes it back, on a phone as much as anywhere. Typing IS the reason this
+     window opens, so it is the one place the keyboard should arrive with it. */
+  openModal(dlg);
   F('searchBox').value = '';
   renderSearchResults();
   F('searchBox').focus();
@@ -15671,7 +15674,7 @@ F('wipeBtn').onclick = () => {
   F('clearSyncWarn').textContent = signedIn
     ? 'You are signed in, so this also clears the copy in your Google account. Your other devices will ask before clearing themselves.'
     : '';
-  clearDialog.showModal();
+  openModal(clearDialog);
 };
 
 F('clearBackupBtn').onclick = downloadBackup;
@@ -15748,6 +15751,57 @@ F('importFile').onchange = (e) => {
   };
   reader.readAsText(file);
 };
+
+/* ── Opening a dialog on a touch screen ─────────────────────────────────────
+   `showModal()` runs the spec's dialog focusing steps: focus the `autofocus`
+   element, or failing that the FIRST FOCUSABLE ONE, whatever it happens to be.
+   Nothing here asks for that — there is no `autofocus` in the file — which is
+   why the Back up and Share dialogs land on a button and the cell editor lands
+   on a text box. They differ only in what their markup happens to open with.
+
+   On a phone, focusing a text box raises the on-screen keyboard, which covers
+   half the dialog you just opened before you have read it. So on a COARSE
+   pointer the focus is moved off the field and onto the dialog itself.
+
+   Focus still goes INTO the dialog, and that part is not optional: leave it on
+   the button behind and a keyboard or screen-reader user is stranded outside a
+   thing covering the page. Landing on the CONTAINER is the arrangement the ARIA
+   practices offer for exactly this case — the dialog carries `aria-labelledby`,
+   so it announces itself, and Tab from there reaches the first field.
+
+   `(pointer: coarse)` and NOT the 700px breakpoint the chrome uses: the
+   keyboard is a fact about touch, not about width. A desktop window dragged
+   narrow keeps type-straight-into-the-cell, and a wide tablet is still spared.
+
+   It runs only when the browser actually landed on a text-entry field, so it is
+   a no-op for the dialogs that open on a button and stays right for a dialog
+   that later gains a field at the top. And it deliberately does nothing to a
+   caller that focuses something itself AFTERWARDS — which is how Find keeps its
+   keyboard, the one place typing is the entire point of opening the window. */
+const KEYBOARD_TYPES = new Set(['text', 'number', 'search', 'tel', 'url', 'email',
+  'password', 'date', 'month']);
+/* Which elements a phone answers with a keyboard — pure over {tagName, type},
+   so the list is pinned by tests rather than rediscovered the next time a
+   dialog opens on a field nobody thought about. A checkbox, a button and a
+   select all raise nothing, which is why the dialogs that open on one are left
+   exactly as they were. */
+function raisesKeyboard(el) {
+  if (!el) return false;
+  return el.tagName === 'TEXTAREA'
+    || (el.tagName === 'INPUT' && KEYBOARD_TYPES.has(el.type));
+}
+function openModal(dlg) {
+  dlg.showModal();
+  if (!window.matchMedia('(pointer: coarse)').matches) return;
+  const el = document.activeElement;
+  if (!el || !dlg.contains(el)) return;
+  if (!raisesKeyboard(el)) return;
+  /* Set here rather than in the markup: a dialog is only a focus target for
+     the moment it opens, and a permanent tabindex would put it in the tab
+     order of every dialog in the file for no reason. */
+  dlg.tabIndex = -1;
+  dlg.focus();
+}
 
 /* ── Clicking outside a dialog closes it ────────────────────────────────────
    A modal <dialog> ignores backdrop clicks by default, which reads as the app
@@ -16807,7 +16861,7 @@ function openShare() {
      Velocity gives its "All teams" box on a single-team link. */
   F('shareFuture').disabled = !shareFutureYears(state, shareCeilingYear(state, false)).length;
   refreshShareLink();
-  shareDialog.showModal();
+  openModal(shareDialog);
   shareDialog.scrollTop = 0;
 }
 
@@ -17121,6 +17175,7 @@ window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, balanceTip,
   receivedInto, earningsOver, earningLines, balanceYearTip, flowTransferNote, internalRows,
+  raisesKeyboard,
   accountEarnings, earningsTip,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its
@@ -17474,7 +17529,7 @@ function chooseSyncSource(local, remote, remoteUpdatedAt) {
     deviceBtn.addEventListener('click', onDevice);
     googleBtn.addEventListener('click', onGoogle);
     dlg.addEventListener('cancel', preventCancel);
-    dlg.showModal();
+    openModal(dlg);
   });
 }
 

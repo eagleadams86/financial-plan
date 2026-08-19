@@ -155,6 +155,33 @@ family names as well as balances.
   says otherwise. Anything else coerceShape reaches for has to obey the same
   rule. It's a `console.warn`, not an error, so a console check filtered to
   errors will not show it.
+- **Every modal opens through `openModal(dlg)`, never `showModal()` directly.**
+  `showModal()` runs the spec's dialog focusing steps — the `autofocus` element,
+  or failing that the FIRST FOCUSABLE one — and there is no `autofocus` anywhere
+  in the file, so which dialogs raise a phone's keyboard was decided entirely by
+  which happened to open with a text box (cell editor, row/account editor,
+  Preferences) rather than a button (Back up, Share, Help). The keyboard then
+  covers half the dialog before it has been read. On a COARSE pointer openModal
+  moves focus off the field and onto the dialog itself.
+  - **Focus still goes INTO the dialog** — that part is not optional, or a
+    keyboard/screen-reader user is stranded outside a thing covering the page.
+    The CONTAINER is what the ARIA practices offer for this case: every dialog
+    here carries `aria-labelledby`, so it announces itself, and Tab reaches the
+    first field. `tabIndex` is set at open rather than in the markup — a dialog
+    is a focus target only for that moment.
+  - **`(pointer: coarse)`, NOT the 700px breakpoint the chrome uses.** The
+    keyboard is a fact about touch, not width: a desktop window dragged narrow
+    keeps click-a-cell-and-type, a wide tablet is still spared. It is the file's
+    only `matchMedia` in JS — everything else branches on width, and this one
+    deliberately does not.
+  - **`raisesKeyboard(el)` is pure and pinned** over `{tagName, type}`, so the
+    type list is a test rather than a rediscovery. The guard is a no-op when the
+    browser landed on a button or a checkbox, which is what keeps the
+    button-first dialogs untouched and stays right if one later gains a field.
+  - **Find is the deliberate exception**, and it needs no special case: it calls
+    `openModal` like everything else and then focuses `#searchBox` itself, which
+    simply wins. Typing is the entire reason that window opens. Any future
+    dialog wanting the keyboard on a phone does the same — focus it afterwards.
 - **Undo is an in-memory ring of saved states** (`undoRing`/`undoSnapshot`,
   cap 20, `pushSnapshot` pure and pinned). save() banks the state it REPLACES
   unless the save is itself an undo (the `undoing` latch — without it repeated
