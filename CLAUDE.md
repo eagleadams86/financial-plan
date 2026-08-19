@@ -155,8 +155,9 @@ family names as well as balances.
   says otherwise. Anything else coerceShape reaches for has to obey the same
   rule. It's a `console.warn`, not an error, so a console check filtered to
   errors will not show it.
-- **Form controls are 16px under `(pointer: coarse)`, and that one pixel is
-  load-bearing.** iOS Safari ZOOMS THE PAGE IN when a focused field is under
+- **Form controls are 16px under `(pointer: coarse)` — and that rule now lives in
+  the THEME PACK (`theme.css`, pack rule 10), not here.** Don't re-add it locally.
+  The one pixel is load-bearing: iOS Safari ZOOMS THE PAGE IN when a focused field is under
   16px, and the body font is 15 — so every tap into a box zoomed the app, which
   then sat wider than the screen: dialogs cut off at the right, the wrap's
   padding gone, and pinching out lasted only until the next field was tapped.
@@ -166,16 +167,16 @@ family names as well as balances.
     `user-scalable=no` stops it by taking pinch-zoom from everyone — a real
     accessibility loss, and modern iOS ignores it anyway. The viewport meta
     stays `width=device-width, initial-scale=1.0`.
-  - **The block is the FAMILY's, byte-identical in all five web apps** (added
-    across Sprint Velocity, Flow Metrics, Golf Handicap and PAPTrack the same
-    day — every one of them had the bug). It lists every control that raises a
-    keyboard rather than this app's own selector list, so it cannot drift from a
-    base rule that gains a type later. Checkbox and radio are absent on purpose.
-  - **It sits LAST in the stylesheet, and that is load-bearing.** Several
-    controls carry a smaller size from a rule of EQUAL specificity further down
-    (Flow Metrics' `textarea`, SV's `#jiraBlock textarea`), and source order is
-    what settles those — the block lost to them until it was moved. Anything
-    added after it can silently undo it.
+  - **It came here first as a local block, then went to the pack** the same day
+    (2026-08-19) once the sweep found all five web apps had the bug. The pack's
+    version uses `html` prefixes, which a local block could not: `theme.css` is
+    linked BEFORE this `<style>`, so a bare `select`/`textarea` loses the tie to
+    `font: inherit` further down. That source-order trap is why the local block
+    had to sit last in the sheet, and why it is better off in the pack.
+  - **If this app ever overrides a typing control with a class or an id, it owns
+    re-asserting 16px on touch** — that is the pack rule's own contract, and
+    Sprint Velocity's Jira paste box and PAPTrack's `.field select` are the two
+    places in the family that need it. Nothing here does today.
   - **Left alone on purpose: the header theme/zoom/team pickers and the
     read-only share link.** The pickers are `<select>`s pinned to
     `--chrome-h` (30px), so 16px would break the header, and a select opens a
