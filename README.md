@@ -955,6 +955,10 @@ same numbers you do.
 It's a snapshot — later edits don't appear, and **a link can't be withdrawn
 once sent**, so treat one like emailing a spreadsheet.
 
+A link made by a **newer version** of the app than the copy you're running is
+refused with an explanation rather than opened with pieces silently missing —
+reloading the page picks up the current version, and the link then opens.
+
 ---
 
 ## Cross-Device Sync

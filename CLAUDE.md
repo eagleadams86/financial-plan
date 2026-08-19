@@ -2576,6 +2576,15 @@ in the FRAGMENT, which is never sent to a server: no Firestore rules, no
 account, no network on either side. `privacy.html` says so and must stay in
 step.
 
+**The payload carries its own version, `v: SHARE_PAYLOAD_V`** — a different
+thing from `SHARE_FORMAT`, which says how the bytes are packed; this says what
+shape is inside them (the SV pattern, mirrored 2026-08-18). `decodeShare`
+refuses a HIGHER one, before the shape check (a newer build may well have
+changed the shape), with `err.newerVersion` set — and `renderShareError` reads
+that mark to say "reload for the current version" instead of telling somebody
+their perfectly intact link looks cut in half. Bump the constant whenever the
+payload's shape changes in a way an older build would silently misread.
+
 - **`viewOnly` does two jobs**: it strips every edit affordance, and — the
   load-bearing one — it makes `save()` a no-op, which is what guarantees a
   borrowed link can never overwrite the plan of whoever opened it. The flag is

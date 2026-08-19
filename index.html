@@ -8684,7 +8684,7 @@ function taxCheckCard() {
     <div class="goalgrid">
       ${tile('Federal', fed === null ? null : fmtMoney(fed),
         tables.federal ? `Your ${esc(tables.federal.fromYear)} table` : 'No federal table')}
-      ${tile(jurLabel('state'), st === null ? null : fmtMoney(st),
+      ${tile(esc(jurLabel('state')), st === null ? null : fmtMoney(st),
         tables.state ? `Your ${esc(tables.state.fromYear)} table` : 'No state table')}
       ${tile('Total', income === undefined ? null : fmtMoney(total),
         income ? `Leaving ${fmtMoney(round2(income - total))}` : 'Federal and state together')}
@@ -15892,6 +15892,15 @@ document.querySelectorAll('.tab').forEach(tab => {
 
 const SHARE_FORMAT = 1;
 
+/* The PAYLOAD version, and a different thing from SHARE_FORMAT above: that
+   marker says how the bytes are packed, this says what shape is inside them.
+   It travels as `v`, and decodeShare() refuses a higher one — somebody on a
+   newer build should get "ask for a fresh link" rather than a view silently
+   missing whatever their build added. Unlike SCHEMA there is no stored copy at
+   stake, so nothing is written and nothing halts — the family pattern from
+   Sprint Velocity. */
+const SHARE_PAYLOAD_V = 1;
+
 const b64urlEncode = (bytes) => {
   let s = '';
   for (const b of bytes) s += String.fromCharCode(b);
@@ -16437,7 +16446,7 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
               activeTab: keep[0], tabOrder: keep.slice() };
 
   return {
-    v: 1,
+    v: SHARE_PAYLOAD_V,
     sharedAt: Date.now(),
     sections: keep,
     /* Flags, not sentences. The recipient's banner is built from these rather
@@ -16475,7 +16484,17 @@ async function decodeShare(token) {
      and coerceShape mutates in place without stripping unknown keys, so a
      crafted __proto__ would otherwise survive into the Object.assign merges. */
   const p = safeParse(json);
-  if (!p || !Array.isArray(p.sections) || !p.data || typeof p.data !== 'object')
+  if (!p || typeof p !== 'object') throw new Error('not a share payload');
+  /* Made by a newer build than this one. Checked BEFORE the shape test, because
+     a newer build may well have changed the shape — and thrown with a marked
+     reason so the error screen can say something true: "it looks incomplete"
+     would send the recipient chasing a link that arrived perfectly intact. */
+  if (Number(p.v || 1) > SHARE_PAYLOAD_V) {
+    const err = new Error('share payload v' + p.v + ' is newer than this build');
+    err.newerVersion = true;
+    throw err;
+  }
+  if (!Array.isArray(p.sections) || !p.data || typeof p.data !== 'object')
     throw new Error('not a share payload');
   /* Filtered against VIEWS rather than trusted: the section list decides which
      renderers run, and an unknown name would leave render() with a tab it has
@@ -16520,18 +16539,29 @@ async function openSharedView() {
     render();
   } catch (e) {
     console.warn('share link could not be read', e);
-    renderShareError();
+    renderShareError(e);
   }
 }
 
-function renderShareError() {
+function renderShareError(e) {
   document.querySelector('.tabs').hidden = true;
+  /* Two different truths need two different sentences: a link cut in half by a
+     mail app, and a link that arrived perfectly intact from a NEWER build of
+     the app (decodeShare marks that one). Telling the second reader their link
+     "looks incomplete" would send them chasing a fresh copy of a link that was
+     never broken — the fix for them is this page catching up, not a resend. */
+  const newer = !!(e && e.newerVersion);
   F('views').innerHTML = `
     <div class="card"><div class="empty">
       <h2>This Shared Link Couldn’t Be Opened</h2>
-      <p>It looks incomplete — links are long, and mail apps sometimes cut them in half or
+      ${newer
+        ? `<p>It was made by a newer version of Financial Plan than the copy running
+         here. The link itself is fine — reload this page to pick up the current
+         version and then open it again. If that doesn't change anything, this
+         browser may be holding an old copy in its offline cache.</p>`
+        : `<p>It looks incomplete — links are long, and mail apps sometimes cut them in half or
          wrap them across two lines. Ask whoever sent it for a fresh copy, and paste the
-         whole thing in one go.</p>
+         whole thing in one go.</p>`}
       <p style="margin-top:16px">
         <a class="btn primary" href="${esc(location.pathname)}">Open my own plan</a></p>
     </div></div>`;
@@ -16938,6 +16968,7 @@ window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
      without one — a missing entry ships an empty tab, and a missing owner ships
      a branch the sender was never told about. */
   SECTION_NEEDS, BRANCH_OWNERS, BRANCH_LABEL, SHARE_PREFIX, SHARE_FORMAT,
+  SHARE_PAYLOAD_V,
   parseShareScope, shareYearUniverse, shareCutoffYear, shareCeilingYear,
   shareStartedYear, shareFutureYears, keepShareYear,
   trimShareYearMap, trimShareYearMaps, trimTaxYearMap, stripNotes, anonymisePeople,

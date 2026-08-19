@@ -6243,6 +6243,27 @@ t('a link that is not a link is refused rather than half-opened', async () => {
   await refuses('0.' + btoa('not json at all'), 'rubbish');
 });
 
+t('a link from a newer build is refused, and marked as such', async () => {
+  /* buildSharePayload stamps v: SHARE_PAYLOAD_V; a higher one means a newer
+     build wrote the link, and whatever that build added would be silently
+     missing from a view this build drew. decodeShare refuses with
+     err.newerVersion set BEFORE the shape check (a newer build may well have
+     changed the shape), so the error screen can say "reload for the current
+     version" instead of blaming the mail app for cutting a perfectly intact
+     link in half — the Sprint Velocity pattern, mirrored. */
+  const newer = { v: H.SHARE_PAYLOAD_V + 1, sections: ['budget'], data: shareFixture() };
+  try {
+    await H.decodeShare(await H.encodeShare(newer));
+    throw new Error('accepted a payload from a newer build');
+  } catch (e) {
+    ok(e.newerVersion === true,
+      'expected the marked newerVersion refusal, got: ' + e.message);
+  }
+  const same = { v: H.SHARE_PAYLOAD_V, sections: ['budget'], data: shareFixture() };
+  const back = await H.decodeShare(await H.encodeShare(same));
+  eq(back.sections, ['budget'], 'the current version still opens');
+});
+
 t('an unknown tab in a link is dropped, not drawn', async () => {
   const back = await H.decodeShare('0.' + btoa(JSON.stringify(
     { sections: ['budget', 'nonsense', 'goals'], data: { years: {} } })));
@@ -7005,6 +7026,37 @@ t('finAdopt halts on a plan from a newer build instead of adopting it', () => {
     'the newer plan must be stored VERBATIM before the halt — coercion would lose its fields');
   ok(coerce > -1 && halt < coerce,
     'the halt must fire before coerceShape ever sees the newer plan');
+});
+
+/* ── The state label's path to the page ──────────────────────────────────────
+   `side.tax.stateLabel` has no in-app editor: it arrives only from a restored
+   backup, a synced doc or a share link — the three least-trusted inputs the
+   app has. coerceShape trims and caps it but deliberately keeps it AS TYPED,
+   so escaping is the sink's job. The renderer reads the global state and so
+   can't be called from here (the ambient-state rule); the sink is pinned over
+   the source instead, the way the finAdopt ordering above is. */
+group('The state label reaches the page escaped');
+
+t('a hostile stateLabel survives coercion as text, so the sink must escape it', () => {
+  const evil = '<img src=x onerror=alert(1)>';
+  const d = H.coerceShape({ side: { tax: {
+    federal: {}, state: { '2030': { single: { bands: [{ upTo: null, rate: 0.5 }] } } },
+    stateLabel: evil } } });
+  eq(d.side.tax.stateLabel, evil,
+    'coerceShape keeps the label as typed — it does not sanitise markup');
+  eq(H.esc(evil), '&lt;img src=x onerror=alert(1)&gt;', 'esc() neutralises it');
+});
+
+t("the What You'd Pay tile escapes the state label at its sink", () => {
+  /* Every other jurLabel sink already went through esc(); the tax-check tile
+     was the one that didn't, and a 28-character label fits inside the 60-char
+     cap with room to spare — on the shared Pages origin that was an XSS hole
+     reachable from a crafted share link. This fails the day the esc() is
+     dropped, or the day a new tile() call takes jurLabel() raw. */
+  ok(/tile\(esc\(jurLabel\('state'\)\)/.test(APP_SRC),
+    "the What You'd Pay card must render tile(esc(jurLabel('state')), …)");
+  ok(!/tile\(jurLabel\(/.test(APP_SRC),
+    'no tile() call may take jurLabel() unescaped');
 });
 
 /* ── Runner ───────────────────────────────────────────────────────────────── */
