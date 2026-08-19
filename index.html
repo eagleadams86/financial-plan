@@ -4203,10 +4203,26 @@ function computeYear(st, yearKey, prior) {
       /* A pinned year STATES its balances — there is no chain to run and no
          projection to run it from, only the figures you read off a statement
          at the time. So an account shows up in a past year exactly where it
-         has one, and nowhere else: no interest, no carry-forward, no month
-         invented for an account that didn't exist yet. */
+         has one, and nowhere else: no carry-forward, no month invented for an
+         account that didn't exist yet.
+         Its EARNINGS are stated on the same footing (2026-08-19): a rate that
+         describes an account today says nothing about what it paid in 2021, so
+         nothing here is computed — a figure exists only where the reader typed
+         one, and the same `balAdjust` map the live year corrects a computed
+         figure with is where it lives. It does NOT move the balance beside it:
+         a stated balance already holds whatever the account made. What it does
+         is put the money back where the rest of the app counts income —
+         Interest & Dividends on the grid, money in vs money out, the savings
+         rate — which for a past year read $0 however much it really earned.
+         Type-checked here rather than in coerceShape, which is the arrangement
+         the live branch above already relies on. */
       let total = 0, any = false;
       for (const a of accountsOf(st)) {
+        const adj = (yr.balAdjust || {})[`${a.id}|${m}`] || {};
+        if (typeof adj.interest === 'number')
+          interest[`${a.id}|${m}`] = round2(adj.interest);
+        if (typeof adj.dividend === 'number')
+          dividend[`${a.id}|${m}`] = round2(adj.dividend);
         const ov = yr.overrides[`${a.id}|${m}`];
         if (!ov) continue;
         balances[`${a.id}|${m}`] = round2(ov.v);
@@ -4366,7 +4382,10 @@ const HELP = {
       + 'month\'s transfers. That growth normally stays in the account — but a brokerage '
       + 'often sweeps dividends into cash instead, so each account can name where its '
       + 'interest lands. Any month\'s interest can also be overridden with what really '
-      + 'arrived, by clicking that month\'s balance.' },
+      + 'arrived, by clicking that month\'s balance. A PAST year works the other way '
+      + 'round: nothing is computed there, so clicking a balance is how you STATE what '
+      + 'the account earned that month. Those figures count as income for the year and '
+      + 'leave the stated balance beside them alone, which already holds the money.' },
   /* accountSince, convertSummary and avgLastYear used to sit here unrendered —
      entries no helpBtn ever pointed at. Each is told where the reader actually
      is: the account editor's own sub explains the partway start, the convert
@@ -5088,8 +5107,17 @@ function gridCard(y, yr) {
   const earnMonths = months.map(m => accountEarnings(c, yr, [m]));
   const earnYear = accountEarnings(c, yr, ownMonths);
   const earns = earnYear.v !== 0 || earnMonths.some(e => e.v !== 0);
+  /* Where the figure comes from differs by model, so the title has to: a live
+     year works it out from each account's rate, a pinned one only knows what
+     was typed onto its balance cells. A title naming a rate over a year that
+     ignores rates would send the reader to the account editor to fix a figure
+     nothing there can change. */
+  const earnTitle = 'What the accounts earned — interest and dividends, added up '
+    + 'across every account. ' + (live
+      ? 'Worked out from each account\'s own rate, so it is corrected there rather than here.'
+      : 'A past year states them: open a month on the account row below to type what it earned.');
   const earnRow = () => `<tr class="derived"><th class="lbl" scope="row"
-      title="What the accounts earned — interest and dividends, added up across every account. Worked out from each account's own rate, so it is corrected there rather than here.">Interest &amp; Dividends</th>${
+      title="${esc(earnTitle)}">Interest &amp; Dividends</th>${
     months.map((m, i) => `<td class="c-${earnMonths[i].kind} ${m === thisM ? 'now' : ''}"
       data-tip="${esc(earningsTip(earnMonths[i]))}">${fmtCell(earnMonths[i].v)}</td>`).join('')
     }${rowTotalTd(earnYear.v, false, earnYear.kind, earningsTip(earnYear))}</tr>`;
@@ -5130,7 +5158,12 @@ function gridCard(y, yr) {
      beside the hub, so those would sit at $0 forever — hide them rather than
      show dead rows. They appear the moment anything feeds them. */
   const accounts = accountsOf(state);
-  const stated = (a) => Object.keys(yr.overrides).some(k => k.startsWith(a.id + '|'));
+  /* A pinned year's account has a row wherever it has a STATED figure — a
+     balance or an earning. Earnings count because they are typed into the same
+     cells: state 2021's dividends on an account whose balances you never wrote
+     down and the row has to be there to hold them. */
+  const stated = (a) => [yr.overrides, yr.balAdjust || {}]
+    .some(map => Object.keys(map).some(k => k.startsWith(a.id + '|')));
   const activeBal = (a) => accountShowsInYear(a, yr, c, months, accounts);
   /* A PINNED year shows only the accounts it actually holds figures for. The
      live year's rules don't apply to history: the hub wasn't necessarily the
@@ -5192,12 +5225,22 @@ function gridCard(y, yr) {
       months.map(m => {
         const v = c.balances[`${a.id}|${m}`];
         /* Before tracking begins the cell is blank but still yours to click:
-           typing a balance in is what starts the account from that month. */
-        if (v === undefined)
+           typing a balance in is what starts the account from that month.
+           A past year can state what a month EARNED without stating what it
+           held, so the earnings ride under the invitation rather than being
+           the one figure on the grid with nowhere to read it. The cell still
+           reads '·' — hovering is how every other detail on this grid is
+           found, and a glyph invented for this one case would be a symbol the
+           reader has to learn to spot a month they typed themselves. */
+        if (v === undefined) {
+          const said = earningLines(state, c, yr, a, m);
           return `<td class="cell ${m === thisM ? 'now' : ''}"
             data-bal="${esc(a.id)}" data-m="${m}"
-            data-tip="${live ? `Not tracked yet — click to start this account from ${esc(monthLabel(m))}`
-              : `Nothing recorded — click to state what ${esc(a.name)} held in ${esc(monthLabel(m))}`}">·</td>`;
+            data-tip="${esc([live
+              ? `Not tracked yet — click to start this account from ${monthLabel(m)}`
+              : `Nothing recorded — click to state what ${a.name} held in ${monthLabel(m)}`,
+              ...said].join('\n'))}">·</td>`;
+        }
         const kind = c.balanceKinds[`${a.id}|${m}`];
         const ov = yr.overrides[`${a.id}|${m}`];
         /* Same rule as a category cell: a note earns the dot, and says what it
@@ -5207,7 +5250,7 @@ function gridCard(y, yr) {
           data-bal="${esc(a.id)}" data-m="${m}"
           data-tip="${esc(balanceTip(state, c, yr, a, m))}">${fmtCell(v || 0)}</td>`;
       }).join('')}${balTotalTd(closingOf(a.id),
-        earningsOver(state, c, a, ownMonths), 'closing balance')}</tr>`).join('')
+        earningsOver(state, c, yr, a, ownMonths), 'closing balance')}</tr>`).join('')
     + secheadRow('')   // the same band that opens the block, closing it off
     + ownerRowsHtml
     /* Total carries the same estimate mark as the accounts it adds up. It is
@@ -5227,7 +5270,7 @@ function gridCard(y, yr) {
              arrivals: a sweep between two of these accounts is already inside
              this total, and naming it here would read as money from outside. */
           activeAccounts.reduce((s, a) => {
-            const e = earningsOver(state, c, a, ownMonths);
+            const e = earningsOver(state, c, yr, a, ownMonths);
             return { interest: round2(s.interest + e.interest),
               dividend: round2(s.dividend + e.dividend) };
           }, { interest: 0, dividend: 0 }), 'closing total')}</tr>`
@@ -5499,14 +5542,37 @@ function cellTip(r) {
    sweeping its dividend to cash is the ordinary arrangement, and earnings paid
    elsewhere are the likeliest reason a balance didn't move by what it earned.
    The RECEIVING end says so too, through `receivedInto` below.
-   A pinned or summary year computes neither, so its `interest`/`dividend` maps
-   are empty and every extra line falls away on its own. */
+   A SUMMARY year has no accounts at all, so its maps are empty and every extra
+   line falls away on its own. A PINNED year states its earnings instead of
+   computing them (see computeYear), so the two figures read exactly as they
+   were typed — and they are never marked "into" another account: `creditTo`
+   and `divTo` describe where the money goes TODAY, and a past year is not
+   today's arrangement. `receivedInto` keeps the other half of that rule. */
 function balanceTip(st, c, yr, a, m) {
   const key = `${a.id}|${m}`;
   const ov = (yr.overrides || {})[key];
-  const adj = (yr.balAdjust || {})[key] || {};
   const head = [fmtMoney(c.balances[key] || 0), ov ? 'stated balance' : '', ov && ov.note]
     .filter(Boolean).join(' · ');
+  /* No esc() — the whole tip is escaped once at the sink and rendered through
+     textContent, exactly like the account names above. */
+  const lines = [...earningLines(st, c, yr, a, m)];
+  for (const g of receivedInto(st, c, yr, a, m))
+    lines.push(`Paid in ${fmtMoney(g.v)} from ${g.name}`);
+  for (const g of sweepArrivals(st, yr, c, a, m))
+    lines.push(`Swept in ${fmtMoney(g.v)} from ${g.name} (${g.row})`);
+  return [head, ...lines].join('\n');
+}
+
+/* What a month EARNED, as tooltip lines — the two figures on their own, split
+   out of `balanceTip` so a month with earnings and no stated balance can show
+   them too. That case only exists in a past year, and it is a real one: the
+   reader knows what the brokerage paid in June 2021 without having written
+   down what it held, and before this the money appeared on the Interest &
+   Dividends row with nothing on the account row it belonged to. Pure. */
+function earningLines(st, c, yr, a, m) {
+  const key = `${a.id}|${m}`;
+  const adj = (yr.balAdjust || {})[key] || {};
+  const routed = yr.model === 'live';
   const earned = (label, amt, stated, to) => `${label} ${fmtMoney(amt)}${
     to ? ` into ${to}` : ''}${stated ? ' · stated' : ''}`;
   const lines = [];
@@ -5514,17 +5580,11 @@ function balanceTip(st, c, yr, a, m) {
   const div = (c.dividend || {})[key];
   if (typeof int === 'number' && (int || typeof adj.interest === 'number'))
     lines.push(earned('Interest', int, typeof adj.interest === 'number',
-      a.creditTo && a.creditTo !== a.id ? accountName(st, a.creditTo) : ''));
+      routed && a.creditTo && a.creditTo !== a.id ? accountName(st, a.creditTo) : ''));
   if (typeof div === 'number' && (div || typeof adj.dividend === 'number'))
     lines.push(earned('Dividends', div, typeof adj.dividend === 'number',
-      (a.divTo || a.id) !== a.id ? accountName(st, a.divTo) : ''));
-  /* No esc() — the whole tip is escaped once at the sink and rendered through
-     textContent, exactly like the account names above. */
-  for (const g of receivedInto(st, c, a, m))
-    lines.push(`Paid in ${fmtMoney(g.v)} from ${g.name}`);
-  for (const g of sweepArrivals(st, yr, c, a, m))
-    lines.push(`Swept in ${fmtMoney(g.v)} from ${g.name} (${g.row})`);
-  return [head, ...lines].join('\n');
+      routed && (a.divTo || a.id) !== a.id ? accountName(st, a.divTo) : ''));
+  return lines;
 }
 
 /* What the OTHER accounts swept into this one this month — one entry per
@@ -5541,9 +5601,15 @@ function balanceTip(st, c, yr, a, m) {
    that isn't running yet stay with the account that earned them, so a
    destination is only credited in months it is actually running — and having a
    balance to hover or edit is the proof of that, since only a running account
-   has one. Pure over the computed year, so the wording above it is testable. */
-function receivedInto(st, c, a, m) {
+   has one.
+   A year that isn't LIVE routes nothing, and that is the point of the `yr`
+   argument: a pinned year's earnings are stated on the account that earned
+   them, and reading today's `creditTo`/`divTo` over them would announce that
+   2021's dividends were swept into an account chosen in 2026. Pure over the
+   computed year, so the wording above it is testable. */
+function receivedInto(st, c, yr, a, m) {
   const got = [];
+  if (!yr || yr.model !== 'live') return got;
   for (const s of accountsOf(st)) {
     if (s.id === a.id) continue;
     const sent = round2(
@@ -5576,13 +5642,13 @@ function sweepArrivals(st, yr, c, a, m) {
    cannot disagree. Sources are gathered by NAME: two accounts sharing one is
    the merge's whole premise, and a reader looking at a year wants one line per
    name they recognise. */
-function earningsOver(st, c, a, months) {
+function earningsOver(st, c, yr, a, months) {
   let interest = 0, dividend = 0;
   const from = new Map();
   for (const m of months) {
     interest += (c.interest || {})[`${a.id}|${m}`] || 0;
     dividend += (c.dividend || {})[`${a.id}|${m}`] || 0;
-    for (const g of receivedInto(st, c, a, m))
+    for (const g of receivedInto(st, c, yr, a, m))
       from.set(g.name, round2((from.get(g.name) || 0) + g.v));
   }
   return { interest: round2(interest), dividend: round2(dividend),
@@ -5603,9 +5669,11 @@ function earningsOver(st, c, a, months) {
 
    Pure over the computed year, and it reads the maps rather than walking
    `accountsOf`, which is what lets a caller holding only `(computed, yr)` ask
-   it. A PINNED or summary year computes neither map, so it earns nothing here —
-   the same answer `yearFlows` gives, and for the same reason: stated balances
-   already hold whatever they earned.
+   it. A SUMMARY year has no accounts, so it earns nothing here. A PINNED year
+   earns exactly what it STATES — nothing is computed for it, so a year of
+   history reads $0 until the figures are typed in, and every month that has
+   one is `actual` by the rule below, since a stated earning is a fact whatever
+   month it sits in.
 
    The kind follows the house rule that every added-up figure says what it is
    made of, through `sumKind` like every other. What a month's earnings are made
@@ -9863,8 +9931,10 @@ function yearFlows(yr, computed, y, noTransfers) {
        the budget rows on their own explain — leaving it out understated money
        in by thousands a year, growing with the balances. A negative figure (an
        overdrawn month, or a correction) counts as money out, same as a cell.
-       A PINNED year adds nothing here: its balances are stated outright, so
-       whatever they earned is already inside the figures. */
+       A PINNED year computes none of this, so it contributes exactly what it
+       STATES — nothing at all until the figures are typed in. Its balances are
+       stated outright, so the earnings never move them; they are here because
+       money the accounts made is money in, whichever year made it. */
     for (const map of [(computed || {}).interest, (computed || {}).dividend])
       for (const [key, v] of Object.entries(map || {}))
         if (key.split('|')[1].startsWith(y)) add(v);
@@ -9941,8 +10011,8 @@ function yearSpending(yr, computed, y) {
    `accountEarnings` is the single reader, so the rate and the grid cannot
    differ about what a year earned. A summary year falls back to everything
    positive that isn't a balance — the old sheets predate sections, exactly the
-   yearSpending arrangement — and a pinned one earns nothing here, its stated
-   balances holding whatever they made. */
+   yearSpending arrangement — and a pinned one counts what it STATES, which is
+   nothing until the figures are typed onto its balance cells. */
 function yearIncome(yr, computed, y) {
   if (yr.kind === 'summary') {
     let inn = 0;
@@ -10308,6 +10378,19 @@ function gridToSummary(st, y) {
     if (cat.note) row.note = cat.note;
     return row;
   });
+  /* What the year's accounts earned, as ONE flow row — a summary has no
+     accounts to hang it on, and the Interest & Dividends line it replaces was
+     income, so it belongs among the flows rather than the balances. Offered
+     only when the year states something: a plan that never typed its earnings
+     in gains no row, which is the same silence the grid keeps. It goes in
+     before the balances, so the flow list ends where the flow rows end. */
+  const own = new Set(months);
+  const earned = round2(Object.entries(yr.balAdjust || {}).reduce((t, [k, adj]) =>
+    own.has(k.slice(k.indexOf('|') + 1))
+      ? t + (typeof adj.interest === 'number' ? adj.interest : 0)
+          + (typeof adj.dividend === 'number' ? adj.dividend : 0)
+      : t, 0));
+  if (earned) categoryTotals.push({ name: 'Interest & Dividends', total: earned });
   for (const a of accountsOf(st)) {
     let last = null;
     for (const m of months)
@@ -10336,6 +10419,14 @@ function gridToSummary(st, y) {
    total is stamped too — the year-by-year chart reads `eoyCash` and nothing
    else for a year that isn't live — unless the year already states one.
 
+   The EARNINGS are written down by the same act (2026-08-19), and for the same
+   reason the balances are: a pinned year computes nothing, so a year frozen
+   without them lost every dollar of interest and dividends it had made — the
+   Interest & Dividends row emptied, money in dropped by the year's earnings,
+   the savings rate moved. Only months that actually earned something are
+   stamped, so a plan with no rates gains no map; a figure the reader already
+   typed over the computed one is left alone, exactly like a stated balance.
+
    Everything needed to undo it goes into `pinnedFrom`, so Re-open puts the
    year back rather than approximately back. Pure state-in, value-out so tests
    can pin it. */
@@ -10343,18 +10434,27 @@ function gridToPinned(st, computed, y) {
   const yr = st.years[y];
   const own = yearMonths(yr).filter(m => m.startsWith(y));
   const overrides = { ...(yr.overrides || {}) };
+  const balAdjust = { ...(yr.balAdjust || {}) };
   const bal = (computed && computed.balances) || {};
+  const int = (computed && computed.interest) || {};
+  const div = (computed && computed.dividend) || {};
   for (const m of yearMonths(yr))
     for (const a of accountsOf(st)) {
       const key = `${a.id}|${m}`;
+      const earned = {};
+      if (round2(int[key] || 0)) earned.interest = round2(int[key]);
+      if (round2(div[key] || 0)) earned.dividend = round2(div[key]);
+      if (Object.keys(earned).length && balAdjust[key] === undefined)
+        balAdjust[key] = earned;
       if (bal[key] === undefined || overrides[key] !== undefined) continue;
       overrides[key] = { v: round2(bal[key]) };
     }
   const dec = bal[`total|${own[own.length - 1]}`];
   const stamp = yr.eoyCash === undefined && dec !== undefined;
-  return { ...yr, model: 'pinned', overrides,
+  return { ...yr, model: 'pinned', overrides, balAdjust,
     pinnedFrom: { enteredThrough: yr.enteredThrough,
-      overrides: { ...(yr.overrides || {}) }, eoyStamped: stamp },
+      overrides: { ...(yr.overrides || {}) },
+      balAdjust: { ...(yr.balAdjust || {}) }, eoyStamped: stamp },
     ...(stamp ? { eoyCash: round2(dec) } : {}) };
 }
 
@@ -10366,8 +10466,15 @@ function pinnedToLive(st, y) {
   const yr = st.years[y];
   const pf = yr.pinnedFrom || {};
   const { pinnedFrom, eoyCash, ...rest } = yr;
+  /* The stamped earnings come off with the stamped balances — left behind,
+     every month would carry a STATED figure over a year that computes its own,
+     which freezes the interest at whatever the rates said on the day it was
+     frozen. A year pinned before this stamping existed has no `balAdjust` in
+     its `pinnedFrom`; `|| {}` is not a shrug there, it is the right answer,
+     since such a year's adjustments were all typed by hand. */
   return { ...rest, model: 'live', enteredThrough: pf.enteredThrough,
     overrides: { ...(pf.overrides || {}) },
+    balAdjust: { ...(pf.balAdjust || {}) },
     ...(pf.eoyStamped || eoyCash === undefined ? {} : { eoyCash }) };
 }
 
@@ -10391,10 +10498,15 @@ function convertYearToSummary(y) {
       + `${needed.slice(0, 4).join(', ')}${needed.length > 4 ? '…' : ''}. `
       + `Their estimates will go blank.`
     : '';
+  /* Said out loud because it is the one row the reader didn't type: stated
+     earnings survive the conversion as a single flow total, and a confirm that
+     listed everything else would read as if they didn't. */
+  const earns = Object.keys(yr.balAdjust || {}).length
+    ? ` What the accounts earned becomes one "Interest & Dividends" row.` : '';
   if (!confirm(`Convert ${y} to a yearly summary? Its ${yearMonths(yr).length} months of `
     + `figures are replaced by one total per row (each account keeps its end-of-year `
     + `balance), and the months are gone for good — only restoring a backup brings them `
-    + `back. The Progress tab's charts carry on unchanged.${warn}`))
+    + `back.${earns} The Progress tab's charts carry on unchanged.${warn}`))
     return;
   state.years[y] = gridToSummary(state, y);
   save(); render();
@@ -10421,8 +10533,9 @@ function freezeYear(y) {
     + `stated figures — exactly the ones showing now${stated ? `, and the ${stated} you `
       + `stated by hand stay as they are` : ''}. Nothing you typed changes, and `
     + `${y} stops keeping up with edits made after this.\n\n`
-    + `Interest and dividends sit inside those stated balances from then on, so `
-    + `Money In vs Money Out no longer counts them separately for ${y}.\n\n`
+    + `What each account earned is written down at the same time, so the `
+    + `Interest & Dividends line and Money In vs Money Out still show it — `
+    + `stated from then on rather than worked out from the rates.\n\n`
     + `You can re-open it as a live year afterwards.`))
     return;
   state.years[y] = gridToPinned(state, C[y], y);
@@ -14883,7 +14996,15 @@ function openCellEditor(yearKey, type, id, m) {
        and the boxes below correct only what THIS account earned. Saying it out
        loud is what stops the balance above looking wrong by exactly that sum,
        which is the reason to open this dialog in the first place. */
-    const rateLine = [
+    /* A pinned year applies no rate to anything, so quoting one here would
+       promise arithmetic that never runs — and "No growth or dividend rate set"
+       would be a second wrong answer, since the account may well carry one. It
+       gets its own sentence instead, saying what the boxes below actually do. */
+    const rateLine = !live
+      ? 'Interest and dividends are stated for a past year, the way the balance is: '
+        + 'type what the account really earned this month. It counts as income for '
+        + `${yearKey} and leaves the balance above alone, which already holds it.`
+      : [
       (acct.rate || 0) ? `Grows ${round2(acct.rate * 100)}%/yr — ${fmtMoney(earned || 0)} this month${
         acct.creditTo !== acct.id ? `, into ${accountName(state, acct.creditTo)}` : ''}.` : '',
       (acct.divRate || 0) ? `Pays ${round2(acct.divRate * 100)}%/yr in dividends, ${
@@ -14891,7 +15012,7 @@ function openCellEditor(yearKey, type, id, m) {
           acct.divEvery || 3]} — ${paidOut ? fmtMoney(paidOut) : 'nothing'} this month${
         (acct.divTo || acct.id) !== acct.id ? `, into ${accountName(state, acct.divTo)}` : ''}.` : '',
     ].filter(Boolean).join(' ') || 'No growth or dividend rate set on this account.';
-    const gotIn = C[yearKey] ? receivedInto(state, C[yearKey], acct, m) : [];
+    const gotIn = C[yearKey] ? receivedInto(state, C[yearKey], yr, acct, m) : [];
     const paidInLine = gotIn.length
       ? ` Paid in this month: ${andList(gotIn.map(g => `${fmtMoney(g.v)} from ${g.name}`))} — `
         + 'correct that where it was earned, not here.'
@@ -14905,13 +15026,12 @@ function openCellEditor(yearKey, type, id, m) {
           `${fmtMoney(g.v)} from ${g.name} by "${g.row}"`))} — correct the row's cell, not here.`
       : '';
     /* A pinned year has no chain and no projection — every balance in it is a
-       figure read off a statement at the time. So there is nothing to say
-       about rates or what a month "should" have been: the number is the whole
-       story, and offering to correct interest that was never computed would
-       be inviting an edit that does nothing. */
+       figure read off a statement at the time, so there is nothing to say about
+       what a month "should" have been. What it CAN say is what the boxes below
+       are for, which is `rateLine`'s pinned sentence. */
     F('cellContext').textContent = !live
-      ? (ov ? `What ${acct.name} held in ${monthLabel(m)}. Past years are stated outright — clear the box to drop the figure.`
-            : `Nothing recorded for ${acct.name} in ${monthLabel(m)}. Type what it held.`)
+      ? (ov ? `What ${acct.name} held in ${monthLabel(m)}. Past years are stated outright — clear the box to drop the figure. `
+            : `Nothing recorded for ${acct.name} in ${monthLabel(m)}. Type what it held. `) + rateLine
       : (ov
         ? 'This balance is stated (pinned), not computed. '
         : cur === undefined
@@ -14941,14 +15061,23 @@ function openCellEditor(yearKey, type, id, m) {
        check. Reconciliation belongs to a month the plan actually worked out. */
     if (live && cur !== undefined && !ov) editing.computed = round2(cur || 0);
     F('cellNote').value = ov?.note || '';
-    F('cellBalWrap').hidden = !live;   // nothing to adjust where nothing is computed
+    /* Shown on BOTH models, and the difference is the placeholder. A live year
+       computes a figure, so the box shows it greyed and typing takes over. A
+       pinned year computes nothing, so an empty box is the honest hint: there
+       is no number here until you write one, and a placeholder of $0.00 would
+       claim the account earned nothing. */
+    F('cellBalWrap').hidden = false;
     F('cellInterest').value = showMoney(typeof adj.interest === 'number' ? adj.interest : '');
-    F('cellInterest').placeholder = fmtMoney(round2(earned || 0));
+    F('cellInterest').placeholder = live ? fmtMoney(round2(earned || 0)) : '';
     F('cellDividend').value = showMoney(typeof adj.dividend === 'number' ? adj.dividend : '');
-    F('cellDividend').placeholder = fmtMoney(round2(paidOut || 0));
+    F('cellDividend').placeholder = live ? fmtMoney(round2(paidOut || 0)) : '';
     kindWrap.hidden = true;
     revertBtn.hidden = !live || !(ov || adj.interest !== undefined || adj.dividend !== undefined);
-    clearBtn.hidden = !(!live && ov);   // a past year's figure is cleared, not reverted
+    /* A past year's figure is cleared, not reverted — and the button empties
+       the whole month, earnings included, so a stated dividend can't outlive
+       the balance it was written beside. */
+    clearBtn.hidden = !(!live
+      && (ov || adj.interest !== undefined || adj.dividend !== undefined));
   } else {   // paychecks count
     F('cellRowBtn').hidden = true;
     F('cellSplitBtn').hidden = true;
@@ -15095,10 +15224,20 @@ F('cellSplitBtn').onclick = () => {
 function balRowGoneNote(yearKey, id) {
   const yr = state.years[yearKey], c = C[yearKey];
   const a = accountsOf(state).find(x => x.id === id);
-  if (!a || !yr || !c || yr.model !== 'live') return '';
-  if (accountShowsInYear(a, yr, c, c.months, accountsOf(state))) return '';
+  if (!a || !yr || !c || yr.kind !== 'grid') return '';
+  /* A pinned year asks a simpler question than `accountShowsInYear` — it draws
+     an account where the year STATES something, and nothing else — so the note
+     has to ask the same one the grid just did, or it would promise a row that
+     isn't coming back. */
+  const shows = yr.model === 'live'
+    ? accountShowsInYear(a, yr, c, c.months, accountsOf(state))
+    : [yr.overrides || {}, yr.balAdjust || {}]
+        .some(map => Object.keys(map).some(k => k.startsWith(a.id + '|')));
+  if (shows) return '';
   return ` — that was the only figure ${a.name} had in ${yearKey}, so its row has `
-    + 'gone. State a balance again, or send something into it, to bring it back.';
+    + 'gone. State a balance again' + (yr.model === 'live'
+      ? ', or send something into it, to bring it back.'
+      : ' — or what it earned — to bring it back.');
 }
 
 F('cellRevertBtn').onclick = () => {
@@ -15122,8 +15261,14 @@ F('cellClearBtn').onclick = () => {
   else if (type === 'pay') delete yr.paychecks[m];
   /* Only offered on a pinned year, where the stated figure IS the balance —
      in a live year the same button would look like it clears a computed
-     number it can't touch, so Revert is what's shown there instead. */
-  else if (type === 'bal') delete yr.overrides[`${id}|${m}`];
+     number it can't touch, so Revert is what's shown there instead. The stated
+     earnings go with it: they are typed into this same cell, and leaving them
+     behind would keep a past year's income line standing over a month with
+     nothing in it. Emptying just one of the three is what the boxes are for. */
+  else if (type === 'bal') {
+    delete yr.overrides[`${id}|${m}`];
+    delete (yr.balAdjust || {})[`${id}|${m}`];
+  }
   cellDialog.close();
   save(); render();
   refocusGridCell();
@@ -16940,7 +17085,7 @@ window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, balanceTip,
-  receivedInto, earningsOver, balanceYearTip, flowTransferNote, internalRows,
+  receivedInto, earningsOver, earningLines, balanceYearTip, flowTransferNote, internalRows,
   accountEarnings, earningsTip,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its

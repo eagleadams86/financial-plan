@@ -224,10 +224,32 @@ family names as well as balances.
     which DIRECTION each figure moved, so a negative month there counts as money
     out. `accountEarnings` nets across the run the way a category row does.
     Merging them would silently change money in vs money out.
-  - **A PINNED or summary year earns nothing here** — computeYear fills neither
-    map off the live branch — which is the same answer `yearFlows` gives and for
-    the same reason: stated balances already hold whatever they made. So the row
-    is absent from history, with no branch anywhere saying so.
+  - **A PINNED year earns exactly what it STATES** (2026-08-19). It computes
+    nothing — no chain, no rates — so `computeYear`'s pinned branch fills the
+    two maps from `balAdjust` and nothing else, and a past year with no figures
+    typed into it earns nothing, exactly as before. The point is that a past
+    year could not record its earnings AT ALL: the boxes were hidden, the
+    Interest & Dividends row never drew, and money in / the savings rate read a
+    history worth thousands a year less than it was. A SUMMARY year has no
+    accounts, so it still earns nothing here — its earnings are a
+    `categoryTotals` row like any other flow.
+    - **A stated earning does NOT move the balance beside it**, and that is the
+      whole reason it is safe: a pinned balance was read off a statement and
+      already holds what the account made. It is recorded so the money lands
+      where the app counts INCOME.
+    - **Nothing is routed in a pinned year.** `creditTo`/`divTo` say where the
+      money goes TODAY, and reading them over 2021 would announce that year's
+      dividends were swept into an account chosen in 2026 — so `receivedInto`
+      takes the year and returns `[]` off the live branch, and `balanceTip`
+      drops the "into X" suffix by the same test. `earningsOver` takes the year
+      only to pass it down.
+    - **Freezing a live year stamps its earnings** alongside its balances
+      (`gridToPinned`), and `pinnedToLive` takes them off again with the
+      `pinnedFrom.balAdjust` it kept. Without the stamp, marking a year as
+      history silently cost it every dollar of interest it had made. Only
+      non-zero months are stamped, and a figure the reader typed is left alone.
+      Converting a pinned year to a summary folds the lot into one
+      "Interest & Dividends" flow row (`gridToSummary`).
   - **The kind is the MONTH's, `balanceKinds['total|m']` (i.e. `kindAt`), NOT
     the assorted kinds of the accounts under it.** An account whose balance you
     stated reads `pinned`, so reading the accounts marked an entered January
@@ -450,7 +472,8 @@ suite passed while the card was wrong.
   default) — the brokerage sweep. A payment carries the whole period, so the
   yearly rate means the same whichever frequency it's on. Both are earnings, so both raise Total
   wherever they land; a per-month `balAdjust.interest`/`.dividend` replaces
-  either with what really arrived. `since` starts an account partway through, seeded from
+  either with what really arrived — and in a PINNED year that map is not a
+  correction but the whole record, since nothing there is computed. `since` starts an account partway through, seeded from
   `yr.seeds`, blank and out of Total before it. It is set once — at migration,
   or to the current month when an account is added — and deliberately has NO
   editor field: when tracking began is a fact about the data, and editing it
@@ -807,10 +830,17 @@ suite passed while the card was wrong.
   reader's own accounts is already inside that figure, and naming it there
   would read as money arriving from outside the plan. An owner subtotal shows
   its closing figure alone — what each account earned is on its own row.
-  A pinned or summary year computes neither, so its
-  `interest`/`dividend` maps are empty and the extra lines fall away with no
-  branch. Keep it in step with the cell editor's `rateLine`, which answers the
-  same question from the account's rates rather than the month's figures.
+  A SUMMARY year has no accounts, so its maps are empty and the extra lines
+  fall away with no branch. A PINNED year states its earnings instead of
+  computing them, which is why the two earning lines live in
+  **`earningLines(st, c, yr, a, m)`** rather than inside `balanceTip`: a past
+  year can state what a month EARNED without stating what it HELD, so the blank
+  cell's tooltip needs the same two lines. That cell still reads '·' — hovering
+  is how every other detail on this grid is found, and a glyph invented for this
+  one case is a symbol the reader has to learn.
+  Keep it in step with the cell editor's `rateLine`, which answers the same
+  question from the account's rates in a live year and, in a past one, says
+  instead what the two boxes below it do.
 - The month header is pinned by `pinGridHeader()`, not by CSS: `.gridwrap`
   scrolls sideways, which makes it the sticky scroll container, and giving it a
   vertical scroll of its own would put a second scrollbar on screen. The header

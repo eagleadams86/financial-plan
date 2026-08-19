@@ -2678,10 +2678,67 @@ function tipFixture() {
   const c = H.computeAll(s, TODAY_FIX)['2030'];
   return {
     tip: (id, m) => H.balanceTip(s, c, yr, acct(id), m),
-    got: (id, m) => H.receivedInto(s, c, acct(id), m),
-    over: (id, ms) => H.earningsOver(s, c, acct(id), ms),
+    got: (id, m) => H.receivedInto(s, c, yr, acct(id), m),
+    over: (id, ms) => H.earningsOver(s, c, yr, acct(id), ms),
   };
 }
+
+group('What a past year states that it earned');
+/* A pinned year computes nothing — no chain, no rates — so interest and
+   dividends exist there only where the reader typed them. These pin the whole
+   round trip: what computeYear hands back, and what the readers above it make
+   of it. */
+function pastFixture(balAdjust) {
+  const s = H.coerceShape({
+    settings: { accounts: [
+      { id: 'cash', name: 'Cash', hub: true, rate: 0.12, creditTo: 'cash' },
+      { id: 'mid', name: 'Savings', rate: 0.12, creditTo: 'cash',
+        divRate: 0.04, divTo: 'cash', divEvery: 3 }] },
+    years: { '2021': { kind: 'grid', model: 'pinned', startMonth: '2021-01',
+      monthCount: 3, categories: [], cells: {}, paychecks: {}, seeds: {},
+      overrides: { 'mid|2021-01': { v: 10000 }, 'mid|2021-02': { v: 10050 },
+                   'mid|2021-03': { v: 10100 } },
+      balAdjust: balAdjust || {}, extraNotes: [] } } });
+  return { s, yr: s.years['2021'], c: H.computeAll(s, TODAY_FIX)['2021'] };
+}
+
+t('a rate the account carries today earns nothing in a past year', () => {
+  const { c } = pastFixture();
+  eq(Object.keys(c.interest), [], 'no chain ran, so no interest was worked out');
+  eq(Object.keys(c.dividend), []);
+});
+
+t('a stated figure is what the year earned, and the balance beside it never moves', () => {
+  const { yr, c } = pastFixture({ 'mid|2021-02': { interest: 31, dividend: 90 } });
+  eq(c.interest['mid|2021-02'], 31);
+  eq(c.dividend['mid|2021-02'], 90);
+  eq(c.balances['mid|2021-02'], 10050,
+    'the stated balance already holds it — stating the earning cannot restate the balance');
+  eq(H.accountEarnings(c, yr, ['2021-01', '2021-02', '2021-03']).v, 121,
+    'and the grid\'s Interest & Dividends row has something to show at last');
+});
+
+t('a past year never routes its earnings through today\'s destinations', () => {
+  const { s, yr, c } = pastFixture({ 'mid|2021-02': { interest: 31, dividend: 90 } });
+  const mid = s.settings.accounts.find(a => a.id === 'mid');
+  const cash = s.settings.accounts.find(a => a.id === 'cash');
+  eq(H.receivedInto(s, c, yr, cash, '2021-02'), [],
+    'creditTo and divTo describe 2026, and 2021 is not 2026');
+  eq(H.balanceTip(s, c, yr, mid, '2021-02'),
+    '$10,050.00 · stated balance\nInterest $31.00 · stated\nDividends $90.00 · stated',
+    'so no line claims the money went anywhere');
+});
+
+t('an earning can be stated in a month with no balance beside it', () => {
+  const { s, yr, c } = pastFixture({ 'cash|2021-03': { dividend: 25 } });
+  eq(c.dividend['cash|2021-03'], 25);
+  eq(c.balances['cash|2021-03'], undefined,
+    'stating what an account earned is not stating what it held');
+  const cash = s.settings.accounts.find(a => a.id === 'cash');
+  eq(H.earningLines(s, c, yr, cash, '2021-03'), ['Dividends $25.00 · stated'],
+    'and the empty cell still has something to say on hover');
+  eq(H.earningLines(s, c, yr, cash, '2021-01'), [], 'a month that stated nothing stays quiet');
+});
 
 group('The account balance tooltip');
 t('what the month earned rides under the balance', () => {
@@ -3132,16 +3189,27 @@ t('income counts what the accounts earned as well as the income rows', () => {
   eq(p.income, 5436, 'the savings rate reads the same figure the grid shows');
   eq(p.spent, 0);
 });
-t('a pinned or summary year earns nothing here', () => {
+t('a pinned or summary year earns only what it states', () => {
   const { yr } = earnFixture();
   const pinned = { ...yr, model: 'pinned' };
-  /* computeYear fills neither map off the live branch, so there is nothing to
-     add — the same answer yearFlows gives, and for the same reason: stated
-     balances already hold whatever they earned. */
+  /* computeYear fills neither map off the live branch, so a pinned year with
+     nothing typed into it earns nothing — the figures only exist where the
+     reader has written them down. */
   const c = { months: ['2026-01'], cells: {}, interest: {}, dividend: {},
               balanceKinds: {} };
   eq(H.accountEarnings(c, pinned, ['2026-01']).v, 0);
   eq(H.yearIncome(pinned, c, '2026'), 0);
+  /* And the other half of the rule: a stated figure counts, and counts as a
+     fact, because a past year has no estimates to mark it against. */
+  const stated = { ...pinned, balAdjust: { 'cash|2026-01': { interest: 40, dividend: 60 } } };
+  const cs = { months: ['2026-01'], cells: {},
+               interest: { 'cash|2026-01': 40 }, dividend: { 'cash|2026-01': 60 },
+               balanceKinds: {} };
+  const e = H.accountEarnings(cs, stated, ['2026-01']);
+  eq(e.v, 100, 'both halves, added');
+  eq(e.kind, 'actual', 'stated, so never an estimate');
+  eq(H.yearIncome(stated, cs, '2026'), 100, 'and it is income for the year');
+  eq(H.yearFlows(stated, cs, '2026').in, 100, 'money in counts it too');
 });
 t('the tooltip names which half the money was', () => {
   const { yr, c } = earnFixture();
@@ -5408,6 +5476,32 @@ t('converting keeps each account\'s end-of-year balance as a balance row', () =>
   eq(summary.categoryTotals.find(r => r.name === 'Rent').total, -900,
     'flows are untouched');
 });
+t('converting folds the year\'s stated earnings into one income row', () => {
+  const s = H.coerceShape({
+    settings: { accounts: [{ id: 'cash', name: 'Checking', hub: true },
+      { id: 'mid', name: 'Savings' }] },
+    years: { '2020': { kind: 'grid', model: 'pinned', startMonth: '2020-01',
+      monthCount: 12, categories: [], cells: {}, paychecks: {}, seeds: {},
+      overrides: { 'mid|2020-12': { v: 2000 } }, extraNotes: [],
+      balAdjust: { 'mid|2020-03': { interest: 10, dividend: 40 },
+                   'mid|2020-09': { interest: 12 },
+                   'mid|2021-01': { interest: 500 } } } } });
+  const rows = H.gridToSummary(s, '2020').categoryTotals;
+  const earn = rows.find(r => r.name === 'Interest & Dividends');
+  eq(earn.total, 62, 'both halves of every month the year itself owns');
+  eq(earn.isBalance, undefined, 'it is money in, not a balance');
+  ok(rows.indexOf(earn) < rows.findIndex(r => r.isBalance),
+    'and it sits among the flows, above the balances');
+});
+t('a year that stated no earnings gains no row for them', () => {
+  const s = H.coerceShape({
+    settings: { accounts: [{ id: 'cash', name: 'Checking', hub: true }] },
+    years: { '2020': { kind: 'grid', model: 'pinned', startMonth: '2020-01',
+      monthCount: 12, categories: [], cells: {}, paychecks: {}, seeds: {},
+      overrides: { 'cash|2020-12': { v: 5 } }, balAdjust: {}, extraNotes: [] } } });
+  ok(!H.gridToSummary(s, '2020').categoryTotals
+    .some(r => r.name === 'Interest & Dividends'));
+});
 t('converting warns when next year looks back into this one', () => {
   const s = H.coerceShape(fixtureState());
   /* 2030 has a same-month-last-year row, which reads 2029 */
@@ -5484,6 +5578,35 @@ t('a stamped figure the reader corrects becomes theirs, and survives re-opening'
   s.years['2030'].eoyCash = 9999;
   s.years['2030'].pinnedFrom.eoyStamped = false;
   eq(H.pinnedToLive(s, '2030').eoyCash, 9999);
+});
+
+t('freezing writes down what the accounts earned, and re-opening lets go again', () => {
+  const s = enteredFixture();
+  const before = H.computeAll(s, TODAY_FIX)['2030'];
+  const earned = Object.entries(before.interest).filter(([, v]) => v);
+  ok(earned.length, 'the fixture earns something, or this proves nothing');
+  const inBefore = H.yearFlows(s.years['2030'], before, '2030').in;
+  s.years['2030'] = H.gridToPinned(s, before, '2030');
+  const after = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(earned.filter(([k, v]) => after.interest[k] !== v), [],
+    'every month of interest reads exactly as it did while the year was live');
+  eq(Object.values(s.years['2030'].balAdjust).some(a => a.interest === 0), false,
+    'a month that earned nothing gains no entry');
+  eq(H.yearFlows(s.years['2030'], after, '2030').in, inBefore,
+    'so money in does not drop by a year of earnings the moment it is frozen');
+  const back = H.pinnedToLive(s, '2030');
+  eq(back.balAdjust, enteredFixture().years['2030'].balAdjust,
+    'the stamped figures go with the stamped balances — a live year computes its own');
+});
+
+t('an earning the reader stated survives the freeze untouched', () => {
+  const s = enteredFixture();
+  s.years['2030'].balAdjust['mid|2030-02'] = { interest: 7 };
+  s.years['2030'] = H.gridToPinned(s, H.computeAll(s, TODAY_FIX)['2030'], '2030');
+  eq(s.years['2030'].balAdjust['mid|2030-02'], { interest: 7 },
+    'the reader typed it, so the stamp leaves it alone');
+  eq(s.years['2030'].pinnedFrom.balAdjust, { 'mid|2030-02': { interest: 7 } },
+    'and it is what re-opening restores');
 });
 
 t('the year after a frozen one opens exactly where it did', () => {

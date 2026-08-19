@@ -174,13 +174,24 @@ name, growth rate, and a choice of which account that interest is paid into.
 every account earned that month, added together, with the two halves named on
 hover.
 
-It is worked out from each account's rates rather than typed, so you correct
-it on the account rather than in the grid. The Income total counts it — it is
-money in, and money in vs money out and the savings rate had always counted
-it while the grid itself showed it nowhere.
+In the **live** year it is worked out from each account's rates rather than
+typed, so you correct it on the account rather than in the grid. The Income
+total counts it — it is money in, and money in vs money out and the savings
+rate had always counted it while the grid itself showed it nowhere.
 
-A year whose accounts earn nothing shows no such row, and a finished year has
-none either: a stated balance already holds whatever it made.
+In a **past year it is stated**, the way the balances there are. Nothing is
+computed in a finished year — a rate an account carries today says nothing
+about what it paid in 2021 — so click the month on the account's row and type
+what it really earned. That figure counts as income for the year and leaves
+the balance beside it alone, which already holds the money. You can state what
+a month earned without stating what it held; hovering the blank cell reads it
+back.
+
+Marking a live year as history writes its earnings down at the same time as
+its balances, so freezing a year never costs it the interest it made.
+
+A year whose accounts earn nothing — or a past year you haven't typed any
+figures into — shows no such row at all.
 
 A row that earns interest **names the accounts it earns on**, and any income
 row can be **marked as pay** so the giving percentages count it.
@@ -234,7 +245,11 @@ Click any cell to edit it. Beyond typing a figure:
   what the other accounts paid in this month — and lets you override the
   interest or add a dividend. Correct either and the balance recomputes around
   it, in whichever account the money is paid into, for that month and every
-  month after.
+  month after. In a **past year** the same two boxes state the earnings
+  outright: there is no rate to quote and no balance to recompute, so the
+  editor says so, and "Clear this cell" empties the month's balance and its
+  earnings together. Nothing is routed to another account there — where
+  interest lands is today's arrangement, not 2021's.
 
 ### Notes
 
@@ -261,8 +276,9 @@ Nothing is lost either way. **↩ Re-open as live** puts the year back to a
 computed one, including any balance you'd stated by hand.
 
 A finished year can also be **converted to a yearly summary** — permanent; the
-Progress charts carry on unchanged, and each account keeps its end-of-year
-balance as a balance row — or deleted outright. It holds its account balances
+Progress charts carry on unchanged, each account keeps its end-of-year balance
+as a balance row, and whatever the year stated it earned folds into one
+"Interest & Dividends" row among the flows — or deleted outright. It holds its account balances
 as figures you stated at the time rather than a chain to recompute, and an
 account you've since closed stops at its last month instead of following you
 into later years.
