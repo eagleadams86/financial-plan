@@ -155,6 +155,25 @@ family names as well as balances.
   says otherwise. Anything else coerceShape reaches for has to obey the same
   rule. It's a `console.warn`, not an error, so a console check filtered to
   errors will not show it.
+- **Form controls are 16px under `(pointer: coarse)`, and that one pixel is
+  load-bearing.** iOS Safari ZOOMS THE PAGE IN when a focused field is under
+  16px, and the body font is 15 — so every tap into a box zoomed the app, which
+  then sat wider than the screen: dialogs cut off at the right, the wrap's
+  padding gone, and pinching out lasted only until the next field was tapped.
+  Reported from the INSTALLED web app on an iPhone, where there is no browser
+  chrome to make the zoom legible as zoom. Never "tidy" these back to `inherit`.
+  - **The fix has to be the FONT, not the viewport.** `maximum-scale=1` /
+    `user-scalable=no` stops it by taking pinch-zoom from everyone — a real
+    accessibility loss, and modern iOS ignores it anyway. The viewport meta
+    stays `width=device-width, initial-scale=1.0`.
+  - **The media query's selector mirrors the base rule directly above it.** An
+    input type added there and not here is a field that zooms again, so they
+    move together. (Rendered types are text/number/date/month, plus textarea
+    and select — `percent` and `money` are `number` and `text`.)
+  - **Known uncovered edge, deliberately:** the app's own zoom is CSS `zoom` on
+    the root, so Preferences below 100% renders these under 16px again and iOS
+    may resume. Holding the boxes at a fixed size while everything around them
+    shrank would look broken, and the phone hides the header zoom picker anyway.
 - **Every modal opens through `openModal(dlg)`, never `showModal()` directly.**
   `showModal()` runs the spec's dialog focusing steps — the `autofocus` element,
   or failing that the FIRST FOCUSABLE one — and there is no `autofocus` anywhere
