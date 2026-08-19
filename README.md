@@ -865,7 +865,7 @@ that apply across the whole app rather than to a row:
 | Setting | What it changes |
 | --- | --- |
 | **Subtitle** | Your own words beside "Financial Plan" in the header and the browser tab |
-| **You file taxes as** | Filing jointly makes the Roth IRA (MAGI) check count both incomes |
+| **You file taxes as** | Which bracket table the Tax tab reads and which Roth (MAGI) threshold it checks against — always asked, since the Tax tab needs no household. Filing jointly also counts both incomes once there are two of you |
 | **Compensation tab follows** | Which person that tab's salary history is about, once there are two of you |
 | **Currency** | A three-letter code (USD, EUR, GBP, CAD). It changes how figures read, not what they are |
 | **Budget row order** | Your own arrangement, or alphabetical within a section (which turns dragging off and leaves your order stored underneath) |

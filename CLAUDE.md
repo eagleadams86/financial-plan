@@ -701,7 +701,13 @@ suite passed while the card was wrong.
   every year and a figure shipped here would be quietly wrong within twelve
   months while looking authoritative. (Filing status has a second job since the
   Tax tab arrived: it is the innermost key of a bracket table. Same principle —
-  it selects between tables the reader typed, and still sets no figure itself.)
+  it selects between tables the reader typed, and still sets no figure itself.
+  That second job is why Preferences ALWAYS asks it, as of 2026-08-19: it was
+  hidden until a household existed, back when the Roth check was its only
+  reader, which left anyone using the Tax tab without naming a person stuck on
+  Single while the bracket editor told them what they were filed under. The
+  half that genuinely needs two people — whose income is counted — guards
+  itself where it is computed rather than by hiding the question.)
   **Deleting a limits record clears figures, never neighbours**: a second
   earner's delete touches only their `by` entry, and the comp person's delete
   clears the flat record's own fields while `by` still holds somebody — the
