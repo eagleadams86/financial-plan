@@ -214,6 +214,30 @@ family names as well as balances.
     `openModal` like everything else and then focuses `#searchBox` itself, which
     simply wins. Typing is the entire reason that window opens. Any future
     dialog wanting the keyboard on a phone does the same — focus it afterwards.
+  - **Mirrored into Sprint Predictability, Flow Metrics, Golf Handicap and PAPTrack
+    on 2026-08-20**, where the same markup accident raised the keyboard on Adjust
+    capacity, Teams & boards, four Golf editors and the supply form. A change here
+    is a change there.
+- **A horizontal scroll box must carry `position: relative`** — `.tablewrap`,
+  `.gridwrap`, `.triprow`, `.yearrail` and the narrow-screen `.tabs` all do.
+  `overflow-x: auto` is the whole design: a grid too wide for a phone scrolls
+  inside its card and the page stays the width of the screen. On iOS that only
+  half worked — WebKit clipped it on screen but still counted its full width in
+  the DOCUMENT's scrollable area, so the page itself became horizontally
+  scrollable into a band of nothing. Found in Sprint Predictability and fixed
+  across the family 2026-08-20; measured on iOS 27 at a 402px viewport,
+  `documentElement.scrollWidth` 906 against a 402px body. `position: relative` is
+  what fixes it and nothing weaker does — a stacking context alone
+  (`isolation: isolate`) leaves it at 906, and so does spelling out `overflow-y`;
+  `contain: paint` works but takes the containing block for fixed descendants with
+  it. The two absolutely positioned things inside these boxes
+  (`.grid td.noted::after`, `.yearchip + .yearchip::before`) already hang off a
+  `position: relative` of their own, so nothing moved. Chrome and Firefox were
+  always right here, so it is only ever visible on a phone.
+- **Date and month fields are `appearance: none`, and that lives in `theme.css`.**
+  WebKit ignores an author `box-sizing` on a natively drawn control, so
+  `width: 100%` on a date input meant the column PLUS its padding and border. See
+  rule 11 in the theme pack's CLAUDE.md; don't re-fix it here.
 - **Undo is an in-memory ring of saved states** (`undoRing`/`undoSnapshot`,
   cap 20, `pushSnapshot` pure and pinned). save() banks the state it REPLACES
   unless the save is itself an undo (the `undoing` latch — without it repeated
