@@ -136,6 +136,13 @@ self.addEventListener('install', (e) => {
    nothing is read out of the message — the only thing a sender can do here is
    ask for files that are already public to be re-fetched. */
 self.addEventListener('message', (e) => {
+  /* Origin check first. A worker only ever controls same-origin clients and its
+     scope is this app's own directory, so this cannot currently be reached from
+     anywhere else — it is here because this file runs with NO CSP (Pages cannot
+     send headers) and is resident, which is the whole reason it is written as
+     defensively as it is. Flagged by CodeQL as js/missing-origin-check in all
+     five workers on 2026-08-20; cheaper to satisfy than to keep re-deciding. */
+  if (e.origin && e.origin !== self.location.origin) return;
   if (!e.data || e.data.type !== 'shell-check') return;
   e.waitUntil(topUp());
 });
