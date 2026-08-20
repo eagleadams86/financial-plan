@@ -1586,6 +1586,13 @@ would otherwise park it in a box in the middle of the screen. On a browser with
 no popover support the attribute is inert and the toast is exactly the fixed
 element it always was. **The same fix belongs in Sprint Velocity, Flow Metrics
 and Golf Handicap** — all four share this chrome and all four had the bug.
+- **Mirrored into Sprint Predictability, Flow Metrics, Golf Handicap and the two
+  lottery calculators on 2026-08-20**, block for block. Two of those needed
+  something this file did not: a single-line PROSE field that the TEXTAREA rule
+  cannot catch (Golf's round note, PAPTrack's supply note), so the shared block
+  now honours a `data-keep-caret` attribute as a by-hand opt-out. Nothing here
+  carries it — every prose box in Money Map is a real TEXTAREA — but the
+  attribute is wired here too so the block stays identical across the family.
 
 Budget rows carry `section` (income/expense/transfer — display grouping,
 inferred once in `coerceShape` for pre-section data, a stored value is never
