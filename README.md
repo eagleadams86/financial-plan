@@ -1134,7 +1134,11 @@ Served by GitHub Pages from `main`.
 **There is a sample plan.** The welcome screen offers **Load sample data** beside Start fresh:
 an invented household of three — two earners, a child, five accounts, this year's budget with two
 years of history behind it — which fills every one of the nine tabs. It exists because this is the
-most complex app of the family and an empty grid shows none of what it does. **The figures are
+most complex app of the family and an empty grid shows none of what it does. It goes in through
+the same door a backup does, which is worth saying because `coerceShape` is built to carry an odd
+shape rather than throw: a key in the wrong place there does not fail, it settles to a default and
+the feature it was meant to show draws $0.00 or nothing at all. Its tests therefore read the
+values the way their readers do rather than only counting entries. **The figures are
 invented**, the app says so in its own header while the sample is loaded, and the tax bands are
 round numbers labelled *"not real tax brackets"* in the field the reader is shown — the app's
 promise that it ships no tax figure of its own is kept by making the demo's obviously fake. It

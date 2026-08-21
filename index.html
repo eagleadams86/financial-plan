@@ -5025,10 +5025,27 @@ function welcomeCard() {
                  the fund, a grant out of it, cash given straight, and one still
                  pending
      Tax         federal and state tables for this year, which is what lets the
-                 retirement drawdown show a withdrawal paying its own tax
+                 retirement drawdown show a withdrawal paying its own tax ·
+                 `stateLabel` names the state, so the card is headed by it
+     Holdings    THREE pots — a linked pane, an unlinked one and the holdings
+                 inside Rosa's Roth IRA — because "Everything You Hold", its By
+                 Class table and the target/drift columns are gated on more than
+                 one. With a single pot the rollup is that pane's own table
+                 under a grander heading, so it isn't drawn, and the allocation
+                 targets go with it.
+     Limits      per-person 401(k) figures under `by`, which is what fills the
+                 two Limit Check cards, the MAGI card's pre-tax lines and the
+                 "Paid in" column of the year-by-year retirement table.
 
    Everything is deliberate. If a figure looks arbitrary it is holding a feature
-   up; the sample-data tests name which. */
+   up; the sample-data tests name which.
+
+   **A key in the wrong place here is invisible.** `coerceShape` is built to
+   carry an odd shape rather than throw, so a misplaced or mis-scaled field
+   doesn't fail — it settles to a default and the feature it was meant to show
+   quietly draws $0.00, "Unnamed" or nothing at all. Every value below goes in
+   through the same door a backup does; when you add one, load the sample and
+   look at the tab it was for. */
 function sampleState() {
   const Y = new Date().getFullYear();
   const PREV = Y - 1, PREV2 = Y - 2;
@@ -5150,24 +5167,35 @@ function sampleState() {
         },
       },
       side: {
-        /* A portfolio's own holdings live in `rows` — `taxable` below is the
-           separate list for money held outside one. Both are populated so the
-           rollup has something to group. */
-        portfolios: [{ id: 'brokerage', name: 'Brokerage', accounts: ['long'], rows: [
-          { ticker: 'VTI',  shares: 210, price: 268.4, cost: 41200, lookup: true },
-          { ticker: 'VXUS', shares: 180, price: 64.2,  cost: 10800, lookup: true },
-          { ticker: 'BND',  shares: 95,  price: 72.1,  cost: 7100,  lookup: true },
-        ] }],
-        taxable: [
-          { ticker: 'VTI',  shares: 40, price: 268.4, cost: 8600, lookup: true },
+        /* TWO panes, and the pair is the point. The first says its holdings ARE
+           the budget's Brokerage account (`accounts`), which is what draws the
+           reconcile line on the pane and makes net worth count that pot once;
+           the second names no account, which is the ordinary case for money
+           that never passes through the budget. Two panes plus the holdings
+           inside Rosa's Roth IRA also give the rollup the several pots it is
+           gated on — see the retirement accounts below. */
+        portfolios: [
+          { id: 'brokerage', name: 'Brokerage', accounts: ['long'], rows: [
+            { ticker: 'VTI',  shares: 210, price: 268.4, cost: 41200, lookup: true },
+            { ticker: 'VXUS', shares: 180, price: 64.2,  cost: 10800, lookup: true },
+            { ticker: 'BND',  shares: 95,  price: 72.1,  cost: 7100,  lookup: true },
+          ] },
+          { id: 'ben-brokerage', name: "Ben's brokerage", rows: [
+            { ticker: 'VTI',  shares: 40, price: 268.4, cost: 8600, lookup: true },
+          ] },
         ],
+        /* `taxable` and `hsa` are the two FIXED lists panes replaced, and they
+           are deliberately empty: coerceShape only folds them into panes for a
+           plan that has none, so a row left here on a sample that ships two
+           panes would be data nothing ever reads or draws. */
+        taxable: [],
         /* `otherMoney` is deliberately EMPTY. A row in it mints an account of
            its own so net worth counts that money once — correct behaviour, but
            in a demo it puts an account on the budget grid with no rows and no
            cells against it, which reads as something broken rather than as a
            feature. The holdings above already show what Investments does. */
         otherMoney: [],
-        hsa: [{ ticker: 'VTI', shares: 22, price: 268.4, cost: 4900, lookup: true }],
+        hsa: [],
         daf: [{ ticker: 'VTI', shares: 12, price: 268.4, cost: 2400, lookup: true }],
         targets: { VTI: 0.55, VXUS: 0.25, BND: 0.20 },
         classes: { VTI: 'US stocks', VXUS: 'International stocks', BND: 'Bonds' },
@@ -5185,35 +5213,77 @@ function sampleState() {
           { date: `${Y}-06-30`,     total: 271500, liquid: 34700, invested: 62500,
             retirement: 384000, property: 181000 },
         ],
+        /* `type` is the account kind (the list the editor offers) and `kind` is
+           only ever 'traditional' or 'roth' — both are written out here rather
+           than left to coerceShape's name-sniffing, which repaired the first
+           draft's `kind: 'pretax'` by luck and would have stopped doing so the
+           moment a row was renamed.
+           Rosa's Roth IRA carries HOLDINGS and a contribution history, and both
+           are load-bearing for the demo: the holdings make a SECOND pot, which
+           is what draws "Everything You Hold", its By Class table and the
+           target/drift columns (the rollup is gated on two pots — with one it
+           would just be that pane's own table under a grander heading), and the
+           contributions are what put figures in the IRA outlook's "a year" and
+           "still to pay in" columns. */
         retirementAccounts: [
-          { id: 'rosa-401k', name: '401(k)', kind: 'pretax', owner: 'rosa', amount: 268000, rate: 0.05 },
-          { id: 'rosa-roth', name: 'Roth IRA', kind: 'roth', owner: 'rosa', amount: 74500, rate: 0.05 },
-          { id: 'rosa-hsa',  name: 'HSA',      kind: 'hsa',  owner: 'rosa', amount: 21400, rate: 0.05 },
-          { id: 'ben-401k',  name: '401(k)',   kind: 'pretax', owner: 'ben', amount: 96200, rate: 0.05 },
+          { id: 'rosa-401k', name: '401(k)', type: '401k', kind: 'traditional',
+            owner: 'rosa', amount: 268000, rate: 0.05 },
+          { id: 'rosa-roth', name: 'Roth IRA', type: 'roth-ira', kind: 'roth',
+            owner: 'rosa', rate: 0.05,
+            contribs: { [PREV2]: 6500, [PREV]: 7000, [y]: 7000 },
+            rows: [
+              { ticker: 'VTI',  shares: 210, price: 268.4, cost: 38400, lookup: true },
+              { ticker: 'VXUS', shares: 280, price: 64.2,  cost: 16900, lookup: true },
+            ] },
+          { id: 'rosa-hsa',  name: 'HSA', type: 'hsa', kind: 'traditional',
+            owner: 'rosa', amount: 21400, rate: 0.05 },
+          { id: 'ben-401k',  name: '401(k)', type: '401k', kind: 'traditional',
+            owner: 'ben', amount: 96200, rate: 0.05 },
         ],
         drawdown: {
           spend: 74000, safeRate: 0.04,
+          /* `label`, not `name` — the field the table reads and the editor
+             writes; a row without one renders as "Unnamed". `from` is a YEAR
+             (a number), not a month: coerceShape's `yearOrNone` only survived
+             '2047-05' because parseFloat stops at the dash, which is luck
+             rather than a shape. And `taxPct` is a SHARE, 0–1: a 20 there is
+             clamped to 1 and the row claims to be taxed in full. */
           income: [
-            { type: 'pension', name: 'Rosa — small pension', person: 'rosa',
-              amount: 9200, from: '2047-05', taxPct: 20 },
-            { type: 'social', name: 'Social Security — Rosa', person: 'rosa',
-              amount: 31200, from: '2052-05', taxPct: 20 },
-            { type: 'social', name: 'Social Security — Ben', person: 'ben',
-              amount: 24800, from: '2053-10', taxPct: 20 },
+            { label: 'Rosa — small pension', person: 'rosa',
+              amount: 9200, from: 2047, taxPct: 1, stateTaxPct: 1 },
+            { label: 'Social Security — Rosa', person: 'rosa',
+              amount: 31200, from: 2052, taxPct: 0.85, stateTaxPct: 0 },
+            { label: 'Social Security — Ben', person: 'ben',
+              amount: 24800, from: 2053, taxPct: 0.85, stateTaxPct: 0 },
           ],
         },
-        limits: { [y]: {
+        /* Per-person figures live under `by`, and that nesting is the whole
+           record: everything else on a limits year is a flat number (the
+           401(k) limit, the MAGI threshold), so coerceShape num()s it — and a
+           person's object sitting at the top level came out as `rosa: 0`,
+           taking their salary, their elections and the whole card with it. Both
+           401(k) Limit Checks read $0.00, the MAGI card subtracted no pre-tax
+           money, and the projection's "Paid in" column was empty for forty
+           years. */
+        limits: { [y]: { by: {
           rosa: { salary: 92000, bonus: 6000, pretaxPct: 0.10, bonusPct: 0.5, rothShare: 0.3, hsaPretax: 4200 },
           ben:  { salary: 48000, bonus: 0,    pretaxPct: 0.06, bonusPct: 0,   rothShare: 0,   hsaPretax: 0 },
-        } },
+        } } },
         /* Comp is keyed by YEAR, not by person — Preferences picks whose salary
            this tab follows (compPerson below), and the second earner is tracked
            as an income row in the budget instead. Three years so the raise
-           history and the since-last-year check both have something to read. */
+           history and the since-last-year check both have something to read —
+           and the two states that check has are BOTH shown: the middle year
+           picks up exactly where the one before it ended ("as planned"), and
+           this year doesn't, because Rosa was promoted. The gap has to be a
+           real one: an earlier draft was $1.80 out, which rendered as
+           "+$1.80 above plan (0.00%)" and read as a rounding fault rather than
+           as the feature. It is also the salary her 401(k) card is filled in
+           with below, so the two tabs tell one story. */
         comp: {
           [PREV2]: { salary: 84000, raisePct: 0.03 },
           [PREV]:  { salary: 86520, raisePct: 0.035 },
-          [y]:     { salary: 89550, raisePct: 0.027 },
+          [y]:     { salary: 92000, raisePct: 0.027 },
         },
         bonuses: { [PREV2]: 4200, [PREV]: 5100, [y]: 6000 },
         k401: {}, rothContribs: {},
@@ -5246,8 +5316,12 @@ function sampleState() {
                     { upTo: null, rate: 0.30 }] } } },
           state: { [y]: { joint: { deduction: 16000, source: SAMPLE_TAX_SOURCE,
             bands: [{ upTo: 40000, rate: 0.04 }, { upTo: null, rate: 0.06 }] } } },
+          /* INSIDE `side.tax`, beside the two jurisdictions it names one of —
+             a sibling of `tax` is a key nothing reads, and the State Brackets
+             card went on calling itself "State" while the word rode along in
+             every backup and share link. */
+          stateLabel: 'Demoshire',
         },
-        stateLabel: 'Demoshire',
       },
       vacations: {
         trips: [{ id: 'coast', name: 'A week on the coast', year: Y, nights: 7,

@@ -2539,6 +2539,92 @@ t('the giving data covers all four shapes the tab reads', () => {
      'and money going into the fund, which is the deductible one');
 });
 
+/* ── A key in the wrong place here is INVISIBLE ─────────────────────────────
+   The tests above ask whether a branch has entries in it, which is the right
+   question for "did somebody empty the sample" and no question at all for the
+   failure this group actually met: coerceShape is built to carry an odd shape
+   rather than throw, so a misplaced or mis-scaled field doesn't fail — it
+   settles to a default and the feature it was there to show quietly draws
+   $0.00, "Unnamed", or nothing whatever. Six of them were live at once.
+   These read the values the way their READERS do, which is the only test that
+   can tell a filled-in sample from one that merely looks filled in. */
+t('the per-person 401(k) figures survive as figures', () => {
+  /* Nested under `by`. At the top level each person's object met num(), came
+     out as `rosa: 0`, and took both Limit Check cards, the MAGI card's two
+     pre-tax lines and the projection's whole "Paid in" column with it. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = String(new Date().getFullYear());
+  ok(d.side.limits[y].by, 'per-person limits live under `by`');
+  for (const who of ['rosa', 'ben']) {
+    const L = H.limitsForIn(d, y, who);
+    ok(L.salary > 0, who + ' has a salary the card can show');
+    ok(L.pretaxPct > 0, who + ' puts something in, or the card reads 0% of the limit');
+  }
+  const magi = H.magiFor(d, y);
+  ok(magi.pretax > 0 && magi.hsa > 0, 'and the MAGI card has pre-tax money to subtract');
+});
+t('the retirement income rows are named, dated and scaled', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  for (const r of d.side.drawdown.income) {
+    ok(r.label, 'a row without `label` renders as "Unnamed" — `name` is not the field');
+    ok(typeof r.from === 'number' && r.from > 2000,
+       '`from` is a YEAR: a month string only survives because parseFloat stops at the dash');
+    ok(r.taxPct === undefined || r.taxPct <= 1,
+       'taxPct is a SHARE — a 20 is clamped to 1 and the row claims to be taxed in full');
+  }
+  ok(d.side.drawdown.income.some(r => r.taxPct > 0 && r.taxPct < 1),
+     'and one row is partly taxable, which is the whole point of the column');
+});
+t('the state label is inside side.tax, where its reader looks', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  ok(d.side.tax.stateLabel, 'a sibling of `tax` is a key nothing reads');
+  eq(d.side.stateLabel, undefined, 'and nothing is left riding along in every backup');
+});
+t('the rollup has the several pots it is gated on', () => {
+  /* "Everything You Hold", its By Class table and the target/drift columns are
+     only drawn once two pots contribute — with one it would be that pane's own
+     table under a grander heading. So a sample with a single pane silently
+     shows none of it, and `targets`, `classes` and `classTargets` go dark with
+     it however carefully they are filled in. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const roll = H.allHoldings(d);
+  const pots = new Set(roll.rows.flatMap(r => r.pots));
+  ok(pots.size >= 2, 'two pots or the rollup is not drawn at all: ' + [...pots].join(', '));
+  ok(roll.rows.some(r => typeof r.target === 'number'), 'a target, so Drift has a column');
+  ok(roll.rows.some(r => r.cls), 'and a class, so By Class is drawn');
+});
+t('nothing is parked in the two lists panes replaced', () => {
+  /* coerceShape only folds `taxable` / `hsa` into panes for a plan that has
+     NONE. A sample that ships panes and also fills those lists is holding data
+     no reader anywhere will ever see. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  eq((d.side.taxable || []).length, 0, 'side.taxable is dead once there are panes');
+  eq((d.side.hsa || []).length, 0, 'and so is side.hsa');
+});
+t('every retirement account says which side of the split it is on', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  for (const a of d.side.retirementAccounts) {
+    ok(H.RET_TYPES.some(t2 => t2[0] === a.type), a.name + ' needs a type the editor offers');
+    ok(a.kind === 'roth' || a.kind === 'traditional',
+       a.name + ": `kind` is only ever roth or traditional — 'pretax' is repaired by luck");
+  }
+  ok(d.side.retirementAccounts.some(a => a.kind === 'roth'), 'and both sides are represented');
+});
+t('the raise history shows both answers the since-last-year check has', () => {
+  /* An earlier draft was $1.80 out, which rendered as "+$1.80 above plan
+     (0.00%)" — a rounding fault to look at, not a feature. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const years = Object.keys(d.side.comp).sort();
+  const states = years.map((yy, i) => i === 0 ? 'first'
+    : H.sinceLastYear(yy, years[i - 1], d.side.comp[yy].salary,
+        H.afterRaise(d.side.comp[years[i - 1]])).state);
+  ok(states.includes('planned'), 'one year picks up exactly where the last ended');
+  ok(states.includes('above') || states.includes('below'), 'and one does not');
+  const last = H.sinceLastYear(years[2], years[1], d.side.comp[years[2]].salary,
+    H.afterRaise(d.side.comp[years[1]]));
+  ok(Math.abs(last.moved) > 100, 'and the gap is legible, not a rounding artefact');
+});
+
 group('Untrusted input');
 /* ── Ids are held to a shape at the boundary ────────────────────────────────
    The family rule — /^[A-Za-z0-9_-]{1,64}$/ — which this app was the last to
