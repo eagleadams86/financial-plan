@@ -1147,7 +1147,7 @@ saves like any other plan and is removed with Back up → Start again.
 **State is versioned.** The schema is `5` today, as the `SCHEMA` constant.
 Every entry point runs the payload through `coerceShape()`, whose upgrades are
 presence-based and safe to run twice. Its first act is to pin every id — people,
-accounts, goals, budget rows, portfolios, and every field pointing at one — to
+accounts, goals, budget rows, portfolios, trips, and every field pointing at one — to
 `[A-Za-z0-9_-]`, at most 64 characters. That is the rule the sibling apps already
 keep, and here it guards something specific: cells, overrides and balance
 adjustments are stored under `<id>|<month>` keys, so an id containing a `|` from
@@ -1158,6 +1158,17 @@ ids are already well-formed is left exactly as it was. `migrate()` walks an olde
 the current schema — and because all of its gates are `<`, a plan from a
 *newer* build would sail through untouched, so `load()` checks for that case
 first and halts instead.
+
+It also holds every free scalar in `settings` to a type — the PTO allowance, the
+subtitle, the currency code and the two assumed rates. Those look like the least
+important fields in the file and are in fact the most exposed ones: a read-only
+share link carries the whole of `settings` on purpose, so that a recipient reads
+the sender's figures under the sender's own assumptions. Until this landed a
+crafted link could put markup where the PTO card prints its allowance without
+escaping, or a number where the page expects the subtitle to be text — the first
+running script on an origin shared with every other app in the account, the
+second bringing the page up blank. A value that cannot be read is *removed*
+rather than blanked, so the app's own default still wins the merge.
 
 **`computeAll()` is the only place numbers are calculated.** Every cell,
 balance and goal figure derives from stored inputs at render time; nothing

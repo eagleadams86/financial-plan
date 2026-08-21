@@ -370,6 +370,32 @@ family names as well as balances.
   field must be dropped rather than become a deliberate-looking $0. A live
   year is also guaranteed an `enteredThrough` (the month before startMonth
   when absent) because gridCard calls monthAdd on it unguarded.
+- **`settings`' free scalars are held to a type too, and that was the branch
+  nothing checked** (fixed 2026-08-21). Everything else in `settings` is a
+  whitelisted vocabulary (`rowSort`, `filingStatus`) or a boolean, and those were
+  guarded from the start — but `ptoAllowance`, `tagline`, `currency` and the two
+  assumed rates went straight through. That is backwards from how it looks: **a
+  share link carries all of `settings` by design**, so these are the most
+  attacker-controlled fields in the whole state, not the least. Each failed
+  differently and all three are pinned in `Untrusted input`:
+  - `ptoAllowance` **reaches the page unescaped** — the PTO card interpolates it
+    raw whenever the year has no allowance of its own — so a string of markup
+    there executed on the origin every app in the family shares. It goes through
+    the same `num()` class fix as `shares` and `nights`, not an `esc()` at the
+    one sink.
+  - `tagline` is read as `(tagline || '').trim()` at the top of `render()`, so a
+    NUMBER threw before a single tab was drawn and **the app came up completely
+    blank** — no card, no message, nothing the reader could act on.
+  - the two rates feed the balance chain, where a non-numeric value is NaN
+    through every month after it.
+  **They are DELETED when unreadable, never set to `undefined`.** `load()` and
+  `finAdopt` merge over `blankState().settings` with `Object.assign`, which
+  copies an explicit `undefined` straight over a default — so setting the key is
+  not the same as removing it, and only removing it lets the default win. That is
+  the same reason `retirementReturnLow`/`High` are deleted rather than blanked;
+  there is a test that merges a coerced state over `blankState()` to prove it.
+  **Anything added to `settings` from now on needs a line in that block** — it is
+  the `SECTION_NEEDS` discipline one level down.
 - **`sampleState()` is the DEMO, and every tab must show something from it.** The
   family rule the sibling apps keep, applied to the app that needed it most: a new
   feature is not finished until the sample exercises it, and the roster comment
@@ -389,8 +415,12 @@ family names as well as balances.
 - **`normalizeIds()` runs first inside `coerceShape`, and every id comes out
   matching `/^[A-Za-z0-9_-]{1,64}$/`** — the family rule Sprint Predictability,
   Flow Metrics, Golf Handicap and PAPTrack all keep, which this app was the last
-  to apply (2026-08-21). It covers people, accounts, goals, budget rows and
-  portfolios, plus every field that points at one. **This is not only tidiness:
+  to apply (2026-08-21). It covers people, accounts, goals, budget rows,
+  portfolios and TRIPS, plus every field that points at one. (Trips were missed
+  on the first pass and added the same day — nothing keys a map on a trip id, so
+  that was the family rule being kept rather than a hole being closed, but the
+  rule is *every* id-bearing list and a sixth one is exactly what a later reader
+  would assume was already covered.) **This is not only tidiness:
   an id is a key PREFIX.** Cells, overrides and balance adjustments are stored as
   `<id>|<month>` and read back with `key.split('|')`, so an id carrying a bar
   splits in the wrong place and the month becomes nonsense — a hand-edited backup

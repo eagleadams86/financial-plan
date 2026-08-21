@@ -2878,6 +2878,77 @@ t('markup in a year key survives coerceShape as data, not as markup', () => {
   eq(H.esc('&<>"\''), '&amp;&lt;&gt;&quot;&#39;', 'all five entities, in one pass');
   eq(H.esc('Tom & Jerry’s 100%'), 'Tom &amp; Jerry’s 100%', 'ordinary text passes through');
 });
+/* ── `settings` is the least-guarded branch, and the most widely shared ──────
+   Everything above holds `years`, `side`, `people` and `vacations` to a type.
+   `settings` was checked only where it holds a VOCABULARY (rowSort,
+   filingStatus) or a boolean — its four free scalars went through untouched
+   until 2026-08-21. They matter more than most, not less: a share link carries
+   all of `settings` by design (buildSharePayload), so every one of them is
+   attacker-controlled on a link somebody was sent. */
+t('a PTO allowance from a share link cannot be markup', () => {
+  /* The one settings field that reaches the page WITHOUT esc(): the PTO card
+     interpolates it raw whenever the year has no allowance of its own, so a
+     string of markup here EXECUTED — on the origin every app in the family
+     shares. Same class fix as shares/nights rather than an esc() at the sink. */
+  const evil = '<img src=x onerror=alert(1)>';
+  const d = H.coerceShape({ settings: { ptoAllowance: evil },
+    vacations: { pto: { '2026': { entries: [] } } } });
+  eq(typeof d.settings.ptoAllowance, 'number', 'markup is never left as a string here');
+  eq(d.settings.ptoAllowance, 0);
+  eq(H.coerceShape({ settings: { ptoAllowance: '25' } }).settings.ptoAllowance, 25,
+     'a numeric string still reads');
+});
+t('an absent setting is ABSENT, so its default can still win', () => {
+  /* The half that is easy to get wrong: load() and finAdopt merge over
+     blankState().settings with Object.assign, which copies an explicit
+     `undefined` straight over the default. Setting the key is not the same as
+     removing it — these have to be deleted or every default is lost. */
+  const d = H.coerceShape({ settings: { ptoAllowance: null, tagline: 7,
+    midTermRateAnnual: 'x', retirementReturnAnnual: undefined } });
+  ['ptoAllowance', 'tagline', 'midTermRateAnnual', 'retirementReturnAnnual']
+    .forEach(k => eq(k in d.settings, false, `${k} must be gone, not undefined`));
+  const merged = Object.assign(H.blankState().settings, d.settings);
+  eq(merged.ptoAllowance, 32, 'so the blank state’s own figure survives the merge');
+  eq(merged.tagline, '');
+  eq(merged.midTermRateAnnual, 0.03);
+  eq(merged.retirementReturnAnnual, 0.07);
+});
+t('a subtitle that is not a string cannot take the whole page down', () => {
+  /* render() reads `(state.settings.tagline || '').trim()` before it draws a
+     single tab, so a NUMBER there threw and the app came up completely blank —
+     no card, no message, nothing the reader could act on. */
+  eq('tagline' in H.coerceShape({ settings: { tagline: 12345 } }).settings, false);
+  eq(H.coerceShape({ settings: { tagline: '  Our plan  ' } }).settings.tagline, 'Our plan',
+     'a real subtitle is trimmed, the way Preferences stores it');
+  eq(H.coerceShape({ settings: { tagline: 'x'.repeat(200) } }).settings.tagline.length, 60,
+     'and capped at the same 60 characters');
+});
+t('the assumed rates stay numbers, so the balance chain stays finite', () => {
+  const d = H.coerceShape({ settings: { midTermRateAnnual: '0.04',
+    retirementReturnAnnual: 0.06 } });
+  eq(d.settings.midTermRateAnnual, 0.04, 'a numeric string parses');
+  eq(d.settings.retirementReturnAnnual, 0.06, 'a real rate is untouched');
+});
+t('a currency has to look like an ISO code', () => {
+  eq(H.coerceShape({ settings: { currency: 'gbp' } }).settings.currency, 'GBP');
+  eq('currency' in H.coerceShape({ settings: { currency: 'nonsense' } }).settings, false);
+  eq('currency' in H.coerceShape({ settings: { currency: {} } }).settings, false);
+});
+t('a trip id is held to the family shape like every other id', () => {
+  /* Trips are the sixth id-bearing list. Nothing keys a map on a trip id — it
+     addresses a row and a folded-box key, both escaped — so this is the family
+     rule being kept rather than a hole being closed, and a trip the app minted
+     itself is already a slug and must come through untouched. */
+  const d = H.coerceShape({ vacations: { trips: [
+    { id: 'coast|week', name: 'A week on the coast', year: 2026, items: [] },
+    { id: '', name: 'Half Term', year: 2026, items: [] },
+    { id: 'city-break', name: 'City break', year: 2026, items: [] }] } });
+  const ids = d.vacations.trips.map(t => t.id);
+  ids.forEach(id => ok(/^[A-Za-z0-9_-]{1,64}$/.test(id), 'not in shape: ' + id));
+  eq(ids[0], 'coast-week', 're-slugged, keeping its stem');
+  eq(ids[1], 'half-term', 'a missing id falls back to the name');
+  eq(ids[2], 'city-break', 'an id that was already fine is untouched');
+});
 
 group('The cell tooltip');
 t('an ordinary month is one line', () => {
@@ -7594,6 +7665,27 @@ t("the What You'd Pay tile escapes the state label at its sink", () => {
     "the What You'd Pay card must render tile(esc(jurLabel('state')), …)");
   ok(!/tile\(jurLabel\(/.test(APP_SRC),
     'no tile() call may take jurLabel() unescaped');
+});
+
+group('A year with no leave to spend');
+
+t('the PTO card reads a stored 0 as 0, not as the app-wide default', () => {
+  /* `ptoYear.save` stores the typed figure with `??`, so a deliberate 0 really
+     is written to the year. The card read it back with `||`, where 0 is falsy —
+     so a year somebody had recorded as having NO leave silently borrowed
+     `settings.ptoAllowance` and announced days that were never there. The two
+     halves have to use the same operator; this is the one that was wrong. */
+  ok(/const allowance = p\.allowance \?\? state\.settings\.ptoAllowance/.test(APP_SRC),
+    'the PTO card must read the year’s allowance with ??, matching ptoYear.save');
+  ok(!/p\.allowance \|\| state\.settings\.ptoAllowance/.test(APP_SRC),
+    'no sink may fall back on a stored 0 with ||');
+  /* Both places the reader sees the figure now read the ONE resolved variable,
+     so the sub-heading and the "left" pill can never quote different
+     allowances — which is how the `||` managed to hide for as long as it did. */
+  ok(/\$\{used\} of \$\{allowance\} PTO days planned/.test(APP_SRC),
+    'the sub-heading must print the resolved allowance, not re-derive it');
+  ok(/const remain = allowance - used/.test(APP_SRC),
+    'and the pill must be measured against that same figure');
 });
 
 /* ── Runner ───────────────────────────────────────────────────────────────── */

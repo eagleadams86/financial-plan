@@ -2453,6 +2453,14 @@ function normalizeIds(d) {
     ref(g, 'for', ''); ref(g, 'overflowOf', ''); refs(g, 'accounts');
   }
   for (const pf of list(side.portfolios)) { own(pf, pf.name || 'account'); refs(pf, 'accounts'); }
+  /* Trips are the sixth id-bearing list and were missed on the first pass.
+     Nothing keys a map on a trip id — it addresses a row and a folded-box key,
+     both of which go through esc() — so this is the family rule rather than a
+     hole being closed. It costs one regex test per trip on a healthy plan, and
+     `slugJs` is what mints these ids at save time anyway, so a trip the app
+     itself created is untouched. */
+  const vac = (d.vacations && typeof d.vacations === 'object') ? d.vacations : {};
+  for (const t of list(vac.trips)) own(t, t.name || 'trip');
   for (const a of list(side.retirementAccounts)) ref(a, 'owner', '');
   for (const r of list(side.property)) ref(r, 'person', '');
 
@@ -3294,6 +3302,45 @@ function coerceShape(data) {
       || Object.values(s.donations).some(rows =>
         (rows || []).some(r => r && (r.funding || r.grant)));
   if (d.settings.rowSort !== 'alpha') d.settings.rowSort = 'manual';
+  /* ── The rest of `settings`, held to a type ────────────────────────────────
+     Everything above this line is a whitelisted vocabulary or a boolean; these
+     five are the free scalars, and until 2026-08-21 nothing checked them at all.
+     `settings` travels in FULL in a share link (see buildSharePayload), so these
+     are attacker-controlled in exactly the way a budget row's figures are — and
+     the branch that guards `people` this carefully sat right beside a branch
+     that guarded nothing. Each was reachable, and each failed differently:
+
+     · `ptoAllowance` REACHES THE PAGE UNESCAPED — the PTO card interpolates it
+       raw whenever the year has no allowance of its own, so a string of markup
+       there executed on this origin. That origin is shared with Sprint
+       Predictability and Flow Metrics, which is the whole reason the shared-
+       origin rule exists. It goes through `num()` like `shares` and `nights`:
+       the class fix, not an esc() at the one sink.
+     · `tagline` is read as `(tagline || '').trim()` in render(), so a NUMBER
+       there threw before a single tab was drawn and the app came up blank —
+       no card, no error the reader could see, nothing.
+     · the two rates feed the balance chain, where a non-numeric value is NaN
+       through every month after it.
+
+     The rates and the tagline are DELETED rather than defaulted, because
+     load()/finAdopt merge over `blankState().settings` — and Object.assign
+     copies an explicit `undefined` straight over a default, so setting the key
+     is not the same as removing it. Absent is what lets the default win. */
+  const pto = num(d.settings.ptoAllowance);
+  if (typeof pto === 'number') d.settings.ptoAllowance = pto;
+  else delete d.settings.ptoAllowance;
+  if (typeof d.settings.tagline === 'string')
+    d.settings.tagline = d.settings.tagline.trim().slice(0, 60);
+  else delete d.settings.tagline;
+  /* A currency is an ISO code; buildMoneyFormats already survives a bad one by
+     falling back to USD, but the Preferences field shows this value back. */
+  if (typeof d.settings.currency !== 'string' || !/^[A-Za-z]{3}$/.test(d.settings.currency))
+    delete d.settings.currency;
+  else d.settings.currency = d.settings.currency.toUpperCase();
+  for (const k of ['midTermRateAnnual', 'retirementReturnAnnual']) {
+    const v = rateOrNone(d.settings[k]);
+    if (v === undefined) delete d.settings[k]; else d.settings[k] = v;
+  }
   /* Defaulted from absence rather than migrated: a `??`-style fill can run on
      every load without ever overwriting a choice, so it belongs here and not
      in `migrate`. 'single' is what the old fixed MAGI figure already encoded. */
@@ -9895,13 +9942,19 @@ function renderVacations() {
   const ptoCard = (y) => {
     const p = state.vacations.pto[y];
     const used = p.entries.reduce((s, e) => s + (e.ptoDays || 0), 0);
-    const remain = (p.allowance || state.settings.ptoAllowance) - used;
+    /* `??`, not `||`, and it has to match `ptoYear.save` — which already stores
+       a typed 0 with `??`. Read back with `||` that 0 was falsy, so a year with
+       no leave to spend fell through to the app-wide default and the card
+       announced an allowance nobody had. Absent is the only thing that should
+       borrow the setting. */
+    const allowance = p.allowance ?? state.settings.ptoAllowance;
+    const remain = allowance - used;
     const pill = remain >= 3 ? 'good' : remain >= 0 ? 'warn' : 'bad';
     const glyph = remain >= 3 ? '✓' : remain >= 0 ? '!' : '✕';
     return `<div class="card" data-box="pto-${esc(y)}">
       <h2>${esc(y)} Holidays &amp; PTO <button class="h-edit" data-edit="ptoYear"
         data-year="${esc(y)}" title="Change the year's PTO allowance, or delete the year">✎ Edit</button></h2>
-      <p class="sub">${used} of ${p.allowance || state.settings.ptoAllowance} PTO days planned ·
+      <p class="sub">${used} of ${allowance} PTO days planned ·
         <span class="pill ${pill}">${glyph} ${remain} left</span>
         <span class="sr-only">${remain >= 0 ? `${remain} days remaining` : `${-remain} days over`}</span></p>
       <div class="tablewrap"><table>
