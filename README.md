@@ -1123,7 +1123,15 @@ Served by GitHub Pages from `main`.
 
 **State is versioned.** The schema is `5` today, as the `SCHEMA` constant.
 Every entry point runs the payload through `coerceShape()`, whose upgrades are
-presence-based and safe to run twice. `migrate()` walks an older plan up to
+presence-based and safe to run twice. Its first act is to pin every id — people,
+accounts, goals, budget rows, portfolios, and every field pointing at one — to
+`[A-Za-z0-9_-]`, at most 64 characters. That is the rule the sibling apps already
+keep, and here it guards something specific: cells, overrides and balance
+adjustments are stored under `<id>|<month>` keys, so an id containing a `|` from
+a hand-edited backup or a crafted share link would be read back with the split in
+the wrong place. Ids are re-slugged rather than replaced, so the references and
+the stored figures follow their row instead of being orphaned, and a plan whose
+ids are already well-formed is left exactly as it was. `migrate()` walks an older plan up to
 the current schema — and because all of its gates are `<`, a plan from a
 *newer* build would sail through untouched, so `load()` checks for that case
 first and halts instead.

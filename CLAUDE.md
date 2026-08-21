@@ -370,6 +370,24 @@ family names as well as balances.
   field must be dropped rather than become a deliberate-looking $0. A live
   year is also guaranteed an `enteredThrough` (the month before startMonth
   when absent) because gridCard calls monthAdd on it unguarded.
+- **`normalizeIds()` runs first inside `coerceShape`, and every id comes out
+  matching `/^[A-Za-z0-9_-]{1,64}$/`** — the family rule Sprint Predictability,
+  Flow Metrics, Golf Handicap and PAPTrack all keep, which this app was the last
+  to apply (2026-08-21). It covers people, accounts, goals, budget rows and
+  portfolios, plus every field that points at one. **This is not only tidiness:
+  an id is a key PREFIX.** Cells, overrides and balance adjustments are stored as
+  `<id>|<month>` and read back with `key.split('|')`, so an id carrying a bar
+  splits in the wrong place and the month becomes nonsense — a hand-edited backup
+  or a crafted share link could corrupt the grid with nothing erroring. Two
+  things to know before touching it. The cleaner is **`slugJs`, deterministic**,
+  not a fresh random id: a reference re-slugs to the same string its target does,
+  so the link survives without a remap table (Sprint Predictability needs one
+  because ITS ids are opaque; these are slugs, and slugs can be re-slugged). And
+  it **rewrites the keyed maps too** — `cells`, `overrides`, `balAdjust`, `seeds`
+  — driven from the list of ids that MOVED rather than by splitting each key,
+  because the ids being repaired are exactly the ones a split reads wrongly.
+  `slugJs` is idempotent, so a healthy plan is untouched and pays only a regex
+  test per id; the test asserting that is the one that matters if this changes.
 
 ## The engine
 

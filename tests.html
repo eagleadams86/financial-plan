@@ -2432,6 +2432,96 @@ t('PTO dates read out of the old free-text box, once', () => {
 });
 
 group('Untrusted input');
+/* ── Ids are held to a shape at the boundary ────────────────────────────────
+   The family rule — /^[A-Za-z0-9_-]{1,64}$/ — which this app was the last to
+   apply. It is not only tidiness here: cells, overrides and balance
+   adjustments are stored as `<id>|<month>`, so an id containing a bar splits at
+   the wrong place when it is read back and the month becomes nonsense. */
+t('every id from a restored file comes out in the family shape', () => {
+  const d = H.coerceShape({
+    people: [{ id: 'me|x', name: 'Charlie' }, { id: '', name: 'Sam Adams' },
+             { id: 'A'.repeat(200), name: 'Long' }, { id: {}, name: 'Obj' }],
+    settings: { accounts: [{ id: 'cash', name: 'Cash' },
+      { id: 'sav|ings', name: 'Savings', creditTo: 'sav|ings', divTo: 'cash' }] },
+    goals: [{ id: 'gl|1', name: 'Roof' }],
+    years: { '2026': { kind: 'grid', categories: [{ id: 'rent|z', name: 'Rent' }] } }
+  });
+  const ids = [...d.people.map(p => p.id), ...d.settings.accounts.map(a => a.id),
+               ...d.goals.map(g => g.id), ...d.years['2026'].categories.map(c => c.id)];
+  ids.forEach(id => ok(/^[A-Za-z0-9_-]{1,64}$/.test(id), 'not in shape: ' + JSON.stringify(id)));
+  eq(d.people[1].id, 'sam-adams', 'a missing id still falls back to the name');
+  eq(d.people[2].id.length, 64, 'a long id is capped, not dropped');
+});
+t('a mangled id keeps its stem, so a backup stays readable', () => {
+  const d = H.coerceShape({ settings: { accounts: [{ id: 'sav|ings', name: 'Savings' }] } });
+  eq(d.settings.accounts[0].id, 'sav-ings', 'the id is re-slugged, not replaced wholesale');
+});
+t('references follow their target, rather than being dropped', () => {
+  /* The reason the cleaner is deterministic instead of minting a fresh id: a
+     reference re-slugs to the same string its target does, so the link
+     survives. A random replacement would need a remap threaded through every
+     referring field. */
+  const d = H.coerceShape({
+    people: [{ id: 'me|x', name: 'Charlie' }],
+    settings: { accounts: [{ id: 'cash', name: 'Cash' },
+      { id: 'sav|ings', name: 'Savings', creditTo: 'sav|ings', divTo: 'cash', owner: 'me|x' }] },
+    goals: [{ id: 'gl|1', name: 'Roof', for: 'me|x', accounts: ['sav|ings'] }],
+    years: { '2026': { kind: 'grid', categories: [
+      { id: 'rent|z', name: 'Rent', person: 'me|x', accounts: ['sav|ings'] }] } }
+  });
+  const acct = d.settings.accounts[1], goal = d.goals[0];
+  const cat = d.years['2026'].categories[0];
+  eq(acct.creditTo, 'sav-ings', 'the account still credits itself');
+  eq(acct.owner, 'me-x', 'and still has its owner');
+  eq(goal.for, 'me-x', 'the goal still names the person');
+  eq(goal.accounts, ['sav-ings'], 'and still names its account');
+  eq(cat.person, 'me-x'); eq(cat.accounts, ['sav-ings']);
+});
+t('the keyed maps follow too, so no figure is orphaned', () => {
+  /* The half that is easy to miss: the id is a key PREFIX. Rewriting the id
+     without rewriting `<id>|<month>` would leave every cell pointing at a row
+     that no longer exists — the figures would simply vanish from the grid. */
+  const d = H.coerceShape({
+    settings: { accounts: [{ id: 'sav|ings', name: 'Savings' }] },
+    years: { '2026': { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 3,
+      categories: [{ id: 'rent|z', name: 'Rent' }, { id: 'food', name: 'Food' }],
+      cells: { 'rent|z|2026-01': { v: 100 }, 'rent|z|2026-02': { v: 200 },
+               'food|2026-01': { v: 9 } },
+      overrides: { 'sav|ings|2026-01': { v: 5 } },
+      balAdjust: { 'sav|ings|2026-02': { v: 7 } },
+      seeds: { 'sav|ings': 1000 } } }
+  });
+  const yr = d.years['2026'];
+  eq(yr.cells['rent-z|2026-01'].v, 100, 'the cell moved with its row, value intact');
+  eq(yr.cells['rent-z|2026-02'].v, 200);
+  eq(yr.cells['rent|z|2026-01'], undefined, 'and the broken key is gone');
+  eq(yr.cells['food|2026-01'].v, 9, 'a row that was already fine is untouched');
+  eq(yr.overrides['sav-ings|2026-01'].v, 5, 'overrides follow the account');
+  eq(yr.balAdjust['sav-ings|2026-02'].v, 7, 'so do balance adjustments');
+  eq(yr.seeds['sav-ings'], 1000, 'and the seed, which is keyed by the bare id');
+});
+t('a healthy plan is not touched at all', () => {
+  /* The property that makes this safe to run on every load: the cleaner is
+     slugJs, which is idempotent on anything already well-formed. If this ever
+     fails, real plans are being rewritten on open. */
+  const good = { schema: 5,
+    people: [{ id: 'charlie', name: 'Charlie', role: 'adult' }],
+    settings: { accounts: [{ id: 'cash', name: 'Cash', creditTo: 'cash', hub: true },
+                           { id: 'mid', name: 'Savings', creditTo: 'mid' }] },
+    goals: [{ id: 'roof-fund', name: 'Roof', accounts: ['mid'], for: 'charlie' }],
+    years: { '2026': { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 12,
+      categories: [{ id: 'rent', name: 'Rent', section: 'expense' }],
+      cells: { 'rent|2026-01': { v: -1200 } }, seeds: { cash: 500 },
+      overrides: { 'cash|2026-02': { v: 10 } }, balAdjust: {} } } };
+  const before = JSON.stringify(good);
+  const d = H.coerceShape(JSON.parse(before));
+  eq(d.people[0].id, 'charlie'); eq(d.goals[0].id, 'roof-fund');
+  eq(Object.keys(d.years['2026'].cells), ['rent|2026-01'], 'no cell key moved');
+  eq(Object.keys(d.years['2026'].seeds), ['cash'], 'no seed key moved');
+  eq(Object.keys(d.years['2026'].overrides), ['cash|2026-02'], 'no override key moved');
+  /* Idempotent: coercing an already-coerced plan changes nothing further. */
+  eq(JSON.stringify(H.coerceShape(JSON.parse(JSON.stringify(d)))), JSON.stringify(d));
+});
 t('a __proto__ key in a restored file never becomes a prototype', () => {
   const hostile = '{"years":{},"__proto__":{"pwned":1}}';
   const guarded = JSON.parse(hostile, (k, v) => k === '__proto__' ? undefined : v);

@@ -2329,8 +2329,154 @@ function coerceTaxBands(list) {
    throws on a blank page. The importer/restore path shape-checks the RAW parse
    BEFORE coercing — coercion would turn any JSON into a valid empty state, and
    the wrong file must be refused, not imported as nothing. */
+/* ── Ids, pinned to a shape ──────────────────────────────────────────────────
+   Every other app in the family holds its ids to `/^[A-Za-z0-9_-]{1,64}$/` at
+   the boundary — Sprint Predictability, Flow Metrics and Golf Handicap check it
+   and mint a replacement, PAPTrack strips to the same character set and caps at
+   64. This app did not: `p.id = String(p.id || …)` took whatever a backup file
+   or a share link happened to carry, in every id-bearing list, and goals and
+   budget rows were not coerced at all.
+
+   That is not only a tidiness gap here, because an id is not just a key — it is
+   a key PREFIX. Cells, overrides and balance adjustments are stored as
+   `<id>|<month>` and read back with `key.split('|')`, so an id containing a bar
+   silently splits in the wrong place and the month becomes nonsense. The
+   account list's own comment upstairs says it plainly: "id is permanent (seeds,
+   overrides and goal sources key off it)".
+
+   Two decisions worth stating, because both had a tempting alternative:
+
+   • The cleaner is DETERMINISTIC — `slugJs`, the same function that generates
+     ids in the first place — rather than a fresh random id. That matters: an id
+     is referenced from a dozen places, and a deterministic clean means a
+     reference cleans to the same string its target does, so the link survives.
+     A random replacement would need a remap table threaded through every one of
+     those places, which is what Sprint Predictability does because ITS ids are
+     opaque. Here they are slugs, and slugs can simply be re-slugged. `slugJs`
+     is idempotent on anything already well-formed, so a healthy plan is
+     untouched — no id in a real file moves.
+
+   • Collisions are NOT resolved, and that is the existing policy rather than a
+     shortcut: coerceShape already says "Ids are NOT deduped here on purpose —
+     renaming a duplicate would break every account, retirement account and goal
+     pointing at it, which is worse than the collision." Two malformed ids that
+     clean to the same slug land in exactly that case, and it is handled the
+     same way — the save path is what guarantees uniqueness.
+
+   Runs BEFORE the rest of coerceShape, so every `acctIds.has(...)` sweep below
+   is deciding about ids that are already in shape. */
+const ID_OK = /^[A-Za-z0-9_-]{1,64}$/;
+
+function cleanId(raw, fallback) {
+  const s = (raw === null || raw === undefined) ? '' : String(raw);
+  if (ID_OK.test(s)) return s;
+  /* Re-slug the ID itself, not the name: a mangled id is usually a good id with
+     something extra on it, and keeping its stem keeps a backup readable —
+     `cash|x` becomes `cash`, not `savings-account`. The name is the fallback
+     only when the id has nothing sluggable in it at all.
+
+     `/[a-z0-9]/` rather than checking slugJs's output against its own 'row'
+     fallback: an id of "Row!" really does slug to "row", and treating that as
+     "nothing usable" would silently swap it for the name. */
+  const usable = (x) => /[a-z0-9]/.test(String(x).toLowerCase());
+  const trim = (x) => slugJs(x).slice(0, 64).replace(/-+$/, '');
+  if (usable(s)) return trim(s) || 'row';
+  return (usable(fallback) && trim(fallback)) || 'row';
+}
+
+/* Rewrite the `<id>|<month>` keys of one map when an id has moved.
+
+   Driven from the MOVED IDS, matching each as a literal `id + '|'` prefix —
+   NOT by splitting each key at its first bar. That distinction is the whole
+   repair: the ids being fixed here are exactly the ones that contain a bar, so
+   `rent|z|2026-01` splits at the wrong place and yields `rent`, which is not an
+   id that moved and not an id at all. Reading the key is what is broken; the
+   list of what moved is what is known.
+
+   Longest id first, so that with both `a` and `a|b` mangled, the key
+   `a|b|2026-01` is claimed by the longer match. The ambiguity is real and comes
+   from the corrupt data, not from this pass — longest-wins is the reading that
+   keeps a cell with its own row. */
+function remapPrefixed(map, moved) {
+  if (!map || typeof map !== 'object' || !moved.size) return;
+  const froms = [...moved.keys()].sort((a, b) => b.length - a.length);
+  for (const k of Object.keys(map)) {
+    const from = froms.find(f => k.startsWith(f + '|'));
+    if (from === undefined) continue;
+    const next = moved.get(from) + k.slice(from.length);
+    /* An existing entry under the new key wins: it was already well-formed, and
+       a malformed twin must not overwrite it. */
+    if (!Object.prototype.hasOwnProperty.call(map, next)) map[next] = map[k];
+    delete map[k];
+  }
+}
+
+/* Same, for a map keyed by a BARE id (yr.seeds). */
+function remapKeys(map, moved) {
+  if (!map || typeof map !== 'object' || !moved.size) return;
+  for (const k of Object.keys(map)) {
+    const to = moved.get(k);
+    if (to === undefined || to === k) continue;
+    if (!Object.prototype.hasOwnProperty.call(map, to)) map[to] = map[k];
+    delete map[k];
+  }
+}
+
+function normalizeIds(d) {
+  if (!d || typeof d !== 'object') return;
+  const list = (v) => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : []);
+  const ref = (o, k, fb) => {
+    if (o && typeof o === 'object' && o[k] !== undefined && o[k] !== null && o[k] !== '')
+      o[k] = cleanId(o[k], fb);
+  };
+  const refs = (o, k) => {
+    if (o && Array.isArray(o[k])) o[k] = o[k].map(x => cleanId(x, ''));
+  };
+  /* What moved, per namespace, so the keyed maps can follow. */
+  const movedAcct = new Map(), movedCat = new Map();
+  const own = (o, fb, moved) => {
+    const before = (o.id === null || o.id === undefined) ? '' : String(o.id);
+    o.id = cleanId(o.id, fb);
+    if (moved && o.id !== before) moved.set(before, o.id);
+  };
+
+  const settings = (d.settings && typeof d.settings === 'object') ? d.settings : {};
+  const side = (d.side && typeof d.side === 'object') ? d.side : {};
+
+  for (const p of list(d.people)) own(p, p.name || 'person');
+  for (const a of list(settings.accounts)) {
+    own(a, a.name || 'account', movedAcct);
+    ref(a, 'creditTo', a.name); ref(a, 'divTo', a.name); ref(a, 'owner', '');
+  }
+  for (const g of list(d.goals)) {
+    own(g, g.name || 'goal');
+    ref(g, 'for', ''); ref(g, 'overflowOf', ''); refs(g, 'accounts');
+  }
+  for (const pf of list(side.portfolios)) { own(pf, pf.name || 'account'); refs(pf, 'accounts'); }
+  for (const a of list(side.retirementAccounts)) ref(a, 'owner', '');
+  for (const r of list(side.property)) ref(r, 'person', '');
+
+  const years = (d.years && typeof d.years === 'object') ? d.years : {};
+  for (const y of Object.keys(years)) {
+    const yr = years[y];
+    if (!yr || typeof yr !== 'object') continue;
+    movedCat.clear();
+    for (const c of list(yr.categories)) {
+      own(c, c.name || 'row', movedCat);
+      ref(c, 'person', ''); ref(c, 'overflowFrom', ''); ref(c, 'transferTo', '');
+      ref(c, 'goalId', ''); ref(c, 'capGoalId', '');
+      refs(c, 'accounts'); refs(c, 'thresholdAccounts'); refs(c, 'capAccounts');
+    }
+    remapPrefixed(yr.cells, movedCat);
+    remapPrefixed(yr.overrides, movedAcct);
+    remapPrefixed(yr.balAdjust, movedAcct);
+    remapKeys(yr.seeds, movedAcct);
+  }
+}
+
 function coerceShape(data) {
   const d = (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
+  normalizeIds(d);
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
   const arr = (v) => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
   /* Force a field that must be a number BUT reaches the page unescaped (shares,
@@ -2372,7 +2518,10 @@ function coerceShape(data) {
   d.people = arr(d.people);
   const peopleIds = new Set();          // real people only — 'joint' is not one
   for (const p of d.people) {
-    p.id = String(p.id || slugJs(p.name || 'person'));
+    /* Shape and fallback are normalizeIds()' job, above — by here p.id is a
+       non-empty id in the family's character set. Left as an assignment only
+       so `p.name` below still has something to fall back to. */
+    p.id = String(p.id);
     p.name = String(p.name || p.id);
     /* Two roles, because two things branch: an adult has retirement accounts
        and income, a child ages into majority and has money saved for them. */
@@ -2421,7 +2570,7 @@ function coerceShape(data) {
   delete d.settings.accountRates;
   const acctIds = new Set();
   for (const a of d.settings.accounts) {
-    a.id = String(a.id || slugJs(a.name || 'account'));
+    a.id = String(a.id);            // already shaped by normalizeIds()
     a.name = String(a.name || a.id);
     a.rate = typeof a.rate === 'number' ? a.rate : 0;
     /* An account whose creditTo points at something deleted would silently
@@ -2717,7 +2866,7 @@ function coerceShape(data) {
     s.taxable = []; s.hsa = [];
   }
   for (const pf of s.portfolios) {
-    pf.id = String(pf.id || slugJs(pf.name || 'account'));
+    pf.id = String(pf.id);          // already shaped by normalizeIds()
     pf.name = String(pf.name || pf.id);
     pf.rows = arr(pf.rows);
     pf.rows.forEach(numHolding);
