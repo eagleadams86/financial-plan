@@ -161,9 +161,16 @@ on a budget row.
   transfers and pass-throughs are both described against it. Open an account
   to nominate a different one if your banking moves; only one can hold it, so
   ticking the box moves it.
+- **Interest starts where it grows.** A new account pays its interest into
+  itself, which is what an account holding money does; its dividends default to
+  the main account instead, since a brokerage usually sweeps those somewhere
+  spendable. Both are a dropdown, and either can be pointed anywhere.
 - **An account you stop using can be closed**, from the month it last held
   anything, so it drops out of Total instead of carrying its final balance
-  forward for ever.
+  forward for ever. If other accounts were paying their interest or dividends
+  into it, those earnings stay in the account that made them from the closing
+  month on — and closing it says so, because money that quietly changed where
+  it compounds is exactly what a plan is read to catch.
 - **Two accounts with exactly the same name are the same account** under
   different labels. Years of history imported under drifting names fold into
   one row, carrying every balance with them. It refuses if both hold a figure
@@ -853,6 +860,9 @@ The way out to a spreadsheet.
   year totals, account balances, raw numbers, ready for Excel or an
   accountant.
 - **The Giving tab** exports every year's donations as the tax-season table.
+  Its Deductible column is the tick you put on the row, the same field the
+  table on screen reads and the year's deductible total adds up — the file and
+  the screen cannot say different things about one gift.
 
 Text fields are defused against spreadsheet formula injection, and a BOM keeps
 Excel honest about UTF-8.

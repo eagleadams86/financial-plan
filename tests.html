@@ -3189,18 +3189,36 @@ t('a summary year is two columns', () => {
     categoryTotals: [{ name: 'Income', total: 40000 }] } } });
   eq(H.gridToCsv(st, null, '2015').split('\n')[1], 'Income,40000');
 });
+/* The Deductible column is the row's own TICK, not a guess from its shape.
+   This used to read `d.funding` — "money into the fund is deductible", which is
+   true and is not the question — and the test pinned that, fixture and all. It
+   meant every CASH gift the reader had ticked exported as "No", so the one file
+   that exists to be handed to whoever does the tax disagreed with the screen
+   beside it and understated the year. The third row is that regression. */
 t('donations export the tax-season table', () => {
   const csv = H.donationsToCsv({ '2026': [
     { date: '2026-02-13', foundation: 'Fidelity Charitable', cause: 'DAF Funding',
-      funding: 5009.18 },
+      funding: 5009.18, deductible: true },
     { date: '2026-04-30', foundation: 'Cradle Beach', cause: 'Kids', grant: -1000,
       pending: true },
+    { date: '2026-06-01', foundation: '', cause: 'School fund', cash: 250,
+      deductible: true },
   ] });
   const lines = csv.split('\n');
   ok(lines[1].includes('Fund deposit') && lines[1].includes('Yes'),
-    'a deposit is the deductible event');
+    'a ticked deposit exports as deductible');
   ok(lines[2].includes('DAF grant') && lines[2].includes('Planned') && lines[2].includes('No'),
     'a planned grant is neither done nor deductible');
+  ok(lines[3].includes('Cash') && lines[3].includes('Yes'),
+    'a ticked CASH gift is deductible too — the column is the tick, not the shape');
+});
+t('an unticked donation is not deductible whatever shape it is', () => {
+  const csv = H.donationsToCsv({ '2026': [
+    { date: '2026-02-13', cause: 'DAF Funding', funding: 5000 },
+  ] });
+  /* The screen reads the same field, so silence here has to mean "No" there
+     too — the two must not be able to say different things about one row. */
+  ok(csv.split('\n')[1].endsWith(',No'), 'never said is not a yes');
 });
 
 group('Search');
@@ -3824,6 +3842,49 @@ t('it only ever looks at the account being closed', () => {
   const st = withBalances(['2026-09']);
   st.years['2026'].overrides['cash|2026-11'] = { v: 500 };
   eq(H.statedAfter(st, 'old', '2026-10'), [], 'another account’s figures are not in the way');
+});
+/* ── Earnings never fall down the gap a closing leaves ──────────────────────
+   `running` is a LATCH: an account that has started never unsets, so a closed
+   one went on looking like a live destination for another account's interest.
+   The credit was filed under an id the balance loop no longer visits and the
+   money simply evaporated — while `interest[…]` still reported it, so the
+   Interest & Dividends row, money in vs money out and the savings rate all
+   counted earnings that no balance anywhere held. The books have to balance:
+   every dollar reported as earned is a dollar some account is holding. */
+t('interest bound for a closed account stays where it grew', () => {
+  const st = H.coerceShape({ settings: { accounts: [
+      { id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true },
+      { id: 'inv', name: 'Inv', rate: 0.12, creditTo: 'sweep' },
+      { id: 'sweep', name: 'Sweep', rate: 0, creditTo: 'sweep', until: '2026-03' }] },
+    years: { '2026': { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 6,
+      enteredThrough: '2025-12', categories: [], cells: {},
+      seeds: { cash: 1000, inv: 12000, sweep: 500 } } } });
+  const c = H.computeYear(st, '2026', null);
+  eq(c.balances['sweep|2026-03'], 860, 'while it is open the sweep collects it');
+  eq(c.balances['sweep|2026-04'], undefined, 'and from April the account is gone');
+  eq(c.balances['inv|2026-04'], 12120, 'so April’s interest stays in the account that made it');
+  eq(c.balances['inv|2026-05'], 12241.20, 'and compounds there');
+  /* The whole point, stated as arithmetic: earnings reported == earnings held. */
+  const earned = H.accountEarnings(c, st.years['2026'], c.months).v;
+  const opened = 1000 + 12000 + 500;
+  const closedOut = c.balances['sweep|2026-03'];
+  const heldAtEnd = c.balances['cash|2026-06'] + c.balances['inv|2026-06'] + closedOut;
+  eq(H.round2(heldAtEnd - opened), H.round2(earned),
+     'every dollar counted as income is a dollar some account is holding');
+});
+t('interest bound for an account that has not STARTED yet stays put too', () => {
+  /* The same fallback, from the other end — this half always worked, and it is
+     what the closed case now matches rather than inventing a second rule. */
+  const st = H.coerceShape({ settings: { accounts: [
+      { id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true },
+      { id: 'inv', name: 'Inv', rate: 0.12, creditTo: 'later' },
+      { id: 'later', name: 'Later', rate: 0, creditTo: 'later' }] },
+    years: { '2026': { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 4,
+      enteredThrough: '2025-12', categories: [], cells: {}, seeds: { cash: 0, inv: 12000 },
+      overrides: { 'later|2026-03': { v: 700 } } } } });
+  const c = H.computeYear(st, '2026', null);
+  eq(c.balances['inv|2026-01'], 12120, 'January’s interest has nowhere else to go');
+  eq(c.balances['later|2026-01'], undefined, 'because the account is not running yet');
 });
 
 group('A dividends row names the accounts it earns on');

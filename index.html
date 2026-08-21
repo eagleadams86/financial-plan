@@ -4310,10 +4310,20 @@ function computeYear(st, yearKey, prior) {
         dividend[`${a.id}|${m}`] = round2(earnedDiv[a.id]);
       }
       const creditedTo = {};
-      const payInto = (want, from) => {
-        const dest = accountById(st, want);
-        return dest && running[dest.id] ? want : from;
-      };
+      /* Whose balance actually exists THIS month — which is not the same set as
+         `running`, and the difference was money quietly disappearing. `running`
+         is a latch: once an account starts it never unsets, so a CLOSED account
+         went on looking like a live destination for ever. The credit was then
+         added to `creditedTo` under an id the balance loop below never visits,
+         and the interest evaporated — while `interest[…]` still reported it, so
+         the Interest & Dividends row, money in vs money out and the savings rate
+         all counted earnings no balance ever held. Measured off `accounts`, the
+         list this month's balances are actually drawn from, so the two can't
+         drift apart again. Falling back to the earning account is the same
+         degrade this already made for a destination that hasn't STARTED yet:
+         growth stays where it grew, which is the honest place for it. */
+      const liveThisMonth = new Set(accounts.map(a => a.id));
+      const payInto = (want, from) => liveThisMonth.has(want) ? want : from;
       for (const a of accounts) {
         const iTo = payInto(a.creditTo, a.id);
         creditedTo[iTo] = (creditedTo[iTo] || 0) + earnedInt[a.id];
@@ -13004,15 +13014,25 @@ const EDITORS = {
       { key: 'rate', label: 'Interest / growth %/yr', type: 'percent',
         hint: 'Compounds monthly on the balance, in future months only. 0 for an account '
           + 'that just holds money.' },
+      /* "Itself" is a real option and has to be sayable, which on a NEW account
+         it wasn't: the list is built from the accounts that exist, and the one
+         being added isn't among them yet. So the default fell to the hub and the
+         hint above it said the opposite — add a savings account at 4% and its
+         growth landed in Cash, silently, until you reopened the account and
+         corrected it. An empty value is the answer, since `save` already reads
+         an unrecognised destination as "itself". Offered only while adding; on
+         an existing account its own name is in the list and says it better. */
       { key: 'creditTo', label: 'Interest is paid into', type: 'select',
-        options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
+        options: [...(ds.bal ? [] : [['', 'Itself — growth stays here']]),
+                  ...accountsOf(state).map(a => [a.id, accountOption(state, a)])],
         hint: 'Usually itself — growth that stays where it grew.' },
       { key: 'divRate', label: 'Dividends %/yr', type: 'percent',
         hint: 'Earned on the balance each month like interest, but paid out to wherever '
           + 'you send it below instead of compounding here. 0 for an account that pays '
           + 'none.' },
       { key: 'divTo', label: 'Dividends are paid into', type: 'select',
-        options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
+        options: [...(ds.bal ? [] : [['', 'Itself — reinvested here']]),
+                  ...accountsOf(state).map(a => [a.id, accountOption(state, a)])],
         hint: 'Often somewhere spendable: a brokerage usually sweeps its dividends into '
           + 'cash rather than reinvesting them here.' },
       { key: 'divEvery', label: 'Paid how often', type: 'select', options: [
@@ -13049,8 +13069,14 @@ const EDITORS = {
                divRate: a.divRate || 0, divTo: a.divTo || a.id,
                divEvery: String(a.divEvery || 3), hub: !!a.hub, until: a.until || '' };
     },
+    /* Interest defaults to ITSELF (the empty value above), which is what the
+       field's own hint promises and what an account holding money actually
+       does. Dividends keep the hub, and the two differ on purpose: growth
+       compounds where it grew, a dividend is usually swept somewhere
+       spendable — which is what the hint under each one already said while
+       both defaulted to the hub. */
     blank: () => ({ rate: 0, divRate: 0, divEvery: '3',
-                    creditTo: hubAccount(state)?.id, divTo: hubAccount(state)?.id }),
+                    creditTo: '', divTo: hubAccount(state)?.id }),
     save(ds, v) {
       if (!v.name) return;
       if (ds.bal) {
@@ -13111,6 +13137,19 @@ const EDITORS = {
             a.until = wantUntil;
             said += `${a.name} is closed after ${monthLabelFull(wantUntil)} — out of Total `
               + 'from then on, and no longer carrying its last balance forward. ';
+            /* An account that was somebody's interest or dividend destination
+               stops being one the month it closes, and the engine puts that
+               money back where it grew. Said out loud rather than left to be
+               noticed: a brokerage sweeping its dividends into a bank you have
+               just shut is exactly the arrangement this changes, and a figure
+               that quietly starts compounding somewhere else is the kind of
+               surprise a plan is read to avoid. */
+            const fedIn = accountsOf(state)
+              .filter(x => x.id !== a.id && (x.creditTo === a.id || x.divTo === a.id))
+              .map(x => x.name);
+            if (fedIn.length)
+              said += `${andList(fedIn)} paid earnings into it, so from then on those stay `
+                + 'in the account that made them. ';
           } else {
             delete a.until;
             said += `${a.name} is open again. `;
@@ -15965,7 +16004,16 @@ function gridToCsv(st, computed, y) {
 }
 
 /* Every donation, every year — the tax-season table. The How/Status/
-   Deductible derivations mirror the Giving tab's own rows exactly. */
+   Deductible derivations mirror the Giving tab's own rows exactly.
+
+   Deductible is the row's own TICK (`d.deductible`), which is the only thing
+   the table on screen has ever read and the only thing the year's deductible
+   total adds up. It was derived here from `d.funding` instead — "money into the
+   fund is deductible", which is true and is not the question — so every cash
+   gift the reader had ticked exported as "No", in the one file that exists to
+   be handed to whoever does the tax. A wrong figure in a spreadsheet nobody
+   cross-checks against the screen is exactly the failure this app takes most
+   seriously, so the derivation now reads the field rather than re-deciding. */
 function donationsToCsv(donations) {
   const lines = [['Year', 'Date', 'Foundation', 'Event', 'Cause', 'Amount',
     'How', 'Status', 'Deductible'].join(',')];
@@ -15977,7 +16025,7 @@ function donationsToCsv(donations) {
         csvCell(d.cause || '', true), csvCell(amount),
         csvCell(d.funding ? 'Fund deposit' : d.grant ? 'DAF grant' : 'Cash', true),
         csvCell(d.pending ? 'Planned' : 'Done', true),
-        csvCell(d.funding ? 'Yes' : 'No', true)].join(','));
+        csvCell(d.deductible ? 'Yes' : 'No', true)].join(','));
     }
   }
   return lines.join('\n');
