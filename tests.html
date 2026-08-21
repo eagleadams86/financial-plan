@@ -2431,6 +2431,114 @@ t('PTO dates read out of the old free-text box, once', () => {
   eq(e[0].dates, undefined, 'the text goes once it has become dates');
 });
 
+/* ── The sample plan ────────────────────────────────────────────────────────
+   The family rule: the sample IS the demo, so every tab must show something and
+   a feature is not finished until the sample exercises it. These pin the pieces
+   that are load-bearing — if a figure below is "tidied", one of these says which
+   feature just went dark. They run against sampleState() itself, the same object
+   the button loads. */
+group('Sample data');
+t('it survives the boundary intact — every collection still there', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const n = (v) => Array.isArray(v) ? v.length : Object.keys(v || {}).length;
+  ok(n(d.people) === 3, 'three people');
+  ok(n(d.settings.accounts) === 5, "five accounts — a sixth means something minted one");
+  ok(n(d.goals) === 3, 'three goals');
+  ok(n(d.years) === 3, 'this year plus two of history');
+  ok(n(d.side.retirementAccounts) === 4, 'four retirement accounts');
+  ok(n(d.side.snapshots) === 3, 'three net-worth snapshots');
+  ok(n(d.side.portfolios[0].rows) === 3, 'three holdings in the portfolio');
+  ok(n(d.vacations.trips) === 1, 'a trip');
+  ok(n(d.side.drawdown.income) === 3, 'three retirement income rows');
+});
+t('every tab it fills has data behind it', () => {
+  /* One assertion per tab, so a failure names which screen just went empty. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = String(new Date().getFullYear());
+  ok(d.years[y].categories.length > 8, 'budget: rows');
+  ok(Object.keys(d.years[y].cells).length > 50, 'budget: actual figures');
+  ok(d.goals.length && d.side.snapshots.length, 'progress: goals and net worth');
+  ok(d.vacations.trips.length && d.vacations.pto[y], 'vacations: a trip and its PTO');
+  ok(d.side.donations[y].length && d.side.daf.length, 'giving: donations and the fund');
+  ok(d.side.portfolios[0].rows.length && Object.keys(d.side.targets).length,
+     'investments: holdings and targets');
+  ok(d.side.retirementAccounts.length && d.side.drawdown.spend, 'retirement: pots and a spend');
+  ok(d.people.length === 3 && d.side.property.length, 'household: people and property');
+  ok(Object.keys(d.side.comp).length === 3, 'comp: three years of salary');
+  ok(d.side.tax.federal[y] && d.side.tax.state[y], 'tax: both tables');
+});
+t('the tax bands are labelled as invented, and are not real brackets', () => {
+  /* The app promises it ships no tax figure of its own. Sample data is a
+     deliberate load rather than something shipped, but the promise is close
+     enough that the tables have to say what they are, in the field the reader
+     is shown. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = String(new Date().getFullYear());
+  for (const jur of ['federal', 'state']) {
+    const table = d.side.tax[jur][y].joint;
+    ok(table, jur + ' table is filed under the sample plan\'s filing status');
+    ok(/sample/i.test(table.source) && /not real/i.test(table.source),
+       jur + ' table must say in its own source field that it is invented: ' + table.source);
+    table.bands.forEach(b => ok(Math.round(b.rate * 100) === b.rate * 100,
+      'a band rate that is not a round percent reads as a real bracket: ' + b.rate));
+  }
+});
+t('no birth year belongs to anyone real', () => {
+  /* 1986 is deliberately absent — see the note in the roster. A fixture is
+     published, and a birth year is a fact about a person. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  d.people.forEach(p => {
+    ok(/^\d{4}-\d{2}$/.test(p.birth), p.name + ' needs a birth month');
+    ok(p.birth.slice(0, 4) !== '1986', 'that year is not for a fixture');
+  });
+});
+t('the sweep is a real overflow row, capped by its goal', () => {
+  /* The one row whose figure the ENGINE works out. If its rule is ever tidied
+     to 'carry' it silently stops sweeping and the grid still looks fine. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = String(new Date().getFullYear());
+  const sweep = d.years[y].categories.find(c => c.id === 'sweep');
+  ok(sweep, 'the sweep row is still there');
+  eq(sweep.rule, 'overflow', "a sweep must be rule 'overflow', not a carried cell");
+  eq(sweep.overflowFrom, 'cash');
+  eq(sweep.transferTo, 'emergency');
+  eq(sweep.capGoalId, 'emergency-fund', 'and it stops when that goal is met');
+  ok(d.goals.some(g => g.id === 'emergency-fund'), 'so that goal has to exist');
+});
+t('both earners count as pay, not just the paycheck-rule row', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = String(new Date().getFullYear());
+  const pay = d.years[y].categories.filter(c => H.isPayRow(c.name, c.rule, c.isPay));
+  ok(pay.length === 2, 'two pay rows, or household take-home is one salary short');
+});
+t('the third-payday month is still there', () => {
+  /* The reason the per-check machinery exists: a year of income that does not
+     divide by twelve. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = String(new Date().getFullYear());
+  const counts = Object.values(d.years[y].paychecks || {});
+  ok(counts.some(n => n === 3), 'one month must hold three checks');
+});
+t('the pinned balance and the account earnings survive', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = String(new Date().getFullYear());
+  ok(Object.keys(d.years[y].overrides).length, 'a stated balance pins the projection');
+  const brokerage = d.settings.accounts.find(a => a.id === 'long');
+  ok(brokerage.divRate > 0 && brokerage.divTo === 'cash',
+     'the brokerage pays dividends into Everyday — earnings on the ACCOUNT');
+  ok(d.settings.accounts.some(a => a.rate > 0), 'and at least one account earns interest');
+});
+t('the giving data covers all four shapes the tab reads', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = String(new Date().getFullYear());
+  const rows = d.side.donations[y];
+  ok(rows.some(r => r.grant > 0), 'a grant out of the fund');
+  ok(rows.some(r => r.cash > 0), 'cash given straight from an account');
+  ok(rows.some(r => r.pending), 'one still pending');
+  ok(Object.values(d.side.donations).flat().some(r => r.funding > 0),
+     'and money going into the fund, which is the deductible one');
+});
+
 group('Untrusted input');
 /* ── Ids are held to a shape at the boundary ────────────────────────────────
    The family rule — /^[A-Za-z0-9_-]{1,64}$/ — which this app was the last to

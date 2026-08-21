@@ -1121,6 +1121,15 @@ from the private claude-theme-pack, the palette source of truth for all apps),
 a vendored `chart.min.js`, and `sw.js` with its `sw-kill.js` escape hatch.
 Served by GitHub Pages from `main`.
 
+**There is a sample plan.** The welcome screen offers **Load sample data** beside Start fresh:
+an invented household of three — two earners, a child, five accounts, this year's budget with two
+years of history behind it — which fills every one of the nine tabs. It exists because this is the
+most complex app of the family and an empty grid shows none of what it does. **The figures are
+invented**, the app says so in its own header while the sample is loaded, and the tax bands are
+round numbers labelled *"not real tax brackets"* in the field the reader is shown — the app's
+promise that it ships no tax figure of its own is kept by making the demo's obviously fake. It
+saves like any other plan and is removed with Back up → Start again.
+
 **State is versioned.** The schema is `5` today, as the `SCHEMA` constant.
 Every entry point runs the payload through `coerceShape()`, whose upgrades are
 presence-based and safe to run twice. Its first act is to pin every id — people,

@@ -370,6 +370,22 @@ family names as well as balances.
   field must be dropped rather than become a deliberate-looking $0. A live
   year is also guaranteed an `enteredThrough` (the month before startMonth
   when absent) because gridCard calls monthAdd on it unguarded.
+- **`sampleState()` is the DEMO, and every tab must show something from it.** The
+  family rule the sibling apps keep, applied to the app that needed it most: a new
+  feature is not finished until the sample exercises it, and the roster comment
+  above the function says what each part is there to hold up. Load it from the
+  welcome card only — a household cannot sensibly be merged into one already
+  there, which is why there is no second button in Preferences. Three things that
+  will bite a tidy-up. **The sweep row must stay `rule: 'overflow'`** — tidied to
+  `carry` it silently stops sweeping and the grid still looks fine. **The tax
+  bands must stay round and stay labelled invented** in their own `source` field:
+  the app promises it ships no tax figure, and a plausible-looking demo bracket
+  is the one way to break that promise while passing every test. **No birth year
+  may belong to anyone real** — a fixture is published, and a birth year is a
+  fact about a person. `side.otherMoney` is deliberately left empty; a row there
+  mints an account of its own, which in a demo reads as a broken empty grid row.
+  All of the above is pinned in the `Sample data` test group, which measures
+  `sampleState()` itself rather than a copy that could drift.
 - **`normalizeIds()` runs first inside `coerceShape`, and every id comes out
   matching `/^[A-Za-z0-9_-]{1,64}$/`** — the family rule Sprint Predictability,
   Flow Metrics, Golf Handicap and PAPTrack all keep, which this app was the last

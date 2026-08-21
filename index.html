@@ -4950,10 +4950,13 @@ function welcomeCard() {
       in this browser — nothing is uploaded anywhere.</p>
     <p style="margin-top:16px">
       <button class="btn primary" id="startFreshBtn">Start fresh</button>
+      <button class="btn" id="welcomeSampleBtn">Load sample data</button>
       <button class="btn" id="welcomeRestoreBtn">Restore a backup</button></p>
     <p class="sub" style="margin-top:14px">Start fresh sets up this year's budget with a
-      starter set of rows — rename, add or delete any of them. Restore reads a Financial Plan
-      export.</p>
+      starter set of rows — rename, add or delete any of them. Load sample data fills every tab
+      with an invented household, so you can see what the app does before typing anything of
+      your own — the figures are made up, including the tax bands. Restore reads a Financial
+      Plan export.</p>
   </div></div>`;
 }
 
@@ -4964,6 +4967,312 @@ function welcomeCard() {
    "average so far" for the spending that varies. The per-check paycheck rule
    and the transfer/charitable roles from the full model are still available
    in each row's settings for anyone who wants them. */
+/* ═══════════════════════════════ Sample data ═══════════════════════════════ */
+
+/* ── The sample plan is this app's DEMO, not filler to fill the screen ────────
+   It is what someone opening the published link explores, and it is the only
+   way to see what nine tabs of a financial planner actually do without typing
+   a household's worth of figures in first. So the standing rule the sibling
+   apps keep applies here too: EVERY tab must show something real, and a new
+   feature is not finished until the sample exercises it. When you add one, add
+   the data that shows it off, name it in the roster below and in the confirm
+   text, and pin it in the sample-data tests.
+
+   THE FIGURES ARE INVENTED. This repo holds code and never data — the household
+   below does not exist, and the tax bands are round numbers chosen to be
+   obviously wrong rather than plausibly right, labelled as such in the table's
+   own `source` field. A birth year is a real fact about a real person, so the
+   three here are picked well clear of anyone's.
+
+   The roster, and the one thing each part is here to show:
+
+     Rosa        the main earner — a fortnightly paycheck, so July holds a THIRD
+                 payday and the year's income does not divide by twelve · the
+                 salary history, raises and bonuses behind the Comp tab
+     Ben         a second earner, tagged `isPay` on a plain carry row, which is
+                 what makes household take-home right rather than Rosa's alone
+     Mia         a child — an age that matures, a 529 owned by her, and a goal
+                 held FOR her, so the household tab has all three shapes
+
+     Everyday    the hub account
+     Savings     earns interest, credited to itself · carries the PINNED balance
+                 in June, where a statement overrules the projection
+     Emergency   the sweep's destination, and the account a goal measures
+     Brokerage   pays DIVIDENDS quarterly into Everyday — earnings on an account
+                 rather than an income row · deliberately $12k behind its
+                 holdings, so the Investments tab's reconciliation notice shows
+     Mia's 529   an account with an owner
+
+     Sweep row   `rule: 'overflow'` — everything Everyday holds over $6,000 goes
+                 to Emergency, and `capGoalId` STOPS it the month that goal is
+                 met. It fires once, in September, and then never again: the one
+                 row on the grid whose figure the engine works out rather than
+                 carries.
+
+     2024, 2025  summary years, so Progress has history to draw and Comp has a
+                 raise to measure against
+     Donations   one of each shape the Giving tab reads differently — money into
+                 the fund, a grant out of it, cash given straight, and one still
+                 pending
+     Tax         federal and state tables for this year, which is what lets the
+                 retirement drawdown show a withdrawal paying its own tax
+
+   Everything is deliberate. If a figure looks arbitrary it is holding a feature
+   up; the sample-data tests name which. */
+function sampleState() {
+  const Y = new Date().getFullYear();
+  const PREV = Y - 1, PREV2 = Y - 2;
+
+    const y = String(Y);
+    const m = (n) => `${Y}-${String(n).padStart(2, '0')}`;
+
+    const SAMPLE_TAX_SOURCE = 'Sample data — invented round numbers, NOT real tax brackets';
+
+    const people = [
+      { id: 'rosa',  name: 'Rosa',  role: 'adult', birth: '1985-04', retireAge: 62, planToAge: 92 },
+      { id: 'ben',   name: 'Ben',   role: 'adult', birth: '1988-09', retireAge: 65, planToAge: 92,
+        retireWhen: 'jan-after' },
+      { id: 'mia',   name: 'Mia',   role: 'child', birth: '2015-06' },
+    ];
+
+    const accounts = [
+      { id: 'cash',      name: 'Everyday',      rate: 0,      creditTo: 'cash', hub: true },
+      { id: 'mid',       name: 'Savings',       rate: 0.042,  creditTo: 'mid' },
+      { id: 'emergency', name: 'Emergency fund', rate: 0.042, creditTo: 'emergency' },
+      { id: 'long',      name: 'Brokerage',     rate: 0,      creditTo: 'long',
+        divRate: 0.018, divEvery: 3, divTo: 'cash' },
+      { id: 'college',   name: "Mia's 529",     rate: 0.055,  creditTo: 'college', owner: 'mia' },
+    ];
+
+    const cats = [
+      /* `isPay` is set explicitly on both, so the take-home figures on Giving and
+         Progress count the household's whole pay and not just the row whose rule
+         happens to be 'paycheck'. */
+      { id: 'rosa-pay',   name: 'Rosa — paycheck',  rule: 'paycheck', role: 'normal', section: 'income',
+        person: 'rosa', perCheck: 2950, isPay: true },
+      { id: 'ben-pay',    name: 'Ben — paycheck',   rule: 'carry',    role: 'normal', section: 'income',
+        person: 'ben', isPay: true },
+      { id: 'other-income', name: 'Other income',   rule: 'none',     role: 'normal', section: 'income' },
+      { id: 'mortgage',   name: 'Mortgage',         rule: 'carry',    role: 'normal', section: 'expense' },
+      { id: 'utilities',  name: 'Utilities',        rule: 'avg',      role: 'normal', section: 'expense' },
+      { id: 'groceries',  name: 'Groceries',        rule: 'avg',      role: 'normal', section: 'expense' },
+      { id: 'childcare',  name: 'Childcare',        rule: 'carry',    role: 'normal', section: 'expense',
+        person: 'mia' },
+      { id: 'transport',  name: 'Transport',        rule: 'avg',      role: 'normal', section: 'expense' },
+      { id: 'insurance',  name: 'Insurance',        rule: 'carry',    role: 'normal', section: 'expense' },
+      { id: 'dining',     name: 'Dining out',       rule: 'avg',      role: 'normal', section: 'expense' },
+      { id: 'everything-else', name: 'Everything else', rule: 'avg',  role: 'normal', section: 'expense' },
+      { id: 'to-savings', name: 'To savings',       rule: 'carry',    role: 'transfer', section: 'transfer',
+        transferTo: 'mid' },
+      { id: 'to-college', name: "To Mia's 529",     rule: 'carry',    role: 'transfer', section: 'transfer',
+        transferTo: 'college' },
+      /* The sweep, and it needs `rule: 'overflow'` specifically — the engine works
+         the amount out after interest rather than from a typed figure, so it is a
+         rule and not a carried cell. Whatever Everyday holds above $6,000 at month
+         end moves to the emergency fund, and `capGoalId` stops it the moment that
+         goal is met rather than piling money in for ever. */
+      { id: 'sweep',      name: 'Sweep to emergency', rule: 'overflow', role: 'transfer',
+        section: 'transfer', transferTo: 'emergency', overflowFrom: 'cash',
+        threshold: 6000, thresholdAccounts: ['cash'], capGoalId: 'emergency-fund' },
+    ];
+
+    const cells = {};
+    const put = (id, month, v, extra) => { cells[`${id}|${m(month)}`] = Object.assign({ v, kind: 'actual' }, extra || {}); };
+    for (let i = 1; i <= 8; i++) {
+      /* Rosa is paid fortnightly, so most months hold two checks and July holds
+         three — which is what `paychecks` below records, and what makes the
+         per-check editor open a month as its checks rather than one figure. */
+      put('rosa-pay', i, 2950 * (i === 7 ? 3 : 2));
+      put('ben-pay', i, 1850);
+      put('mortgage', i, -2180);
+      put('utilities', i, -(210 + (i % 3) * 25));
+      put('groceries', i, -(860 + (i % 4) * 40));
+      put('childcare', i, -1150);
+      put('transport', i, -(310 + (i % 2) * 60));
+      put('insurance', i, -285);
+      put('dining', i, -(240 + (i % 3) * 55));
+      put('everything-else', i, -(380 + (i % 5) * 70));
+      put('to-savings', i, -600);
+      put('to-college', i, -300);
+    }
+    /* A month with a note on it, so the notes gathering and the marked cell show. */
+    cells[`everything-else|${m(3)}`] = { v: -1240, kind: 'actual',
+      note: 'Boiler service and the new washing machine — one-off, not a new normal.' };
+    /* A one-off in the income row that carries nothing forward. */
+    put('other-income', 5, 1400);
+
+    const paychecks = {};
+    /* The third-payday month — the one that quietly makes a year's income not
+       divide by twelve, and the reason the per-check machinery exists. */
+    paychecks[m(7)] = 3;
+
+    const seeds = { cash: 5200, mid: 18400, emergency: 9100, long: 62500, college: 14300 };
+    /* A pinned balance — the statement said this, so the projection bends to it. */
+    const overrides = { [`mid|${m(6)}`]: { v: 21850 } };
+    /* And a small correction that is not a pin: interest posted a few days late. */
+    const balAdjust = { [`emergency|${m(4)}`]: { v: 35 } };
+
+    const state = {
+      schema: 5,
+      settings: {
+        accounts, currency: 'USD', tagline: 'A sample household — not real figures',
+        midTermRateAnnual: 0.03, retirementReturnAnnual: 0.05,
+        ptoAllowance: 25, paycheckRule: true, givingFund: true,
+        rowSort: 'manual', filingStatus: 'joint', compPerson: 'rosa',
+      },
+      people,
+      goals: [
+        { id: 'emergency-fund', name: 'Emergency fund — six months', count: 'capped',
+          accounts: ['emergency'], target: 21000, role: 'normal' },
+        { id: 'roof', name: 'Roof replacement', count: 'capped', accounts: ['mid'],
+          target: 14000, targetDate: `${Y + 1}-09` },
+        { id: 'college-fund', name: "Mia's college", count: 'all', accounts: ['college'],
+          for: 'mia', target: 90000, targetDate: '2033-09' },
+      ],
+      years: {
+        [PREV2]: { kind: 'summary', income: 96400, spending: 88100, saved: 8300 },
+        [PREV]:  { kind: 'summary', income: 101200, spending: 90600, saved: 10600 },
+        [y]: {
+          kind: 'grid', model: 'live',
+          startMonth: `${Y}-01`, monthCount: 12,
+          enteredThrough: m(8),
+          categories: cats, cells, paychecks, seeds, overrides, balAdjust, extraNotes: [],
+        },
+      },
+      side: {
+        /* A portfolio's own holdings live in `rows` — `taxable` below is the
+           separate list for money held outside one. Both are populated so the
+           rollup has something to group. */
+        portfolios: [{ id: 'brokerage', name: 'Brokerage', accounts: ['long'], rows: [
+          { ticker: 'VTI',  shares: 210, price: 268.4, cost: 41200, lookup: true },
+          { ticker: 'VXUS', shares: 180, price: 64.2,  cost: 10800, lookup: true },
+          { ticker: 'BND',  shares: 95,  price: 72.1,  cost: 7100,  lookup: true },
+        ] }],
+        taxable: [
+          { ticker: 'VTI',  shares: 40, price: 268.4, cost: 8600, lookup: true },
+        ],
+        /* `otherMoney` is deliberately EMPTY. A row in it mints an account of
+           its own so net worth counts that money once — correct behaviour, but
+           in a demo it puts an account on the budget grid with no rows and no
+           cells against it, which reads as something broken rather than as a
+           feature. The holdings above already show what Investments does. */
+        otherMoney: [],
+        hsa: [{ ticker: 'VTI', shares: 22, price: 268.4, cost: 4900, lookup: true }],
+        daf: [{ ticker: 'VTI', shares: 12, price: 268.4, cost: 2400, lookup: true }],
+        targets: { VTI: 0.55, VXUS: 0.25, BND: 0.20 },
+        classes: { VTI: 'US stocks', VXUS: 'International stocks', BND: 'Bonds' },
+        classTargets: { 'us stocks': 0.55, 'international stocks': 0.25, bonds: 0.20 },
+        property: [
+          { kind: 'home', name: 'The house', value: 412000, owed: 231000,
+            note: 'Bought 2019; the mortgage row in the budget is this one.' },
+          { kind: 'vehicle', name: 'The estate car', value: 14500, owed: 0 },
+        ],
+        snapshots: [
+          { date: `${PREV2}-12-31`, total: 214800, liquid: 28400, invested: 51200,
+            retirement: 292000, property: 168000 },
+          { date: `${PREV}-12-31`,  total: 248300, liquid: 31900, invested: 58600,
+            retirement: 341000, property: 175000 },
+          { date: `${Y}-06-30`,     total: 271500, liquid: 34700, invested: 62500,
+            retirement: 384000, property: 181000 },
+        ],
+        retirementAccounts: [
+          { id: 'rosa-401k', name: '401(k)', kind: 'pretax', owner: 'rosa', amount: 268000, rate: 0.05 },
+          { id: 'rosa-roth', name: 'Roth IRA', kind: 'roth', owner: 'rosa', amount: 74500, rate: 0.05 },
+          { id: 'rosa-hsa',  name: 'HSA',      kind: 'hsa',  owner: 'rosa', amount: 21400, rate: 0.05 },
+          { id: 'ben-401k',  name: '401(k)',   kind: 'pretax', owner: 'ben', amount: 96200, rate: 0.05 },
+        ],
+        drawdown: {
+          spend: 74000, safeRate: 0.04,
+          income: [
+            { type: 'pension', name: 'Rosa — small pension', person: 'rosa',
+              amount: 9200, from: '2047-05', taxPct: 20 },
+            { type: 'social', name: 'Social Security — Rosa', person: 'rosa',
+              amount: 31200, from: '2052-05', taxPct: 20 },
+            { type: 'social', name: 'Social Security — Ben', person: 'ben',
+              amount: 24800, from: '2053-10', taxPct: 20 },
+          ],
+        },
+        limits: { [y]: {
+          rosa: { salary: 92000, bonus: 6000, pretaxPct: 0.10, bonusPct: 0.5, rothShare: 0.3, hsaPretax: 4200 },
+          ben:  { salary: 48000, bonus: 0,    pretaxPct: 0.06, bonusPct: 0,   rothShare: 0,   hsaPretax: 0 },
+        } },
+        /* Comp is keyed by YEAR, not by person — Preferences picks whose salary
+           this tab follows (compPerson below), and the second earner is tracked
+           as an income row in the budget instead. Three years so the raise
+           history and the since-last-year check both have something to read. */
+        comp: {
+          [PREV2]: { salary: 84000, raisePct: 0.03 },
+          [PREV]:  { salary: 86520, raisePct: 0.035 },
+          [y]:     { salary: 89550, raisePct: 0.027 },
+        },
+        bonuses: { [PREV2]: 4200, [PREV]: 5100, [y]: 6000 },
+        k401: {}, rothContribs: {},
+        /* Four shapes, one each, because the Giving tab reads them differently:
+           `funding` is money INTO the fund (deductible when it goes in), `grant`
+           is money out of it to a cause, `cash` is given straight from an account,
+           and `pending` is promised but not yet sent. */
+        donations: { [PREV]: [
+          { date: `${PREV}-11-30`, foundation: 'Fidelity Charitable', cause: 'Giving fund',
+            funding: 2400, grant: 0, cash: 0, deductible: true, pending: false,
+            note: 'Shares transferred in — deductible the year they went in, not when granted.' },
+        ], [y]: [
+          { date: `${Y}-02-14`, foundation: 'Fidelity Charitable', event: 'Winter appeal',
+            cause: 'Food bank', funding: 0, grant: 600, cash: 0,
+            deductible: false, pending: false },
+          { date: `${Y}-05-02`, foundation: '', cause: 'School fund',
+            funding: 0, grant: 0, cash: 250, deductible: true, pending: false },
+          { date: `${Y}-07-19`, foundation: '', cause: 'Disaster relief',
+            funding: 0, grant: 0, cash: 400, deductible: true, pending: false,
+            note: 'Matched by Rosa’s employer.' },
+          { date: `${Y}-11-01`, foundation: '', cause: 'Winter appeal — pledged',
+            funding: 0, grant: 0, cash: 300, deductible: true, pending: true },
+        ] },
+        /* Tables are keyed by YEAR then FILING STATUS, and a band is {upTo, rate}
+           with the open top band stored as upTo:null. The rates are deliberately
+           round and deliberately wrong — see the note by loadSample. */
+        tax: {
+          federal: { [y]: { joint: { deduction: 30000, source: SAMPLE_TAX_SOURCE,
+            bands: [{ upTo: 24000, rate: 0.10 }, { upTo: 96000, rate: 0.20 },
+                    { upTo: null, rate: 0.30 }] } } },
+          state: { [y]: { joint: { deduction: 16000, source: SAMPLE_TAX_SOURCE,
+            bands: [{ upTo: 40000, rate: 0.04 }, { upTo: null, rate: 0.06 }] } } },
+        },
+        stateLabel: 'Demoshire',
+      },
+      vacations: {
+        trips: [{ id: 'coast', name: 'A week on the coast', year: Y, nights: 7,
+          items: [
+            { label: 'Cottage', paid: 1150, credits: 0, due: 0 },
+            { label: 'Ferry and fuel', paid: 0, credits: 0, due: 240 },
+            { label: 'Food and days out', paid: 0, credits: 0, due: 500 },
+          ] }],
+        pto: { [y]: { allowance: 25, entries: [
+          { name: 'Coast week', from: `${Y}-08-03`, to: `${Y}-08-07`, nights: 7, ptoDays: 5 },
+          { name: 'Half term',  from: `${Y}-02-16`, to: `${Y}-02-18`, nights: 0, ptoDays: 3 },
+        ] } },
+      },
+      ui: { activeYear: y, activeTab: 'budget', collapsed: [] },
+    };
+  return state;
+}
+
+/* Offered on the welcome card only, which is the one place there is nothing to
+   overwrite — unlike the sibling apps' sample data, a household cannot sensibly
+   be merged into one already there. */
+function loadSample() {
+  if (!confirm(
+      'Load the sample plan? An invented household of three — two earners, a child, '
+    + 'five accounts and a year of budget with two years of history behind it.\n\n'
+    + 'It fills every tab: savings goals, a holiday and its PTO, giving with a '
+    + 'donor-advised fund, holdings with targets, a retirement drawdown, and the tax '
+    + 'tables that let the drawdown work out its own tax.\n\n'
+    + 'THE FIGURES ARE INVENTED — including the tax bands, which are round numbers '
+    + 'and not real brackets. Nobody\'s plan, and safe to delete: Back up → Start again.')) return;
+  state = migrate(coerceShape(sampleState()));
+  save(); render();
+  toast('Sample plan loaded — click any cell or row name to explore it');
+}
+
 const STARTER_CATEGORIES = [
   ['Paycheck', 'carry', 'normal', 'income'],
   ['Other income', 'none', 'normal', 'income'],
@@ -14534,6 +14843,7 @@ F('views').addEventListener('click', (e) => {
      when there's no data), so its buttons must be handled here, in the one
      listener that survives every re-render. */
   if (e.target.closest('#startFreshBtn')) { startFresh(); return; }
+  if (e.target.closest('#welcomeSampleBtn')) { loadSample(); return; }
   if (e.target.closest('#welcomeRestoreBtn')) { openModal(F('dataDialog')); return; }
   const add = e.target.closest('[data-add]');
   if (add) { openRowEditor(add.dataset.add, add.dataset, true); return; }
@@ -17377,6 +17687,9 @@ booted = true;
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
+  /* The sample plan, so its tests measure the SAME object the button loads
+     rather than a copy of it that can drift. */
+  sampleState,
   afterRaise, bonusBase, bonusShare, yearFlows, yearSpending, summaryRowIsFlow, notesOfYear,
   givenOutOfPocket, plannedOutOfPocket, grossIncome, takeHomePay, givingStats,
   givingCeiling, isPayRow,
