@@ -3099,3 +3099,4 @@ CSP. That is the whole feature; it adds no runtime code beyond one line in
 - Keep README.md current whenever the app meaningfully changes.
 - Help/info icons never sit flush against the word they follow (standing
   preference).
+- **`package.json` is a Dependabot manifest, not a build step.** It installs nothing, declares nothing but the vendored `chart.min.js`, is `private: true` with no scripts, and CI passes `--omit=dev` so npm never downloads it. **Dependabot cannot re-vendor a file**, so a version-bump PR would raise the manifest while the app kept serving the old bytes — `tests.html` pins the manifest's pin to the version string inside the bundle, which makes a manifest-only bump fail and turns the PR into the right instruction: update the file too, in all three repos that carry it (lottery, team-dashboard, financial-plan). Never add a `scripts` block, and never let the pin become a `^` range — a range cannot be checked against a file.

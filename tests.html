@@ -7161,6 +7161,37 @@ group('Offline — the service worker');
 let SW_SRC = null, KILL_SRC = null, APP_SRC = null;
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
+t('package.json and the vendored bundle name the SAME Chart.js', async () => {
+  /* The manifest exists only so Dependabot has something to scan — nothing is
+     ever installed from it (CI passes --omit=dev), and the bytes that ship are
+     chart.min.js in this repo. That creates one specific way to end up lying:
+     Dependabot cannot re-vendor a file, so a version-bump PR would raise the
+     manifest to 4.5.0 while the app went on serving 4.4.1.
+
+     This is what stops that being quiet. A manifest-only bump fails here, which
+     turns the PR into the correct instruction — "a newer Chart.js exists, now
+     update the FILE too, in all three repos that carry it" — rather than a
+     false record. Same discipline as the theme pack's gate: a generated
+     artefact has to match its source. */
+  const [pkgRes, libRes] = await Promise.all([fetch('package.json'), fetch('chart.min.js')]);
+  ok(pkgRes.ok, 'package.json is missing — Dependabot then scans nothing at all');
+  ok(libRes.ok, 'chart.min.js is missing');
+  const PKG = await pkgRes.text(), LIB = await libRes.text();
+  const pinned = (PKG.match(/"chart\.js"\s*:\s*"([^"]+)"/) || [])[1];
+  ok(pinned, 'package.json must declare chart.js');
+  ok(/^\d+\.\d+\.\d+$/.test(pinned),
+     'pin it exactly — a ^ or ~ range cannot be checked against a vendored file: ' + pinned);
+  ok(LIB.includes('"' + pinned + '"'),
+     'chart.min.js is not ' + pinned + ' — if this followed a Dependabot bump, the file '
+     + 'still has to be re-vendored, and the sibling repos with it');
+  const pkg = JSON.parse(PKG);
+  eq(pkg.private, true, 'private:true, so it can never reach npm by accident');
+  ok(!pkg.scripts, 'no scripts — this repo has no build step and must not grow one');
+  ok(!pkg.dependencies, "the entry belongs in devDependencies, which CI's --omit=dev skips");
+  ok(pkg.devDependencies && Object.keys(pkg.devDependencies).length === 1,
+     'one entry only: the library that is vendored beside it');
+});
+
 t('sw.js and its kill switch are both present', async () => {
   const [a, b, c] = await Promise.all([
     fetch('sw.js'), fetch('sw-kill.js'), fetch('index.html')]);
