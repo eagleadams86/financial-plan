@@ -833,8 +833,10 @@ choice actually uses.
 
 - **Landing on a box selects what's in it**, so typing replaces the figure
   instead of running on to the end of it. Click a second time to place the
-  cursor and edit normally. (A note is the exception: those are written over
-  several lines and added to, so they're left as they are.)
+  cursor and edit normally. The up/down arrows a browser draws on a number box
+  are left alone by this — a press there steps the figure once and stops.
+  (A note is the exception: those are written over several lines and added to,
+  so they're left as they are.)
 - **Clicking outside any dialog closes it** without saving.
 - **A small ⓘ beside a figure explains the arithmetic** behind it.
 - **The budget grid is keyboard-operable**: Tab into it, move between cells

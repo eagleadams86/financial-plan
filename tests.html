@@ -7267,6 +7267,61 @@ function showLatestRun() {
 /* Async because a handful of tests are: the share-link encode/decode goes
    through CompressionStream, which is promise-based. `await` on an ordinary
    return value is a no-op, so every synchronous test is untouched. */
+/* ── Select-on-focus versus a number field’s spin arrows ──────────────────────
+   Clicking a box selects what is in it, which takes cancelling the mouseup —
+   that is what would otherwise place the caret and collapse the selection.
+   Chrome’s number spinner ALSO ends its press on the mouseup’s default action:
+   it repeats while an arrow is held down and stops when the release is allowed
+   through. Cancelling it there left ONE click on a down arrow running the value
+   all the way to its minimum (found in Flow Metrics, 2026-08-21).
+
+   Press, focus and release are all dispatched by hand, for two reasons: a
+   synthetic press never reaches the browser’s own spin button, and focus()
+   inside a frame nobody is looking at sets activeElement without firing focusin
+   until the frame is focused. So what a real click looks like is not observable
+   from here — but the DECISION the guard makes is, and the decision is the part
+   that was wrong. The value moving between the press and the release means a
+   spin, and a spin has no caret to protect. Same block in every app in the
+   family, so it is pinned in every suite. */
+function spinProbe(appWin, setUp) {
+  const box = appWin.document.createElement('input');
+  box.type = 'number'; box.value = '14'; box.min = '1';
+  appWin.document.body.appendChild(box);
+  try {
+    setUp(box);
+    const up = new appWin.MouseEvent('mouseup', { bubbles: true, cancelable: true });
+    box.dispatchEvent(up);
+    return up.defaultPrevented;
+  } finally {
+    /* Releases the pointer flag as a real release would; without it the next
+       probe would inherit a press that never ended. */
+    box.dispatchEvent(new appWin.PointerEvent('pointerup', { bubbles: true }));
+    box.remove();
+  }
+}
+function spinFocusIn(appWin, el) { el.dispatchEvent(new appWin.FocusEvent('focusin', { bubbles: true })); }
+function spinPress(appWin, el)   { el.dispatchEvent(new appWin.PointerEvent('pointerdown', { bubbles: true })); }
+
+group('Select-on-focus versus a number field’s spin arrows');
+t('a plain click keeps the select-all — the caret placement is cancelled', () => {
+  ok(spinProbe(w, (box) => { spinPress(w, box); spinFocusIn(w, box); }));
+});
+t('a spin press is let through, so the browser stops repeating on the release', () => {
+  eq(spinProbe(w, (box) => { spinPress(w, box); spinFocusIn(w, box); box.value = '13'; }), false);
+});
+t('a click on the label still selects, exactly as before', () => {
+  ok(spinProbe(w, (box) => {
+    /* No press on the box of its own to compare against, so the value as it
+       stands at focus stands in and that path is left as it was. */
+    const lab = w.document.createElement('label');
+    w.document.body.appendChild(lab);
+    spinPress(w, lab); spinFocusIn(w, box); lab.remove();
+  }));
+});
+t('a focus with no press behind it guards nothing — a Tab has no caret to place', () => {
+  eq(spinProbe(w, (box) => { spinFocusIn(w, box); }), false);
+});
+
 async function run() {
   w = document.getElementById('app').contentWindow;
   /* A frame that never got the app is a SETUP problem — the folder isn't being

@@ -16041,7 +16041,16 @@ const SELECT_ON_FOCUS = new Set(['text', 'search', 'number', 'tel', 'url', 'pass
    whether the guard below is needed at all. Capture, so it is set before the
    focus it explains. */
 let focusFromPointer = false;
-document.addEventListener('pointerdown', () => { focusFromPointer = true; }, true);
+/* The field under the press that is about to move focus, and what it held at
+   that moment. A press on a number field's spin button steps the value before
+   the mouseup lands, and that difference is what tells a spin apart from a
+   caret placement in the guard below. */
+let pressedEl = null, pressedValue = '';
+document.addEventListener('pointerdown', (e) => {
+  focusFromPointer = true;
+  pressedEl = e.target;
+  pressedValue = (e.target && e.target.value !== undefined) ? e.target.value : '';
+}, true);
 document.addEventListener('pointerup', () => { focusFromPointer = false; }, true);
 document.addEventListener('focusin', (e) => {
   const el = e.target;
@@ -16061,8 +16070,23 @@ document.addEventListener('focusin', (e) => {
      after a Tab would eat the caret placement of a later, deliberate click. A
      drag-select is unharmed — the range is built on the mousemoves, and
      stopping mouseup's default does not unpick it. */
-  if (focusFromPointer)
-    el.addEventListener('mouseup', (ev) => ev.preventDefault(), { once: true });
+  if (focusFromPointer) {
+    /* What the field held before the press. A click on the LABEL rather than the
+       box has no press of its own to compare against, so the value as it stands
+       at focus does, and that path behaves exactly as it always did. */
+    const before = pressedEl === el ? pressedValue : el.value;
+    el.addEventListener('mouseup', (ev) => {
+      /* NOT over a spin button. Chrome's number spinner repeats while the arrow
+         is held and stops on the mouseup's DEFAULT ACTION, so cancelling that
+         default left a single click spinning all the way to min or max — one
+         press of a down arrow took a threshold from 14 to 1 (found in Flow
+         Metrics, 2026-08-21). A spin has no caret to protect anyway, and the
+         value moving between the press and the release is the one way to spot
+         one that doesn't depend on where the browser draws the arrows. */
+      if (el.value !== before) return;
+      ev.preventDefault();
+    }, { once: true });
+  }
 });
 
 /* Arrow keys move along the tabs and switch view as they go; ALT+arrow drags
