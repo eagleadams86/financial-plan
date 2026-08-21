@@ -3152,3 +3152,20 @@ page out of five is not a convention.
   rather than something to click on the way in.
 - **Pinned in `tests.html`**, so the next page added to this repo cannot quietly ship without
   it.
+- **It is a real `<footer>`, and the policy is in a real `<main>`** (2026-08-21, a day after
+  the footer itself). A styled `<p>` is not a landmark, and a page whose only landmark is
+  contentinfo is worse than one with none — the actual policy would sit in no landmark at all.
+  So both went in together.
+  - **`</main>` closes BEFORE the `<footer>`, and that ordering is the whole thing.** A
+    `<footer>` nested inside `main`, `article` or `section` is **not** contentinfo — it is a
+    plain footer for that section. So `.wrap` stays an ordinary `<div>` rather than becoming
+    the `<main>`, which would have swallowed the footer and left the page with no contentinfo
+    at all while looking correct in the source. A test asserts the ORDER, not just the tags.
+  - The back link stays outside `<main>` — it is navigation, not the document.
+  - **The tests strip HTML comments and match the footer by its class**, because the notes
+    beside both elements name them in prose and one of those notes lives in the `<style>`
+    block, which an HTML-comment strip does not reach. Without both, a page that had lost the
+    element and kept the comment explaining it would still pass. That is not hypothetical —
+    it is how the first version of this test failed.
+  - `.foot` sets `margin`, not `margin-top`, so the rule no longer depends on which element
+    carries it: a `<p>` brought a UA bottom margin with it and a `<footer>` does not.
