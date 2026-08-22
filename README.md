@@ -1448,7 +1448,7 @@ Chart.js that is *vendored* as `chart.min.js` beside the app, pinned exactly, an
 `--omit=dev` so npm never downloads it. Dependabot cannot re-vendor a file, so a version-bump
 PR would otherwise raise the manifest while the app went on serving the old bytes; a test pins
 the two to the same version, which makes a manifest-only bump fail and turns the PR into the
-right instruction — update the file too, in all three repos that carry it.
+right instruction — update the file too, in all four repos that carry it.
 
 ## When Google's Code Loads (2026-08-22)
 
