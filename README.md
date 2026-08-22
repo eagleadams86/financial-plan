@@ -1284,3 +1284,27 @@ unchanged.
 
 Every page in this repo passes axe-core at WCAG 2.1 A and AA plus its best-practice rules, in
 all four themes, with data loaded and on every tab.
+
+## What Watches the Firebase SDK (2026-08-21)
+
+The one genuinely third-party thing this app runs is Google's Firebase SDK, and it is loaded
+by **URL** from `www.gstatic.com` — so nothing was watching it. Dependabot reads manifests, and
+no manifest named it; the clean bill of health it reported covered nothing at all. (There are
+no known advisories against the pinned version — the problem was that nobody would have been
+told if there were.)
+
+`package.json` is that manifest. It installs nothing — it is `private`, has no `scripts`, and
+CI passes `--omit=dev` — and the bytes that run still come from Google's CDN at page load.
+That creates the same way of ending up lying that a vendored library has: **Dependabot cannot
+rewrite a URL**, so a version-bump PR would raise the manifest while the page went on fetching
+the old one. `tests.html` pins the manifest's version to the `firebasejs/…` URL in
+`index.html`, which makes a manifest-only bump fail and turns the PR into the right
+instruction: *a newer SDK exists, now change the URL too.*
+
+Never let that pin become a `^` or `~` range — a range cannot be checked against a URL.
+
+The three sync apps are **not on the same Firebase version** (Golf Handicap 12.17.1, PAPTrack
+and Money Map 12.16.0, latest 12.18.0). Nothing is wrong with any of them and none has a known
+advisory, but the Chart.js rule — one version, moved in all the repos that carry it — should
+apply here too. Bumping means changing the URL and the manifest pin together and then proving
+a real Google sign-in still works, which needs a signed-in browser on the live origin.

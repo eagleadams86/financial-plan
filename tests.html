@@ -7427,9 +7427,44 @@ t('package.json and the vendored bundle name the SAME Chart.js', async () => {
   eq(pkg.private, true, 'private:true, so it can never reach npm by accident');
   ok(!pkg.scripts, 'no scripts — this repo has no build step and must not grow one');
   ok(!pkg.dependencies, "the entry belongs in devDependencies, which CI's --omit=dev skips");
-  ok(pkg.devDependencies && Object.keys(pkg.devDependencies).length === 1,
-     'one entry only: the library that is vendored beside it');
+  ok(pkg.devDependencies && Object.keys(pkg.devDependencies).length === 2,
+     'two entries: the vendored library, and the Firebase SDK the page loads by URL');
 });
+
+t('package.json and the page name the SAME Firebase SDK', async () => {
+  /* The one genuinely third-party thing this app runs is Google's Firebase SDK,
+     and it is loaded by URL from www.gstatic.com — so until 2026-08-21 NOTHING
+     was watching it. Dependabot only reads manifests, and there was no manifest
+     naming it; the clean bill of health it reported covered nothing at all.
+
+     This file is that manifest. It installs nothing (CI passes --omit=dev) and
+     the bytes that run still come from Google's CDN at page load. Which creates
+     the same way of ending up lying that the vendored Chart.js has: Dependabot
+     cannot rewrite a URL, so a version-bump PR would raise the manifest while
+     the page went on fetching the old one. Pinning the two together turns that
+     PR into the right instruction — "a newer SDK exists, now change the URL
+     too" — rather than a false record. */
+  const [pkgRes, appRes] = await Promise.all([fetch('package.json'), fetch('index.html')]);
+  ok(pkgRes.ok, 'package.json is missing — Dependabot then scans nothing at all');
+  ok(appRes.ok, 'index.html is missing');
+  const PKG = await pkgRes.text(), APP = await appRes.text();
+  const pinned = (PKG.match(/"firebase"\s*:\s*"([^"]+)"/) || [])[1];
+  ok(pinned, 'package.json must declare firebase');
+  ok(/^\d+\.\d+\.\d+$/.test(pinned),
+    'pin it exactly — a ^ or ~ range cannot be checked against a URL: ' + pinned);
+  const used = (APP.match(/firebasejs\/(\d+\.\d+\.\d+)\//) || [])[1];
+  ok(used, 'could not find the firebasejs URL in index.html');
+  eq(used, pinned,
+    'the page loads Firebase ' + used + ' but the manifest pins ' + pinned
+    + ' — if this followed a Dependabot bump, the URL still has to be changed');
+  const pkg = JSON.parse(PKG);
+  eq(pkg.private, true, 'private:true, so it can never reach npm by accident');
+  ok(!pkg.scripts, 'no scripts — this repo has no build step and must not grow one');
+  ok(!pkg.dependencies, "the entries belong in devDependencies, which CI's --omit=dev skips");
+  ok(pkg.devDependencies && Object.keys(pkg.devDependencies).length === 2,
+    'the manifest grew an entry — every one of them has to be pinned to something real');
+});
+
 
 t('sw.js and its kill switch are both present', async () => {
   const [a, b, c] = await Promise.all([
