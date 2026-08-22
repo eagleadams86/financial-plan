@@ -3332,6 +3332,24 @@ function coerceShape(data) {
     c.salary = num(c.salary);
     c.raisePct = num(c.raisePct);
     if (c.bonus !== undefined) c.bonus = num(c.bonus);
+    /* The rest of the package: equity that vested that year, and what the
+       employer put into a retirement account. Both DELETED rather than zeroed
+       when they are not a figure — the cost-basis discipline. A stored 0 would
+       claim "no equity, no match", which for most people is a different
+       statement from "this plan doesn't track those", and only the second is
+       true of every plan written before today. */
+    for (const k of ['equity', 'match']) {
+      if (c[k] === undefined) continue;
+      /* rateOrNone, NOT num — despite these being money. num() turns anything
+         it cannot read into 0, and here a 0 is a claim: "nothing vested",
+         "no employer contribution". The field is the denominator of every
+         giving percentage in the app, so a corrupt backup must leave it absent
+         rather than quietly shrink somebody's income. The helper is named for
+         the first three fields that wanted it; what it actually means is "read
+         it strictly or not at all". */
+      const v = rateOrNone(c[k]);
+      if (v !== undefined) c[k] = v; else delete c[k];
+    }
   }
   for (const y of Object.keys(s.bonuses)) {
     s.bonuses[y] = num(s.bonuses[y]);
@@ -5344,6 +5362,11 @@ function welcomeCard() {
 
      2024, 2025  summary years, so Progress has history to draw and Comp has a
                  raise to measure against
+     Comp        salary, bonus AND the two parts most packages have that this
+                 app used to ignore — equity that vested and the employer's own
+                 contribution. They are what make the Comp tab draw a total-comp
+                 line above the salary line, and what the Giving shares are
+                 measured against.
      History     two REAL yearly summaries, not three dead scalars — every row
                  named, so the long-run charts have bars and Where the Money
                  Goes has a year to compare against. `Holiday club` is in them
@@ -5690,9 +5713,14 @@ function sampleState() {
            as the feature. It is also the salary her 401(k) card is filled in
            with below, so the two tabs tell one story. */
         comp: {
-          [PREV2]: { salary: 84000, raisePct: 0.03 },
-          [PREV]:  { salary: 86520, raisePct: 0.035 },
-          [y]:     { salary: 92000, raisePct: 0.027 },
+          /* Equity and the employer contribution are here so the Comp tab
+             draws its two extra columns and its total-comp line, and so the
+             Giving percentages are measured against the whole package rather
+             than the salary — which is the case they were quietly getting
+             wrong for anyone paid in shares. */
+          [PREV2]: { salary: 84000, raisePct: 0.03, equity: 6200, match: 4200 },
+          [PREV]:  { salary: 86520, raisePct: 0.035, equity: 8100, match: 4480 },
+          [y]:     { salary: 92000, raisePct: 0.027, equity: 11400, match: 4750 },
         },
         bonuses: { [PREV2]: 4200, [PREV]: 5100, [y]: 6000 },
         k401: {}, rothContribs: {},
@@ -10176,7 +10204,16 @@ function renderComp() {
   const bonuses = s.bonuses || {};
   /* One bonus, read from one place — the same figure the table below shows. */
   const bonusFor = (y) => bonuses[y] || 0;
-  const totalComp = (y) => round2(afterRaise(comp[y]) + bonusFor(y));
+  /* One reader for the whole package, shared with the Giving tab's denominator
+     — `grossIncome` IS this figure, so the two tabs can never disagree about
+     what somebody was paid. It used to be salary + bonus written out here and
+     salary + bonus written out there. */
+  const totalComp = (y) => grossIncome(state, y) ?? round2(afterRaise(comp[y]) + bonusFor(y));
+  /* Which of the two newer parts anybody has recorded. A column of dashes is a
+     question the reader has to decide to ignore, so a part nobody tracks draws
+     no column at all — the Cost/Gain rule from the holdings tables. */
+  const anyEquity = years.some(y => typeof comp[y].equity === 'number');
+  const anyMatch = years.some(y => typeof comp[y].match === 'number');
 
   /* This tab is ONE career, and says so once there is more than one to confuse
      it with — `sinceLastYear` asks whether this salary picked up where last
@@ -10188,13 +10225,20 @@ function renderComp() {
     <h2>Where Comp Stands${latest ? ` — ${esc(latest)}` : ''}</h2>
     ${whose ? `<p class="sub">${esc(whose)}'s salary history (Preferences picks whose). A second
       earner's pay is tracked as an income row in the budget instead.</p>` : ''}
-    ${cur ? `<p class="sub">Total comp is salary with this year's raise applied, plus the bonus.</p>
+    ${cur ? `<p class="sub">Total comp is salary with this year's raise applied, plus the
+      bonus${anyEquity || anyMatch ? ` and ${andList([anyEquity ? 'any equity that vested'
+        : null, anyMatch ? 'what your employer put in' : null].filter(Boolean))}` : ''}. It is
+      the same figure the Giving tab measures your giving against.</p>
       <div class="tablewrap"><table><tbody>
       <tr><th scope="row">Salary</th><td>${fmtMoney(cur.salary || 0)}</td></tr>
       <tr><th scope="row">Raise</th><td>${((cur.raisePct || 0) * 100).toFixed(2)}%</td></tr>
       <tr><th scope="row">Salary after the raise</th>
         <td>${fmtMoney(afterRaise(cur))}</td></tr>
       <tr><th scope="row">Bonus</th><td>${fmtMoney(bonusFor(latest))}</td></tr>
+      ${anyEquity ? `<tr><th scope="row">Equity vested</th><td>${
+        typeof cur.equity === 'number' ? fmtMoney(cur.equity) : '<span class="muted">—</span>'}</td></tr>` : ''}
+      ${anyMatch ? `<tr><th scope="row">Employer contribution</th><td>${
+        typeof cur.match === 'number' ? fmtMoney(cur.match) : '<span class="muted">—</span>'}</td></tr>` : ''}
       <tr><th scope="row">Total comp</th><td>${fmtMoney(totalComp(latest))}</td></tr>
     </tbody></table></div>` : '<p class="sub">Nothing recorded yet.</p>'}
     <div class="addbar">
@@ -10227,13 +10271,19 @@ function renderComp() {
     const sinceTitle = s.state === 'first' ? 'Nothing recorded before this year'
       : `${y} started on ${fmtMoney(c.salary || 0)}; ${prevY} ended on ${
           fmtMoney(prevAfter)}`;
+    const part = (v) => typeof v === 'number' ? fmtMoney(v) : '<span class="muted">—</span>';
     return `<tr class="editrow" data-edit="comp" data-key="${esc(y)}">
       <th scope="row">${esc(y)}</th>
       <td>${fmtMoney(c.salary || 0)}</td>
       <td>${((c.raisePct || 0) * 100).toFixed(2)}%</td>
       <td>${raiseAmt ? '+' + fmtMoney(raiseAmt) : '—'}</td>
       <td title="${esc(sinceTitle)}">${since}</td>
-      <td>${fmtMoney(afterRaise(c))}</td></tr>`;
+      <td>${fmtMoney(afterRaise(c))}</td>
+      ${anyEquity ? `<td>${part(c.equity)}</td>` : ''}
+      ${anyMatch ? `<td>${part(c.match)}</td>` : ''}
+      ${anyEquity || anyMatch ? `<td title="Salary after the raise, plus the bonus${
+        anyEquity ? ', equity' : ''}${anyMatch ? ' and the employer contribution' : ''
+        }">${fmtMoney(totalComp(y))}</td>` : ''}</tr>`;
   }).join('');
 
   const historyCard = `<div class="card">
@@ -10241,14 +10291,18 @@ function renderComp() {
     <p class="sub">Raise $ is this year's percentage applied to this year's salary. Since last
       year checks this salary against what last year's ended at${
       helpBtn('raiseVsMoved', 'the two change columns')} — "as planned" means the raise was
-      the only thing that moved your pay, and a figure there means something else landed.</p>
+      the only thing that moved your pay, and a figure there means something else landed.${
+      anyEquity || anyMatch ? ' Total comp is the whole package, which is what a raise on the '
+        + 'salary alone can hide going the other way.' : ''}</p>
     ${years.length > 1
       ? '<div class="chartbox" style="height:220px"><canvas id="compChart"></canvas></div>'
       : '<p class="sub">A second year is what turns this into a trend — add one below.</p>'}
     ${years.length ? `<div class="tablewrap" style="margin-top:12px"><table>
       <thead><tr><th style="text-align:left">Year</th><th>Salary</th><th>Raise</th>
         <th>Raise $</th><th>Since last year</th>
-        <th>Salary after the raise</th></tr></thead>
+        <th>Salary after the raise</th>
+        ${anyEquity ? '<th>Equity</th>' : ''}${anyMatch ? '<th>Employer</th>' : ''}
+        ${anyEquity || anyMatch ? '<th>Total comp</th>' : ''}</tr></thead>
       <tbody>${raiseRows}</tbody></table></div>` : '<p class="sub">Add a year to get started.</p>'}
     <div class="addbar"><button class="btn small" data-add="comp">＋ Add a year</button></div>
   </div>`;
@@ -10285,6 +10339,21 @@ function buildCompChart() {
   const years = Object.keys(comp).sort();
   if (years.length < 2) return;
   const accent = cssVar('--accent');
+  /* A second line only where there is a second story to tell. With no equity
+     and no employer contribution recorded, total comp is salary plus bonus and
+     the two lines would sit on top of each other saying nothing. */
+  const anyExtra = years.some(y => typeof comp[y].equity === 'number'
+    || typeof comp[y].match === 'number');
+  const totalLine = anyExtra ? [{
+    label: 'Total comp',
+    data: years.map(y => grossIncome(state, y) || 0),
+    borderColor: cssVar('--series-2'), backgroundColor: 'transparent',
+    /* Dashed as well as a different colour: the whole family's rule is that a
+       distinction never rides on hue alone. */
+    borderDash: [6, 4], pointStyle: 'rectRot',
+    borderWidth: 2, pointRadius: 3, pointBackgroundColor: cssVar('--series-2'),
+    tension: .2, pointHoverRadius: 5,
+  }] : [];
   newChart('compChart', {
     type: 'line',
     data: { labels: years, datasets: [{
@@ -10293,20 +10362,24 @@ function buildCompChart() {
       borderColor: accent, backgroundColor: 'transparent',
       borderWidth: 2, pointRadius: 3, pointBackgroundColor: accent, tension: .2,
       pointHoverRadius: 5,
-    }]},
+    }, ...totalLine]},
     options: {
       /* Hover anywhere in a year's column — the sparse-line rule the pot and
          liquidity charts follow; a 3px point is a target nobody should have
          to hit. */
       interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: (t) => `${fmtMoney(t.parsed.y)} · raise ${
-          ((comp[years[t.dataIndex]].raisePct || 0) * 100).toFixed(2)}%` } } },
+      plugins: { legend: { display: anyExtra, labels: { color: cssVar('--chart-tick') } },
+        tooltip: { callbacks: { label: (t) => t.datasetIndex
+          ? `Total comp ${fmtMoney(t.parsed.y)}`
+          : `${fmtMoney(t.parsed.y)} · raise ${
+            ((comp[years[t.dataIndex]].raisePct || 0) * 100).toFixed(2)}%` } } },
       scales: { x: chartAxes(), y: Object.assign(chartAxes(),
         { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
     },
   }, `Salary by year: ${years.map(y =>
-    `${y}, ${fmtMoney(comp[y].salary || 0)}`).join('; ')}.`);
+    `${y}, ${fmtMoney(comp[y].salary || 0)}`).join('; ')}.${anyExtra
+      ? ` Total comp: ${years.map(y => `${y}, ${fmtMoney(grossIncome(state, y) || 0)}`).join('; ')}.`
+      : ''}`);
 }
 
 /* ═══════════════════════════ Investments view ═════════════════════════════ */
@@ -10784,10 +10857,31 @@ function dropDonationYear(st, y) {
    consumer, never written out again. A year with no comp record has no gross —
    the bonus alone would be a nonsense denominator, so it returns null and the
    tile says why rather than showing a share of nothing. */
+/* The whole package for a year: the salary the year ended on, the bonus that
+   landed, equity that vested, and what the employer put in on top.
+
+   The last two are additive by design — absent in every plan written before
+   they existed, so nobody's giving percentage moved the day this changed. They
+   are counted because they ARE compensation: a plan that measures giving
+   against "gross income" while leaving out a third of what somebody is paid is
+   measuring against the wrong denominator, and the person with equity is
+   exactly the person for whom the answer is most wrong. */
 function grossIncome(st, y) {
   const c = (st.side.comp || {})[y];
   if (!c || !c.salary) return null;
-  return round2(afterRaise(c) + ((st.side.bonuses || {})[y] || 0));
+  return round2(afterRaise(c) + ((st.side.bonuses || {})[y] || 0)
+    + (c.equity || 0) + (c.match || 0));
+}
+
+/* The parts of it, for the tab that has to show its working. Absent stays
+   absent so the table can draw a dash rather than a $0.00 — "no equity" and
+   "this plan doesn't track equity" are different answers, and only the tiles
+   for parts somebody has actually recorded are drawn. */
+function compParts(st, y) {
+  const c = (st.side.comp || {})[y];
+  if (!c) return null;
+  return { salary: afterRaise(c), bonus: (st.side.bonuses || {})[y],
+    equity: c.equity, match: c.match, total: grossIncome(st, y) };
 }
 
 /* A budget row that PAYS you. Take-home is what actually reached the bank, so
@@ -15504,6 +15598,14 @@ const EDITORS = {
       { key: 'bonus', label: 'Bonus', type: 'money' },
       { key: 'bonusPct', label: 'Bonus %', type: 'percent', dp: 4,
         hint: 'A share of the salary the year starts on — type either box.' },
+      /* The rest of the package. Both optional and both absent by default: a
+         plan that has never had either is unchanged, figure for figure. */
+      { key: 'equity', label: 'Equity vested', type: 'money',
+        hint: 'What actually vested that year, at the price it vested at — RSUs, shares. '
+          + 'Not a grant you have not received.' },
+      { key: 'match', label: 'Employer contribution', type: 'money',
+        hint: 'What your employer put into a retirement account that year. It is pay you '
+          + 'were given; it is just paid somewhere you cannot spend it yet.' },
     ],
     /* The two raise boxes are one fact written two ways, so typing in either
        fills the other. Whichever box you are in is the one that's right.
@@ -15581,7 +15683,13 @@ const EDITORS = {
          a path that fires no input event, a paste or an autofill. */
       const raisePct = v.raisePct
         ?? (salary && v.after ? raiseFor(salary, v.after) / 100 : 0);
-      state.side.comp[key] = { salary, raisePct };
+      const row = { salary, raisePct };
+      /* Written only when there is something to write. An empty box removes
+         the key rather than storing a 0, so a year clears back to "not
+         tracked" and the tab's columns disappear with the last figure. */
+      for (const k of ['equity', 'match'])
+        if (typeof v[k] === 'number') row[k] = v[k];
+      state.side.comp[key] = row;
     },
     /* The bonus stays: what landed that year is still true whether or not the
        salary record is, and Bonuses by year covers years with no comp row. */
@@ -18730,7 +18838,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   /* The sample plan, so its tests measure the SAME object the button loads
      rather than a copy of it that can drift. */
   sampleState,
-  afterRaise, bonusBase, bonusShare, yearFlows, yearSpending, summaryRowIsFlow, notesOfYear,
+  afterRaise, compParts, bonusBase, bonusShare, yearFlows, yearSpending, summaryRowIsFlow, notesOfYear,
   givenOutOfPocket, plannedOutOfPocket, grossIncome, takeHomePay, givingStats,
   givingCeiling, isPayRow,
   nextUnplannedYear, isLeapYear, reDate, cloneDonationsForward, dropDonationYear,

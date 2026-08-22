@@ -3395,6 +3395,50 @@ t('the total counts a linked pot once, at what the holdings are worth', () => {
     'an empty pane claims nothing — its accounts stay counted as themselves');
 });
 
+group('The whole package');
+t('gross income counts equity and the employer contribution', () => {
+  const d = H.coerceShape({ side: {
+    comp: { '2030': { salary: 100000, raisePct: 0.05, equity: 20000, match: 9000 } },
+    bonuses: { '2030': 10000 } } });
+  eq(H.grossIncome(d, '2030'), 144000, '105,000 after the raise, plus 10k, 20k and 9k');
+  const parts = H.compParts(d, '2030');
+  eq([parts.salary, parts.bonus, parts.equity, parts.match, parts.total],
+     [105000, 10000, 20000, 9000, 144000]);
+});
+t('a plan that has never tracked either is unchanged, to the cent', () => {
+  /* The whole reason both fields are absent rather than 0: this figure is the
+     denominator of every giving percentage in the app. */
+  const d = H.coerceShape({ side: {
+    comp: { '2030': { salary: 100000, raisePct: 0 } }, bonuses: { '2030': 5000 } } });
+  eq(H.grossIncome(d, '2030'), 105000);
+  const parts = H.compParts(d, '2030');
+  eq(parts.equity, undefined, 'so the tab draws a column only once somebody records one');
+  eq(parts.match, undefined);
+});
+t('an unreadable equity figure is dropped, never stored as nothing-vested', () => {
+  const d = H.coerceShape({ side: { comp: {
+    '2030': { salary: 1, equity: 'junk', match: '4000' },
+    '2031': { salary: 1, equity: 0 } } } });
+  eq(d.side.comp['2030'].equity, undefined);
+  eq(d.side.comp['2030'].match, 4000, 'a numeric string still reads');
+  eq(d.side.comp['2031'].equity, 0, 'but a typed zero is a statement and is kept');
+});
+t('the giving share is measured against the whole package', () => {
+  const st = H.coerceShape({ side: {
+    comp: { '2030': { salary: 100000, raisePct: 0, equity: 25000 } },
+    bonuses: {},
+    donations: { '2030': [{ date: '2030-03-01', cash: -5000 }] } } });
+  const stats = H.givingStats(st, {}, '2031-01-01');
+  eq(stats[0].gross, 125000, 'or somebody paid in shares reads a share of the wrong number');
+  eq(H.round2(stats[0].grossPct * 100), 4);
+});
+t('the sample records both, so the tab shows what it can do', () => {
+  const s = H.sampleState();
+  const years = Object.keys(s.side.comp);
+  ok(years.some(y => typeof s.side.comp[y].equity === 'number'), 'equity');
+  ok(years.some(y => typeof s.side.comp[y].match === 'number'), 'an employer contribution');
+});
+
 group('Where the money goes');
 t('a year splits into its expense rows, netted and read as positives', () => {
   const st = H.coerceShape({ years: { '2030': { kind: 'grid', startMonth: '2030-01',
