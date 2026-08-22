@@ -4843,6 +4843,20 @@ const HELP = {
       + 'money (its ✎ Edit dialog). The Liquid and Invested tiles still match their tabs, '
       + 'but the Total counts that pot once — at what the holdings are worth, since a '
       + 'priced figure is the better answer to what something is worth today.' },
+  spendingMix: { title: 'How Where the Money Goes Is Counted',
+    body: 'Exactly the way the Spending, Year by Year bars are, because the two have to '
+      + 'add up to the same figure. Only rows filed under Expenses count, so money swept '
+      + 'into savings or moved between your own accounts is not spending here. A row is '
+      + 'NETTED across the year rather than added up as magnitudes: a refund lands back in '
+      + 'the row it came out of and really does reduce what that row cost you. The current '
+      + 'year includes the months the plan has worked out rather than stopping at the last '
+      + 'one you entered — otherwise August would always look like a cheap year — and the '
+      + 'figures say so by being set in the estimate style. Rows are matched to last year '
+      + 'by the row itself, so renaming one keeps its history in one line rather than '
+      + 'splitting it in two; against an old imported yearly summary, which has no rows to '
+      + 'point at, they are matched by name instead. Anything that spent nothing in either '
+      + 'year is left out, and a row that has vanished since last year still gets a line — '
+      + 'money that stopped being spent is as much a finding as money that started.' },
   liabilities: { title: 'How a Debt Is Projected',
     body: 'A balance on its own is a fact about a day nobody wrote down, which is why it '
       + 'goes stale. Say WHEN it was true and the app can do the rest: each month the '
@@ -5330,6 +5344,11 @@ function welcomeCard() {
 
      2024, 2025  summary years, so Progress has history to draw and Comp has a
                  raise to measure against
+     History     two REAL yearly summaries, not three dead scalars — every row
+                 named, so the long-run charts have bars and Where the Money
+                 Goes has a year to compare against. `Holiday club` is in them
+                 and not in the grid: a row that stopped, which the comparison
+                 has to keep rather than quietly drop.
      Debts       one of each shape the What You Owe card reads differently — a
                  mortgage secured on the house, a car loan nearly done, an
                  UNSECURED student loan (the case a number typed on a property
@@ -5471,8 +5490,60 @@ function sampleState() {
           for: 'mia', target: 90000, targetDate: '2033-09' },
       ],
       years: {
-        [PREV2]: { kind: 'summary', income: 96400, spending: 88100, saved: 8300 },
-        [PREV]:  { kind: 'summary', income: 101200, spending: 90600, saved: 10600 },
+        /* The two history years, as REAL yearly summaries — a list of what each
+           row came to, plus each account's closing balance.
+
+           They used to be `{income, spending, saved}`, three fields nothing in
+           the app reads: every chart that walks the years drew them at $0.00,
+           so the sample's own history was a pair of empty bars sitting under a
+           card explaining what history looks like. Written out properly they
+           feed money in vs money out, spending year by year, the end-of-year
+           liquidity line and Where the Money Goes, which is the card that
+           needed a second year to have anything to say.
+
+           The expense names deliberately MATCH the grid's rows, because that is
+           how a summary year lines up beside a live one — a summary has no row
+           ids, so the match is by name. `Holiday club` is the exception on
+           purpose: a row that existed then and does not now, which is the case
+           the comparison must not silently drop. */
+        [PREV2]: { kind: 'summary', categoryTotals: [
+          { name: 'Rosa — paycheck', total: 60000 },
+          { name: 'Ben — paycheck', total: 32400 },
+          { name: 'Interest & Dividends', total: 1120 },
+          { name: 'Mortgage', total: -25320 },
+          { name: 'Childcare', total: -11400 },
+          { name: 'Groceries', total: -10860 },
+          { name: 'Everything else', total: -6480 },
+          { name: 'Transport', total: -4020 },
+          { name: 'Insurance', total: -3060 },
+          { name: 'Dining out', total: -2940 },
+          { name: 'Utilities', total: -2820 },
+          { name: 'Holiday club', total: -1100 },
+          { name: 'Everyday', total: 4100, isBalance: true },
+          { name: 'Savings', total: 12800, isBalance: true },
+          { name: 'Emergency fund', total: 5400, isBalance: true },
+          { name: 'Brokerage', total: 41900, isBalance: true },
+          { name: "Mia's 529", total: 8600, isBalance: true },
+        ] },
+        [PREV]: { kind: 'summary', categoryTotals: [
+          { name: 'Rosa — paycheck', total: 62400 },
+          { name: 'Ben — paycheck', total: 33600 },
+          { name: 'Interest & Dividends', total: 1480 },
+          { name: 'Mortgage', total: -25320 },
+          { name: 'Childcare', total: -12600 },
+          { name: 'Groceries', total: -11520 },
+          { name: 'Everything else', total: -6940 },
+          { name: 'Transport', total: -4320 },
+          { name: 'Insurance', total: -3180 },
+          { name: 'Dining out', total: -3180 },
+          { name: 'Utilities', total: -2940 },
+          { name: 'Holiday club', total: -1150 },
+          { name: 'Everyday', total: 4800, isBalance: true },
+          { name: 'Savings', total: 15600, isBalance: true },
+          { name: 'Emergency fund', total: 7300, isBalance: true },
+          { name: 'Brokerage', total: 52400, isBalance: true },
+          { name: "Mia's 529", total: 11400, isBalance: true },
+        ] },
         [y]: {
           kind: 'grid', model: 'live',
           startMonth: `${Y}-01`, monthCount: 12,
@@ -7249,7 +7320,115 @@ function renderGoals() {
       <div class="chartbox" style="height:300px"><canvas id="spendChart"></canvas></div>
       ${projectedKey}
     </div>
+  </div>
+  ${spendingMixCard()}`;
+}
+
+/* ── Where the Money Goes ───────────────────────────────────────────────────
+   The bar chart above says what a year cost. This says what it was SPENT ON,
+   which is the question the grid has held the answer to since 2011 and never
+   been asked: one bar a year off forty rows of per-category monthly figures.
+
+   It is the live year against the one before it, because that is the comparison
+   a person actually makes — not a matrix of every year, which is a different
+   card and a worse one. The change column is the whole point: a share of
+   spending on its own says which row is biggest, and everybody already knows
+   which row is biggest.
+
+   Deliberately NOT a pie. A pie of forty categories is a colour key, and this
+   app has a reader who cannot use one — the same reason the bars here are all
+   ONE colour with the name written beside each. */
+function spendingMixCard() {
+  const y = latestGridYear();
+  if (!y) return '';
+  const years = yearKeys();
+  const prevY = years[years.indexOf(y) - 1] || years.filter(k => k < y).pop() || null;
+  const mix = spendingMix(state, C, y, prevY);
+  if (!mix.rows.length) return '';
+  /* The live year is part estimate, so its figures are, and the card must say
+     which kind of number it is showing before the reader acts on it. The same
+     reader the bars above use, so the two cards can't disagree about whether a
+     year has finished happening. */
+  const projected = yearIsProjected(y);
+  const arrow = (v) => v > 0 ? '▲' : v < 0 ? '▼' : '';
+  const compare = !!prevY && mix.prevDetailed;
+  const rows = mix.rows.map(r => {
+    /* Up and down are said in WORDS as well as a caret, and never in colour:
+       the four palettes and a red-green reader make hue the one thing that
+       cannot carry this. */
+    const chg = r.change === null ? '<span class="muted">new this year</span>'
+      : !r.change ? '<span class="muted">the same</span>'
+      : `${arrow(r.change)} ${r.change > 0 ? 'up' : 'down'} ${fmtMoney(Math.abs(r.change))}${
+          r.was ? ` <span class="muted">(${Math.abs(r.change / r.was * 100).toFixed(0)}%)</span>` : ''}`;
+    return `<tr>
+      <th scope="row">${esc(r.name)}</th>
+      <td${projected ? ' class="projected"' : ''}>${fmtMoney(r.total)}</td>
+      <td>${r.share === null ? '<span class="muted">—</span>' : `${(r.share * 100).toFixed(1)}%`}</td>
+      ${compare ? `<td>${r.was === null ? '<span class="muted">—</span>' : fmtMoney(r.was)}</td>
+      <td style="text-align:left">${chg}</td>` : ''}</tr>`;
+  }).join('');
+  return `<div class="card">
+    <h2>Where the Money Goes${helpBtn('spendingMix', 'how these are counted')}</h2>
+    <p class="sub">Every expense row in <strong>${esc(y)}</strong>, biggest first${
+      compare ? `, with what the same row came to in ${esc(prevY)} beside it` : ''}. Money
+      moved between your own accounts is not spending and is not here${
+      projected ? `, and ${esc(y)} is still running — the figures include the months the
+      plan has worked out, so they read as the estimates they are` : ''}.${
+      prevY && !mix.prevDetailed ? ` ${esc(prevY)} is kept as a yearly summary with no rows
+      in it, so there is nothing to compare against line by line.` : ''}</p>
+    <div class="chartbox" style="height:${Math.max(180, Math.min(560, mix.rows.length * 26 + 60))}px"><canvas id="mixChart"></canvas></div>
+    <div class="tablewrap" style="margin-top:12px"><table>
+      <thead><tr><th style="text-align:left">Category</th><th>${esc(y)}</th>
+        <th title="Share of everything ${esc(y)} spent">Share</th>
+        ${compare ? `<th>${esc(prevY)}</th>
+        <th style="text-align:left">Change</th>` : ''}</tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><th>Total</th><td>${fmtMoney(mix.total)}</td><td></td>
+        ${compare ? `<td>${fmtMoney(mix.prevTotal)}</td>
+        <td style="text-align:left">${mix.prevTotal
+          ? `${arrow(mix.total - mix.prevTotal)} ${mix.total >= mix.prevTotal ? 'up' : 'down'} ${
+              fmtMoney(Math.abs(round2(mix.total - mix.prevTotal)))}` : ''}</td>` : ''}</tr></tfoot>
+    </table></div>
   </div>`;
+}
+
+/* One colour for every bar, on purpose. The categories are named on the axis
+   beside each bar, so a colour per row would be decoration carrying no
+   information — and a key of forty colours is unreadable for anyone, let alone
+   a red-green reader. `--series-1` is the theme pack's first categorical token,
+   which is what a single-series chart in this family uses. */
+function buildMixChart() {
+  const y = latestGridYear();
+  if (!y) return;
+  const years = yearKeys();
+  const prevY = years[years.indexOf(y) - 1] || years.filter(k => k < y).pop() || null;
+  const mix = spendingMix(state, C, y, prevY);
+  if (!mix.rows.length) return;
+  const tick = cssVar('--chart-tick');
+  newChart('mixChart', {
+    type: 'bar',
+    data: { labels: mix.rows.map(r => r.name), datasets: [{
+      label: `Spent in ${y}`,
+      data: mix.rows.map(r => r.total),
+      backgroundColor: cssVar('--series-1'), borderWidth: 0,
+    }]},
+    options: {
+      /* Horizontal, because a category name is a word and a word does not fit
+         under a vertical bar — the axis reads left to right like the table
+         under it. */
+      indexAxis: 'y',
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (t) => {
+          const r = mix.rows[t.dataIndex];
+          return [`${fmtMoney(r.total)}${r.share === null ? '' : ` · ${(r.share * 100).toFixed(1)}% of the year`}`,
+            r.was === null ? null
+              : `${prevY}: ${fmtMoney(r.was)}`].filter(Boolean);
+        } } } },
+      scales: { y: chartAxes(), x: Object.assign(chartAxes(),
+        { ticks: { color: tick, callback: (v) => fmtMoney0(v) } }) },
+    },
+  }, `Spending by category in ${y}: ${mix.rows.map(r =>
+    `${r.name}, ${fmtMoney(r.total)}`).join('; ')}.`);
 }
 
 /* ═══════════════════════════ Retirement view ══════════════════════════════ */
@@ -11153,6 +11332,93 @@ function yearSpending(yr, computed, y) {
   return round2(-out);
 }
 
+/* yearSpending, but kept in its parts — what each expense ROW came to, rather
+   than what they came to together. The app held eleven years of this and drew
+   one bar a year off it, so "where does the money actually go" was a question
+   the data could answer and the screen could not.
+
+   Everything about how a figure is read is yearSpending's, deliberately, so the
+   parts and the total can never disagree: the COMPUTED cells (a year still
+   running has to show what it comes to), netted rather than summed as
+   magnitudes (a refund really does reduce what its row spent), and a summary
+   year read off its `categoryTotals` flows because the old sheets predate
+   sections.
+
+   Signed the way a reader reads it — spending is POSITIVE here, as it is on the
+   bars — while the cells themselves are negative. One negation, at the end,
+   where yearSpending does its own.
+
+   Rows are returned in GRID ORDER with the zeroes still in. Sorting and
+   dropping is the card's business: a row that spent nothing this year but
+   something last year is a fall the reader wants to see, and a function that
+   dropped it here would have thrown that away before anything could ask. */
+function categorySpend(yr, computed, y) {
+  if (!yr) return [];
+  if (yr.kind === 'summary')
+    return (yr.categoryTotals || [])
+      .filter(it => !it.isBalance && (it.total || 0) < 0)
+      .map(it => ({ id: null, name: String(it.name || 'Unnamed'), total: round2(-it.total) }));
+  const cells = (computed && computed.cells) || yr.cells || {};
+  const rows = (yr.categories || []).filter(c => (c.section || 'expense') === 'expense');
+  const byId = new Map(rows.map(c => [c.id, 0]));
+  for (const [key, cell] of Object.entries(cells)) {
+    const [id, m] = key.split('|');
+    if (!byId.has(id) || !m.startsWith(y)) continue;
+    byId.set(id, byId.get(id) + cell.v);
+  }
+  return rows.map(c => ({ id: c.id, name: c.name, total: round2(-(byId.get(c.id) || 0)) }));
+}
+
+/* Two years' worth of that, lined up by ROW rather than by position — matched
+   on the row id where both years are grids (a rename then follows the row
+   rather than splitting it in two) and on the NAME where either side is a
+   summary, which is the only handle those years have.
+
+   Sorted by this year's figure, biggest first, with anything that spent nothing
+   in EITHER year dropped: a row that has never been used is not a finding, and
+   a screenful of $0.00 is how a table stops being read. `share` is of this
+   year's spending, and it is null rather than 0 when the year spent nothing at
+   all — the house rule for a denominator that isn't there. */
+function spendingMix(st, computed, y, prevY) {
+  const yr = (st.years || {})[y];
+  if (!yr) return { rows: [], total: 0, prevTotal: 0, prevDetailed: false };
+  const now = categorySpend(yr, (computed || {})[y], y);
+  const prevYr = prevY && (st.years || {})[prevY];
+  const before = prevYr ? categorySpend(prevYr, (computed || {})[prevY], prevY) : [];
+  const key = (r) => (r.id === null ? `name:${r.name.trim().toLowerCase()}` : `id:${r.id}`);
+  /* A summary year has no ids, so a grid year beside one has to fall back to
+     names on BOTH sides or nothing would ever match. Decided once, up here,
+     rather than per row — a mixed answer would match half a table. */
+  const byName = now.some(r => r.id === null) || before.some(r => r.id === null);
+  const k = (r) => (byName ? `name:${r.name.trim().toLowerCase()}` : key(r));
+  const prevBy = new Map(before.map(r => [k(r), r.total]));
+  const total = round2(now.reduce((t, r) => t + r.total, 0));
+  const prevTotal = round2(before.reduce((t, r) => t + r.total, 0));
+  const seen = new Set();
+  const rows = [];
+  for (const r of now) {
+    seen.add(k(r));
+    const was = prevBy.has(k(r)) ? prevBy.get(k(r)) : null;
+    if (!r.total && !was) continue;
+    rows.push({ id: r.id, name: r.name, total: r.total, was,
+      change: was === null ? null : round2(r.total - was),
+      share: total ? r.total / total : null });
+  }
+  /* A row that existed last year and is gone from this one still spent money,
+     and dropping it would make the two columns describe different tables. */
+  for (const r of before) {
+    if (seen.has(k(r)) || !r.total) continue;
+    rows.push({ id: r.id, name: r.name, total: 0, was: r.total,
+      change: round2(-r.total), share: total ? 0 : null });
+  }
+  rows.sort((a, b) => b.total - a.total || (b.was || 0) - (a.was || 0));
+  /* Whether last year can be compared with at all. A yearly summary that
+     recorded only its totals has no rows in it, and without this flag every
+     line would read "new this year" — which is a claim about the ROW, where the
+     truth is about the YEAR. Two different absences, and the card says which. */
+  return { rows, total, prevTotal, prevDetailed: before.length > 0 };
+}
+
 /* The mirror of yearSpending: the income rows, netted across the year, off the
    COMPUTED cells for the same reason — PLUS what the accounts earned on their
    own. Interest and dividends are income wherever the app counts income: money
@@ -11818,7 +12084,7 @@ function wireView(view) {
   /* Progress draws the goal line AND the three long-run charts that used to be
      a History tab of their own. */
   if (view === 'goals') {
-    buildGoalChart(); buildHistoryCharts(); buildWorthChart();
+    buildGoalChart(); buildHistoryCharts(); buildWorthChart(); buildMixChart();
     const rec = F('recordWorthBtn');
     if (rec) rec.onclick = () => {
       const liveKey = latestGridYear();
@@ -18509,6 +18775,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   overflowOrder, overflowMeasure, sweepArrivals, freezeOverflowThresholds, ruleDesc,
   KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
+  categorySpend, spendingMix,
   coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
   csvCell, gridToCsv, donationsToCsv, searchPlan, SEARCH_CAP, snapshotPoints,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,

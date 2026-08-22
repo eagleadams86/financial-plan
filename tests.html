@@ -3395,6 +3395,104 @@ t('the total counts a linked pot once, at what the holdings are worth', () => {
     'an empty pane claims nothing — its accounts stay counted as themselves');
 });
 
+group('Where the money goes');
+t('a year splits into its expense rows, netted and read as positives', () => {
+  const st = H.coerceShape({ years: { '2030': { kind: 'grid', startMonth: '2030-01',
+    monthCount: 12, categories: [
+      { id: 'rent', name: 'Rent', section: 'expense' },
+      { id: 'food', name: 'Food', section: 'expense' },
+      { id: 'pay', name: 'Pay', section: 'income' },
+      { id: 'sav', name: 'To savings', section: 'transfer' },
+    ], cells: {
+      'rent|2030-01': { v: -1000, kind: 'actual' },
+      'rent|2030-02': { v: -1000, kind: 'actual' },
+      'food|2030-01': { v: -400, kind: 'actual' },
+      'food|2030-02': { v: 50, kind: 'actual' },      // a refund
+      'pay|2030-01': { v: 5000, kind: 'actual' },
+      'sav|2030-01': { v: -900, kind: 'actual' },
+    } } } });
+  const rows = H.categorySpend(st.years['2030'], null, '2030');
+  eq(rows.map(r => [r.name, r.total]), [['Rent', 2000], ['Food', 350]],
+    'expenses only, netted — the refund comes off Food, and a transfer is not spending');
+  eq(H.round2(rows.reduce((t, r) => t + r.total, 0)),
+     H.yearSpending(st.years['2030'], null, '2030'),
+     'the parts add up to the total the bars are drawn from');
+});
+t('a yearly summary splits into its own flow rows', () => {
+  const st = H.coerceShape({ years: { '2020': { kind: 'summary', categoryTotals: [
+    { name: 'Rent', total: -900 }, { name: 'Pay', total: 4000 },
+    { name: 'Savings', total: 1200, isBalance: true } ] } } });
+  eq(H.categorySpend(st.years['2020'], null, '2020').map(r => [r.name, r.total]),
+    [['Rent', 900]], 'money out only, and never a balance row');
+});
+t('two years line up by row, so a rename keeps its history in one line', () => {
+  const st = H.coerceShape({ years: {
+    '2029': { kind: 'grid', startMonth: '2029-01', monthCount: 12, categories: [
+      { id: 'rent', name: 'Rent', section: 'expense' },
+      { id: 'gone', name: 'Gym', section: 'expense' }],
+      cells: { 'rent|2029-01': { v: -900 }, 'gone|2029-01': { v: -40 } } },
+    '2030': { kind: 'grid', startMonth: '2030-01', monthCount: 12, categories: [
+      { id: 'rent', name: 'Rent, renamed', section: 'expense' },
+      { id: 'new', name: 'Nursery', section: 'expense' }],
+      cells: { 'rent|2030-01': { v: -1000 }, 'new|2030-01': { v: -600 } } } } });
+  const mix = H.spendingMix(st, null, '2030', '2029');
+  eq(mix.prevDetailed, true);
+  const by = Object.fromEntries(mix.rows.map(r => [r.name, r]));
+  eq(by['Rent, renamed'].was, 900, 'matched on the row, not on what it is called');
+  eq(by['Rent, renamed'].change, 100);
+  eq(by['Nursery'].was, null, 'genuinely new');
+  eq(by['Gym'].total, 0, 'a row that stopped still gets a line');
+  eq(by['Gym'].change, -40);
+  eq(mix.rows[0].name, 'Rent, renamed', 'biggest first');
+  eq(H.round2(by['Rent, renamed'].share * 100), 62.5, 'share of what THIS year spent');
+});
+t('against a yearly summary the match falls back to names', () => {
+  const st = H.coerceShape({ years: {
+    '2029': { kind: 'summary', categoryTotals: [{ name: 'Rent', total: -900 }] },
+    '2030': { kind: 'grid', startMonth: '2030-01', monthCount: 12,
+      categories: [{ id: 'rent', name: 'Rent', section: 'expense' }],
+      cells: { 'rent|2030-01': { v: -1000 } } } } });
+  const mix = H.spendingMix(st, null, '2030', '2029');
+  eq(mix.rows[0].was, 900, 'a summary has no ids, so the name is the only handle');
+  eq(mix.prevTotal, 900);
+});
+t('a year with nothing to compare says so rather than calling every row new', () => {
+  const st = H.coerceShape({ years: {
+    '2029': { kind: 'summary', categoryTotals: [] },
+    '2030': { kind: 'grid', startMonth: '2030-01', monthCount: 12,
+      categories: [{ id: 'rent', name: 'Rent', section: 'expense' }],
+      cells: { 'rent|2030-01': { v: -1000 } } } } });
+  const mix = H.spendingMix(st, null, '2030', '2029');
+  eq(mix.prevDetailed, false, 'the card drops the columns rather than printing "new"');
+  eq(mix.rows[0].was, null);
+});
+t('a row that has never been used is not a finding', () => {
+  const st = H.coerceShape({ years: { '2030': { kind: 'grid', startMonth: '2030-01',
+    monthCount: 12, categories: [
+      { id: 'rent', name: 'Rent', section: 'expense' },
+      { id: 'idle', name: 'Never used', section: 'expense' }],
+    cells: { 'rent|2030-01': { v: -1000 } } } } });
+  const mix = H.spendingMix(st, null, '2030', null);
+  eq(mix.rows.map(r => r.name), ['Rent'], 'a screenful of $0.00 is how a table stops being read');
+});
+t('the sample history has rows in it, or three charts draw nothing', () => {
+  const s = H.sampleState();
+  const years = Object.keys(s.years).filter(y => s.years[y].kind === 'summary');
+  ok(years.length >= 2, 'two years of history');
+  for (const y of years) {
+    const rows = s.years[y].categoryTotals || [];
+    ok(rows.some(r => !r.isBalance && r.total < 0), `${y} records what it spent`);
+    ok(rows.some(r => r.isBalance), `${y} closes its accounts`);
+  }
+  const st = H.migrate(H.coerceShape(s));
+  const live = Object.keys(st.years).filter(y => st.years[y].kind === 'grid').sort().pop();
+  const prev = Object.keys(st.years).filter(y => y < live).sort().pop();
+  const mix = H.spendingMix(st, H.computeAll(st, `${live}-08-15`), live, prev);
+  ok(mix.prevDetailed, 'so Where the Money Goes has a year to compare against');
+  ok(mix.rows.some(r => r.total === 0 && r.was),
+    'including a row that stopped — the case the comparison must not drop');
+});
+
 group('What you owe');
 t('a schedule pays the interest first and the last payment is only what is left', () => {
   const a = H.amortize({ balance: 1000, rate: 0.12, payment: 300 });
