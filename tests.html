@@ -3395,6 +3395,73 @@ t('the total counts a linked pot once, at what the holdings are worth', () => {
     'an empty pane claims nothing — its accounts stay counted as themselves');
 });
 
+group('Money in another currency');
+t('a rate is the reader’s, read strictly, and never the plan’s own currency', () => {
+  const d = H.coerceShape({ settings: { currency: 'USD' }, side: { rates: {
+    gbp: { rate: '1.27', asOf: '2026-07-01' },
+    EUR: { rate: 0 },
+    JPY: { rate: 'junk' },
+    USD: { rate: 2 },
+    TOOLONG: { rate: 1.1 } } } });
+  eq(Object.keys(d.side.rates), ['GBP'], 'upper-cased, and only what is a rate');
+  eq(d.side.rates.GBP, { rate: 1.27, asOf: '2026-07-01' });
+});
+t('an unrated currency is left out and named, never counted at face value', () => {
+  const st = H.coerceShape({ settings: { currency: 'USD' }, side: {
+    property: [{ id: 'flat', name: 'Flat', kind: 'home', value: 100000, cur: 'GBP' },
+               { id: 'house', name: 'House', kind: 'home', value: 50 }] } });
+  const nw = H.netWorthParts(st, '2030-04');
+  eq(nw.property, 50, 'the flat is not added in at 100,000 dollars');
+  eq(nw.unconverted, ['Flat (GBP)'], 'and the card can say which and why');
+});
+t('a rate converts the property, the debt on it and a whole pane', () => {
+  const st = H.coerceShape({ settings: { currency: 'USD' }, side: {
+    rates: { GBP: { rate: 2 } },
+    property: [{ id: 'flat', name: 'Flat', kind: 'home', value: 100, cur: 'GBP' }],
+    liabilities: [{ id: 'm', name: 'Mortgage', balance: 40, securedOn: 'flat', cur: 'GBP' },
+                  { id: 'v', name: 'Visa', kind: 'card', balance: 10, cur: 'GBP' }],
+    portfolios: [{ id: 'isa', name: 'ISA', cur: 'GBP',
+      rows: [{ ticker: 'VWRL', shares: 10, price: 5 }] }] } });
+  const nw = H.netWorthParts(st, '2030-04');
+  eq(nw.unconverted, [], 'everything can be valued');
+  eq(nw.property, 120, '(100 − 40) × 2');
+  eq(nw.debts, 20, '10 × 2');
+  eq(nw.invested, 100, '50 of holdings at 2');
+});
+t('the plan’s own currency needs no rate and never gets one', () => {
+  const st = H.coerceShape({ settings: { currency: 'GBP' }, side: {
+    property: [{ id: 'flat', name: 'Flat', kind: 'home', value: 100, cur: 'GBP' }] } });
+  eq(st.side.property[0].cur, undefined, 'the plan currency is not a foreign one');
+  eq(H.planRate(st, 'GBP').rate, 1);
+  eq(H.planRate(st, undefined).rate, 1, 'and absent means the same thing');
+  eq(H.planRate(st, 'USD'), null, 'while an unrated one has no answer at all');
+});
+t('conversion is one function, and it says when it cannot', () => {
+  const st = H.coerceShape({ settings: { currency: 'USD' },
+    side: { rates: { GBP: { rate: 1.25 } } } });
+  eq(H.inPlanCurrency(st, 80, 'GBP').v, 100);
+  eq(H.inPlanCurrency(st, 80, 'gbp').v, 100, 'however it is cased');
+  eq(H.inPlanCurrency(st, 80).v, 80, 'no code is the plan’s own money');
+  eq(H.inPlanCurrency(st, 80, 'JPY'), { v: 0, unknown: true, code: 'JPY' });
+});
+t('a foreign figure keeps its own symbol, and only totals convert', () => {
+  /* The first thing this got wrong: printing 96,000 pounds as "$96,000.00" —
+     the wrong figure wearing the right symbol, which is the exact failure the
+     rate table exists to prevent. */
+  ok(/£/.test(H.fmtMoneyIn(96000, 'GBP')), 'pounds are drawn as pounds');
+  eq(H.fmtMoneyIn(96000, 'USD'), H.fmtMoney(96000), "the plan's own currency is unchanged");
+  eq(H.fmtMoneyIn(96000), H.fmtMoney(96000), 'and so is no currency at all');
+  ok(/ZZZ/.test(H.fmtMoneyIn(5, 'ZZZ')), 'a code Intl does not know falls back rather than throwing');
+});
+t('the sample holds something abroad, or the feature never shows itself', () => {
+  const s = H.sampleState();
+  ok(Object.keys(s.side.rates || {}).length, 'a stated rate');
+  ok(s.side.property.some(p => p.cur), 'and something priced in it');
+  const st = H.migrate(H.coerceShape(s));
+  eq(H.netWorthParts(st, `${new Date().getFullYear()}-08`).unconverted, [],
+    'every foreign figure in the sample has a rate behind it');
+});
+
 group('A year, coming back from a spreadsheet');
 t('the parser survives quotes, commas and the BOM the export writes', () => {
   const rows = H.csvRows('﻿a,b\r\n"Rent, water","say ""hi"""\r\n');

@@ -1996,6 +1996,32 @@ buildMoneyFormats('USD');
 const fmtMoney  = (v) => moneyFmt.format(v);
 const fmtMoney0 = (v) => moneyFmt0.format(v);
 
+/* A figure in a currency that is NOT the plan's own. Property, debts and
+   investment panes can each be held abroad, and the figure on the statement in
+   front of the reader is in that currency — so that is what their own cards
+   show, with its own symbol. Only the TOTALS convert, and they say so.
+
+   Printing £96,000 as "$96,000.00" was the first thing this got wrong: the
+   wrong figure wearing the right symbol, which is the exact failure the whole
+   rate table exists to prevent. Cached per code because a table redraws every
+   render and building an Intl formatter per cell is not free. A code Intl does
+   not know falls back to "96000 XYZ" rather than throwing — the same
+   belt-and-braces buildMoneyFormats has. */
+const otherMoneyFmt = new Map();
+function fmtMoneyIn(v, code) {
+  const own = String((state.settings || {}).currency || 'USD').toUpperCase();
+  const c = String(code || '').toUpperCase();
+  if (!c || c === own) return fmtMoney(v);
+  if (!otherMoneyFmt.has(c)) {
+    let f = null;
+    try { f = new Intl.NumberFormat('en-US', { style: 'currency', currency: c }); }
+    catch (e) { f = null; }
+    otherMoneyFmt.set(c, f);
+  }
+  const f = otherMoneyFmt.get(c);
+  return f ? f.format(v) : `${roundTo(v, 2)} ${c}`;
+}
+
 /* Money is typed and read the way it looks on a statement — $1,234.50. A
    number input can render neither the symbol nor the separator, so money
    fields are text inputs that format themselves when you leave them and parse
@@ -2357,6 +2383,28 @@ function blankState() {
          field on a property row, because most debts are not secured on
          anything and the ones that are outlive the thing as often as not. */
       liabilities: [],
+      /* ── Money that isn't in the plan's own currency ──────────────────────
+         `currency` in settings was only ever a LABEL: it changed the symbol in
+         front of every figure and nothing else, so a plan holding a flat in
+         one country and a brokerage in another could not be written down at
+         all — one of the two was quietly wrong by whatever the rate happened
+         to be.
+
+         This is a rate table the READER states: ISO code → {rate, asOf},
+         where rate is how much of the plan's currency one unit is worth. The
+         reader's, never the app's, and for exactly the reason no tax bracket
+         and no contribution limit ships either — a rate fetched today is wrong
+         tomorrow, and a rate baked in is wrong for ever while looking
+         authoritative. `asOf` is what lets the app say how old the answer is
+         instead of pretending it is live.
+
+         It reaches PROPERTY, DEBTS and INVESTMENT PANES — the three things
+         that sit outside the engine. The budget grid stays in one currency on
+         purpose: every balance in it chains month to month through transfers
+         and interest, and a rate that moved would rewrite eleven years of
+         history every time it was edited. The app says that rather than
+         half-doing it. */
+      rates: {},
       /* Allocation targets for the Everything You Hold card — UPPER-CASED
          ticker → the share (0–1) of all holdings it should be. A map, not a
          list: one target per ticker is the whole idea, and the rollup already
@@ -3085,6 +3133,37 @@ function coerceShape(data) {
       if (!/^\d{4}-\d{2}$/.test(String(l.asOf || ''))) delete l.asOf;
       if (l.securedOn !== undefined && !propIds.has(l.securedOn)) delete l.securedOn;
     }
+  }
+  /* Exchange rates: ISO code → what one unit is worth in the plan's own
+     currency. The code is shaped like `settings.currency` is (three letters,
+     upper-cased) and the rate is read STRICTLY — num() would turn a corrupt
+     field into a rate of 0, which silently values a foreign holding at nothing
+     rather than refusing to value it. A rate of 0 or less is not a rate.
+     `asOf` is optional and dropped when malformed: the card then says the rate
+     has no date rather than inventing one. */
+  {
+    const rates = obj(s.rates); s.rates = {};
+    const own = String((d.settings || {}).currency || 'USD').toUpperCase();
+    for (const [k, v] of Object.entries(rates)) {
+      const code = String(k).trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(code) || code === own) continue;
+      const row = obj(v);
+      const rate = rateOrNone(row.rate);
+      if (rate === undefined || !(rate > 0)) continue;
+      s.rates[code] = { rate };
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(row.asOf || ''))) s.rates[code].asOf = row.asOf;
+    }
+  }
+  /* Which currency a thing is held in. Absent means the plan's own, which is
+     what every row written before today means and what nearly every row will
+     always mean — so it is DELETED rather than stamped, and a code with no
+     rate behind it is kept: the figure is then named as one the total could
+     not count, which is a better answer than converting it at 1:1. */
+  for (const row of [...s.property, ...s.liabilities, ...s.portfolios]) {
+    const code = String(row.cur || '').trim().toUpperCase();
+    if (/^[A-Z]{3}$/.test(code) && code !== String((d.settings || {}).currency || 'USD').toUpperCase())
+      row.cur = code;
+    else delete row.cur;
   }
   /* Investments used to be two fixed panes, "Taxable investments" and "HSA",
      because those were the two Charlie had. They're a named list now — add as
@@ -4919,6 +4998,22 @@ const HELP = {
       + 'money (its ✎ Edit dialog). The Liquid and Invested tiles still match their tabs, '
       + 'but the Total counts that pot once — at what the holdings are worth, since a '
       + 'priced figure is the better answer to what something is worth today.' },
+  currencies: { title: 'How a Rate Is Used',
+    body: 'You state the rate; the app never looks one up. That is the same rule the tax '
+      + 'tables and the contribution limits follow, and for the same reason — a rate '
+      + 'fetched today is wrong tomorrow, and a rate baked into the app is wrong for ever '
+      + 'while looking authoritative. What the app can do is remember the day you read it '
+      + 'and show you how old the answer is. Three things can say which currency they are '
+      + 'in: a property, a debt, and an investment pane. Each is converted into the plan\u2019s '
+      + 'own currency for net worth, and each still reads in its own money on its own card, '
+      + 'because that is the figure on the statement in front of you. The BUDGET GRID stays '
+      + 'in one currency and always will: its balances chain month to month through '
+      + 'transfers and interest, so a rate you edited would silently rewrite years of '
+      + 'history every time you touched it. Retirement accounts carry no currency either — '
+      + 'a 401(k) is a creature of one country\u2019s tax code. If something is in a currency '
+      + 'you have given no rate for, it is left OUT of your net worth and named, never '
+      + 'counted at face value: a foreign flat added in at whatever number happens to be '
+      + 'typed is the one answer worse than saying the total cannot be worked out yet.' },
   taxNow: { title: 'What This Figure Is, and Is Not',
     body: 'It is your own bracket table and your own deduction, applied to the total '
       + 'compensation on the Compensation tab — salary after the raise, plus the bonus, '
@@ -5440,6 +5535,9 @@ function welcomeCard() {
                  contribution. They are what make the Comp tab draw a total-comp
                  line above the salary line, and what the Giving shares are
                  measured against.
+     Currency    a flat and its mortgage in GBP, with one stated rate — the
+                 case `settings.currency` could never express, because that was
+                 only ever a symbol in front of every figure.
      History     two REAL yearly summaries, not three dead scalars — every row
                  named, so the long-run charts have bars and Where the Money
                  Goes has a year to compare against. `Holiday club` is in them
@@ -5688,7 +5786,15 @@ function sampleState() {
           { id: 'house', kind: 'home', name: 'The house', value: 412000,
             note: 'Bought 2019; the mortgage row in the budget is this one.' },
           { id: 'car', kind: 'vehicle', name: 'The estate car', value: 14500 },
+          /* Priced in the currency it stands in, which is the whole case the
+             app could not express before: without a rate this flat was either
+             absent from the plan or counted as if 96,000 GBP were 96,000 USD. */
+          { id: 'flat', kind: 'home', name: 'The flat in Leeds', value: 96000, cur: 'GBP',
+            note: 'Rented out. Valued and mortgaged in pounds.' },
         ],
+        /* One rate, stated with the day it was read — the app never looks one
+           up, and the card says how old the answer is. */
+        rates: { GBP: { rate: 1.27, asOf: `${Y}-07-01` } },
         /* One of each shape the debts card reads differently, because a demo
            that only holds mortgages never shows what the card does with the
            rest. A mortgage SECURED on the house (so it comes off that
@@ -5699,6 +5805,10 @@ function sampleState() {
            The mortgage's payment is under the budget row's $2,180 on purpose —
            that row includes escrow, and a reader who notices is right to. */
         liabilities: [
+          { id: 'flat-loan', name: 'The flat in Leeds — mortgage', kind: 'mortgage',
+            balance: 41000, rate: 0.0459, payment: 310, asOf: `${PREV}-12`,
+            securedOn: 'flat', cur: 'GBP',
+            note: 'In pounds, like the flat it is secured on.' },
           { id: 'house-loan', name: 'The house — mortgage', kind: 'mortgage',
             balance: 231000, rate: 0.0325, payment: 1620, asOf: `${PREV}-12`,
             securedOn: 'house',
@@ -7042,35 +7152,71 @@ function payoffMonth(l) {
 const securedTo = (l, propIds) => (l && l.securedOn && propIds.has(l.securedOn))
   ? l.securedOn : null;
 
+/* ── One figure, in the plan's own money ────────────────────────────────────
+   `code` absent means the plan's currency, which is what every row written
+   before rates existed means. A code the reader has given no rate for is NOT
+   converted at 1:1 and NOT dropped in silence: it comes back `unknown`, the
+   total leaves it out, and the card names it. Guessing a rate of 1 would put a
+   foreign flat into somebody's net worth at whatever number happened to be
+   typed, which is the one outcome worse than saying "I can't count this yet". */
+function planRate(st, code) {
+  const own = String(((st.settings || {}).currency) || 'USD').toUpperCase();
+  if (!code || String(code).toUpperCase() === own) return { rate: 1 };
+  const r = ((st.side || {}).rates || {})[String(code).toUpperCase()];
+  return (r && r.rate > 0) ? r : null;
+}
+
+function inPlanCurrency(st, amount, code) {
+  const r = planRate(st, code);
+  if (!r) return { v: 0, unknown: true, code: String(code).toUpperCase() };
+  return { v: round2((amount || 0) * r.rate), rate: r.rate, asOf: r.asOf };
+}
+
 function netWorthParts(st, month) {
   const side = st.side || {};
   const portfolios = side.portfolios || [];
   const retAccts = side.retirementAccounts || [];
   const property = side.property || [];
   const liabilities = side.liabilities || [];
-  const invested = round2(portfolios.reduce((s, p) => s + holdingsValue(p.rows || []), 0));
+  /* Anything the plan cannot value, because its currency has no rate yet. Names
+     rather than a count: a card that says "1 thing could not be counted" is a
+     card that sends you hunting. */
+  const unconverted = [];
+  const conv = (row, amount) => {
+    const got = inPlanCurrency(st, amount, row.cur);
+    if (got.unknown) unconverted.push(`${row.name || 'Untitled'} (${got.code})`);
+    return got.v;
+  };
+  const invested = round2(portfolios.reduce((s, p) => s + conv(p, holdingsValue(p.rows || [])), 0));
+  /* Retirement accounts carry no currency of their own, deliberately: a 401(k)
+     or an ISA is a creature of one country's tax code, and an app that shipped
+     one country's contribution limits could not have offered the other's
+     anyway. Nothing here pretends otherwise. */
   const retirement = round2(retAccts.reduce((s, a) => s + retAcctBalance(a), 0));
   /* `p.owed` is the pre-schema-7 spelling. It is still added because a backup
      from before the split is coerced before it is migrated, and this function
      runs over both — dropping it for one tick would silently overstate a
      recorded net worth. After migration every property carries none. */
-  const owed = round2(property.reduce((s, p) => s + (p.owed || 0), 0));
-  const propertyValue = round2(property.reduce((s, p) => s + (p.value || 0), 0));
+  const owed = round2(property.reduce((s, p) => s + conv(p, p.owed || 0), 0));
+  const propertyValue = round2(property.reduce((s, p) => s + conv(p, p.value || 0), 0));
   const propIds = new Set(property.map(p => p.id));
   const owedNow = (l) => liabilityAt(l, month);
   /* Secured debt comes off the PROPERTY tile, unsecured debt gets a tile of its
      own. Both come off the total, so the split is a matter of where a reader
      looks for the figure, never of what the plan is worth. */
   const secured = round2(liabilities.filter(l => securedTo(l, propIds))
-    .reduce((t, l) => t + owedNow(l), 0));
+    .reduce((t, l) => t + conv(l, owedNow(l)), 0));
   const loose = liabilities.filter(l => !securedTo(l, propIds));
-  const debts = round2(loose.reduce((t, l) => t + owedNow(l), 0));
+  const debts = round2(loose.reduce((t, l) => t + conv(l, owedNow(l)), 0));
   return {
     invested, hasInvested: portfolios.some(p => p && (p.rows || []).length),
     retirement, hasRetirement: retAccts.length > 0,
     property: round2(propertyValue - owed - secured), propertyOwed: round2(owed + secured),
     hasProperty: property.length > 0,
     debts, hasDebts: loose.length > 0,
+    /* Deduped: a property and the loan on it both carrying the same unrated
+       currency is one thing to fix, not two. */
+    unconverted: [...new Set(unconverted)],
     daf: round2(holdingsValue(side.daf || [])), hasDaf: (side.daf || []).length > 0,
     /* Budget accounts whose money IS some pane's holdings (pf.accounts, the
        reader's own statement) — the renderer subtracts their computed balances
@@ -7151,6 +7297,12 @@ function netWorthCard(liquid, cur, c) {
       the holdings are worth.` : ''}${
       nw.hasDaf ? ` The giving fund's ${fmtMoney(nw.daf)} is not counted — that money is
       already given, and it is waiting on the Giving tab.` : ''}</p>
+    ${nw.unconverted.length ? `<p class="warn">${esc(andList(nw.unconverted))} ${
+      nw.unconverted.length === 1 ? 'is' : 'are'} left out: ${
+      nw.unconverted.length === 1 ? 'its currency has' : 'their currencies have'} no rate
+      yet. Add one on the Household tab — counting ${
+      nw.unconverted.length === 1 ? 'it' : 'them'} at face value would be the wrong
+      figure wearing the right symbol.</p>` : ''}
     <div class="goalgrid">
       ${tile('Total', total, overlap
         ? `Everything below, with ${fmtMoney(overlap)} of overlap counted once`
@@ -7751,31 +7903,107 @@ function propertyCard() {
     .filter(l => l.securedOn === p.id)
     .reduce((t, l) => t + liabilityAt(l, now), 0));
   const anyOwed = list.some(p => owedOn(p) > 0);
+  const foreign = list.filter(p => p.cur);
+  /* Each row reads in ITS OWN money — that is the figure on the statement. The
+     total is the only thing converted, because adding pounds to dollars is the
+     one arithmetic this table must never quietly do. */
   const rows = list.map((p, idx) => {
     const owed = owedOn(p);
     const equity = round2((p.value || 0) - owed);
+    const money = (v) => fmtMoneyIn(v, p.cur);
+    const conv = p.cur ? inPlanCurrency(state, equity, p.cur) : null;
     return `<tr class="editrow" data-edit="property" data-idx="${idx}"
-      title="Click to edit${p.note ? ' · ' + esc(p.note) : ''}">
+      title="Click to edit${p.cur ? ` · in ${esc(p.cur)}${conv.unknown ? ', no rate stated yet'
+        : `, about ${fmtMoney(conv.v)}`}` : ''}${p.note ? ' · ' + esc(p.note) : ''}">
       <th scope="row">${esc(p.name)}${p.note ? ` <span class="muted" title="${esc(p.note)}">📝</span>` : ''}</th>
-      <td style="text-align:left">${esc(PROPERTY_KIND_LABEL[p.kind] || 'Other')}</td>
-      <td>${p.value === undefined ? '<span class="muted">—</span>' : fmtMoney(p.value)}</td>
-      ${anyOwed ? `<td>${owed ? fmtMoney(owed) : '<span class="muted">—</span>'}</td>` : ''}
-      <td>${fmtMoney(equity)}</td></tr>`;
+      <td style="text-align:left">${esc(PROPERTY_KIND_LABEL[p.kind] || 'Other')}${
+        p.cur ? ` <span class="muted">${esc(p.cur)}</span>` : ''}</td>
+      <td>${p.value === undefined ? '<span class="muted">—</span>' : money(p.value)}</td>
+      ${anyOwed ? `<td>${owed ? money(owed) : '<span class="muted">—</span>'}</td>` : ''}
+      <td>${money(equity)}</td></tr>`;
   }).join('');
-  const totalEquity = round2(list.reduce((s, p) => s + (p.value || 0) - owedOn(p), 0));
+  const equities = list.map(p => ({ p, v: round2((p.value || 0) - owedOn(p)) }))
+    .map(({ p, v }) => inPlanCurrency(state, v, p.cur));
+  const totalEquity = round2(equities.reduce((s, e) => s + e.v, 0));
+  const uncounted = equities.filter(e => e.unknown).length;
   return `<div class="card">
     <h2>Property</h2>
     <p class="sub">What the household owns — a home, a car, a boat — at what it
       would sell for. Equity is that value minus whatever is still owed on it, and it is
-      what the Progress tab's net worth counts.${anyOwed ? ' The Owed column is read from What You Owe, below.' : ''}${viewOnly || !list.length ? '' : ' Click a row to update a value.'}</p>
+      what the Progress tab's net worth counts.${anyOwed ? ' The Owed column is read from What You Owe, below.' : ''}${
+      foreign.length ? ` A row held abroad reads in its own money; only the total is
+      converted${uncounted ? ', and it leaves out what has no rate yet' : ''}.` : ''}${
+      viewOnly || !list.length ? '' : ' Click a row to update a value.'}</p>
     ${list.length ? `<div class="tablewrap"><table>
       <thead><tr><th style="text-align:left">Property</th><th style="text-align:left">Kind</th>
         <th>Value</th>${anyOwed ? '<th>Owed</th>' : ''}<th>Equity</th></tr></thead>
       <tbody>${rows}</tbody>
-      ${list.length > 1 ? `<tfoot><tr><th>Total</th><td></td><td></td>${anyOwed ? '<td></td>' : ''}
-        <td>${fmtMoney(totalEquity)}</td></tr></tfoot>` : ''}
+      ${list.length > 1 ? `<tfoot><tr><th>Total${foreign.length
+        ? ` <span class="muted">in ${esc(String(state.settings.currency || 'USD').toUpperCase())}</span>` : ''}</th>
+        <td></td><td></td>${anyOwed ? '<td></td>' : ''}
+        <td${uncounted ? ' title="Leaves out what has no exchange rate yet"' : ''}>${
+          fmtMoney(totalEquity)}</td></tr></tfoot>` : ''}
     </table></div>` : '<p class="sub">Nothing listed yet.</p>'}
     <div class="addbar"><button class="btn small" data-add="property">＋ Add property</button></div>
+  </div>`;
+}
+
+/* ── Other currencies ───────────────────────────────────────────────────────
+   A rate table the reader types, for the same reason the tax tables and the
+   contribution limits are: a rate fetched today is wrong tomorrow, and one
+   baked into the app is wrong for ever while looking authoritative. What the
+   app can do is say how old the answer is, which is what `asOf` is for.
+
+   Drawn on the Household tab even when it is empty, because a card that only
+   appears once you have used the feature is a feature nobody finds. It says
+   plainly what rates do NOT reach — the budget grid — rather than leaving that
+   to be discovered by a figure that didn't move. */
+function currenciesCard() {
+  const own = String(state.settings.currency || 'USD').toUpperCase();
+  const rates = state.side.rates || {};
+  const codes = Object.keys(rates).sort();
+  /* Everything wearing a currency, so the card can say what each rate is
+     actually doing and flag a code nothing uses. */
+  const held = {};
+  for (const row of [...(state.side.property || []), ...(state.side.liabilities || []),
+                     ...(state.side.portfolios || [])])
+    if (row.cur) (held[row.cur] = held[row.cur] || []).push(row.name);
+  const orphans = Object.keys(held).filter(c => !rates[c]).sort();
+  const rows = codes.map(c => {
+    const uses = held[c] || [];
+    return `<tr class="editrow" data-edit="rate" data-key="${esc(c)}"
+      title="Click to change or remove this rate">
+      <th scope="row">${esc(c)}</th>
+      <td>${esc(String(round2(rates[c].rate)))} ${esc(own)}</td>
+      <td style="text-align:left">${rates[c].asOf
+        ? esc(rates[c].asOf)
+        : '<span class="muted">no date given</span>'}</td>
+      <td style="text-align:left">${uses.length
+        ? esc(andList(uses))
+        : '<span class="muted">nothing yet</span>'}</td></tr>`;
+  }).join('');
+  return `<div class="card">
+    <h2>Other Currencies${helpBtn('currencies', 'how a rate is used')}</h2>
+    <p class="sub">${codes.length || orphans.length
+      ? `What one unit is worth in ${esc(own)}, as you state it — the app never looks a rate
+         up, the same rule the tax tables keep. Property, debts and investment panes can
+         each say which currency they are in.`
+      : `Everything in this plan is in ${esc(own)}. If you hold a property, a debt or a
+         brokerage in another currency, add its rate here and those three can say so.`}
+      <strong>The budget grid stays in ${esc(own)}</strong> — its balances chain month to
+      month, and a rate you edited would rewrite years of them.</p>
+    ${codes.length ? `<div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Currency</th><th>One unit is</th>
+        <th style="text-align:left">Rate from</th>
+        <th style="text-align:left">Used by</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>` : ''}
+    ${orphans.length ? `<p class="warn" style="margin-top:10px">${
+      esc(andList(orphans))} ${orphans.length === 1 ? 'has' : 'have'} no rate yet, so
+      ${esc(andList(orphans.flatMap(c => held[c])))} ${
+      orphans.flatMap(c => held[c]).length === 1 ? 'is' : 'are'} left out of your net worth
+      rather than counted at the wrong figure.</p>` : ''}
+    <div class="addbar"><button class="btn small" data-add="rate">＋ Add a currency</button></div>
   </div>`;
 }
 
@@ -7812,9 +8040,14 @@ function liabilitiesCard() {
     /* The stated figure is named in the tooltip whenever the projection has
        moved it, so a balance nobody typed is never mistaken for one somebody
        did. */
-    const balTitle = moved
-      ? `Stated ${fmtMoney(l.balance)} in ${monthLabelFull(l.asOf)}, paid down to here`
-      : l.asOf ? `As stated in ${monthLabelFull(l.asOf)}` : 'As typed — no month said';
+    const money = (v) => fmtMoneyIn(v, l.cur);
+    const balTitle = (moved
+      ? `Stated ${money(l.balance)} in ${monthLabelFull(l.asOf)}, paid down to here`
+      : l.asOf ? `As stated in ${monthLabelFull(l.asOf)}` : 'As typed — no month said')
+      + (l.cur ? ` · in ${l.cur}${(() => {
+        const c = inPlanCurrency(state, bal, l.cur);
+        return c.unknown ? ', no rate stated yet' : `, about ${fmtMoney(c.v)}`;
+      })()}` : '');
     const ends = !a ? '<span class="muted">Add a payment</span>'
       : a.never ? '<span class="muted">The payment is under the interest</span>'
       : !l.asOf ? '<span class="muted">Add the month it was true</span>'
@@ -7825,15 +8058,24 @@ function liabilitiesCard() {
       <th scope="row">${esc(l.name)}${l.note ? ` <span class="muted" title="${esc(l.note)}">📝</span>` : ''}</th>
       <td style="text-align:left">${esc(LIABILITY_KIND_LABEL[l.kind] || 'Other')}${
         l.securedOn && propName(l.securedOn)
-          ? ` <span class="muted">on ${esc(propName(l.securedOn))}</span>` : ''}</td>
-      <td title="${esc(balTitle)}"${moved ? ' class="projected"' : ''}>${fmtMoney(bal)}</td>
+          ? ` <span class="muted">on ${esc(propName(l.securedOn))}</span>` : ''}${
+        l.cur ? ` <span class="muted">${esc(l.cur)}</span>` : ''}</td>
+      <td title="${esc(balTitle)}"${moved ? ' class="projected"' : ''}>${money(bal)}</td>
       <td>${typeof l.rate === 'number' ? `${round2(l.rate * 100)}%` : '<span class="muted">—</span>'}</td>
-      <td>${typeof l.payment === 'number' ? fmtMoney(l.payment) : '<span class="muted">—</span>'}</td>
+      <td>${typeof l.payment === 'number' ? money(l.payment) : '<span class="muted">—</span>'}</td>
       <td style="text-align:left">${ends}</td>
       <td>${rest && !rest.never && rest.interest !== null && bal > 0
-        ? fmtMoney(rest.interest) : '<span class="muted">—</span>'}</td></tr>`;
+        ? money(rest.interest) : '<span class="muted">—</span>'}</td></tr>`;
   }).join('');
-  const total = round2(list.reduce((t, l) => t + liabilityAt(l, now), 0));
+  /* Both totals convert, and both leave out what they cannot value — a column
+     of pounds and dollars added together is the one figure this card must never
+     print. */
+  const owedEach = list.map(l => inPlanCurrency(state, liabilityAt(l, now), l.cur));
+  const total = round2(owedEach.reduce((t, e) => t + e.v, 0));
+  const payTotal = round2(list
+    .reduce((t, l) => t + inPlanCurrency(state, l.payment || 0, l.cur).v, 0));
+  const uncounted = owedEach.filter(e => e.unknown).length;
+  const foreign = list.filter(l => l.cur).length;
   const anyProjected = list.some(l => l.asOf && liabilityAt(l, now) !== l.balance);
   return `<div class="card" style="grid-column:1/-1">
     <h2>What You Owe${helpBtn('liabilities', 'how a debt is projected')}</h2>
@@ -7845,15 +8087,19 @@ function liabilitiesCard() {
         : `Say what a balance was, when it was true, the rate and the payment, and the app
            works out what is left today and when it ends.`} Nothing here reaches the budget:
       the payment is already an expense row, and counting it twice would take the money out
-      twice.</p>
+      twice.${foreign ? ` A debt held abroad reads in its own money; only the totals are
+      converted${uncounted ? ', and they leave out what has no rate yet' : ''}.` : ''}</p>
     ${list.length ? `<div class="tablewrap"><table>
       <thead><tr><th style="text-align:left">Debt</th><th style="text-align:left">Kind</th>
         <th>Owed now</th><th>Rate</th><th>Payment</th>
         <th style="text-align:left">Paid off</th>
         <th title="What the remaining payments cost in interest, at this rate">Interest left</th></tr></thead>
       <tbody>${rows}</tbody>
-      ${list.length > 1 ? `<tfoot><tr><th>Total</th><td></td><td>${fmtMoney(total)}</td>
-        <td></td><td>${fmtMoney(round2(list.reduce((t, l) => t + (l.payment || 0), 0)))}</td>
+      ${list.length > 1 ? `<tfoot><tr><th>Total${foreign
+        ? ` <span class="muted">in ${esc(String(state.settings.currency || 'USD').toUpperCase())}</span>` : ''}</th>
+        <td></td><td${uncounted ? ' title="Leaves out what has no exchange rate yet"' : ''}>${
+          fmtMoney(total)}</td>
+        <td></td><td>${fmtMoney(payTotal)}</td>
         <td></td><td></td></tr></tfoot>` : ''}
     </table></div>` : `<p class="sub">Nothing owed${viewOnly ? '.' : ' — or nothing recorded yet.'}</p>`}
     <div class="addbar"><button class="btn small" data-add="liability">＋ Add a debt</button></div>
@@ -7869,7 +8115,8 @@ function renderHousehold() {
       <p>Your Total doesn't move: this records who owns the money, not how much
         of it there is.</p>
       <p style="margin-top:14px"><button class="btn primary" data-add="person">＋ Add the first person</button></p>
-    </div></div>` + `<div class="cards2 pairs">${propertyCard()}${liabilitiesCard()}</div>`;
+    </div></div>` + `<div class="cards2 pairs">${propertyCard()}${liabilitiesCard()}${
+      currenciesCard()}</div>`;
 
   const now = thisMonth();
   const rows = people.map((p, idx) => {
@@ -7971,6 +8218,7 @@ function renderHousehold() {
        ends the string. It did, and the app came up blank. -->
   ${propertyCard()}
   ${liabilitiesCard()}
+  ${currenciesCard()}
   <div class="card">
     <h2>Who Owns What</h2>
     <p class="sub">Every account, grouped by whose it is${
@@ -13662,6 +13910,18 @@ const andList = (xs) => xs.length < 2 ? xs.join('')
   : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 
 /* ── The registry ─────────────────────────────────────────────────────────── */
+/* The Currency box the three off-engine things share. Offered only once a rate
+   exists: a dropdown whose one option is the currency you are already in is a
+   question with no answer, and the card that adds rates says so in prose. */
+const currencyField = (hint) => {
+  const own = String(state.settings.currency || 'USD').toUpperCase();
+  const codes = Object.keys((state.side || {}).rates || {}).sort();
+  if (!codes.length) return [];
+  return [{ key: 'cur', label: 'Currency', type: 'select',
+    options: [[own, `${own} — this plan's own`], ...codes.map(c => [c, c])],
+    hint: hint || 'Converted into ' + own + ' at the rate on the Household tab.' }];
+};
+
 const EDITORS = {
 
   /* Budget category rows (the grid's left column) */
@@ -14440,6 +14700,8 @@ const EDITORS = {
       { key: 'kind', label: 'Kind', type: 'select',
         options: PROPERTY_KINDS.map(([v, label]) => [v, label]) },
       { key: 'value', label: 'What it would sell for', type: 'money' },
+      ...currencyField('The currency it is worth that much IN — a flat abroad is priced '
+        + 'where it stands, not where you bank.'),
       noteField,
     ],
     get: (ds) => ({ ...state.side.property[+ds.idx] }),
@@ -14452,9 +14714,13 @@ const EDITORS = {
         /* An empty money box is null — keep the field absent rather than
            storing a 0 that claims the thing is worthless. */
         value: typeof v.value === 'number' ? v.value : undefined,
+        cur: (state.side.rates || {})[v.cur] ? v.cur : undefined,
         note: v.note || undefined,
       };
-      if (ds.idx !== undefined) Object.assign(state.side.property[+ds.idx], row);
+      if (ds.idx !== undefined) {
+        Object.assign(state.side.property[+ds.idx], row);
+        if (row.cur === undefined) delete state.side.property[+ds.idx].cur;
+      }
       /* A new row is minted an id here rather than left to coerceShape,
          because a debt secured on it needs something to point at the moment
          the reader adds one — which is usually the very next thing they do. */
@@ -14472,6 +14738,50 @@ const EDITORS = {
       if (gone) for (const l of state.side.liabilities || [])
         if (l.securedOn === gone.id) delete l.securedOn;
     },
+  },
+
+  /* One exchange rate. Keyed by the CODE rather than an index, because that is
+     what everything else points at — `cur` on a property, a debt or a pane. */
+  rate: {
+    title: (ds, isNew) => isNew ? 'Add a Currency' : 'Exchange Rate',
+    cols: 2,
+    sub: () => `What one unit is worth in ${String(state.settings.currency || 'USD')
+      .toUpperCase()}. You state it; the app never looks one up — a rate fetched today is `
+      + 'wrong tomorrow, and one baked in is wrong for ever. Say when it was true and the '
+      + 'card can tell you how old it is.',
+    fields: () => [
+      { key: 'code', label: 'Currency code', type: 'text',
+        hint: 'Three letters — GBP, EUR, CAD.' },
+      { key: 'rate', label: `One unit is`, type: 'money' },
+      { key: 'asOf', label: 'Rate from', type: 'date',
+        hint: 'The day you read it. Optional, but a rate with no date is a rate you '
+          + 'cannot judge.' },
+    ],
+    get: (ds) => ({ code: ds.key, ...(state.side.rates[ds.key] || {}) }),
+    blank: () => ({}),
+    save(ds, v) {
+      const code = String(v.code || '').trim().toUpperCase();
+      const own = String(state.settings.currency || 'USD').toUpperCase();
+      if (!/^[A-Z]{3}$/.test(code)) { toast('A currency code is three letters — GBP, EUR, CAD'); return; }
+      if (code === own) { toast(`${code} is already this plan's own currency`); return; }
+      if (!(v.rate > 0)) { toast('A rate has to be more than nothing'); return; }
+      /* Renaming the code moves the row AND everything pointing at it: a
+         property saying GBP whose rate had just become EUR would drop out of
+         net worth with no explanation on screen. */
+      if (ds.key !== undefined && ds.key !== code) {
+        delete state.side.rates[ds.key];
+        for (const row of [...state.side.property, ...state.side.liabilities,
+                           ...state.side.portfolios])
+          if (row.cur === ds.key) row.cur = code;
+      }
+      state.side.rates[code] = { rate: v.rate };
+      if (v.asOf) state.side.rates[code].asOf = v.asOf;
+    },
+    /* The rate goes; what was priced in it does NOT. Those rows keep their
+       currency and drop out of the total, and the card says which and why —
+       silently repricing somebody's flat into dollars because a rate was
+       deleted is exactly the wrong answer. */
+    del: (ds) => { delete state.side.rates[ds.key]; },
   },
 
   /* What is still owed. Deliberately its own list rather than a field on a
@@ -14494,6 +14804,8 @@ const EDITORS = {
           + 'figure simply stands as typed.' },
       { key: 'rate', label: 'Rate %/yr', type: 'percent' },
       { key: 'payment', label: 'Paid each month', type: 'money' },
+      ...currencyField('The currency the debt is IN — the balance and the payment are both '
+        + 'read as that.'),
       /* Only offered when there is something to secure it ON. A dropdown whose
          only option is "Nothing" is a question with one answer. */
       ...((state.side.property || []).length ? [{ key: 'securedOn', label: 'Secured on',
@@ -14521,6 +14833,7 @@ const EDITORS = {
         asOf: /^\d{4}-\d{2}$/.test(String(v.asOf || '')) ? v.asOf : undefined,
         securedOn: (state.side.property || []).some(p => p.id === v.securedOn)
           ? v.securedOn : undefined,
+        cur: (state.side.rates || {})[v.cur] ? v.cur : undefined,
         note: v.note || undefined,
       };
       if (ds.idx !== undefined) {
@@ -14529,7 +14842,7 @@ const EDITORS = {
            settings-defaults trap in reverse, and the reason it is safe is that
            nothing merges this row over a set of defaults. */
         Object.assign(state.side.liabilities[+ds.idx], row);
-        for (const k of ['rate', 'payment', 'asOf', 'securedOn', 'note'])
+        for (const k of ['rate', 'payment', 'asOf', 'securedOn', 'cur', 'note'])
           if (row[k] === undefined) delete state.side.liabilities[+ds.idx][k];
       } else {
         state.side.liabilities.push({ ...row,
@@ -14995,10 +15308,16 @@ const EDITORS = {
           + 'real-world account that isn\'t listed here should stay unticked, or its money '
           + 'would vanish from the total. Leave them all unticked for money the budget '
           + 'doesn\'t track.' },
+      /* A pane held abroad. It applies to the PANE, not to a holding: a
+         brokerage account has one currency, and letting each ticker carry its
+         own would be a claim about where a fund is listed that the app has no
+         way to check. */
+      ...currencyField('The currency this account\'s prices are in. It converts for net '
+        + 'worth; the pane itself still reads in its own money.'),
     ],
     get: (ds) => {
       const pf = state.side.portfolios.find(p => p.id === ds.id) || {};
-      return { name: pf.name, accounts: pf.accounts || [] };
+      return { name: pf.name, accounts: pf.accounts || [], cur: pf.cur };
     },
     save(ds, v) {
       if (!v.name) return;
@@ -15009,14 +15328,16 @@ const EDITORS = {
         .filter(id => accountById(state, id));
       if (ds.id) {
         const pf = state.side.portfolios.find(p => p.id === ds.id);
+        const cur = (state.side.rates || {})[v.cur] ? v.cur : null;
         if (pf) { pf.name = v.name;
-          if (accounts.length) pf.accounts = accounts; else delete pf.accounts; }
+          if (accounts.length) pf.accounts = accounts; else delete pf.accounts;
+          if (cur) pf.cur = cur; else delete pf.cur; }
         return;
       }
-      let id = slugJs(v.name), n = 2;
-      while (state.side.portfolios.some(p => p.id === id)) id = `${slugJs(v.name)}-${n++}`;
+      const id = uniqueId(state.side.portfolios, v.name, 'account');
       state.side.portfolios.push({ id, name: v.name,
-        ...(accounts.length ? { accounts } : {}), rows: [] });
+        ...(accounts.length ? { accounts } : {}),
+        ...((state.side.rates || {})[v.cur] ? { cur: v.cur } : {}), rows: [] });
     },
     del(ds) {
       state.side.portfolios = state.side.portfolios.filter(p => p.id !== ds.id);
@@ -19249,7 +19570,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote,
   priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
   coerceQuotes,
-  fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
+  fmtMoney, fmtMoneyIn, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
   reconcileNote,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   mergeAccountsByName, nominateHub, hubAccount, dividendAccounts, statedAfter,
@@ -19271,6 +19592,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   /* Debts: the schedule, where it lands in a given month, and when it ends.
      Pure over one row, so a test pins the arithmetic rather than the card. */
   amortize, liabilityAt, payoffMonth, LIABILITY_KINDS, SECURED_KINDS,
+  planRate, inPlanCurrency,
   SNAPSHOT_PARTS, SNAPSHOT_ASSETS, uniqueId, cellTip, balanceTip,
   receivedInto, earningsOver, earningLines, balanceYearTip, flowTransferNote, internalRows,
   raisesKeyboard,
