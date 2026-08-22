@@ -1246,27 +1246,53 @@ PR would otherwise raise the manifest while the app went on serving the old byte
 the two to the same version, which makes a manifest-only bump fail and turns the PR into the
 right instruction — update the file too, in all three repos that carry it.
 
-## What Google's Code Does on an Ordinary Visit (2026-08-21)
+## When Google's Code Loads (2026-08-22)
 
-A network trace of a plain page load — no clicking, no signing in — shows four requests to
-Google: `firebase-app.js`, `firebase-auth.js` and `firebase-firestore.js` from
-`www.gstatic.com`, and the sign-in client from `accounts.google.com`. That is not a bug. The
-app cannot know whether you are **already** signed in on this device without asking Firebase,
-and it cannot ask without loading Firebase first, so `init()` runs on load.
+**Not on an ordinary visit any more.** `init()` used to run unconditionally at the foot of the
+sync module, so `firebase-app`, `firebase-auth`, `firebase-firestore` and the Google sign-in
+client were fetched from `www.gstatic.com` and `accounts.google.com` before anyone had touched
+anything — four requests to Google carrying the visitor's IP and user-agent, on a page that
+might never sync. That is what made the old privacy wording false; this is the change that
+lets the strong sentence be true.
 
-What was wrong was the **privacy policy**, which said Google's code loaded "only when you
-choose to sign in". It now says what actually happens, names the two hosts so the claim can be
-checked against a trace of your own, and is explicit that no app data goes with those requests
-and nothing is stored or synced until you press the button. `tests.html` ties the two
-together: while the CSP still admits `gstatic.com` and `accounts.google.com` — the app's own
-record that it loads them — the policy has to carry the "every visit" paragraph, and the old
-wording fails the suite.
+It cannot be made *fully* lazy, and that is the whole difficulty: a returning signed-in reader
+has to be recognised **without clicking anything**, and the only thing that knows whether this
+browser holds a live Firebase session is Firebase. So the app records the answer itself:
 
-**If this should stop being true**, the change is to defer `init()` until either the sign-in
-button is pressed or a stored flag says this browser has signed in before. That keeps a
-returning user signed in while giving a first-time visitor a page that talks to nobody. It is
-a real refactor of the sync module, not a wording change, and the test above is written to be
-revisited rather than deleted if it happens.
+| `fin-sync-live` | meaning | on load |
+|---|---|---|
+| `'1'` | a session was live at last report | load Firebase now |
+| `'0'` | there was none, or they signed out | load nothing |
+| absent | never asked, or a browser from before this change | fall back to the legacy `fin-sync-uid` marker |
+
+`onAuthStateChanged` writes `'1'` or `'0'` on **every** auth report, including the null one
+that follows signing out — so signing out stops the requests, not just the syncing. The
+`absent` case is the migration and costs at most **one** eager load per browser:
+`fin-sync-uid` has been written on the first successful sync for an account since long
+before this, and is never removed, so its presence means "this browser has signed in at some
+point". A browser that has never signed in has neither key and never takes that path.
+
+**The warming is load-bearing, not an optimisation.** `requestAccessToken()` has to be called
+from inside the click handler or the browser judges the popup unsolicited and blocks it, and
+awaiting a cold SDK import first would spend the gesture. So the load starts on
+`pointerenter`, `pointerdown` and `focus` — all of which fire *before* click. `onClick` still
+awaits `ensureInit()` as a fallback, for somebody who tabs straight to the button and presses
+Enter; if the popup is refused there, the existing `popup_failed_to_open` message says what to
+do and the second press always works. `ensureInit()` is idempotent, or a hover and a click
+would start two Firebase apps.
+
+The click listener is wired at the **boot branch**, not at the end of `init()` — `init()` may
+not have run yet, and the button has to be pressable in order to be what causes it to run.
+
+`tests.html` pins the shape of all of this, and the privacy page's wording with it.
+
+## Firebase Version
+
+All three sync apps are on the **same** Firebase version, moved together, exactly like the
+vendored Chart.js: `package.json` pins it for Dependabot and `tests.html` pins the manifest to
+the `firebasejs/…` URL in `index.html`, so a manifest-only bump fails. Bumping means changing
+the URL and the pin in the same commit, in all three repos, and then proving a real Google
+sign-in still works on the live origin.
 
 ## The Landmarks (2026-08-21)
 
@@ -1303,8 +1329,14 @@ instruction: *a newer SDK exists, now change the URL too.*
 
 Never let that pin become a `^` or `~` range — a range cannot be checked against a URL.
 
-The three sync apps are **not on the same Firebase version** (Golf Handicap 12.17.1, PAPTrack
-and Money Map 12.16.0, latest 12.18.0). Nothing is wrong with any of them and none has a known
-advisory, but the Chart.js rule — one version, moved in all the repos that carry it — should
-apply here too. Bumping means changing the URL and the manifest pin together and then proving
-a real Google sign-in still works, which needs a signed-in browser on the live origin.
+## The Header Strapline
+
+The header reads **Financial Plan · Charlie's Epic Money Map**, matching the six sibling apps.
+It is a **Preference**, not a hardcoded name: change it in Preferences and it changes; clear
+it and the app is just "Financial Plan" again, and stays that way. A plan written before
+2026-08-22 gains the default once, through the schema-6 migration, and only if its subtitle
+was empty — one somebody had typed is never overwritten.
+
+It appears in the browser tab as well as the header, and it travels in a share link along with
+everything else in `state.settings`, so a recipient sees the sender's subtitle over the
+sender's figures. That is the existing deliberate pairing, and the Preferences hint says so.

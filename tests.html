@@ -180,7 +180,14 @@ t('blankState carries the spreadsheet constants', () => {
   approx((s.settings.accounts.find(a => a.id === 'long') || {}).rate, 0.07,
      'the 7% lives on the Investments account itself, where it is editable');
   eq(s.settings.ptoAllowance, 32);
-  eq(s.settings.tagline, '', 'and a fresh plan is nobody’s in particular');
+  /* The strapline every sibling app carries, prefilled 2026-08-22 and still a
+     Preference: it is a DEFAULT, not a hardcoded name, and clearing the field
+     sticks because '' is a string that survives coerceShape. Read off the app's
+     own constant rather than repeated here — the markup carries a third copy,
+     and two of the three drifting silently is exactly the failure this catches. */
+  eq(s.settings.tagline, H.DEFAULT_TAGLINE,
+     'a fresh plan wears the family strapline');
+  ok(/Money Map/.test(H.DEFAULT_TAGLINE), 'and it names this app: ' + H.DEFAULT_TAGLINE);
   eq(Array.isArray(s.people), true, 'a fresh plan has an empty household');
   eq(s.people.length, 0);
   eq(s.settings.filingStatus, 'single',
@@ -195,7 +202,7 @@ t('a plan from before the household arrives with an empty one, nothing invented'
     settings: { accounts: [{ id: 'cash', name: 'Cash', hub: true }, { id: 'mid', name: 'Savings' }] },
     years: { '2026': { kind: 'grid', startMonth: '2026-01', monthCount: 12 } }
   }));
-  eq(d.schema, 5);
+  eq(d.schema, H.SCHEMA, 'and it comes forward to the current schema');
   eq(d.people, []);
   eq(d.settings.filingStatus, 'single');
   eq(d.settings.accounts.every(a => a.owner === undefined), true,
@@ -2122,7 +2129,7 @@ t('the reclassification runs once and then leaves you alone', () => {
   const first = H.migrate(H.coerceShape({ schema: 1, years: { '2015': year() } }));
   eq(first.years['2015'].categoryTotals[0].isBalance, undefined, 'Mortgage is a flow now');
   eq(first.years['2015'].categoryTotals[1].isBalance, true);
-  eq(first.schema, 5, 'and it comes forward to the current schema');
+  eq(first.schema, H.SCHEMA, 'and it comes forward to the current schema');
   /* now flip one by hand, as the row editor would, and load again */
   first.years['2015'].categoryTotals[0].isBalance = true;
   const second = H.migrate(H.coerceShape(JSON.parse(JSON.stringify(first))));
@@ -2930,10 +2937,29 @@ t('an absent setting is ABSENT, so its default can still win', () => {
     .forEach(k => eq(k in d.settings, false, `${k} must be gone, not undefined`));
   const merged = Object.assign(H.blankState().settings, d.settings);
   eq(merged.ptoAllowance, 32, 'so the blank state’s own figure survives the merge');
-  eq(merged.tagline, '');
+  eq(merged.tagline, H.DEFAULT_TAGLINE, 'and the strapline default with it');
   eq(merged.midTermRateAnnual, 0.03);
   eq(merged.retirementReturnAnnual, 0.07);
 });
+t('schema 6 fills an empty strapline ONCE, and never over one you typed', () => {
+  /* The fill has to be a migration rather than a coerceShape default: coerceShape
+     runs on every load, so a fill there could never be cleared — you would empty
+     the field, reload, and it would be back. Here it happens to a plan written
+     before 2026-08-22 and never again. */
+  const older = H.migrate(H.coerceShape({ schema: 5, settings: {} }));
+  eq(older.settings.tagline, H.DEFAULT_TAGLINE, 'an older plan gains the strapline');
+  eq(older.schema, H.SCHEMA);
+
+  const mine = H.migrate(H.coerceShape({ schema: 5, settings: { tagline: 'Our plan' } }));
+  eq(mine.settings.tagline, 'Our plan', 'a subtitle somebody typed is theirs — never overwritten');
+
+  /* And the point of doing it once: a plan already at the current schema with a
+     deliberately empty subtitle stays empty, however many times it is loaded. */
+  const cleared = H.migrate(H.coerceShape({ schema: H.SCHEMA, settings: { tagline: '' } }));
+  eq(cleared.settings.tagline, '', 'clearing the field sticks');
+  eq(H.migrate(cleared).settings.tagline, '', 'and stays stuck on the next load');
+});
+
 t('a subtitle that is not a string cannot take the whole page down', () => {
   /* render() reads `(state.settings.tagline || '').trim()` before it draws a
      single tab, so a NUMBER there threw and the app came up completely blank —
@@ -7504,24 +7530,66 @@ t('the privacy page carries the family footer', async () => {
     'with main CLOSED before it: a <footer> inside main is not contentinfo at all');
   ok(!/href="privacy\.html"/.test(src),
     'and NOT a privacy link, which on the privacy page points at itself');
-  /* The gap this closes was found by a network trace on 2026-08-21: Google's
-     firebase-app/auth/firestore and its sign-in client are fetched on an
-     ORDINARY visit, before anyone signs in — the app cannot know whether you
-     are already signed in without asking Firebase, and cannot ask without
-     loading it. The policy listed what the app does not do and never mentioned
-     that, which left an ordinary visit unaccounted for. Tied to the CSP, which
-     is the app's own record that it loads those hosts. */
-  const cspEager = (APP_SRC.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/) || [])[1] || '';
-  ok(/gstatic\.com/.test(cspEager) && /accounts\.google\.com/.test(cspEager),
-    'this test assumes the app still loads Google code on every visit. If it no longer '
-    + 'does, the CSP should have stopped naming those hosts — and then this test, and the '
-    + 'paragraph it pins, both want revisiting rather than deleting.');
-  ok(/every visit/i.test(src),
-    'the policy must say Google’s code loads on EVERY visit, not only on sign-in');
+  /* The wording here has moved twice and the second move is the good one. It
+     had no account of an ordinary visit at all, while a network trace showed
+     Google's code being fetched on every one. That was corrected on 2026-08-21,
+     and then on 2026-08-22 the APP was changed so the strong sentence could be
+     true: nothing of Google's is fetched until the sign-in button is reached
+     for, or unless this browser already holds a session. So this pins the strong
+     claim AND the honest caveat, because a policy that promised "never without
+     asking" and quietly skipped the already-signed-in case would be the same
+     kind of wrong again. */
+  ok(/[Oo]nly when you ask for it/.test(src),
+    'the policy must say Google’s code is fetched only when asked for');
+  ok(/already signed in on this device/.test(src),
+    'and must still own the one case where it loads on its own — a browser that '
+    + 'already holds a session, which is the only way staying signed in can work');
+  ok(/signing out stops the requests/i.test(src),
+    'and say that signing out stops the requests, not just the syncing');
   ok(/gstatic/.test(src) && /accounts\.google\.com/.test(src),
-    'and must name the two hosts, so the claim is checkable against a network trace');
-  ok(!/only when you (choose to )?sign in/i.test(src),
-    'the untrue wording the sibling apps carried must never appear here');
+    'and name the two hosts, so the claim is checkable against a network trace');
+  ok(!/loads? on (every|each) visit(?![\s\S]{0,80}until August)/i.test(src),
+    'the every-visit wording is back, but the app no longer does that — one of '
+    + 'the two is now wrong');
+});
+
+t('Google\u2019s code is fetched when it is asked for, not on every visit', () => {
+  /* The change this pins (2026-08-22): Google's code is no longer fetched on
+     every visit. init() used to run unconditionally at the foot of the sync
+     module, so firebase-app/auth/firestore and the sign-in client were
+     downloaded before anyone had touched anything — which is what made the
+     privacy policy's old wording false. Now the boot branch asks
+     shouldBootSync(), and a browser that has never signed in loads nothing
+     until the button is reached for.
+
+     Read as TEXT, like the service-worker group above and for the same reason:
+     the suite must not boot a real session to find out. What is worth asserting
+     is the SHAPE — that the unconditional call is gone, that the flag is written
+     on every auth report including the null one, and that the click path can
+     still get the SDK for somebody who never hovers. */
+  const code = stripComments(APP_SRC);
+  ok(!/^\s*init\(\)\.catch/m.test(code),
+    'init() is being called unconditionally again — that is the eager load this removed');
+  ok(/function shouldBootSync\(\)/.test(code),
+    'the boot decision must go through shouldBootSync()');
+  ok(/if \(shouldBootSync\(\)\)/.test(code), 'and the boot branch must ask it');
+  ok(/const SYNC_LIVE = 'fin-sync-live'/.test(code),
+    'the flag this app records the answer in must keep its key');
+  ok(/localStorage\.setItem\(SYNC_LIVE, u \? '1' : '0'\)/.test(code),
+    "the flag must be written on EVERY auth report — the null one is what makes "
+    + 'signing out stop the requests rather than just the syncing');
+  ok(/localStorage\.getItem\(LEGACY_SYNC_UID\) !== null/.test(code),
+    'a browser that signed in before this shipped must still be recognised, once, '
+    + 'from the legacy fin-sync-uid marker');
+  for (const ev of ['pointerenter', 'pointerdown', 'focus'])
+    ok(code.includes("'" + ev + "'"),
+      'the SDK is warmed on ' + ev + ', which fires before click — without it the '
+      + 'sign-in popup is opened outside the gesture and browsers block it');
+  ok(/async function onClick\(\)/.test(code) && /await ensureInit\(\)/.test(code),
+    'and the click path must be able to load it itself, for somebody who tabs '
+    + 'straight to the button and presses Enter');
+  ok(/function ensureInit\(\)/.test(code) && /if \(!initPromise\)/.test(code),
+    'ensureInit must be idempotent, or a hover and a click start two Firebase apps');
 });
 
 t('the cache list holds only files that are already public', () => {

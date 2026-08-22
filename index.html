@@ -1210,11 +1210,17 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
          and without it the header would keep showing whatever icon it cached
          the first time. Bump it whenever make_favicon.py is re-run — here, on
          the <link> above, and on privacy.html's, which is easy to forget. -->
-    <!-- The subtitle is the reader's own (Preferences), empty by default and
-         filled in by render(). It used to be one person's name in the markup,
-         which every copy of the app and every shared link then carried. -->
+    <!-- The subtitle is the reader's own (Preferences) and render() rewrites it,
+         but the DEFAULT is written out here — the family's "everything in this
+         row is at its final size" rule, and this is the one thing in the row
+         whose width the header cannot otherwise guess. It was empty and `hidden`
+         because the name used to be hardcoded with no way to change it, which
+         every copy and every shared link then carried; a default a Preference
+         can clear is a different thing, and it puts this app's header in line
+         with its six siblings. Keep the string in step with DEFAULT_TAGLINE,
+         which is what a fresh plan and the schema-6 migration both use. -->
     <h1 class="brand"><img src="favicon.ico?v=2" width="22" height="22" alt=""
-      >Financial&nbsp;Plan <span id="brandTag" hidden></span></h1>
+      >Financial&nbsp;Plan <span id="brandTag">&middot; Charlie&rsquo;s Epic Money Map</span></h1>
     <label class="sr-only" for="themeSel">Theme</label>
     <!-- The four unified themes, listed alphabetically (matches the other apps).
          Midnight is pre-selected to match the theme the boot script in <head> has
@@ -1659,7 +1665,25 @@ const STORAGE_KEY = 'fin-state';
    here is what lets `load` spot the opposite case — a plan from the FUTURE,
    saved by a newer build — which migrate cannot help with and must not guess
    at. Bump it in the same commit as the migration step that earns it. */
-const SCHEMA = 5;
+const SCHEMA = 6;
+
+/* The strapline beside the app's name in the header, and after it in the browser
+   tab. Every other app in the family carries one — "· Charlie's Epic Sprint
+   Planner", "· Charlie's Epic Supply Tracker" — written straight into the markup;
+   this app was the only one without, because its subtitle is a Preference and the
+   default was empty.
+
+   It is prefilled now (2026-08-22, asked for), and still a Preference: clear the
+   field and it stays cleared, because `''` is a string and survives coerceShape
+   where an absent key falls back to this. Migration for a plan written before
+   today is schema 6 below, which fills it ONCE — a fill on every load could never
+   be cleared.
+
+   It travels in a share link, like everything else in state.settings, and that is
+   existing deliberate behaviour rather than something this changes: the recipient
+   sees the SENDER's subtitle over the sender's figures, which is the right
+   pairing, and the Preferences hint on the field says so. */
+const DEFAULT_TAGLINE = 'Charlie\u2019s Epic Money Map';
 const UPDATED_KEY = 'fin-updated';   // written by save(); the hook a future sync layer keys off
 const THEME_KEY   = 'fin-theme';
 /* How big this device draws the app. Beside the theme rather than in the state
@@ -2170,7 +2194,7 @@ function blankState() {
     settings: {
       midTermRateAnnual: 0.03,   // dividend estimate: rate/12 × prior (cash+mid)
       ptoAllowance: 32,
-      tagline: '',   // the reader's own subtitle (Preferences); shown beside the name
+      tagline: DEFAULT_TAGLINE, // the reader's own subtitle (Preferences); beside the name
       /* Every tracked account, in grid order. id is permanent (seeds,
          overrides and goal sources key off it); rate is annual growth applied
          as rate/12 each month; creditTo says which account that interest
@@ -3670,6 +3694,20 @@ function migrate(parsed) {
   if ((parsed.schema || 1) < 5) {
     mergeAccountsByName(parsed);
     parsed.schema = 5;
+  }
+  /* Schema 6 fills in the strapline, ONCE. It belongs here rather than in
+     coerceShape for the same reason schema 3 and 5 do: coerceShape runs on every
+     load, and a fill there could never be undone — clear the field, reload, and
+     it would be back. Here it happens to a plan written before today and never
+     again, so clearing sticks from then on.
+
+     Only over an EMPTY one. A subtitle somebody had already typed is theirs, and
+     the point of the default is to stop the header looking unfinished, not to
+     overwrite an answer. */
+  if ((parsed.schema || 1) < 6) {
+    if (parsed.settings && !String(parsed.settings.tagline || '').trim())
+      parsed.settings.tagline = DEFAULT_TAGLINE;
+    parsed.schema = 6;
   }
   return parsed;
 }
@@ -17876,7 +17914,7 @@ booted = true;
 
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
-window.__finTestHooks = { SCHEMA, round2, roundTo, raiseFor, sinceLastYear,
+window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, sinceLastYear,
   /* The sample plan, so its tests measure the SAME object the button loads
      rather than a copy of it that can drift. */
   sampleState,
@@ -18033,7 +18071,7 @@ const FIREBASE_CONFIG = {
 };
 const GOOGLE_CLIENT_ID = '929356552024-qtv6nm1tucqb8e9j4mbheve9vq9vq3ds.apps.googleusercontent.com';
 
-const SDK = 'https://www.gstatic.com/firebasejs/12.16.0/';
+const SDK = 'https://www.gstatic.com/firebasejs/12.18.0/';
 const GIS = 'https://accounts.google.com/gsi/client';
 const btn = document.getElementById('syncBtn');
 const privacyNote = document.getElementById('privacyNote');
@@ -18054,8 +18092,83 @@ catch (e) { /* cross-origin parent — not the harness */ }
    would replace the payload the visitor was sent with their OWN cloud copy,
    under a banner still claiming to be somebody else's plan. The flag is set
    before the page has finished parsing; the button is already hidden by then. */
+/* ── When Google's code is fetched ──────────────────────────────────────────
+   NOT on every visit any more (2026-08-22). init() used to run here
+   unconditionally, which meant firebase-app, firebase-auth, firebase-firestore
+   and the Google sign-in client were downloaded from gstatic.com and
+   accounts.google.com before anyone had touched anything — four requests to
+   Google, carrying this visitor's IP and user-agent, on a page that might never
+   sync at all. The privacy policy said the opposite and had to be corrected;
+   this is the change that lets the stronger sentence be true again. Same block,
+   same reasoning, in every sync app in the family.
+
+   It cannot be made fully lazy, and that is the whole difficulty: a returning
+   signed-in reader has to be recognised WITHOUT clicking anything, and the only
+   thing that knows whether this browser holds a live Firebase session is
+   Firebase. So the app records the answer itself, in `fin-sync-live`:
+
+     '1'      a session was live at last report        → load Firebase now
+     '0'      there was none, or they signed out       → load nothing
+     absent   never asked, or a browser from before    → fall back to the
+              legacy `fin-sync-uid` marker below
+
+   onAuthStateChanged writes '1' or '0' on every single auth report, so the
+   answer is never more than one load stale, and signing out genuinely stops the
+   requests rather than merely stopping the syncing.
+
+   The `absent` case is the migration, and it costs at most ONE eager load per
+   browser. A browser that was signing in before this shipped has no flag yet,
+   and a live session is invisible from here. `fin-sync-uid` is written on the
+   first successful sync for an account and never removed, so its presence means
+   "this browser has signed in at some point" — good enough to justify asking
+   once. That load resolves the flag either way, and every load after it is
+   decided by the flag alone. A browser that has NEVER signed in has neither key
+   and never takes this path: for a first-time reader the app now talks to
+   nobody at all until they press the button. */
+const SYNC_LIVE = 'fin-sync-live';
+const LEGACY_SYNC_UID = 'fin-sync-uid';
+
+function shouldBootSync() {
+  try {
+    const flag = localStorage.getItem(SYNC_LIVE);
+    if (flag === '1') return true;
+    if (flag === '0') return false;
+    return localStorage.getItem(LEGACY_SYNC_UID) !== null;
+  } catch (e) { return false; }
+}
+
+/* init() exactly once, however many paths ask for it. Every caller awaits the
+   same promise, so a hover that starts the load and a click a moment later do
+   not race into two Firebase apps. */
+let initPromise = null;
+function ensureInit() {
+  if (!initPromise) initPromise = init();
+  return initPromise;
+}
+
+/* Warming, and it is what keeps the sign-in popup opening. requestAccessToken()
+   has to be called from inside the click handler or the browser judges the popup
+   unsolicited and blocks it — and awaiting a cold SDK import first would spend
+   that gesture. So the load starts on the events that fire BEFORE click:
+   pointerenter for a mouse, focus for the keyboard, pointerdown for a touch. By
+   the time click arrives the SDK is usually in hand and the popup opens on the
+   gesture. When it is not, onClick awaits and the popup may be refused — which
+   is what the popup_failed_to_open branch of onSignInFailed already explains,
+   and the second press always works because everything is loaded by then.
+
+   Reaching for the sign-in button is a deliberate act, so this is still the
+   reader asking for Google rather than the page fetching it on their behalf. */
+function armSync() { ensureInit().catch(() => { /* onClick reports it */ }); }
+
 if (FIREBASE_CONFIG && !window.finViewOnly && !inTestHarness) {
-  init().catch((e) => { console.warn('Sync unavailable:', e); btn.hidden = true; });
+  if (shouldBootSync()) {
+    ensureInit().catch((e) => { console.warn('Sync unavailable:', e); btn.hidden = true; });
+  } else {
+    for (const ev of ['pointerenter', 'pointerdown', 'focus'])
+      btn.addEventListener(ev, armSync, { once: true, passive: true });
+  }
+  /* Wired HERE, not at the end of init(), which may not have run yet. */
+  btn.addEventListener('click', onClick);
 } else {
   btn.hidden = true;
 }
@@ -18102,6 +18215,11 @@ async function init() {
   db = Fs.getFirestore(app);
   A.onAuthStateChanged(auth, (u) => {
     user = u;
+    /* What the next load reads to decide whether to fetch Google's code at all
+       (see shouldBootSync above). Written on EVERY report, including the null
+       one that follows signing out — so signing out stops the requests, not
+       just the syncing. */
+    try { localStorage.setItem(SYNC_LIVE, u ? '1' : '0'); } catch (e) {}
     syncError = null;
     /* window.cloudWipe is GONE, and the reason is worth keeping. It deleted the
        Firestore document, forgot fin-sync-uid and signed you out — and the sign
@@ -18140,7 +18258,9 @@ async function init() {
       onSignInFailed(err);
     },
   });
-  btn.addEventListener('click', onClick);
+  /* The click listener is wired at the boot branch above rather than here:
+     init() may not have run yet, and the button has to be pressable in order
+     to be what causes it to run. */
 }
 
 function onSignInFailed(e) {
@@ -18240,6 +18360,18 @@ async function onClick() {
   if (user) {
     if (confirm('Sign out? The app keeps working with the local copy on this device.')) A.signOut(auth);
     return;
+  }
+  /* The load may not have been started, or may not have finished — see armSync.
+     Awaiting here is what makes the button work for someone who tabs straight to
+     it and presses Enter without the pointer ever going near it. */
+  if (!tokenClient) {
+    try {
+      await ensureInit();
+    } catch (e) {
+      console.warn('Sync unavailable:', e);
+      window.toast('Couldn’t reach Google — sync is unavailable right now');
+      return;
+    }
   }
   tokenClient.requestAccessToken();
 }
