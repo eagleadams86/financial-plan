@@ -2979,6 +2979,20 @@ is what the tests diff the JS engine against.
 **`run()` is async and `await`s each test**, because the share-link encode/decode
 goes through `CompressionStream`; `await` on an ordinary return value is a no-op,
 so every synchronous test is untouched.
+**tests.html busts its own cache, on the frame AND on the source fetches
+(2026-08-22), and that is not tidiness.** `const BUST = '?t=' + Date.now()` goes
+on the hidden `iframe.src` and through `bustFetch()` on every read of a file this
+repo serves — `index.html`, `sw.js`, `privacy.html`, `package.json`,
+`chart.min.js` and the two gitignored JSONs. The frame cache and the HTTP cache
+are different caches and they can disagree: in the lottery repo the same harness
+reported **all-green against a page three features out of date**, because the
+source-level tests were reading the file off the server while the frame ran a
+copy the browser had cached. Nothing errored; the new code was simply never run.
+A suite that can pass against a build which exists nowhere is worse than no
+suite — it turns "untested" into "verified". **If a test passes when you expected
+it to fail, check `document.getElementById('app').contentWindow` has the function
+you just wrote before believing anything.** `api.github.com` is deliberately left
+un-busted: somebody else's endpoint, not a file we serve.
 **A test must never depend on the app's AMBIENT state.** The harness frames the
 real `index.html`, so the app inside it loads whatever is in that browser's
 `fin-state` — and while testing a feature by hand that is routinely Charlie's

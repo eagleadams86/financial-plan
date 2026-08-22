@@ -65,6 +65,22 @@
 
 <script>
 'use strict';
+
+/* One cache-buster for this run, on the hidden frame AND on every fetch of a
+   file this repo serves. The two are different caches and they can disagree: on
+   2026-08-22 the lottery repo's suite reported all-green against a page three
+   features out of date, because its source-level tests were reading the file
+   off the server while its frame ran a copy the browser had cached. Nothing
+   errored and nothing looked wrong — the new code was simply never run. A suite
+   that can pass against a build which exists nowhere is worse than no suite,
+   because it turns "untested" into "verified".
+
+   `no-store` as well as the query, since a query alone is only a hint. The
+   `api.github.com` call is deliberately left alone: somebody else's endpoint,
+   not a file we serve. */
+const BUST = '?t=' + Date.now();
+const bustFetch = (f, init) => fetch(f + BUST, Object.assign({ cache: 'no-store' }, init || {}));
+
 const TESTS = [];
 function group(name) { TESTS.push({ group: name }); }
 function t(name, fn) { TESTS.push({ name, fn }); }
@@ -8043,7 +8059,7 @@ t('package.json and the vendored bundle name the SAME Chart.js', async () => {
      update the FILE too, in all three repos that carry it" — rather than a
      false record. Same discipline as the theme pack's gate: a generated
      artefact has to match its source. */
-  const [pkgRes, libRes] = await Promise.all([fetch('package.json'), fetch('chart.min.js')]);
+  const [pkgRes, libRes] = await Promise.all([bustFetch('package.json'), bustFetch('chart.min.js')]);
   ok(pkgRes.ok, 'package.json is missing — Dependabot then scans nothing at all');
   ok(libRes.ok, 'chart.min.js is missing');
   const PKG = await pkgRes.text(), LIB = await libRes.text();
@@ -8075,7 +8091,7 @@ t('package.json and the page name the SAME Firebase SDK', async () => {
      the page went on fetching the old one. Pinning the two together turns that
      PR into the right instruction — "a newer SDK exists, now change the URL
      too" — rather than a false record. */
-  const [pkgRes, appRes] = await Promise.all([fetch('package.json'), fetch('index.html')]);
+  const [pkgRes, appRes] = await Promise.all([bustFetch('package.json'), bustFetch('index.html')]);
   ok(pkgRes.ok, 'package.json is missing — Dependabot then scans nothing at all');
   ok(appRes.ok, 'index.html is missing');
   const PKG = await pkgRes.text(), APP = await appRes.text();
@@ -8099,7 +8115,7 @@ t('package.json and the page name the SAME Firebase SDK', async () => {
 
 t('sw.js and its kill switch are both present', async () => {
   const [a, b, c] = await Promise.all([
-    fetch('sw.js'), fetch('sw-kill.js'), fetch('index.html')]);
+    bustFetch('sw.js'), bustFetch('sw-kill.js'), bustFetch('index.html')]);
   ok(a.ok, 'sw.js is missing');
   ok(b.ok, 'sw-kill.js is missing — the escape hatch has to exist BEFORE it is needed');
   ok(c.ok, 'index.html is missing');
@@ -8150,7 +8166,7 @@ t('printing hides the furniture and opens the scrollers', () => {
    with no way back to what it documents and no statement of who wrote it. The
    privacy link itself is deliberately absent: you are standing on that page. */
 t('the privacy page carries the family footer', async () => {
-  const res = await fetch('privacy.html');
+  const res = await bustFetch('privacy.html');
   ok(res.ok, 'privacy.html is missing — the app footer links straight at it');
   const src = await res.text();
   ok(/>How it works</.test(src),
@@ -8491,7 +8507,7 @@ window.addEventListener('load', async () => {
      and on the public site, and the cross-check test skips itself. */
   try {
     const [d, e] = await Promise.all([
-      fetch('financial-plan-data.json'), fetch('expected-2026.json')]);
+      bustFetch('financial-plan-data.json'), bustFetch('expected-2026.json')]);
     if (d.ok && e.ok)
       window.__realData = { data: await d.json(), expected: await e.json() };
   } catch (_) { /* no local files — skip */ }
@@ -8674,7 +8690,7 @@ if (LOCAL_HOSTS.includes(location.hostname)) {
   frame.setAttribute('title', 'app under test');
   frame.setAttribute('aria-hidden', 'true');
   frame.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;border:0;left:-9999px';
-  frame.src = 'index.html';           /* set before append: one load event, the real one */
+  frame.src = 'index.html' + BUST;    /* set before append: one load event, the real one */
   document.body.appendChild(frame);
 } else {
   /* Two reasons to be here, needing different sentences: a published copy
