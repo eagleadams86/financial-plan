@@ -1181,6 +1181,54 @@ td.projected { font-style: italic; color: var(--text-secondary); }
   var(--accent-bg) 0 4px, var(--surface) 4px 8px); }
 
 .chartbox { position: relative; height: 260px; margin-top: 12px; }
+
+/* ── On paper ───────────────────────────────────────────────────────────────
+   There was no print stylesheet at all, so ⌘P gave you a sticky header parked
+   over the first card, a grid clipped at whatever month happened to be in view,
+   and rows of buttons nobody can press on paper. CSV was the only honest way
+   out, and CSV is not what you hand an accountant or read on a train.
+
+   TWO RULES, and the first one is why this block is short.
+
+   It sets NO COLOUR. Not one. The palettes belong to the theme pack, which is
+   the source of truth for all five apps, and a "print palette" written here
+   would be exactly the drift that rule exists to stop. Printing a dark theme
+   on white paper is still wrong, so the fix is JS and not CSS: `beforeprint`
+   borrows the pack's own LIGHT theme and `afterprint` gives it back (see
+   printUsesLightTheme below). Real light-on-white, no new hex anywhere.
+
+   And it only ever hides FURNITURE — the things that exist to be clicked. What
+   the reader folded away stays folded, because a fold is a decision about what
+   they want to read and print is not the moment to overrule it. */
+@media print {
+  /* Sticky is meaningless on paper and actively harmful: it prints once, over
+     the top of whatever the first page starts with. */
+  header { position: static; border-bottom: 1px solid var(--border); }
+  /* The controls in the header, the tab bar, every ＋ Add and ✎ Edit, the help
+     buttons and the year strip's arrows: all of them are ways IN, and none of
+     them survives the journey to paper. The brand line stays — a printed page
+     with no name on it is a page you cannot file. */
+  #themeSel, #zoomSel, .headbar .btn, .tabs, .addbar, .gridactions-wrap,
+  .tile-help, .yearnav, #shareBar, .checkline, .editrow[title]::after { display: none !important; }
+  /* Every horizontal scroller opens out: a budget year is twelve months wide
+     and the whole point of printing one is to have the twelve. The page is
+     landscape by default for the same reason. */
+  .gridwrap, .tablewrap, .triprow, .yearrail { overflow: visible !important; }
+  @page { size: landscape; margin: 12mm; }
+  /* A card is the unit a reader thinks in, so it should not be torn in half by
+     a page break where that can be helped. `auto` on the tall ones, because a
+     grid taller than a page cannot avoid a break and `avoid` on it would push
+     a whole empty page ahead of it. */
+  .card { break-inside: avoid; box-shadow: none; }
+  .card:has(.gridwrap), .card:has(.chartbox) { break-inside: auto; }
+  h2 { break-after: avoid; }
+  thead { display: table-header-group; }   /* a long table repeats its headings */
+  tr { break-inside: avoid; }
+  /* The footer's links are content — who wrote this and where the privacy
+     policy is — so they print. Their URLs do not: a printed page of financial
+     figures does not need github.com spelled out under it. */
+  a[href]::after { content: none !important; }
+}
 .cards2 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
 /* Four cards that belong in pairs: two columns exactly, so the second row is
    always the pair it's meant to be rather than whatever auto-fit decides the
@@ -4861,6 +4909,21 @@ const HELP = {
       + 'money (its ✎ Edit dialog). The Liquid and Invested tiles still match their tabs, '
       + 'but the Total counts that pot once — at what the holdings are worth, since a '
       + 'priced figure is the better answer to what something is worth today.' },
+  taxNow: { title: 'What This Figure Is, and Is Not',
+    body: 'It is your own bracket table and your own deduction, applied to the total '
+      + 'compensation on the Compensation tab — salary after the raise, plus the bonus, '
+      + 'plus any equity that vested and any employer contribution you have recorded. '
+      + 'That is the whole of the arithmetic. It is NOT a tax return and it is not a '
+      + 'refund estimate: there are no credits in it, nothing is itemised, payroll tax is '
+      + 'not counted, and it takes no notice of what has already been withheld from your '
+      + 'pay — so the figure is what the schedule says on that income, never what you '
+      + 'still owe in April. Nor is it a household figure where two people earn: the app '
+      + 'records a second earner as take-home in the budget and never as gross, so there '
+      + 'is no second package to add and the card counts one. It reads the newest year you '
+      + 'have recorded comp for rather than the calendar year, because a raise letter '
+      + 'arrives when it arrives and a card that went blank every January would be one '
+      + 'nobody trusted. The year with no table of its own carries the newest table before '
+      + 'it forward, exactly as the retirement projection does.' },
   spendingMix: { title: 'How Where the Money Goes Is Counted',
     body: 'Exactly the way the Spending, Year by Year bars are, because the two have to '
       + 'add up to the same figure. Only rows filed under Expenses count, so money swept '
@@ -10118,6 +10181,94 @@ function taxCheckCard() {
   </div>`;
 }
 
+/* ── What this year owes ────────────────────────────────────────────────────
+   The tab typed a set of brackets and then used them for exactly one thing: the
+   retirement gross-up, forty years out. The nearest question — what THIS year
+   owes on what you are actually paid — was one the app had every part of and
+   never asked.
+
+   It reads the Compensation tab's own total, so the two tabs agree about what
+   somebody was paid, and it names the year it read rather than assuming the
+   current one: comp is usually recorded a letter at a time, and a card that
+   went blank every January until the raise landed would be a card nobody
+   trusted.
+
+   What it deliberately is NOT: a return. Brackets and the deduction you typed,
+   applied to one figure. No credits, no itemising, no payroll tax, nothing
+   withheld — and it says all of that out loud, because a number under a heading
+   with the word Tax in it will be read as an answer unless it explains that it
+   isn't one. The same discipline the tab already keeps about not shipping a
+   bracket: the app may work tax out, it may not claim to know your tax. */
+function taxNowCard() {
+  const comp = state.side.comp || {};
+  const years = Object.keys(comp).filter(k => /^\d{4}$/.test(k)).sort();
+  const y = years[years.length - 1];
+  if (!y) return '';
+  const gross = grossIncome(state, y);
+  if (!gross) return '';
+  const tables = taxTablesFor(state, y);
+  if (!tables.federal && !tables.state) return '';
+  const parts = compParts(state, y);
+  const owed = (side) => {
+    const t = tables[side];
+    return t ? taxOn(taxableAfter(gross, t.table), t.table) : null;
+  };
+  const fed = owed('federal'), sta = owed('state');
+  const total = round2((fed || 0) + (sta || 0));
+  const eff = gross ? total / gross : null;
+  /* The FEDERAL marginal rate where there is a federal table — the calculator's
+     own rule, for the same reason: two jurisdictions have two marginal rates
+     and adding them together is a figure that exists nowhere. */
+  const mt = tables.federal || tables.state;
+  const marg = marginalRateOn(taxableAfter(gross, mt.table), mt.table);
+  const tile = (label, value, foot) => `<div class="goal">
+    <div class="label">${label}</div>
+    <div class="value${value === null ? ' muted' : ''}">${value === null ? '—' : value}</div>
+    <div class="foot">${foot}</div></div>`;
+  const row = (label, v, note) => `<tr><th scope="row">${label}</th>
+    <td>${v}</td><td style="text-align:left" class="muted">${note || ''}</td></tr>`;
+  const named = [parts.bonus ? 'the bonus' : null,
+    parts.equity ? 'equity that vested' : null,
+    parts.match ? "your employer's contribution" : null].filter(Boolean);
+  const twoEarners = adultsOf(state).length > 1;
+  return `<div class="card" style="grid-column:1/-1">
+    <h2>What ${esc(y)} Owes${helpBtn('taxNow', 'what this figure is and is not')}</h2>
+    <p class="sub">Your own tables, applied to what the Compensation tab says you were paid
+      in <strong>${esc(y)}</strong>${named.length ? ` — salary after the raise, plus ${
+        esc(andList(named))}` : ''}. <strong>This is brackets and your deduction, and
+      nothing else</strong>: no credits, no itemising, no payroll tax, and nothing you have
+      already had withheld. It is what the schedule says on that figure, which is the
+      question the tab could always answer and never did.${
+      twoEarners ? ` It counts one person's package — the app records a second earner's
+      take-home as a budget row, and never their gross, so there is nothing here to add.` : ''}</p>
+    <div class="goalgrid">
+      ${tile('Federal', fed === null ? null : fmtMoney(fed),
+        tables.federal ? `Your ${esc(tables.federal.fromYear)} table` : 'No federal table')}
+      ${tile(esc(jurLabel('state')), sta === null ? null : fmtMoney(sta),
+        tables.state ? `Your ${esc(tables.state.fromYear)} table` : 'No state table')}
+      ${tile('Total', fmtMoney(total), `Leaving ${fmtMoney(round2(gross - total))} of it`)}
+      ${tile('Effective rate', eff === null ? null : `${(eff * 100).toFixed(2)}%`,
+        `Of the whole package · next dollar at ${(marg * 100).toFixed(2)}%`)}
+    </div>
+    <div class="tablewrap" style="margin-top:14px"><table><tbody>
+      ${row('What you were paid', fmtMoney(gross), 'The Compensation tab’s total comp')}
+      ${tables.federal && tables.federal.table.deduction
+        ? row('Less the deduction', `−${fmtMoney(tables.federal.table.deduction)}`,
+            'The federal one you typed') : ''}
+      ${tables.federal
+        ? row('Federally taxable', fmtMoney(taxableAfter(gross, tables.federal.table)),
+            esc(FILING_LABEL[state.settings.filingStatus])) : ''}
+      ${fed === null ? '' : row('Federal tax', fmtMoney(fed), '')}
+      ${sta === null ? '' : row(`${esc(jurLabel('state'))} tax`, fmtMoney(sta),
+        tables.state.table.deduction
+          ? `After a ${fmtMoney(tables.state.table.deduction)} deduction` : 'No deduction typed')}
+      <tr><th scope="row"><strong>Left after tax</strong></th>
+        <td><strong>${fmtMoney(round2(gross - total))}</strong></td>
+        <td style="text-align:left" class="muted">Before anything else comes out of it</td></tr>
+    </tbody></table></div>
+  </div>`;
+}
+
 /* THE BRIDGE CARD. Read straight off `drawdownYears`, which is the same
    function the Retirement chart and its year-by-year table are drawn from, so
    this can never disagree with them — the `givingStats` arrangement, and the
@@ -10180,8 +10331,9 @@ function renderTax() {
       looking authoritative.</p>
     <p><strong>A year with no table means no tax.</strong>${any ? ''
       : ' You have none yet, so every figure on Retirement is exactly what it has always been.'
-      } What a table changes is the <em>withdrawal</em>: a pre-tax pot has to pay out more
-      than you spend, and the projection now works out how much more.</p>
+      } A table does two things once you have one. It says what <em>this</em> year owes on
+      what you are paid, below. And it changes the <em>withdrawal</em>: a pre-tax pot has to
+      pay out more than you spend, and the projection works out how much more.</p>
     <p>What it will not do: required minimum distributions, a Roth-versus-traditional
       withdrawal order, the Social Security provisional-income formula, itemising, capital
       gains, NIIT or IRMAA. Each is a figure with a year attached, and each would need to be
@@ -10189,6 +10341,7 @@ function renderTax() {
   </div>
   <div class="cards2 pairs">${bracketsCard('federal')}${bracketsCard('state')}</div>
   ${taxYearsStoredCard()}
+  ${taxNowCard()}
   ${taxCheckCard()}
   ${taxPotCard()}`;
 }
@@ -10226,7 +10379,7 @@ function renderComp() {
     ${whose ? `<p class="sub">${esc(whose)}'s salary history (Preferences picks whose). A second
       earner's pay is tracked as an income row in the budget instead.</p>` : ''}
     ${cur ? `<p class="sub">Total comp is salary with this year's raise applied, plus the
-      bonus${anyEquity || anyMatch ? ` and ${andList([anyEquity ? 'any equity that vested'
+      bonus${anyEquity || anyMatch ? `, ${andList([anyEquity ? 'any equity that vested'
         : null, anyMatch ? 'what your employer put in' : null].filter(Boolean))}` : ''}. It is
       the same figure the Giving tab measures your giving against.</p>
       <div class="tablewrap"><table><tbody>
@@ -17518,6 +17671,44 @@ function applyTheme() {
     .getPropertyValue('--bg').trim();
   if (bar && bg) bar.setAttribute('content', bg);
 }
+/* ── Printing borrows the light theme ───────────────────────────────────────
+   The print stylesheet sets no colour, on purpose: the palettes live in the
+   theme pack and a print palette written into this file would be a fifth theme
+   nobody had gated. So printing simply asks for the theme the pack already has
+   for exactly this — real ink-on-paper colours, contrast-checked with the other
+   three.
+
+   Nothing is saved. `themeId()` still reads localStorage, the picker is left
+   alone, and `afterprint` puts the attribute back, so a print never changes
+   what the reader sees afterwards.
+
+   Both mechanisms, because they are not the same event in every browser:
+   before/afterprint is the modern pair, and the `matchMedia('print')` change is
+   what Safari fires. Either one landing twice is harmless — setting the
+   attribute to the value it already has is a no-op, and the restore reads
+   `themeId()` rather than a remembered value, so two restores agree.
+
+   The CHARTS are deliberately not rebuilt. Chart.js resolves its colours when
+   it is constructed, so a printed chart keeps the screen theme's line colours
+   on a light card. Redrawing them would mean a full render() inside a print
+   handler — which in some browsers happens after the page has been snapshotted,
+   and would leave the screen mid-rebuild if the print was cancelled. The lines
+   stay legible because every series token clears AA on both grounds; it is the
+   one thing on the page that does not change, and that is the trade. */
+function printUsesLightTheme(on) {
+  document.documentElement.setAttribute('data-theme', on ? 'light' : themeId());
+}
+addEventListener('beforeprint', () => printUsesLightTheme(true));
+addEventListener('afterprint', () => printUsesLightTheme(false));
+{
+  const mq = matchMedia('print');
+  /* addEventListener on a MediaQueryList is the modern spelling; the guard is
+     for the browsers where it is still addListener-only. */
+  const onChange = (e) => printUsesLightTheme(e.matches);
+  if (mq.addEventListener) mq.addEventListener('change', onChange);
+  else if (mq.addListener) mq.addListener(onChange);
+}
+
 F('themeSel').onchange = (e) => {
   localStorage.setItem(THEME_KEY, e.target.value);
   applyTheme();

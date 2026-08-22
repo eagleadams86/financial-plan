@@ -3395,6 +3395,40 @@ t('the total counts a linked pot once, at what the holdings are worth', () => {
     'an empty pane claims nothing — its accounts stay counted as themselves');
 });
 
+group('What this year owes');
+t('the tables answer the nearest question as well as the furthest one', () => {
+  /* The card is markup, so what is pinned here is the arithmetic under it —
+     the same three functions it calls, over an invented table. */
+  const st = H.coerceShape({
+    settings: { filingStatus: 'single' },
+    side: {
+      comp: { '2030': { salary: 100000, raisePct: 0, equity: 20000 } },
+      bonuses: { '2030': 10000 },
+      tax: { federal: { '2030': { single: { deduction: 30000, bands: [
+        { upTo: 50000, rate: 0.10 }, { upTo: null, rate: 0.20 }] } } },
+        state: {} } } });
+  const gross = H.grossIncome(st, '2030');
+  eq(gross, 130000, 'the whole package, not the salary');
+  const t = H.taxTableFor(st, 'federal', '2030', 'single').table;
+  eq(H.taxableAfter(gross, t), 100000, 'less the deduction typed');
+  eq(H.taxOn(100000, t), 15000, '10% of the first 50k, 20% of the rest');
+  eq(H.round2(H.effectiveRateOn(gross, t) * 100), 11.54, 'measured on the whole package');
+  eq(H.marginalRateOn(100000, t), 0.20, 'and the next dollar is named separately');
+});
+t('a year with no table of its own carries the newest one forward', () => {
+  const st = H.coerceShape({ settings: { filingStatus: 'single' }, side: {
+    comp: { '2033': { salary: 50000, raisePct: 0 } },
+    tax: { federal: { '2030': { single: { bands: [{ upTo: null, rate: 0.10 }] } } }, state: {} } } });
+  const got = H.taxTableFor(st, 'federal', '2033', 'single');
+  eq(got.fromYear, '2030', 'the card names the year it is reading, never assumes');
+});
+t('no table means no figure, which is the promise the whole tab keeps', () => {
+  const st = H.coerceShape({ side: { comp: { '2030': { salary: 100000 } },
+    tax: { federal: {}, state: {} } } });
+  eq(H.taxTablesFor(st, '2030').federal, null);
+  eq(H.taxTablesFor(st, '2030').state, null, 'so the card does not draw at all');
+});
+
 group('The whole package');
 t('gross income counts equity and the employer contribution', () => {
   const d = H.coerceShape({ side: {
@@ -7821,6 +7855,42 @@ t('sw.js and its kill switch are both present', async () => {
   ok(b.ok, 'sw-kill.js is missing — the escape hatch has to exist BEFORE it is needed');
   ok(c.ok, 'index.html is missing');
   SW_SRC = await a.text(); KILL_SRC = await b.text(); APP_SRC = await c.text();
+});
+
+/* ── Paper ───────────────────────────────────────────────────────────────────
+   The print block's one hard rule: it declares no colour. The palettes belong
+   to the theme pack, and a print palette written into this file would be a
+   fifth theme with nobody's contrast gate over it. Printing borrows the pack's
+   own light theme in JS instead, which is what this pins. */
+t('the print stylesheet sets no colour of its own', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const at = APP_SRC.indexOf('@media print');
+  ok(at > 0, 'there is a print stylesheet at all');
+  /* To the end of the block, counting braces from the one that opens it. */
+  let i = APP_SRC.indexOf('{', at), depth = 0, end = i;
+  for (; i < APP_SRC.length; i++) {
+    if (APP_SRC[i] === '{') depth++;
+    else if (APP_SRC[i] === '}' && !--depth) { end = i; break; }
+  }
+  const block = APP_SRC.slice(at, end);
+  ok(!/#[0-9a-fA-F]{3,8}\b/.test(block), 'no hex — that is a palette, and palettes live in the pack');
+  ok(!/\brgba?\(/.test(block), 'nor an rgb()');
+  ok(!/\bhsla?\(/.test(block), 'nor an hsl()');
+  ok(!/(^|[^-])\bcolor\s*:/.test(block.replace(/print-color-adjust/g, '')),
+    'and it never sets a colour property, only what to hide and where to break');
+  ok(/beforeprint/.test(APP_SRC) && /afterprint/.test(APP_SRC),
+    'because the colour question is answered by borrowing the light theme instead');
+  ok(/data-theme', on \? 'light'/.test(APP_SRC),
+    "and it borrows the PACK's light theme rather than inventing one");
+});
+t('printing hides the furniture and opens the scrollers', () => {
+  const at = APP_SRC.indexOf('@media print');
+  const block = APP_SRC.slice(at, APP_SRC.indexOf('</style>', at));
+  for (const sel of ['.tabs', '.addbar', '#themeSel'])
+    ok(block.includes(sel), `${sel} is a way in, and there is no clicking on paper`);
+  ok(/\.gridwrap[\s\S]{0,160}overflow: visible/.test(block),
+    'a budget year is twelve months wide and printing one means printing the twelve');
+  ok(/@page[\s\S]{0,60}landscape/.test(block), 'and it asks for landscape, for the same reason');
 });
 
 /* ── The footer every public page in this account carries ────────────────────
