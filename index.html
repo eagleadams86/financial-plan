@@ -521,6 +521,9 @@ dialog.twoup { max-width: var(--dialog-w-narrow); }
    dialog, so nothing works its width out for it — but at the common 1100px it
    was the emptiest window in the app, and it belongs with the narrow ones. */
 #dataDialog { max-width: var(--dialog-w-narrow); }
+/* Four columns of figures need more room than the narrow dialog gives, and
+   less than the wide one: the table is what sizes it. */
+#compareDialog { max-width: var(--dialog-w-narrow); }
 /* The budget cell editor: an amount, what kind of number it is, and a note.
    Hand-built markup rather than the field grid, so it takes the narrow width
    outright. A split month's rows still fit — the amount box and the kind
@@ -1420,7 +1423,15 @@ td.projected { font-style: italic; color: var(--text-secondary); }
          must not look like one. -->
     <button class="btn" id="csvInBtn"><span aria-hidden="true">⬆</span> Import a year’s CSV…</button>
     <input type="file" id="csvInFile" accept="text/csv,.csv" hidden>
+    <!-- Reads a backup and writes NOTHING. It sits with the other file buttons
+         because a scenario in this app is a file: a plan you exported and then
+         changed. -->
+    <button class="btn" id="compareBtn"><span aria-hidden="true">⇄</span> Compare with a backup…</button>
+    <input type="file" id="compareFile" accept="application/json,.json" hidden>
   </div>
+  <p class="sub muted" style="margin-top:10px">Comparing opens a backup beside what you have
+    now and shows the headline figures side by side — "what if we bought the house", answered
+    without keeping two plans. It only reads: nothing in this browser is touched.</p>
   <p class="sub muted" style="margin-top:10px">A year's CSV goes back in as well as out —
     work a year over in a spreadsheet and bring it home. It reads that year's Income,
     Expenses and Transfers rows only; account balances and the interest line are worked out
@@ -1443,6 +1454,20 @@ td.projected { font-style: italic; color: var(--text-secondary); }
   </details>
   <div class="row" style="justify-content:flex-end;margin-top:18px">
     <button class="btn primary" id="dataCloseBtn">Close</button>
+  </div>
+</dialog>
+
+<!-- ── Two plans, side by side ───────────────────────────────────────────────
+     Read-only by construction: it is filled from a file and has one button,
+     which closes it. There is deliberately no "use this one instead" — that is
+     what Restore is, it already exists, and putting it here would turn a
+     comparison into a way to lose your plan by mis-clicking. -->
+<dialog id="compareDialog" aria-labelledby="compareTitle">
+  <h3 id="compareTitle">This Plan, and the One in That File</h3>
+  <p class="sub" id="compareSub"></p>
+  <div id="compareBody"></div>
+  <div class="row" style="justify-content:flex-end;margin-top:18px">
+    <button class="btn primary" id="compareCloseBtn">Close</button>
   </div>
 </dialog>
 
@@ -17586,6 +17611,100 @@ function gridToCsv(st, computed, y) {
   return lines.join('\n');
 }
 
+/* ── Two plans, side by side ────────────────────────────────────────────────
+   The what-if the app had no answer for. "What if we bought the house", "what
+   if I took the job" — every one of them means changing a dozen figures across
+   five tabs, and there was no way to hold the before and the after next to each
+   other except two browser windows and a good memory.
+
+   The thing NOT built here is a second plan living inside the first. That was
+   the obvious design and it is the wrong one: it doubles what syncs, it doubles
+   what a backup carries, and above all it gives the app two answers to "what am
+   I worth" — where the whole file is built on there being exactly one. What a
+   scenario really is, is a plan you exported and then changed. So a comparison
+   reads a BACKUP FILE, which already exists, is already the plan's own format,
+   costs nothing to store and cannot drift, and it writes absolutely nothing.
+
+   `planHeadlines` is the whole of the arithmetic and it is pure, so what the
+   dialog shows is a test rather than a screenshot. Every figure in it comes
+   from the same function the tab that owns it draws — net worth from
+   `netWorthTotals`, the rate and the runway from `savingsPulse`, the retirement
+   figures from `drawdownOutlook` — so a comparison can never quote a number the
+   app itself doesn't show. */
+function planHeadlines(st, today) {
+  const iso = today || todayISO();
+  const thisYear = +iso.slice(0, 4);
+  const C = computeAll(st, iso);
+  /* The date is passed DOWN, never left to the wall clock: this function is
+     pinned by tests over fixture years that have not happened yet, and a
+     `startedGridYears(st)` reading today would filter every one of them out and
+     report a plan with nothing in it. */
+  const started = startedGridYears(st, iso);
+  const y = started.length ? started[started.length - 1] : null;
+  const c = y ? C[y] : null;
+  const cur = y ? currentMonthOf(st.years[y], iso) : null;
+  const liquid = (c && cur) ? (c.balances[`total|${cur}`] || 0) : null;
+  const pulse = y ? savingsPulse(st.years[y], c, y, liquid) : null;
+  const worth = (c && cur) ? netWorthTotals(st, liquid || 0, c, cur) : null;
+  /* The retirement half is skipped where there is no household to hang it on —
+     `drawdownYears` over a plan with nobody in it is a long walk to zero. */
+  const anyone = peopleOf(st).some(p => retirementYearOf(p));
+  const out = anyone
+    ? drawdownOutlook(drawdownYears(st, thisYear, retirementHorizon(st, thisYear)))
+    : null;
+  return {
+    year: y,
+    netWorth: worth ? worth.total : null,
+    liquid,
+    owed: worth ? round2((worth.nw.debts || 0) + (worth.nw.propertyOwed || 0)) : null,
+    income: pulse ? pulse.income : null,
+    spending: pulse ? pulse.spent : null,
+    savingsRate: pulse ? pulse.rate : null,
+    runwayMonths: pulse ? pulse.runwayMonths : null,
+    retirementPot: out ? out.firstPot : null,
+    runsOutYear: out ? out.runsOutYear : null,
+  };
+}
+
+/* The rows the dialog draws. `kind` says how to read a difference, and it is
+   here rather than in the markup because two of them are the wrong way round
+   from the rest: more spending and more owed are not an improvement, and a
+   comparison that drew every increase as good would be worse than no comparison
+   at all. `higher: null` means neither — a year, where later is simply later. */
+const COMPARE_ROWS = [
+  { key: 'netWorth', label: 'Net worth', kind: 'money', higher: true },
+  { key: 'liquid', label: 'Liquid savings', kind: 'money', higher: true },
+  { key: 'owed', label: 'Owed', kind: 'money', higher: false },
+  { key: 'income', label: 'Income this year', kind: 'money', higher: true },
+  { key: 'spending', label: 'Spending this year', kind: 'money', higher: false },
+  { key: 'savingsRate', label: 'Savings rate', kind: 'pct', higher: true },
+  { key: 'runwayMonths', label: 'Runway', kind: 'months', higher: true },
+  { key: 'retirementPot', label: 'Pot at retirement', kind: 'money', higher: true },
+  { key: 'runsOutYear', label: 'Money runs out', kind: 'year', higher: null },
+];
+
+/* Both plans reduced to the same rows, with the difference worked out only
+   where BOTH sides have an answer. A row neither plan can answer is dropped;
+   one only the other can is kept and dashed, because "this plan says nothing
+   about retirement and that one does" is itself the finding. */
+function comparePlans(mine, theirs, today) {
+  const a = planHeadlines(mine, today), b = planHeadlines(theirs, today);
+  return COMPARE_ROWS.map(r => {
+    const av = a[r.key], bv = b[r.key];
+    const both = typeof av === 'number' && typeof bv === 'number';
+    return { ...r, a: av, b: bv,
+      /* Rounded the way the FIGURE is, not the way money is. round2 on a
+         savings rate turned a 10.8-point gap into 11.0, because two decimals
+         of a fraction is one decimal of a percentage — a rounding error big
+         enough to be quoted at somebody. */
+      delta: both ? (r.kind === 'pct' ? roundTo(bv - av, 6) : round2(bv - av)) : null,
+      /* Null where it cannot be read as better or worse: no comparison, no
+         direction, and a year has none by nature. */
+      better: (!both || r.higher === null || bv === av) ? null
+        : (bv > av) === r.higher };
+  }).filter(r => r.a !== null || r.b !== null);
+}
+
 /* ── And back in again ──────────────────────────────────────────────────────
    CSV was a one-way door: out to a spreadsheet, and no way home. Somebody who
    worked a year over in Excel — which is what the export exists for — had to
@@ -18035,6 +18154,72 @@ F('importFile').onchange = (e) => {
     } catch (err) {
       toast('That file doesn’t look like a Financial Plan backup');
       console.warn('restore failed', err);
+    } finally {
+      e.target.value = '';
+    }
+  };
+  reader.readAsText(file);
+};
+
+/* ── Comparing against a file ───────────────────────────────────────────────
+   The one path in this dialog that cannot lose anything: it parses, computes
+   and draws, and never touches `state`. The refusals are the JSON restore's,
+   because it is the same kind of file and a reader who picked the wrong one
+   deserves the same sentence either way. */
+const compareDialog = F('compareDialog');
+F('compareCloseBtn').onclick = () => compareDialog.close();
+F('compareBtn').onclick = () => F('compareFile').click();
+F('compareFile').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const raw = safeParse(reader.result);
+      if (!raw || typeof raw !== 'object' || typeof raw.years !== 'object'
+          || Array.isArray(raw.years)) throw new Error('not a Financial Plan file');
+      if ((raw.schema || 1) > SCHEMA) {
+        toast('That backup was saved by a newer version of the app — reload to update, then compare it');
+        return;
+      }
+      const other = migrate(coerceShape(raw));
+      const rows = comparePlans(state, other, todayISO());
+      const fmt = (r, v) => v === null || v === undefined ? '<span class="muted">—</span>'
+        : r.kind === 'money' ? fmtMoney(v)
+        : r.kind === 'pct' ? `${(v * 100).toFixed(1)}%`
+        : r.kind === 'months' ? `${roundTo(v, 1)} months`
+        : String(v);
+      F('compareSub').textContent = `${file.name} against what is in this browser now. `
+        + 'Nothing here has been changed — this only reads the file.';
+      F('compareBody').innerHTML = `<div class="tablewrap"><table>
+        <thead><tr><th style="text-align:left"></th><th>Now</th><th>That file</th>
+          <th style="text-align:left">Difference</th></tr></thead>
+        <tbody>${rows.map(r => `<tr>
+          <th scope="row">${esc(r.label)}</th>
+          <td>${fmt(r, r.a)}</td>
+          <td>${fmt(r, r.b)}</td>
+          <td style="text-align:left">${r.delta === null
+            ? '<span class="muted">nothing to compare</span>'
+            : !r.delta ? '<span class="muted">the same</span>'
+            /* Said in words, with an arrow beside them and never a colour: four
+               palettes and a red-green reader mean hue cannot carry this. */
+            /* A gap between two percentages is POINTS, not a percentage: 28%
+               against 18% is ten points, and calling it "10%" invites the
+               reader to think it is a tenth of the first figure. */
+            : `${r.delta > 0 ? '▲' : '▼'} ${r.kind === 'pct'
+                ? `${(Math.abs(r.delta) * 100).toFixed(1)} points`
+                : fmt(r, Math.abs(r.delta))}${
+                r.better === null ? ''
+                  : ` <span class="muted">${r.better ? 'better' : 'worse'}</span>`}`
+          }</td></tr>`).join('')}</tbody>
+      </table></div>
+      <p class="sub" style="margin-top:12px">Headline figures only — each one read from the
+        same place the tab that owns it draws it. To work from the other plan instead, use
+        Restore JSON, which replaces what is here.</p>`;
+      openModal(compareDialog);
+    } catch (err) {
+      toast('That file doesn’t look like a Financial Plan backup');
+      console.warn('compare failed', err);
     } finally {
       e.target.value = '';
     }
@@ -19605,7 +19790,8 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
   categorySpend, spendingMix,
   coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
-  csvCell, gridToCsv, donationsToCsv, csvRows, readGridCsv, applyGridCsv, searchPlan, SEARCH_CAP, snapshotPoints,
+  csvCell, gridToCsv, donationsToCsv, csvRows, readGridCsv, applyGridCsv,
+  planHeadlines, comparePlans, COMPARE_ROWS, searchPlan, SEARCH_CAP, snapshotPoints,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,

@@ -3395,6 +3395,81 @@ t('the total counts a linked pot once, at what the holdings are worth', () => {
     'an empty pane claims nothing — its accounts stay counted as themselves');
 });
 
+group('Two plans, side by side');
+t('every headline is read from the function the tab that owns it draws', () => {
+  const st = H.migrate(H.coerceShape(H.sampleState()));
+  const y = Object.keys(st.years).filter(k => st.years[k].kind === 'grid').sort().pop();
+  const today = `${y}-08-15`;
+  const h = H.planHeadlines(st, today);
+  const C = H.computeAll(st, today);
+  const cur = H.currentMonthOf(st.years[y], today);
+  const liquid = C[y].balances[`total|${cur}`];
+  eq(h.year, y);
+  eq(h.liquid, liquid, 'the same figure the grid shows this month');
+  eq(h.netWorth, H.netWorthTotals(st, liquid, C[y], cur).total,
+    'and the same total the Net Worth card does');
+  const pulse = H.savingsPulse(st.years[y], C[y], y, liquid);
+  eq(h.savingsRate, pulse.rate);
+  eq(h.income, pulse.income);
+  eq(h.spending, pulse.spent);
+  ok(typeof h.retirementPot === 'number', 'the sample has a household, so it has a pot');
+});
+t('a plan with nothing in it answers nothing, rather than answering zero', () => {
+  const h = H.planHeadlines(H.coerceShape({}), '2030-06-15');
+  eq(h.year, null);
+  eq(h.netWorth, null, 'no plan is not a net worth of nothing');
+  eq(h.savingsRate, null);
+  eq(h.retirementPot, null, 'and nobody retiring is not a pot of zero');
+});
+t('a difference is only worked out where both sides have an answer', () => {
+  const a = H.coerceShape({ settings: { accounts: [{ id: 'cash', name: 'Cash', hub: true }] },
+    years: { '2030': { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 12,
+      enteredThrough: '2030-06',
+      categories: [{ id: 'pay', name: 'Pay', section: 'income' },
+                   { id: 'rent', name: 'Rent', section: 'expense' }],
+      cells: { 'pay|2030-01': { v: 1000, kind: 'actual' },
+               'rent|2030-01': { v: -400, kind: 'actual' } },
+      seeds: { cash: 5000 } } } });
+  const b = JSON.parse(JSON.stringify(a));
+  b.years['2030'].cells['rent|2030-01'] = { v: -800, kind: 'actual' };
+  const rows = H.comparePlans(a, H.coerceShape(b), '2030-03-15');
+  const by = Object.fromEntries(rows.map(r => [r.key, r]));
+  ok(by.spending.delta > 0, 'the second plan spends more');
+  eq(by.spending.better, false, 'and more spending is NOT an improvement');
+  eq(by.netWorth.better, false, 'nor is the smaller net worth that follows');
+  ok(!rows.some(r => r.key === 'retirementPot'),
+    'neither plan has anybody retiring, so the row is dropped rather than dashed');
+});
+t('more owed reads as worse, and a year reads as neither', () => {
+  const rows = H.COMPARE_ROWS;
+  eq(rows.find(r => r.key === 'owed').higher, false,
+    'a comparison that drew every increase as good would be worse than none');
+  eq(rows.find(r => r.key === 'spending').higher, false);
+  eq(rows.find(r => r.key === 'runsOutYear').higher, null, 'later is simply later');
+  eq(rows.find(r => r.key === 'netWorth').higher, true);
+});
+t('a row only one plan can answer is kept, dashed, because that IS the finding', () => {
+  const bare = H.coerceShape({ settings: { accounts: [{ id: 'cash', name: 'Cash', hub: true }] },
+    years: { '2030': { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 12,
+      enteredThrough: '2030-06',
+      categories: [{ id: 'pay', name: 'Pay', section: 'income' }],
+      cells: { 'pay|2030-01': { v: 1000, kind: 'actual' } }, seeds: { cash: 100 } } } });
+  const withPeople = H.migrate(H.coerceShape(H.sampleState()));
+  const rows = H.comparePlans(bare, withPeople, '2030-03-15');
+  const pot = rows.find(r => r.key === 'retirementPot');
+  ok(pot, 'the row survives');
+  eq(pot.a, null, 'one side says nothing');
+  ok(typeof pot.b === 'number', 'the other does');
+  eq(pot.delta, null, 'and no difference is invented between a figure and a silence');
+});
+t('comparing changes nothing at all', () => {
+  const st = H.migrate(H.coerceShape(H.sampleState()));
+  const before = JSON.stringify(st);
+  const other = H.migrate(H.coerceShape(H.sampleState()));
+  H.comparePlans(st, other, '2030-03-15');
+  eq(JSON.stringify(st), before, 'a comparison that could edit a plan is a bug waiting');
+});
+
 group('Money in another currency');
 t('a rate is the reader’s, read strictly, and never the plan’s own currency', () => {
   const d = H.coerceShape({ settings: { currency: 'USD' }, side: { rates: {
