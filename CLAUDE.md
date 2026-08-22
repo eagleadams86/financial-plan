@@ -90,6 +90,10 @@ family names as well as balances.
   or its accounts' real money would vanish from the total. The link is said
   out loud in three places: the pane's sub, the Net Worth sub, and the Total
   tile's foot.
+- **`side.liabilities`, `side.rates` and `side.snapshots.debts` arrived
+  2026-08-22** — see "The Nine Gaps" below for all of it. The one thing worth
+  knowing up here: `netWorthParts(st, month)` takes a MONTH now, because what a
+  debt is worth depends on when you ask.
 - **`side.property` is the household's stuff, not an account** — `{name, kind,
   value, owed?, note?}`, kinds from `PROPERTY_KINDS` (above `load()`, the
   temporal-dead-zone rule). Nothing flows through a house: the engine never
@@ -3130,6 +3134,129 @@ CSP. That is the whole feature; it adds no runtime code beyond one line in
 - Help/info icons never sit flush against the word they follow (standing
   preference).
 - **`package.json` is a Dependabot manifest, not a build step.** It installs nothing, declares nothing but the vendored `chart.min.js`, is `private: true` with no scripts, and CI passes `--omit=dev` so npm never downloads it. **Dependabot cannot re-vendor a file**, so a version-bump PR would raise the manifest while the app kept serving the old bytes — `tests.html` pins the manifest's pin to the version string inside the bundle, which makes a manifest-only bump fail and turns the PR into the right instruction: update the file too, in all three repos that carry it (lottery, team-dashboard, financial-plan). Never add a `scripts` block, and never let the pin become a `^` range — a range cannot be checked against a file.
+
+## The Nine Gaps (2026-08-22)
+
+Nine things the app could not do, built in one pass. Each one is written up
+where it lives; what follows is the reasoning a later reader would otherwise
+have to re-derive, and the traps that are already paid for.
+
+- **`side.liabilities` is the big one, and schema 7 is its migration.** A debt
+  was `property.owed` — one number, retyped by hand or left to rot, while every
+  other figure in the file computes itself; and a loan not secured on a house or
+  a car had nowhere to live at all. `drawdownYears` even says so in a comment:
+  *"a debt the app has no way to model and no business inventing."*
+  - **The split is the load-bearing decision.** A debt `securedOn` a property
+    comes off that property's EQUITY (which is what `owed` did, so a migrated
+    plan's net worth is unchanged to the cent); anything else is its own tile.
+    **The total is the same figure either way**, which is what makes a dangling
+    `securedOn` safe to degrade to unsecured rather than an error to handle.
+    There is a test pinning exactly that.
+  - **`netWorthParts` takes a MONTH now.** `liabilityAt(l, month)` walks the
+    schedule forward from `asOf`, so what net worth counts is what is owed
+    today rather than what was stated in December. `netWorthTotals` already had
+    `cur` to hand and passes it down; the parameter is optional so nothing else
+    had to change.
+  - **`amortize` returns three shapes, not one.** `null` = not enough said
+    (no payment); `{never: true}` = the payment does not cover the first
+    month's interest, which is REAL and must be said in words rather than drawn
+    as a line climbing away; otherwise the schedule. Interest-LEFT re-walks from
+    the current balance — reading `a.interest` printed a mortgage's whole
+    lifetime cost under a column headed "left", which was the first thing this
+    got wrong on screen.
+  - **`p.owed` is still coerced and still counted.** A backup from before
+    schema 7 is coerced BEFORE it is migrated, and `netWorthParts` runs over
+    both states. Don't tidy it away.
+  - Property rows have IDS now (`mintIds` in coerceShape — mints only where one
+    is absent, never moves a well-formed one, and numbers collisions, because
+    two cars called "Car" is exactly the ambiguity `securedOn` cannot survive).
+    `uniqueId(list, name, fallback)` beside `slugJs` replaces the five hand-
+    written copies of that loop.
+
+- **`grow` is `carry` with a clock.** Steps up once per CALENDAR YEAR, never
+  monthly: a 3%/yr rent compounding monthly grows by cents every month, which is
+  not a thing a landlord does, and a year built ahead would read twelve figures
+  where the reader typed one. Inside a year the exponent is 0 and it IS carry,
+  which is what lets a typed month take over mid-year. Its rate is `cat.growth`,
+  its OWN key rather than sharing `rate` with the dividends rule — a row moved
+  between the two would otherwise carry the other's figure into an answer that
+  looked typed.
+
+- **`spendingMix` is the card the data had always been able to feed.** Eleven
+  years of per-category monthly figures and one bar a year drawn off them.
+  `categorySpend` copies `yearSpending`'s reading rules exactly (computed cells,
+  netted, summary years off `categoryTotals`) so the parts always add to the
+  total — there is a test asserting that. Matching between years is by row ID
+  where both are grids and by NAME where either is a summary; the choice is made
+  ONCE for the whole table, because a mixed answer would match half of it.
+  `prevDetailed` is the distinction that matters: a summary year with no rows is
+  "nothing to compare", not "every row is new", and those are claims about
+  different things.
+  - **The sample's history years were three dead scalars** (`income`,
+    `spending`, `saved`) that nothing in the app has ever read, so every
+    long-run chart drew them at $0.00. They are real `categoryTotals` now. That
+    was a live defect in the demo, not scope creep for this card.
+
+- **Comp grew `equity` and `match`, and they reach `grossIncome`.** That figure
+  is the DENOMINATOR of every giving percentage, which is why both are absent
+  rather than 0 and read with `rateOrNone` rather than `num` — `num('junk')` is
+  0, and a 0 here is the claim "nothing vested". There is a test that a plan
+  without them is unchanged to the cent.
+
+- **`taxNowCard` is the nearest question, finally asked.** The tab had brackets
+  and used them only for a withdrawal forty years out. It reads the newest year
+  with a comp record rather than the calendar year (a raise letter arrives when
+  it arrives) and says in the card what it is NOT — no credits, no itemising, no
+  payroll tax, nothing withheld. Say that or a number under a heading with the
+  word Tax on it gets read as an answer.
+
+- **The print block declares NO COLOUR, and there is a test that fails if one
+  ever appears in it.** The palettes belong to the theme pack; a print palette
+  here would be a fifth theme with no contrast gate over it. Printing borrows
+  the pack's own `light` theme in JS (`printUsesLightTheme`, on `beforeprint` /
+  `afterprint` AND `matchMedia('print')` for Safari) and gives it back. Nothing
+  is saved, and the restore reads `themeId()` rather than a remembered value so
+  two restores agree. Charts are deliberately NOT rebuilt — a `render()` inside
+  a print handler can land after the page is snapshotted, and would leave the
+  screen mid-rebuild on a cancelled print.
+  - **A `@media print` block probably belongs in the PACK**, so the other four
+    apps get one. Flagged rather than done: it is a family-wide change.
+
+- **CSV comes back in.** `csvRows` is a real parser (quotes, doubled quotes,
+  CRLF, and it strips the BOM the export itself writes). `readGridCsv` refuses
+  WHOLE and names what is wrong — the tax-paste rule. It skips the Accounts
+  block and the Interest & Dividends line because both are computed, and counts
+  them as skipped rather than ignoring them silently. `applyGridCsv` decides the
+  cell kind exactly as the cell editor does, which is the point: this is typing,
+  done faster. The handler rehearses on a deep copy so the confirmation can
+  quote real figures before anything moves.
+
+- **`side.rates` makes `settings.currency` mean something.** It was a symbol in
+  front of every figure and nothing else. Property, debts and investment PANES
+  can carry `cur`; the budget grid deliberately cannot, because its balances
+  chain month to month and an edited rate would rewrite years of history.
+  - **Each card reads in its OWN money** (`fmtMoneyIn`), and only totals
+    convert. Printing £96,000 as "$96,000.00" was the first version of this and
+    it is the exact failure the whole table exists to prevent — the wrong figure
+    wearing the right symbol.
+  - **An unrated currency is EXCLUDED and named** (`nw.unconverted`), never
+    converted at 1:1. A foreign flat added in at whatever number happens to be
+    typed is the one answer worse than "I can't count this yet".
+  - `side.rates` rides in share links with anything that can be held abroad: it
+    is the least personal branch in the file, and without it a shared Progress
+    tab shows the sender's flat as something it cannot value.
+
+- **A scenario is a FILE, not a second plan in the state.** `comparePlans` reads
+  a backup and writes nothing. A plan-inside-a-plan doubles what syncs, doubles
+  what a backup carries, and gives the app two answers to "what am I worth" —
+  and the whole file is built on there being one. `planHeadlines` reads every
+  figure from the function the owning tab draws, so a comparison cannot quote a
+  number the app doesn't show; it takes the date DOWN into `startedGridYears`,
+  or a fixture year that hasn't happened yet filters itself out and the whole
+  plan reports empty. `COMPARE_ROWS.higher` is `false` for spending and owed and
+  `null` for a year — a comparison that drew every increase as good would be
+  worse than none. A percentage gap is rounded at 6dp and stated in POINTS;
+  `round2` on a rate turned a 10.8-point gap into 11.0.
 
 ## The Privacy Page Carries the Family Footer (2026-08-21)
 
