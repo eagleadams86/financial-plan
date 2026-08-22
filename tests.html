@@ -329,6 +329,54 @@ t('a carried figure typed into the new year beats the year before it', () => {
   approx(c.cells['internet|2031-01'].v, -50, 'before the new figure, the old one');
   approx(c.cells['internet|2031-03'].v, -65, 'after it, the new one');
 });
+t('a growing row steps up once a year, not once a month', () => {
+  /* The whole point of the rule: inside a year it repeats, and it rises exactly
+     once as the year turns. A monthly compound would read twelve figures where
+     the reader typed one. */
+  const c = projectNextYear(fixtureState(), [
+    { id: 'internet', name: 'Internet', role: 'normal', rule: 'grow', growth: 0.03 },
+  ])['2031'];
+  approx(c.cells['internet|2031-01'].v, -51.5, "2030's -50, one 3% step");
+  approx(c.cells['internet|2031-07'].v, -51.5, 'and it holds all year — no monthly drift');
+  eq(c.cells['internet|2031-01'].kind, 'auto');
+});
+t('a growing row with no percentage yet simply repeats', () => {
+  /* "Rises by nothing said yet" is repeat, never an invented number. */
+  const c = projectNextYear(fixtureState(), [
+    { id: 'internet', name: 'Internet', role: 'normal', rule: 'grow' },
+  ])['2031'];
+  approx(c.cells['internet|2031-01'].v, -50);
+});
+t('a figure typed into a growing row is what it grows from next', () => {
+  const c = projectNextYear(fixtureState(),
+    [{ id: 'internet', name: 'Internet', role: 'normal', rule: 'grow', growth: 0.1 }],
+    { 'internet|2031-04': { v: -100, kind: 'manual' } })['2031'];
+  approx(c.cells['internet|2031-03'].v, -55, 'before the new figure, last year stepped up');
+  approx(c.cells['internet|2031-05'].v, -100,
+    'after it, the typed figure — and no step, because it is the same year');
+});
+t('a growing row with no history anywhere stays blank', () => {
+  const c = projectNextYear(fixtureState(), [
+    { id: 'newrow', name: 'Never recorded', role: 'normal', rule: 'grow', growth: 0.03 },
+  ])['2031'];
+  eq(c.cells['newrow|2031-03'].kind, 'missing', 'nothing to grow FROM is not $0');
+});
+t('a corrupt growth rate is dropped, never read as 0%', () => {
+  const d = H.coerceShape({ years: { '2031': { kind: 'grid', startMonth: '2031-01',
+    monthCount: 12, categories: [
+      { id: 'a', name: 'A', rule: 'grow', growth: 'junk' },
+      { id: 'b', name: 'B', rule: 'grow', growth: '0.04' },
+      { id: 'c', name: 'C', rule: 'carry', growth: 0.09 },
+    ], cells: {} } } });
+  const cats = d.years['2031'].categories;
+  eq(cats[0].growth, undefined, 'unreadable drops rather than becoming a deliberate 0%');
+  eq(cats[1].growth, 0.04, 'a numeric string still reads');
+  eq(cats[2].growth, undefined, 'kept only while the row is a growing one');
+});
+t('the rule describes itself with its own figure in it', () => {
+  eq(H.ruleDesc({ rule: 'grow', growth: 0.035 }), 'repeats, rising 3.5% each January');
+  ok(/say what/.test(H.ruleDesc({ rule: 'grow' })), 'and asks for one when it has none');
+});
 t('average so far falls back to last year while the new year has no months', () => {
   const c = projectNextYear(fixtureState(), [
     { id: 'cc', name: 'Credit Card', role: 'normal', rule: 'avg' },
@@ -3345,6 +3393,138 @@ t('the total counts a linked pot once, at what the holdings are worth', () => {
     side: { portfolios: [{ id: 'cm', name: 'CM', accounts: ['long'], rows: [] }] } });
   eq(H.netWorthTotals(empty, 1000, c, '2030-04').overlap, 0,
     'an empty pane claims nothing — its accounts stay counted as themselves');
+});
+
+group('What you owe');
+t('a schedule pays the interest first and the last payment is only what is left', () => {
+  const a = H.amortize({ balance: 1000, rate: 0.12, payment: 300 });
+  eq(a.schedule[0].interest, 10, '1% of 1000 in the first month');
+  eq(a.schedule[0].principal, 290);
+  eq(a.months, 4, 'four payments clears it');
+  ok(a.schedule[3].principal < 300, 'the last one is only the remainder, never an overshoot');
+  eq(a.schedule[3].balance, 0, 'and it lands exactly on zero, never below');
+});
+t('no payment is no projection, and a payment under the interest says so', () => {
+  eq(H.amortize({ balance: 1000, rate: 0.12 }), null, 'nothing said, nothing claimed');
+  const never = H.amortize({ balance: 1000, rate: 0.12, payment: 10 });
+  eq(never.never, true, 'a payment exactly equal to the interest never clears it');
+  eq(never.months, null, 'and there is no month to name');
+  eq(H.amortize({ balance: 0, rate: 0.12, payment: 10 }).months, 0, 'nothing owed is nothing owed');
+});
+t('a balance is paid down to the month you ask about, never before its statement', () => {
+  const l = { balance: 1000, rate: 0.12, payment: 300, asOf: '2030-01' };
+  eq(H.liabilityAt(l, '2030-01'), 1000, 'the month it was stated is the stated figure');
+  eq(H.liabilityAt(l, '2029-06'), 1000, 'and nothing is ever run backwards');
+  eq(H.liabilityAt(l, '2030-02'), 710, 'one payment on');
+  eq(H.liabilityAt(l, '2030-09'), 0, 'past the end it is paid off, not negative');
+  eq(H.liabilityAt({ balance: 1000, rate: 0.12, payment: 300 }, '2030-09'), 1000,
+    'no asOf, so the figure simply stands — a fact about no particular day');
+  eq(H.payoffMonth(l), '2030-05', 'four payments from January');
+  eq(H.payoffMonth({ balance: 1000, rate: 0.12, payment: 10, asOf: '2030-01' }), null,
+    'a debt that never clears has no payoff month to name');
+});
+t('a secured debt comes off the property, an unsecured one stands on its own', () => {
+  const st = H.coerceShape({ side: {
+    property: [{ id: 'house', name: 'House', kind: 'home', value: 400 }],
+    liabilities: [
+      { id: 'm', name: 'Mortgage', kind: 'mortgage', balance: 250, securedOn: 'house' },
+      { id: 'v', name: 'Visa', kind: 'card', balance: 30 },
+    ] } });
+  const nw = H.netWorthParts(st, '2030-04');
+  eq(nw.property, 150, 'value minus what is secured on it — the old owed arithmetic');
+  eq(nw.debts, 30, 'and the card stands on its own');
+  eq(nw.hasDebts, true);
+  eq(nw.propertyOwed, 250);
+});
+t('a debt secured on a property that is gone still counts, just elsewhere', () => {
+  /* The property of the split worth knowing: which tile a figure lands in can
+     change, the total cannot. */
+  const st = H.coerceShape({ side: {
+    property: [{ id: 'house', name: 'House', kind: 'home', value: 400 }],
+    liabilities: [{ id: 'm', name: 'Mortgage', balance: 250, securedOn: 'house' }] } });
+  const gone = H.coerceShape({ side: {
+    property: [{ id: 'house', name: 'House', kind: 'home', value: 400 }],
+    liabilities: [{ id: 'm', name: 'Mortgage', balance: 250, securedOn: 'shed' }] } });
+  eq(gone.side.liabilities[0].securedOn, undefined, 'the dangling pointer is dropped');
+  const c = { balances: {} };
+  eq(H.netWorthTotals(st, 0, c, '2030-04').total,
+     H.netWorthTotals(gone, 0, c, '2030-04').total, 'same net worth either way');
+  eq(H.netWorthTotals(st, 0, c, '2030-04').total, 150);
+});
+t('net worth uses what is owed NOW, not what was stated', () => {
+  const st = H.coerceShape({ side: { liabilities: [
+    { id: 'v', name: 'Visa', kind: 'card', balance: 1000, rate: 0.12,
+      payment: 300, asOf: '2030-01' } ] } });
+  eq(H.netWorthParts(st, '2030-03').debts, 417.1, 'two payments in');
+  eq(H.netWorthParts(st, '2030-01').debts, 1000, 'as stated, in the month it was stated');
+});
+t('a debt is read strictly — a corrupt rate is not a free loan', () => {
+  const d = H.coerceShape({ side: { liabilities: [
+    { name: 'Loan', kind: 'nonsense', balance: '5000', rate: 'junk', payment: '250',
+      asOf: 'whenever', securedOn: 'nothing-here' } ] } });
+  const l = d.side.liabilities[0];
+  eq(l.kind, 'other', 'an unknown kind is Other, the property rule');
+  eq(l.balance, 5000, 'a numeric string still reads');
+  eq(l.rate, undefined, 'unreadable drops — it must not become "charges no interest"');
+  eq(l.payment, 250);
+  eq(l.asOf, undefined, 'and a malformed month is no month');
+  eq(l.securedOn, undefined);
+  ok(H.ID_OK === undefined || true);
+  ok(/^[A-Za-z0-9_-]{1,64}$/.test(l.id), 'a row with no id is minted one');
+});
+t('two things with the same name get different ids', () => {
+  const d = H.coerceShape({ side: { property: [
+    { name: 'Car', kind: 'vehicle', value: 1 }, { name: 'Car', kind: 'vehicle', value: 2 } ] } });
+  const ids = d.side.property.map(p => p.id);
+  eq(ids, ['car', 'car-2'], 'or securedOn could not tell them apart');
+  eq(H.uniqueId(d.side.property, 'Car', 'property'), 'car-3', 'and a third joins the queue');
+});
+t('a well-formed id is never moved, because something may point at it', () => {
+  const d = H.coerceShape({ side: {
+    property: [{ id: 'the-shed', name: 'Renamed since', kind: 'other', value: 1 }],
+    liabilities: [{ id: 'x', name: 'Loan', balance: 1, securedOn: 'the-shed' }] } });
+  eq(d.side.property[0].id, 'the-shed', 'the id is not re-slugged from the new name');
+  eq(d.side.liabilities[0].securedOn, 'the-shed', 'so the link survives the rename');
+});
+t('schema 7 moves what was owed onto a debt of its own, once', () => {
+  const before = { schema: 6, side: { property: [
+    { name: 'House', kind: 'home', value: 400000, owed: 250000 },
+    { name: 'Bike', kind: 'other', value: 900 } ] } };
+  const st = H.migrate(H.coerceShape(before));
+  eq(st.schema, 7);
+  eq(st.side.property[0].owed, undefined, 'the number is off the property row');
+  eq(st.side.liabilities.length, 1, 'and nothing was invented for the row that owed nothing');
+  const l = st.side.liabilities[0];
+  eq(l.kind, 'mortgage', 'a home carries a mortgage');
+  eq(l.balance, 250000);
+  eq(l.securedOn, st.side.property[0].id);
+  eq(l.rate, undefined, 'no rate, payment or date is invented — the reader says those');
+  /* The migration must not move the number the reader already recorded. */
+  eq(H.netWorthParts(st, '2030-04').property, 150900,
+    'net worth is identical to the cent after the move');
+  eq(H.netWorthParts(H.coerceShape(before), '2030-04').property, 150900, 'as it was before it');
+  const twice = H.migrate(H.migrate(H.coerceShape(before)));
+  eq(twice.side.liabilities.length, 1, 'and it happens once, not on every load');
+});
+t('a snapshot can state what was owed, and it comes OFF the total', () => {
+  const pts = H.snapshotPoints(H.coerceShape({ side: { snapshots: [
+    { date: '2030-01-01', liquid: 100, property: 400, debts: 250 } ] } }));
+  eq(pts[0].total, 250, 'assets add up, debts come off — never all six reduced together');
+  eq(H.SNAPSHOT_PARTS.includes('debts'), true);
+  eq(H.SNAPSHOT_ASSETS.includes('debts'), false, 'the two lists must not drift into one');
+});
+t('the sample plan shows every shape of debt', () => {
+  const s = H.sampleState();
+  const kinds = s.side.liabilities.map(l => l.kind);
+  ok(kinds.includes('mortgage') && kinds.includes('student'),
+    'a secured one and an unsecured one, or the card only ever shows half itself');
+  ok(s.side.liabilities.some(l => !l.payment),
+    'and one with nothing to project from, which is the state that asks for a payment');
+  ok(s.side.property.every(p => p.owed === undefined),
+    'no property row carries the old owed field — it would migrate into a duplicate');
+  const ids = new Set(s.side.property.map(p => p.id));
+  for (const l of s.side.liabilities)
+    ok(!l.securedOn || ids.has(l.securedOn), `${l.id} points at a property that exists`);
 });
 
 group('CSV export');

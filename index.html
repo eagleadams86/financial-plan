@@ -1127,6 +1127,11 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
    row and the charts' projected bars already use, and the only one available
    here: hue alone can never carry a meaning in this app. */
 .goal.est .value, .goal.est .foot { font-style: italic; }
+/* A figure the app worked out sitting in an ordinary table — the debts card's
+   projected balance. Same grammar as a projected grid cell (`td.c-auto`) and a
+   planned donation row: italic and quieter, never a colour, because the theme
+   has four palettes and Charlie reads none of them by hue. */
+td.projected { font-style: italic; color: var(--text-secondary); }
 .goal.est .value { color: var(--text-secondary); }
 .goal.est .bar { border-style: dashed; }
 /* Two rows that MIRROR each other — three actuals, then the three projections
@@ -1653,6 +1658,49 @@ const PROPERTY_KINDS = [
 ];
 const PROPERTY_KIND_LABEL = Object.fromEntries(PROPERTY_KINDS);
 
+/* ── What the household OWES ────────────────────────────────────────────────
+   The one figure in this app that used to go stale on its own. A debt was a
+   single number typed onto a property row (`owed`), retyped by hand or not at
+   all, while every other figure here computes itself — and a loan not attached
+   to a house or a car had nowhere to live at all.
+
+   A liability is `{id, name, kind, balance, rate?, payment?, asOf?, securedOn?,
+   note?}`. Like property it never touches the budget engine: nothing flows
+   through a mortgage that the mortgage PAYMENT row isn't already recording, and
+   counting both would take the money out twice. It is read by the Household tab
+   and by net worth, and nowhere else.
+
+   `securedOn` names a property row. A secured debt reduces that property's
+   EQUITY — which is what `owed` did, so a migrated plan's net worth is
+   unchanged to the cent — and an unsecured one is its own tile. A dangling
+   `securedOn` degrades to unsecured rather than breaking, and the total is the
+   same figure either way, which is the property of the split worth knowing
+   before changing it. */
+const LIABILITY_KINDS = [
+  ['mortgage', 'Mortgage'],
+  ['auto', 'Car loan'],
+  ['student', 'Student loan'],
+  ['card', 'Credit card'],
+  ['personal', 'Personal loan'],
+  ['other', 'Other'],
+];
+const LIABILITY_KIND_LABEL = Object.fromEntries(LIABILITY_KINDS);
+/* Which kinds are USUALLY secured on something — it only picks the default in
+   the editor's dropdown, and the reader overrides it by choosing a property or
+   choosing none. A car loan on a car you never listed is unsecured here, which
+   is the honest reading of a plan that doesn't mention the car. */
+const SECURED_KINDS = new Set(['mortgage', 'auto']);
+
+/* The parts a net worth snapshot may state, in the order the card's tiles and
+   the history table below them read. Written ONCE because four things have to
+   agree about this list — what coerceShape keeps, what makes a record worth
+   keeping at all, what the Record button writes, and what a record with no
+   stated total adds up to — and the day `debts` arrived was the day a fifth
+   copy would have been missed. `debts` is the one that SUBTRACTS, which is why
+   the sum below can't just reduce over the list. */
+const SNAPSHOT_PARTS = ['total', 'liquid', 'invested', 'retirement', 'property', 'debts'];
+const SNAPSHOT_ASSETS = ['liquid', 'invested', 'retirement', 'property'];
+
 /* Federal and state, and nothing else. Outermost key of `side.tax` because the
    two move on different clocks — a state rewrites its schedule in a year the
    federal one is untouched — so the carry-forward has to be per jurisdiction.
@@ -1665,7 +1713,7 @@ const STORAGE_KEY = 'fin-state';
    here is what lets `load` spot the opposite case — a plan from the FUTURE,
    saved by a newer build — which migrate cannot help with and must not guess
    at. Bump it in the same commit as the migration step that earns it. */
-const SCHEMA = 6;
+const SCHEMA = 7;
 
 /* The strapline beside the app's name in the header, and after it in the browser
    tab. Every other app in the family carries one — "· Charlie's Epic Sprint
@@ -2247,6 +2295,10 @@ function blankState() {
          not accounts: nothing flows through a house, so the engine never sees
          these. */
       property: [],
+      /* What is still owed — see LIABILITY_KINDS above. A list rather than a
+         field on a property row, because most debts are not secured on
+         anything and the ones that are outlive the thing as often as not. */
+      liabilities: [],
       /* Allocation targets for the Everything You Hold card — UPPER-CASED
          ticker → the share (0–1) of all holdings it should be. A map, not a
          list: one target per ticker is the whole idea, and the rollup already
@@ -2502,6 +2554,12 @@ function normalizeIds(d) {
   for (const t of list(vac.trips)) own(t, t.name || 'trip');
   for (const a of list(side.retirementAccounts)) ref(a, 'owner', '');
   for (const r of list(side.property)) ref(r, 'person', '');
+  /* Ids for property and liabilities are MINTED in coerceShape (below), not
+     here: both lists were addressed by index until liabilities arrived, so most
+     rows carry no id at all and minting needs the uniqueness check `own` does
+     not do. What belongs here is the REFERENCE — cleaned the same way, so a
+     mangled `securedOn` still finds the row it names. */
+  for (const l of list(side.liabilities)) ref(l, 'securedOn', '');
 
   const years = (d.years && typeof d.years === 'object') ? d.years : {};
   for (const y of Object.keys(years)) {
@@ -2761,6 +2819,15 @@ function coerceShape(data) {
            STRICTLY: num() would turn junk into 0, and a $0 threshold is a
            real-looking claim ("sweep everything") the reader never made.
            goalId is checked after the goals themselves are settled, below. */
+        /* How fast a growing row rises, read STRICTLY — the account.rate
+           discipline. num() would turn a corrupt field into 0%, which reads on
+           screen as a row somebody deliberately said does not rise, and the
+           whole point of the rule is that it does. Kept only while the row IS
+           a growing one, the way `every` and `perCheck` are. */
+        if (cat.rule === 'grow') {
+          const g = rateOrNone(cat.growth);
+          if (g !== undefined) cat.growth = g; else delete cat.growth;
+        } else delete cat.growth;
         if (cat.rule === 'overflow') {
           if (!acctIds.has(cat.overflowFrom)) delete cat.overflowFrom;
           if (!acctIds.has(cat.transferTo)) delete cat.transferTo;
@@ -2846,7 +2913,27 @@ function coerceShape(data) {
   d.side = obj(d.side);
   const s = d.side;
   for (const k of ['taxable', 'otherMoney', 'hsa', 'daf', 'portfolios',
-                   'retirementAccounts', 'property']) s[k] = arr(s[k]);
+                   'retirementAccounts', 'property', 'liabilities']) s[k] = arr(s[k]);
+  /* Mint an id for a row that has none, WITHOUT moving one that has. Property
+     and liabilities are the two lists that were addressed by index before
+     anything pointed at them, so nearly every stored row arrives id-less and a
+     bare `cleanId` would hand two cars called "Car" the same id — which is
+     exactly the ambiguity `securedOn` cannot survive. A well-formed id is left
+     alone (it is already being pointed at); only the minted ones are numbered,
+     and deterministically, so two loads of one file agree. */
+  const mintIds = (rows, fallback) => {
+    const seen = new Set(rows.map(r => ID_OK.test(String(r.id || '')) ? String(r.id) : null)
+      .filter(Boolean));
+    for (const r of rows) {
+      if (ID_OK.test(String(r.id || ''))) continue;
+      const base = cleanId(r.id, r.name || fallback);
+      let id = base, n = 2;
+      while (seen.has(id)) id = `${base}-${n++}`;
+      r.id = id; seen.add(id);
+    }
+  };
+  mintIds(s.property, 'property');
+  mintIds(s.liabilities, 'debt');
   /* Allocation targets: ticker → share of all holdings. Keys are normalised
      to the rollup's own grouping key (trimmed, upper-cased — a target typed
      for "voo" must find the VOO row); values are read STRICTLY, the
@@ -2879,29 +2966,67 @@ function coerceShape(data) {
     if (key && pct !== undefined) s.classTargets[key] = Math.min(1, Math.max(0, pct));
   }
   /* Net worth snapshots: a record with no DATE means nothing (a worth without
-     a when is not a fact) and is dropped; the five figures go through the
+     a when is not a fact) and is dropped; the figures go through the
      owed discipline — numbers kept, absent stays absent, and a record left
      with no figure at all goes too. */
   s.snapshots = arr(s.snapshots).filter(r => /^\d{4}-\d{2}-\d{2}$/.test(r.date || ''));
   for (const r of s.snapshots) {
-    for (const k of ['total', 'liquid', 'invested', 'retirement', 'property']) {
+    for (const k of SNAPSHOT_PARTS) {
       const v = num(r[k]);
       if (typeof v === 'number') r[k] = v; else delete r[k];
     }
   }
   s.snapshots = s.snapshots.filter(r =>
-    ['total', 'liquid', 'invested', 'retirement', 'property'].some(k => typeof r[k] === 'number'));
+    SNAPSHOT_PARTS.some(k => typeof r[k] === 'number'));
   /* Property: a name, a kind from the fixed list, a value and optionally what
      is still owed. Value and owed feed totals through num() (the NaN class
      fix); owed is DELETED rather than zeroed when it isn't a number, because
      "nothing owed" and "never said" render the same and a stored 0 would be a
-     claim the reader didn't make. */
+     claim the reader didn't make.
+
+     `owed` is READ but no longer WRITTEN: schema 7 moves it to a liability of
+     its own. It stays coerced because a backup taken before today can be
+     restored at any point, and it is still counted by `netWorthParts` for the
+     moment between coerceShape and migrate — which is the only moment it now
+     survives, and one where reading it wrongly would be a silent change to a
+     recorded net worth. */
   for (const p of s.property) {
     p.name = String(p.name || 'Property');
     if (!PROPERTY_KIND_LABEL[p.kind]) p.kind = 'other';
     p.value = num(p.value);
     const owedNum = num(p.owed);
     if (typeof owedNum === 'number') p.owed = owedNum; else delete p.owed;
+  }
+  /* What is owed. The balance goes through num() like every other figure that
+     reaches a total; the RATE and the PAYMENT do not — they go through
+     rateOrNone, the account.rate discipline, because a corrupt field turned
+     into 0 would read as "this loan charges no interest" or "nothing is being
+     paid", both of which are claims the reader never made and both of which
+     change the payoff date on screen.
+
+     `asOf` is the month the balance was true, and it is what makes the whole
+     feature work: without it a stated balance is a fact with no date and the
+     projection has nothing to count from. A malformed one is dropped, which
+     degrades to "the balance stands as typed" — stale, but never wrong about
+     when it was said.
+
+     `securedOn` is checked against the property ids ABOVE, so it is settled by
+     the time anything reads it. Dangling drops to unsecured; the total is the
+     same figure either way. */
+  {
+    const propIds = new Set(s.property.map(p => p.id));
+    for (const l of s.liabilities) {
+      l.name = String(l.name || 'Debt');
+      if (!LIABILITY_KIND_LABEL[l.kind]) l.kind = 'other';
+      l.balance = num(l.balance);
+      if (typeof l.balance !== 'number') l.balance = 0;
+      for (const k of ['rate', 'payment']) {
+        const v = rateOrNone(l[k]);
+        if (v !== undefined) l[k] = v; else delete l[k];
+      }
+      if (!/^\d{4}-\d{2}$/.test(String(l.asOf || ''))) delete l.asOf;
+      if (l.securedOn !== undefined && !propIds.has(l.securedOn)) delete l.securedOn;
+    }
   }
   /* Investments used to be two fixed panes, "Taxable investments" and "HSA",
      because those were the two Charlie had. They're a named list now — add as
@@ -3709,6 +3834,39 @@ function migrate(parsed) {
       parsed.settings.tagline = DEFAULT_TAGLINE;
     parsed.schema = 6;
   }
+  /* Schema 7 moves what is owed OFF the property rows and into liabilities of
+     its own, ONCE. Here rather than in coerceShape for the reason every step
+     above is: coerceShape runs on every load, and a reader who deleted the
+     migrated loan would find it recreated on the next one.
+
+     It is a pure re-filing, and the net worth it produces is identical to the
+     cent — the new row is `securedOn` the property it came from, and a secured
+     debt reduces that property's equity exactly the way `owed` did. What
+     changes is that the figure now has a NAME, a rate, a payment and a date it
+     was true, none of which a bare number on a house could carry.
+
+     No rate, payment or `asOf` is invented. The migrated row is the number the
+     reader typed and nothing more; the projection stays switched off until they
+     say what it costs, which is the same promise the tax tables keep. */
+  if ((parsed.schema || 1) < 7) {
+    const side = parsed.side || (parsed.side = {});
+    const list = Array.isArray(side.liabilities) ? side.liabilities : (side.liabilities = []);
+    const seen = new Set(list.map(l => l && l.id).filter(Boolean));
+    for (const prop of (Array.isArray(side.property) ? side.property : [])) {
+      if (typeof prop.owed !== 'number' || !prop.owed) { delete prop.owed; continue; }
+      let id = `${prop.id}-loan`, n = 2;
+      while (seen.has(id)) id = `${prop.id}-loan-${n++}`;
+      seen.add(id);
+      list.push({ id, name: `${prop.name} loan`,
+        /* A home carries a mortgage and a vehicle a car loan; anything else is
+           secured on something the list has no word for, and "Other" is the
+           honest label rather than a guess dressed up as a fact. */
+        kind: prop.kind === 'home' ? 'mortgage' : prop.kind === 'vehicle' ? 'auto' : 'other',
+        balance: prop.owed, securedOn: prop.id });
+      delete prop.owed;
+    }
+    parsed.schema = 7;
+  }
   return parsed;
 }
 
@@ -4061,6 +4219,38 @@ const RULES = {
       if (cell) return cell.v;
     }
     return priorYearLast(cat, m, ctx)?.v ?? null;
+  },
+
+  /* Rent, childcare, insurance: repeat the last figure, stepped up a set
+     percentage once per CALENDAR YEAR. `carry` with a clock on it.
+
+     Compounding it monthly was the obvious alternative and it is wrong twice
+     over: a 3%/yr rent would grow by cents every month, which is not a thing a
+     landlord does, and a year built ahead would then read twelve different
+     figures where the reader said one. Once a year is what actually happens —
+     the renewal letter, the January price rise — so the step is the difference
+     in YEAR NUMBERS between the month being filled and the month the figure
+     came from. Inside a year the exponent is 0 and this IS carry, which is what
+     lets a typed month take over mid-year exactly the way it does everywhere
+     else.
+
+     Reading the nearest earlier cell rather than the row's first figure is the
+     same choice `carry` makes and matters more here: the reader is expected to
+     type the real new rent when it lands, and the rule must then grow from THAT
+     rather than from a two-year-old number compounded forward past it.
+
+     No rate is a 0% rise, deliberately — a row switched to this rule before its
+     percentage is typed repeats, which is the honest reading of "rises by
+     nothing said yet" and never invents a number. */
+  grow(cat, m, ctx) {
+    const r = typeof cat.growth === 'number' ? cat.growth : 0;
+    const stepped = (v, from) => round2(v * Math.pow(1 + r, +m.slice(0, 4) - +from.slice(0, 4)));
+    for (let i = monthDiff(ctx.yr.startMonth, m) - 1; i >= 0; i--) {
+      const cell = ctx.yr.cells[`${cat.id}|${ctx.months[i]}`];
+      if (cell) return stepped(cell.v, ctx.months[i]);
+    }
+    const prev = priorYearLast(cat, m, ctx);
+    return prev ? stepped(prev.v, prev.m) : null;
   },
 
   /* Cycle bills (a quarterly water bill, semi-annual insurance, an annual
@@ -4637,12 +4827,15 @@ function computeGoals(st, computed, todayIso) {
    helpBtn(key, label) in the renderers. */
 const HELP = {
   netWorth: { title: 'What Counts toward Net Worth',
-    body: 'Four parts, each read from a tab you fill in elsewhere. Liquid is this month\'s '
+    body: 'Five parts, each read from a tab you fill in elsewhere. Liquid is this month\'s '
       + 'computed total across the budget grid\'s accounts. Invested sums the Investments '
       + 'tab\'s holdings at their listed prices. Retirement sums the retirement accounts — '
       + 'Traditional and Roth together, before any tax, so it overstates what the pot '
       + 'would hand you to spend. Property is the Household tab\'s list at your own stated '
-      + 'values, minus anything still owed. The giving fund is deliberately left out: that '
+      + 'values, minus whatever is secured on it. Owed is everything else the household '
+      + 'owes — cards, student loans, a personal loan — and it comes off the total; a debt '
+      + 'secured on a property is already inside the Property figure, so it is never '
+      + 'counted twice. The giving fund is deliberately left out: that '
       + 'money was given the day it went in, and counting it would inflate the total by '
       + 'dollars that are no longer yours. A part with nothing recorded shows no tile at '
       + 'all rather than a $0.00 — an empty list and a worthless one are different claims. '
@@ -4650,6 +4843,22 @@ const HELP = {
       + 'money (its ✎ Edit dialog). The Liquid and Invested tiles still match their tabs, '
       + 'but the Total counts that pot once — at what the holdings are worth, since a '
       + 'priced figure is the better answer to what something is worth today.' },
+  liabilities: { title: 'How a Debt Is Projected',
+    body: 'A balance on its own is a fact about a day nobody wrote down, which is why it '
+      + 'goes stale. Say WHEN it was true and the app can do the rest: each month the '
+      + 'balance takes its share of the rate you typed, the payment covers that interest '
+      + 'first, and whatever is left comes off the principal — the arithmetic on the back '
+      + 'of a mortgage statement. What the card shows is where that lands today, and the '
+      + 'month the debt reaches zero. Leave the payment out and nothing is projected: the '
+      + 'balance stands exactly as you typed it, which is honest rather than helpful. If '
+      + 'the payment is smaller than the first month\u2019s interest the debt genuinely '
+      + 'grows, and the card says so in words rather than drawing a line climbing away — '
+      + 'that is a fact about the loan, and it should not look like a fault in the app. '
+      + 'A debt secured on a property comes off that property\u2019s equity; anything '
+      + 'else gets its own figure. Either way it comes off net worth once, and the total '
+      + 'is the same number whichever side of the line it sits. Nothing here touches the '
+      + 'budget grid: the payment leaving your account is already a row there, and '
+      + 'counting the debt as well would take the money out twice.' },
   savingFor: { title: 'Saving for a Child',
     body: 'Naming the child a goal is for does two things, and only two. It files the goal '
       + 'under them on the Household tab, and — when the target date is still empty — it '
@@ -5121,6 +5330,11 @@ function welcomeCard() {
 
      2024, 2025  summary years, so Progress has history to draw and Comp has a
                  raise to measure against
+     Debts       one of each shape the What You Owe card reads differently — a
+                 mortgage secured on the house, a car loan nearly done, an
+                 UNSECURED student loan (the case a number typed on a property
+                 row could never hold) and a card with no payment said, which is
+                 the state where nothing is projected and the card asks.
      Donations   one of each shape the Giving tab reads differently — money into
                  the fund, a grant out of it, cash given straight, and one still
                  pending
@@ -5300,10 +5514,34 @@ function sampleState() {
         targets: { VTI: 0.55, VXUS: 0.25, BND: 0.20 },
         classes: { VTI: 'US stocks', VXUS: 'International stocks', BND: 'Bonds' },
         classTargets: { 'us stocks': 0.55, 'international stocks': 0.25, bonds: 0.20 },
+        /* Ids, because the debts below point at these rows. They are what
+           coerceShape would mint anyway; writing them out is what makes the
+           `securedOn` links readable in the source. */
         property: [
-          { kind: 'home', name: 'The house', value: 412000, owed: 231000,
+          { id: 'house', kind: 'home', name: 'The house', value: 412000,
             note: 'Bought 2019; the mortgage row in the budget is this one.' },
-          { kind: 'vehicle', name: 'The estate car', value: 14500, owed: 0 },
+          { id: 'car', kind: 'vehicle', name: 'The estate car', value: 14500 },
+        ],
+        /* One of each shape the debts card reads differently, because a demo
+           that only holds mortgages never shows what the card does with the
+           rest. A mortgage SECURED on the house (so it comes off that
+           property's equity, not out of a tile of its own); a car loan close
+           to its end; an unsecured student loan, which is the case the old
+           `owed`-on-a-property model could not express at all; and a card with
+           no payment said, which is what the "add a payment" state looks like.
+           The mortgage's payment is under the budget row's $2,180 on purpose —
+           that row includes escrow, and a reader who notices is right to. */
+        liabilities: [
+          { id: 'house-loan', name: 'The house — mortgage', kind: 'mortgage',
+            balance: 231000, rate: 0.0325, payment: 1620, asOf: `${PREV}-12`,
+            securedOn: 'house',
+            note: 'Principal and interest only; the budget row also carries escrow.' },
+          { id: 'car-loan', name: 'The estate car', kind: 'auto',
+            balance: 6400, rate: 0.049, payment: 340, asOf: `${Y}-01`, securedOn: 'car' },
+          { id: 'student', name: 'Ben — student loan', kind: 'student',
+            balance: 11200, rate: 0.058, payment: 190, asOf: `${PREV}-06` },
+          { id: 'visa', name: 'Visa', kind: 'card', balance: 1450, rate: 0.229,
+            note: 'Cleared most months, so there is no fixed payment to project from.' },
         ],
         snapshots: [
           { date: `${PREV2}-12-31`, total: 214800, liquid: 28400, invested: 51200,
@@ -6456,6 +6694,7 @@ function balanceYearTip(e, closing, label) {
 const RULE_LABEL = {
   none: 'no rule — stays blank until you type',
   carry: 'repeats the last month',
+  grow: 'repeats, rising a set % each year',
   quarterly: 'repeats on a cycle (every few months)',
   avg: 'average of the months so far',
   avglastyear: 'average of last year',
@@ -6475,6 +6714,10 @@ function ruleDesc(cat, st = state) {
     return `${fmtMoney(cat.perCheck || 0)} per check × that month's paychecks`;
   if (r === 'quarterly')
     return `repeats every ${Math.max(1, Math.round(cat.every || 3))} months`;
+  if (r === 'grow')
+    return cat.growth
+      ? `repeats, rising ${round2(cat.growth * 100)}% each January`
+      : 'repeats — say what % a year it rises in Row settings';
   if (r === 'dividends') {
     const on = dividendAccounts(cat).map(id => accountName(st, id));
     return `${round2(((cat.rate ?? st.settings.midTermRateAnnual) || 0) * 100)}%/yr interest on ${
@@ -6547,20 +6790,115 @@ function goalCard(g, idx) {
    tile reading $0.00 would say something else. The giving fund is measured but
    NEVER added to the total — that money is already given; only its being
    left out is worth a sentence. */
-function netWorthParts(st) {
+/* ── What a debt does over time ─────────────────────────────────────────────
+   The arithmetic every mortgage statement runs: each month the balance earns
+   its share of the annual rate, the payment covers that first, and whatever is
+   left comes off the principal.
+
+   Three answers rather than one, because the interesting cases are the ones
+   that aren't a number. `null` is "not enough said to project anything" — no
+   payment typed, which is the state every migrated row starts in. `never: true`
+   is a payment that does not even cover the first month's interest, which is a
+   real thing that happens and which the app must SAY rather than draw: the
+   balance genuinely grows, and a chart of it climbing away would look like a
+   bug in the plan rather than a fact about the loan.
+
+   The schedule is kept because two different questions read it — what is owed
+   in some later month, and what the whole thing costs in interest — and
+   walking it twice would be two chances to walk it differently.
+
+   MAX_AMORT_MONTHS is a backstop against a rate and payment that converge too
+   slowly to terminate, not a policy about loan length: a hundred years is past
+   any real schedule, and a plan that reaches it has already told the reader the
+   payment barely covers the interest. */
+const MAX_AMORT_MONTHS = 1200;
+
+function amortize(l) {
+  const balance = Math.max(0, (l && l.balance) || 0);
+  const monthly = (typeof (l || {}).rate === 'number' ? l.rate : 0) / 12;
+  const pay = Math.max(0, (l && l.payment) || 0);
+  if (!balance) return { months: 0, interest: 0, never: false, schedule: [] };
+  if (!pay) return null;
+  /* Equality counts as never: a payment exactly equal to the interest leaves
+     the principal untouched for ever, which is the same answer. */
+  if (pay <= round2(balance * monthly)) return { months: null, interest: null, never: true, schedule: [] };
+  let bal = balance, interest = 0, months = 0;
+  const schedule = [];
+  while (bal > 0 && months < MAX_AMORT_MONTHS) {
+    const int = round2(bal * monthly);
+    /* The last payment is only what is left — a schedule that overshoots into a
+       negative balance would report a payoff date a month late and a total
+       interest figure that never happened. */
+    const principal = Math.min(round2(pay - int), bal);
+    bal = round2(bal - principal);
+    interest = round2(interest + int);
+    months++;
+    schedule.push({ n: months, interest: int, principal, balance: bal });
+  }
+  return { months, interest, never: false, schedule };
+}
+
+/* What is owed in a given month — the whole point of `asOf`. A balance with no
+   date is a fact about no particular day, so it simply stands; so does one the
+   reader has said nothing else about. Nothing is ever projected BACKWARDS: a
+   month before the statement reads the stated figure, because the app was not
+   told what the loan looked like then and running the schedule in reverse would
+   be inventing it. */
+function liabilityAt(l, month) {
+  const bal = Math.max(0, (l && l.balance) || 0);
+  if (!bal || !l.asOf || !month || month <= l.asOf) return bal;
+  const a = amortize(l);
+  if (!a || a.never) return bal;
+  const n = monthDiff(l.asOf, month);
+  if (n <= 0) return bal;
+  return n >= a.schedule.length ? 0 : a.schedule[n - 1].balance;
+}
+
+/* The month a debt is paid off, or null while there is nothing to work it out
+   from. Read by the Household card and by nothing else — the balance itself is
+   what net worth uses. */
+function payoffMonth(l) {
+  const a = amortize(l);
+  if (!a || a.never || !a.months || !l.asOf) return null;
+  return monthAdd(l.asOf, a.months);
+}
+
+/* Whether a debt is really secured on a property this plan still holds. Asked
+   in three places and worth writing once: a `securedOn` naming a property that
+   has since been deleted degrades to unsecured, which moves the figure from one
+   tile to another and leaves the total alone. */
+const securedTo = (l, propIds) => (l && l.securedOn && propIds.has(l.securedOn))
+  ? l.securedOn : null;
+
+function netWorthParts(st, month) {
   const side = st.side || {};
   const portfolios = side.portfolios || [];
   const retAccts = side.retirementAccounts || [];
   const property = side.property || [];
+  const liabilities = side.liabilities || [];
   const invested = round2(portfolios.reduce((s, p) => s + holdingsValue(p.rows || []), 0));
   const retirement = round2(retAccts.reduce((s, a) => s + retAcctBalance(a), 0));
+  /* `p.owed` is the pre-schema-7 spelling. It is still added because a backup
+     from before the split is coerced before it is migrated, and this function
+     runs over both — dropping it for one tick would silently overstate a
+     recorded net worth. After migration every property carries none. */
   const owed = round2(property.reduce((s, p) => s + (p.owed || 0), 0));
   const propertyValue = round2(property.reduce((s, p) => s + (p.value || 0), 0));
+  const propIds = new Set(property.map(p => p.id));
+  const owedNow = (l) => liabilityAt(l, month);
+  /* Secured debt comes off the PROPERTY tile, unsecured debt gets a tile of its
+     own. Both come off the total, so the split is a matter of where a reader
+     looks for the figure, never of what the plan is worth. */
+  const secured = round2(liabilities.filter(l => securedTo(l, propIds))
+    .reduce((t, l) => t + owedNow(l), 0));
+  const loose = liabilities.filter(l => !securedTo(l, propIds));
+  const debts = round2(loose.reduce((t, l) => t + owedNow(l), 0));
   return {
     invested, hasInvested: portfolios.some(p => p && (p.rows || []).length),
     retirement, hasRetirement: retAccts.length > 0,
-    property: round2(propertyValue - owed), propertyOwed: owed,
+    property: round2(propertyValue - owed - secured), propertyOwed: round2(owed + secured),
     hasProperty: property.length > 0,
+    debts, hasDebts: loose.length > 0,
     daf: round2(holdingsValue(side.daf || [])), hasDaf: (side.daf || []).length > 0,
     /* Budget accounts whose money IS some pane's holdings (pf.accounts, the
        reader's own statement) — the renderer subtracts their computed balances
@@ -6577,7 +6915,7 @@ function netWorthParts(st) {
    EXACTLY the figures the card was showing — two computations of one number
    is how a recorded fact drifts from the screen it came off. */
 function netWorthTotals(st, liquid, c, cur) {
-  const nw = netWorthParts(st);
+  const nw = netWorthParts(st, cur);
   /* Money a pane has claimed as its holdings (pf.accounts) is in the Liquid
      figure AND the Invested one — both tiles honestly match their tabs, so
      the dedupe lives in the TOTAL alone, subtracting the linked accounts'
@@ -6587,7 +6925,7 @@ function netWorthTotals(st, liquid, c, cur) {
     .reduce((s, id) => s + (c.balances[`${id}|${cur}`] || 0), 0));
   const total = round2(liquid + (nw.hasInvested ? nw.invested : 0)
     + (nw.hasRetirement ? nw.retirement : 0) + (nw.hasProperty ? nw.property : 0)
-    - overlap);
+    - (nw.hasDebts ? nw.debts : 0) - overlap);
   return { nw, overlap, total };
 }
 
@@ -6598,8 +6936,12 @@ function snapshotPoints(st) {
   return (((st.side || {}).snapshots) || [])
     .map(r => ({ date: r.date,
       total: typeof r.total === 'number' ? r.total
-        : round2(['liquid', 'invested', 'retirement', 'property']
-            .reduce((s, k) => s + (typeof r[k] === 'number' ? r[k] : 0), 0)) }))
+        /* The assets add up and the debts come OFF — a reduce over
+           SNAPSHOT_PARTS would quietly add somebody's mortgage to their net
+           worth, which is why the two lists are separate constants. */
+        : round2(SNAPSHOT_ASSETS
+            .reduce((s, k) => s + (typeof r[k] === 'number' ? r[k] : 0), 0)
+            - (typeof r.debts === 'number' ? r.debts : 0)) }))
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -6618,8 +6960,9 @@ function netWorthCard(liquid, cur, c) {
   /* Nothing typed beyond the budget means nothing to add up — the Savings
      Goals card below already carries total liquidity, and a one-tile "net
      worth" equal to it would be the same figure wearing a grander name. */
-  const probe = netWorthParts(state);
-  if (!probe.hasInvested && !probe.hasRetirement && !probe.hasProperty) return '';
+  const probe = netWorthParts(state, cur);
+  if (!probe.hasInvested && !probe.hasRetirement && !probe.hasProperty
+      && !probe.hasDebts) return '';
   const tile = (label, value, foot) => `<div class="goal">
     <div class="label">${label}</div>
     <div class="value">${fmtMoney(value)}</div>
@@ -6646,6 +6989,12 @@ function netWorthCard(liquid, cur, c) {
       ${nw.hasProperty ? tile('Property', nw.property, nw.propertyOwed
         ? `Value minus the ${fmtMoney(nw.propertyOwed)} still owed — the Household tab lists it`
         : 'What it would sell for — the Household tab lists it') : ''}
+      ${/* Written as a positive figure with the word Owed doing the work, not
+            as a minus number: a tile reading −$18,400 beside four positives is
+            the one place in this card a reader has to stop and check the sign.
+            The foot says which way it goes. */''}
+      ${nw.hasDebts ? tile('Owed', nw.debts,
+        'Comes off the total — the Household tab lists what you owe') : ''}
     </div>
     ${(() => {
       /* The history: dated snapshots you chose to record, drawn once there are
@@ -6666,7 +7015,7 @@ function netWorthCard(liquid, cur, c) {
            one draws an em dash, never $0.00: absent and zero are different
            answers here as everywhere else. */
         const parts = [['liquid', 'Liquid'], ['invested', 'Invested'],
-          ['retirement', 'Retirement'], ['property', 'Property']]
+          ['retirement', 'Retirement'], ['property', 'Property'], ['debts', 'Owed']]
           .filter(([k]) => snaps.some(({ r }) => typeof r[k] === 'number'));
         return `<div class="tablewrap" style="margin-top:12px"><table>
         <thead><tr><th style="text-align:left">Date</th><th>Total</th>${
@@ -7113,31 +7462,121 @@ function contribYears(st, filter) {
    worth counts the equity (value minus owed). */
 function propertyCard() {
   const list = state.side.property || [];
-  const anyOwed = list.some(p => p.owed !== undefined);
+  const now = thisMonth();
+  /* What is owed AGAINST each thing, read off the liabilities list rather than
+     off the property row. Before schema 7 this was `p.owed`, a number retyped
+     by hand or left to rot; it is a debt with a rate and a payment now, and
+     what shows here is what it has been paid down to. */
+  const owedOn = (p) => round2((state.side.liabilities || [])
+    .filter(l => l.securedOn === p.id)
+    .reduce((t, l) => t + liabilityAt(l, now), 0));
+  const anyOwed = list.some(p => owedOn(p) > 0);
   const rows = list.map((p, idx) => {
-    const equity = round2((p.value || 0) - (p.owed || 0));
+    const owed = owedOn(p);
+    const equity = round2((p.value || 0) - owed);
     return `<tr class="editrow" data-edit="property" data-idx="${idx}"
       title="Click to edit${p.note ? ' · ' + esc(p.note) : ''}">
       <th scope="row">${esc(p.name)}${p.note ? ` <span class="muted" title="${esc(p.note)}">📝</span>` : ''}</th>
       <td style="text-align:left">${esc(PROPERTY_KIND_LABEL[p.kind] || 'Other')}</td>
       <td>${p.value === undefined ? '<span class="muted">—</span>' : fmtMoney(p.value)}</td>
-      ${anyOwed ? `<td>${p.owed === undefined ? '<span class="muted">—</span>' : fmtMoney(p.owed)}</td>` : ''}
+      ${anyOwed ? `<td>${owed ? fmtMoney(owed) : '<span class="muted">—</span>'}</td>` : ''}
       <td>${fmtMoney(equity)}</td></tr>`;
   }).join('');
-  const totalEquity = round2(list.reduce((s, p) => s + (p.value || 0) - (p.owed || 0), 0));
+  const totalEquity = round2(list.reduce((s, p) => s + (p.value || 0) - owedOn(p), 0));
   return `<div class="card">
     <h2>Property</h2>
-    <p class="sub">What the household owns outright — a home, a car, a boat — at what it
-      would sell for. Equity is that value minus anything still owed, and it is what the
-      Progress tab's net worth counts.${viewOnly || !list.length ? '' : ' Click a row to update a value.'}</p>
+    <p class="sub">What the household owns — a home, a car, a boat — at what it
+      would sell for. Equity is that value minus whatever is still owed on it, and it is
+      what the Progress tab's net worth counts.${anyOwed ? ' The Owed column is read from What You Owe, below.' : ''}${viewOnly || !list.length ? '' : ' Click a row to update a value.'}</p>
     ${list.length ? `<div class="tablewrap"><table>
       <thead><tr><th style="text-align:left">Property</th><th style="text-align:left">Kind</th>
-        <th>Value</th>${anyOwed ? '<th>Still owed</th>' : ''}<th>Equity</th></tr></thead>
+        <th>Value</th>${anyOwed ? '<th>Owed</th>' : ''}<th>Equity</th></tr></thead>
       <tbody>${rows}</tbody>
       ${list.length > 1 ? `<tfoot><tr><th>Total</th><td></td><td></td>${anyOwed ? '<td></td>' : ''}
         <td>${fmtMoney(totalEquity)}</td></tr></tfoot>` : ''}
     </table></div>` : '<p class="sub">Nothing listed yet.</p>'}
     <div class="addbar"><button class="btn small" data-add="property">＋ Add property</button></div>
+  </div>`;
+}
+
+/* ── What You Owe ───────────────────────────────────────────────────────────
+   The card the app went without for a year. Every other figure here computes
+   itself; a debt was one number on a property row that only ever changed when
+   somebody remembered to change it.
+
+   Two things it does that the number could not. It projects: a balance stated
+   in a month, a rate and a payment are enough to say what is owed TODAY, and
+   that is the figure net worth counts. And it names the end — the month the
+   thing is paid off and what the borrowing costs between now and then, which is
+   the question a debt is actually carried to answer.
+
+   It says which parts it is missing rather than filling them in. A row with no
+   payment shows its stated balance and asks for one; a payment that does not
+   cover the interest says so outright instead of drawing a balance climbing
+   away, which would read as a bug in the app rather than a fact about the
+   loan. */
+function liabilitiesCard() {
+  const list = state.side.liabilities || [];
+  const now = thisMonth();
+  const propName = (id) => (state.side.property || []).find(p => p.id === id)?.name;
+  const rows = list.map((l, idx) => {
+    const a = amortize(l);
+    const bal = liabilityAt(l, now);
+    const off = payoffMonth(l);
+    /* Interest LEFT, so the schedule is re-walked from where the balance is
+       now rather than from where it was stated. Reading `a.interest` here
+       showed a mortgage's whole lifetime cost under a column headed "left",
+       which is the same figure wearing the wrong question. */
+    const rest = amortize({ ...l, balance: bal });
+    const moved = l.asOf && bal !== l.balance;
+    /* The stated figure is named in the tooltip whenever the projection has
+       moved it, so a balance nobody typed is never mistaken for one somebody
+       did. */
+    const balTitle = moved
+      ? `Stated ${fmtMoney(l.balance)} in ${monthLabelFull(l.asOf)}, paid down to here`
+      : l.asOf ? `As stated in ${monthLabelFull(l.asOf)}` : 'As typed — no month said';
+    const ends = !a ? '<span class="muted">Add a payment</span>'
+      : a.never ? '<span class="muted">The payment is under the interest</span>'
+      : !l.asOf ? '<span class="muted">Add the month it was true</span>'
+      : bal <= 0 ? 'Paid off'
+      : `${esc(monthLabelFull(off))}`;
+    return `<tr class="editrow" data-edit="liability" data-idx="${idx}"
+      title="Click to edit${l.note ? ' · ' + esc(l.note) : ''}">
+      <th scope="row">${esc(l.name)}${l.note ? ` <span class="muted" title="${esc(l.note)}">📝</span>` : ''}</th>
+      <td style="text-align:left">${esc(LIABILITY_KIND_LABEL[l.kind] || 'Other')}${
+        l.securedOn && propName(l.securedOn)
+          ? ` <span class="muted">on ${esc(propName(l.securedOn))}</span>` : ''}</td>
+      <td title="${esc(balTitle)}"${moved ? ' class="projected"' : ''}>${fmtMoney(bal)}</td>
+      <td>${typeof l.rate === 'number' ? `${round2(l.rate * 100)}%` : '<span class="muted">—</span>'}</td>
+      <td>${typeof l.payment === 'number' ? fmtMoney(l.payment) : '<span class="muted">—</span>'}</td>
+      <td style="text-align:left">${ends}</td>
+      <td>${rest && !rest.never && rest.interest !== null && bal > 0
+        ? fmtMoney(rest.interest) : '<span class="muted">—</span>'}</td></tr>`;
+  }).join('');
+  const total = round2(list.reduce((t, l) => t + liabilityAt(l, now), 0));
+  const anyProjected = list.some(l => l.asOf && liabilityAt(l, now) !== l.balance);
+  return `<div class="card" style="grid-column:1/-1">
+    <h2>What You Owe${helpBtn('liabilities', 'how a debt is projected')}</h2>
+    <p class="sub">Every debt the household carries, whether or not it is secured on
+      something. ${anyProjected
+        ? `A balance in <em>this style</em> has been paid down from what you
+           stated — the app works out what is left, so the figure stops going stale the
+           moment you look away.`
+        : `Say what a balance was, when it was true, the rate and the payment, and the app
+           works out what is left today and when it ends.`} Nothing here reaches the budget:
+      the payment is already an expense row, and counting it twice would take the money out
+      twice.</p>
+    ${list.length ? `<div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Debt</th><th style="text-align:left">Kind</th>
+        <th>Owed now</th><th>Rate</th><th>Payment</th>
+        <th style="text-align:left">Paid off</th>
+        <th title="What the remaining payments cost in interest, at this rate">Interest left</th></tr></thead>
+      <tbody>${rows}</tbody>
+      ${list.length > 1 ? `<tfoot><tr><th>Total</th><td></td><td>${fmtMoney(total)}</td>
+        <td></td><td>${fmtMoney(round2(list.reduce((t, l) => t + (l.payment || 0), 0)))}</td>
+        <td></td><td></td></tr></tfoot>` : ''}
+    </table></div>` : `<p class="sub">Nothing owed${viewOnly ? '.' : ' — or nothing recorded yet.'}</p>`}
+    <div class="addbar"><button class="btn small" data-add="liability">＋ Add a debt</button></div>
   </div>`;
 }
 
@@ -7150,7 +7589,7 @@ function renderHousehold() {
       <p>Your Total doesn't move: this records who owns the money, not how much
         of it there is.</p>
       <p style="margin-top:14px"><button class="btn primary" data-add="person">＋ Add the first person</button></p>
-    </div></div>` + propertyCard();
+    </div></div>` + `<div class="cards2 pairs">${propertyCard()}${liabilitiesCard()}</div>`;
 
   const now = thisMonth();
   const rows = people.map((p, idx) => {
@@ -7251,6 +7690,7 @@ function renderHousehold() {
        No backticks in here — this comment is inside a template literal, and one
        ends the string. It did, and the app came up blank. -->
   ${propertyCard()}
+  ${liabilitiesCard()}
   <div class="card">
     <h2>Who Owns What</h2>
     <p class="sub">Every account, grouped by whose it is${
@@ -11391,6 +11831,7 @@ function wireView(view) {
       if (nw.hasInvested) snap.invested = nw.invested;
       if (nw.hasRetirement) snap.retirement = nw.retirement;
       if (nw.hasProperty) snap.property = nw.property;
+      if (nw.hasDebts) snap.debts = nw.debts;
       const replaced = upsertSnapshot(state.side.snapshots, snap);
       save(); render();
       toast(replaced ? `Restated today's snapshot — ${fmtMoney(total)}`
@@ -12729,6 +13170,7 @@ const EDITORS = {
       { key: 'rule', label: 'Future months rule', type: 'select', options: [
         ['none', 'Blank (type estimates by hand)'],
         ['carry', 'Repeat the last month'],
+        ['grow', 'Repeat, rising a set % each year'],
         ['quarterly', 'Repeat on a cycle (every N months)'],
         ['avg', 'Average of the months so far'],
         ['avglastyear', 'Average of last year'],
@@ -12745,6 +13187,14 @@ const EDITORS = {
         showIf: (v) => v.rule === 'paycheck' },
       { key: 'every', label: 'Months between payments', type: 'number', step: 1,
         showIf: (v) => v.rule === 'quarterly' },
+      /* Its own key rather than sharing `rate` with the dividends rule. The two
+         are different questions — what an account earns, and what a bill rises
+         by — and a row moved between the rules would otherwise carry the other
+         one's figure into an answer that looked typed. */
+      { key: 'growth', label: 'Rises %/yr', type: 'percent',
+        showIf: (v) => v.rule === 'grow',
+        hint: 'Applied once each January, never monthly \u2014 a renewal, not compound interest. '
+            + 'Type the real figure when it lands and the row grows from that instead.' },
       { key: 'rate', label: 'Interest %/yr', type: 'percent',
         showIf: (v) => v.rule === 'dividends' },
       /* Which rows count as pay, for the Giving tab's share-of-take-home. It
@@ -12941,6 +13391,9 @@ const EDITORS = {
         if (v.rule === 'dividends' && v.rate !== null && v.rate !== undefined)
           cat.rate = v.rate;
         else delete cat.rate;
+        if (v.rule === 'grow' && v.growth !== null && v.growth !== undefined)
+          cat.growth = v.growth;
+        else delete cat.growth;
         /* Kept only while it is a dividends row, and stored even when empty:
            an empty list is the reader saying "earn on nothing", which reads
            differently from never having been asked — coerceShape backfills the
@@ -13451,8 +13904,10 @@ const EDITORS = {
     title: (ds, isNew) => isNew ? 'Add Property' : 'Property',
     cols: 2,
     sub: () => 'A value you state, not a balance the app computes — update it whenever '
-      + 'your idea of what it would fetch changes. Equity (value minus owed) is what '
-      + 'the net worth on the Progress tab counts.',
+      + 'your idea of what it would fetch changes. What is owed on it is a debt of its '
+      + 'own now, in What You Owe below, so it can carry a rate and a payment and work '
+      + 'out its own payoff date. Equity — value minus that debt — is what the net worth '
+      + 'on the Progress tab counts.',
     fields: () => [
       /* NOT `wide`: a wide field takes a row to itself, which left Name alone
          above and Kind stranded beside an empty half. The four questions pair
@@ -13462,9 +13917,6 @@ const EDITORS = {
       { key: 'kind', label: 'Kind', type: 'select',
         options: PROPERTY_KINDS.map(([v, label]) => [v, label]) },
       { key: 'value', label: 'What it would sell for', type: 'money' },
-      { key: 'owed', label: 'Still owed on it', type: 'money',
-        hint: 'Optional — a mortgage or loan balance. Leave it empty when the thing is '
-          + 'paid off.' },
       noteField,
     ],
     get: (ds) => ({ ...state.side.property[+ds.idx] }),
@@ -13475,15 +13927,93 @@ const EDITORS = {
         name: v.name,
         kind: PROPERTY_KIND_LABEL[v.kind] ? v.kind : 'other',
         /* An empty money box is null — keep the field absent rather than
-           storing a 0 that claims the thing is worthless / debt-free. */
+           storing a 0 that claims the thing is worthless. */
         value: typeof v.value === 'number' ? v.value : undefined,
-        owed: typeof v.owed === 'number' ? v.owed : undefined,
         note: v.note || undefined,
       };
       if (ds.idx !== undefined) Object.assign(state.side.property[+ds.idx], row);
-      else state.side.property.push(row);
+      /* A new row is minted an id here rather than left to coerceShape,
+         because a debt secured on it needs something to point at the moment
+         the reader adds one — which is usually the very next thing they do. */
+      else state.side.property.push({ ...row, id: uniqueId(state.side.property, v.name, 'property') });
     },
-    del(ds) { state.side.property.splice(+ds.idx, 1); },
+    del(ds) {
+      const gone = state.side.property[+ds.idx];
+      state.side.property.splice(+ds.idx, 1);
+      /* A debt secured on a property that is being deleted keeps its balance
+         and simply stops being secured. Deleting it too would throw away a
+         figure the reader never asked to lose — selling the house does not
+         clear the mortgage, and the app has no business assuming it did.
+         coerceShape would drop the dangling pointer on the next load anyway;
+         doing it here is what makes the card read right immediately. */
+      if (gone) for (const l of state.side.liabilities || [])
+        if (l.securedOn === gone.id) delete l.securedOn;
+    },
+  },
+
+  /* What is still owed. Deliberately its own list rather than a field on a
+     property row — see LIABILITY_KINDS. */
+  liability: {
+    title: (ds, isNew) => isNew ? 'Add a Debt' : 'Debt',
+    cols: 2,
+    sub: () => 'The balance and the month it was true are what let the app work out what '
+      + 'is left today, so it stops going stale. Add the rate and the payment and it also '
+      + 'says when the debt ends and what the rest of it costs. None of this reaches the '
+      + 'budget — the payment is already a row there.',
+    fields: () => [
+      { key: 'name', label: 'Name', type: 'text',
+        hint: 'Whatever you call it — "The house", "Mia\u2019s car", "Visa".' },
+      { key: 'kind', label: 'Kind', type: 'select',
+        options: LIABILITY_KINDS.map(([v, label]) => [v, label]) },
+      { key: 'balance', label: 'Balance', type: 'money' },
+      { key: 'asOf', label: 'True as of', type: 'month',
+        hint: 'The month that balance was right \u2014 off a statement. Without it the '
+          + 'figure simply stands as typed.' },
+      { key: 'rate', label: 'Rate %/yr', type: 'percent' },
+      { key: 'payment', label: 'Paid each month', type: 'money' },
+      /* Only offered when there is something to secure it ON. A dropdown whose
+         only option is "Nothing" is a question with one answer. */
+      ...((state.side.property || []).length ? [{ key: 'securedOn', label: 'Secured on',
+        type: 'select',
+        options: [['', 'Nothing \u2014 count it on its own'],
+          ...(state.side.property || []).map(p => [p.id, p.name])],
+        hint: 'A secured debt comes off that property\u2019s equity instead of standing '
+          + 'as its own figure. Either way it comes off your net worth.' }] : []),
+      noteField,
+    ],
+    get: (ds) => ({ ...state.side.liabilities[+ds.idx] }),
+    blank: () => ({ kind: 'other' }),
+    save(ds, v) {
+      if (!v.name) return;
+      const kind = LIABILITY_KIND_LABEL[v.kind] ? v.kind : 'other';
+      const row = {
+        name: v.name, kind,
+        balance: typeof v.balance === 'number' ? v.balance : 0,
+        /* Rate, payment and the month are each ABSENT rather than 0 when they
+           are not answered — the card reads absence as "not said yet" and asks
+           for it, where a 0 would read as a loan that charges nothing or one
+           nobody is paying. */
+        rate: typeof v.rate === 'number' ? v.rate : undefined,
+        payment: typeof v.payment === 'number' ? v.payment : undefined,
+        asOf: /^\d{4}-\d{2}$/.test(String(v.asOf || '')) ? v.asOf : undefined,
+        securedOn: (state.side.property || []).some(p => p.id === v.securedOn)
+          ? v.securedOn : undefined,
+        note: v.note || undefined,
+      };
+      if (ds.idx !== undefined) {
+        /* Object.assign copies an explicit undefined straight over a stored
+           value, which is exactly what a cleared box should do here — the
+           settings-defaults trap in reverse, and the reason it is safe is that
+           nothing merges this row over a set of defaults. */
+        Object.assign(state.side.liabilities[+ds.idx], row);
+        for (const k of ['rate', 'payment', 'asOf', 'securedOn', 'note'])
+          if (row[k] === undefined) delete state.side.liabilities[+ds.idx][k];
+      } else {
+        state.side.liabilities.push({ ...row,
+          id: uniqueId(state.side.liabilities, v.name, 'debt') });
+      }
+    },
+    del(ds) { state.side.liabilities.splice(+ds.idx, 1); },
   },
 
   /* Someone this plan is for. Renaming NEVER changes the id — accounts,
@@ -15036,6 +15566,21 @@ const EDITORS = {
 };
 
 /* id helper for user-created rows (mirrors the importer's slug()) */
+/* A fresh id for a row joining a list that already has some: slug the name,
+   then number it until nothing else claims it. The pattern was written out five
+   times in this file before the two new id-bearing lists arrived and would have
+   made it seven. Deterministic from the name, and by construction unable to
+   collide with an id something else is already pointing at.
+
+   A function DECLARATION beside `slugJs` for the same hoisting reason
+   everything coerceShape reaches has to obey. */
+function uniqueId(list, name, fallback) {
+  const base = slugJs(name || fallback) || fallback;
+  let id = base, n = 2;
+  while ((list || []).some(r => r && r.id === id)) id = `${base}-${n++}`;
+  return id;
+}
+
 function slugJs(name) {
   const s = String(name).replace(/\(.*?\)/g, '').trim().toLowerCase()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -16963,8 +17508,8 @@ const SECTION_NEEDS = {
      the giving fund. All four belong to other tabs, so a Progress link names
      them out loud in the dialog (shareCarriesNote). */
   goals:       ['years', 'goals', 'side.portfolios', 'side.retirementAccounts',
-                'side.property', 'side.daf', 'side.snapshots'],
-  household:   ['years', 'goals', 'people', 'side.property'],
+                'side.property', 'side.liabilities', 'side.daf', 'side.snapshots'],
+  household:   ['years', 'goals', 'people', 'side.property', 'side.liabilities'],
   /* No 'years', deliberately, though the drawdown's spending target is SEEDED
      from the budget's own expense total: the seed fills the box, the figure is
      stored, and a shared Retirement tab reads the stored one. Adding the grid
@@ -17000,7 +17545,7 @@ const BRANCH_OWNERS = {
   goals: ['goals'],
   'side.snapshots': ['goals'],
   people: ['household'],
-  'side.property': ['household'],
+  'side.property': ['household'], 'side.liabilities': ['household'],
   vacations: ['vacations'],
   'side.comp': ['comp'], 'side.bonuses': ['comp'],
   'side.portfolios': ['investments'], 'side.taxable': ['investments'],
@@ -17021,6 +17566,7 @@ const BRANCH_LABEL = {
   'side.snapshots': 'your net worth history',
   people: 'the people in your plan',
   'side.property': 'your property values',
+  'side.liabilities': 'what you owe',
   vacations: 'your trips and PTO',
   'side.comp': 'your salary and bonus history',
   'side.bonuses': 'your salary and bonus history',
@@ -17949,7 +18495,11 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
-  netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, balanceTip,
+  netWorthParts, PROPERTY_KINDS, vacationYearStats,
+  /* Debts: the schedule, where it lands in a given month, and when it ends.
+     Pure over one row, so a test pins the arithmetic rather than the card. */
+  amortize, liabilityAt, payoffMonth, LIABILITY_KINDS, SECURED_KINDS,
+  SNAPSHOT_PARTS, SNAPSHOT_ASSETS, uniqueId, cellTip, balanceTip,
   receivedInto, earningsOver, earningLines, balanceYearTip, flowTransferNote, internalRows,
   raisesKeyboard,
   accountEarnings, earningsTip,
