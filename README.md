@@ -54,7 +54,7 @@ it, the same rule that shows no net-worth tile for a part you have never
 recorded. They appear together the moment a plan exists. (A read-only link is
 the exception: its tabs are what the sender chose to send.)
 
-Open the page and press **Start fresh**. That sets up the current year's
+Open the page and press **Start Fresh**. That sets up the current year's
 budget with a starter set of rows — all renameable, deletable and
 reorderable — and every tab's ＋ Add button does the rest. No import, no
 account, nothing to configure first.
@@ -1328,7 +1328,7 @@ from the private claude-theme-pack, the palette source of truth for all apps),
 a vendored `chart.min.js`, and `sw.js` with its `sw-kill.js` escape hatch.
 Served by GitHub Pages from `main`.
 
-**There is a sample plan.** The welcome screen offers **Load sample data** beside Start fresh:
+**There is a sample plan.** The welcome screen offers **Load Sample Data** beside Start Fresh:
 an invented household of three — two earners, a child, five accounts, this year's budget with two
 years of real history behind it — which fills every one of the nine tabs. It carries one of every
 shape each feature reads differently: a secured mortgage and an unsecured student loan and a card
