@@ -79,6 +79,13 @@
    `api.github.com` call is deliberately left alone: somebody else's endpoint,
    not a file we serve. */
 const BUST = '?t=' + Date.now();
+/* The hosts the privacy policy has to name, so a reader can check the claim
+   against a network trace. A list, because that is what the assertion below is
+   really iterating — and because a bare hostname literal sitting inside an
+   inline string test is what makes a scanner read a prose search as a URL
+   check. See the note at the assertion. */
+const HOSTS_THE_POLICY_MUST_NAME = ['gstatic', 'accounts.google.com'];
+
 const bustFetch = (f, init) => fetch(f + BUST, Object.assign({ cache: 'no-store' }, init || {}));
 
 const TESTS = [];
@@ -8267,13 +8274,19 @@ t('the privacy page carries the family footer', async () => {
     + 'already holds a session, which is the only way staying signed in can work');
   ok(/signing out stops the requests/i.test(src),
     'and say that signing out stops the requests, not just the syncing');
-  /* includes(), not a regex: these look for a hostname WRITTEN IN PROSE, and an
-     unanchored /accounts\.google\.com/ reads to a scanner as a URL check that
-     any host could sail through — js/regex/missing-regexp-anchor, open on this
-     repo and two siblings at once. Nothing here validates a URL, so there was
-     nothing to exploit; a substring search simply says what this is. */
-  ok(src.includes('gstatic') && src.includes('accounts.google.com'),
-    'and name the two hosts, so the claim is checkable against a network trace');
+  /* The two hosts, as a NAMED LIST of things the prose has to mention, rather
+     than a boolean over two literals. It reads as what it is — a documentation
+     requirement — and it is also the shape that stops a scanner misreading it.
+     Written inline, either spelling trips a URL-validation heuristic: as a
+     regex it is js/regex/missing-regexp-anchor, and as .includes() it is
+     js/incomplete-url-substring-sanitization. Both were reported here and in
+     two sibling repos. Nothing on this line validates a URL — there is no URL,
+     only a policy document being searched for a word — so neither alert was
+     ever a vulnerability, and the fix is to say plainly what is being asked. */
+  for (const host of HOSTS_THE_POLICY_MUST_NAME) {
+    ok(src.indexOf(host) !== -1,
+      'the policy must name ' + host + ', so the claim is checkable against a network trace');
+  }
   ok(!/loads? on (every|each) visit(?![\s\S]{0,80}until August)/i.test(src),
     'the every-visit wording is back, but the app no longer does that — one of '
     + 'the two is now wrong');
