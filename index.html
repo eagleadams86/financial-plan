@@ -1224,14 +1224,13 @@ td.projected { font-style: italic; color: var(--text-secondary); }
    sane page breaks. Nothing below sets a colour, and a test fails the build if
    anything ever does.
 
-   This app carried all of that itself for a few hours, including a JavaScript
-   theme swap driven off the browser's own print events. That is gone — it was a
-   page of machinery in one app to express something every app needs, and the
-   test that pins its absence looks for those event names in this whole file,
-   which is why they are not spelled out here.
+   What is left here is the part only this app knows: its own furniture, and the
+   fact that its main object is TWELVE MONTHS WIDE.
 
-   What is left is the part only this app knows: its own furniture, and the fact
-   that its main object is TWELVE MONTHS WIDE. */
+   The CHARTS are the one thing CSS cannot fix, and they are handled in script
+   instead — see printForPaper. A canvas is painted once from getComputedStyle,
+   which never sees a print-media value, so a chart left alone prints in whatever
+   theme it was last drawn in on a page that has just become light. */
 @media print {
   /* This app's own ways in. The header's controls and the tab bar are the
      pack's; these are the buttons the app draws inside its cards. */
@@ -18415,6 +18414,46 @@ function applyTheme() {
     .getPropertyValue('--bg').trim();
   if (bar && bg) bar.setAttribute('content', bg);
 }
+/* ── The half of printing that CSS cannot do ────────────────────────────────
+   `theme.css` puts the Light palette on paper (pack rule 13) and that is the
+   whole answer for text, tables and tiles. It is not the answer for a CANVAS: a
+   chart reads its colours from `getComputedStyle` at the moment it is drawn,
+   print-media values are invisible there, and the canvas is a bitmap by the
+   time the print stylesheet applies. Left alone, every chart prints in the
+   theme it was last rendered in — dark lines on a white page, or worse,
+   colours chosen to sit on black.
+
+   So the theme is swapped for the duration of the print and everything is
+   redrawn, which is what makes the charts match the page around them. Sprint
+   Velocity and Team Dashboard have done this since before the pack rule
+   existed; this is the same shape, deliberately, so a reader who knows one
+   knows all three.
+
+   Two rules it keeps. **Nothing is saved** — `themeId()` still reads
+   localStorage and the picker is untouched — so the swap cannot outlive the
+   print even if `afterprint` never fires. And **Light and Sepia are left
+   alone**: both are already ink on a pale ground, and Sepia is a deliberate
+   choice of a paper-coloured screen. */
+let themeBeforePrint = null;
+function printForPaper(on) {
+  if (on) {
+    const now = document.documentElement.getAttribute('data-theme');
+    /* `auto` resolves to Light or Midnight depending on the reader's system, so
+       it is not safe to leave: in dark mode it IS a dark theme. The two that
+       are light by name are the two that stay. */
+    if (now === 'light' || now === 'sepia') return;
+    themeBeforePrint = now;
+    document.documentElement.setAttribute('data-theme', 'light');
+  } else {
+    if (themeBeforePrint === null) return;
+    document.documentElement.setAttribute('data-theme', themeBeforePrint);
+    themeBeforePrint = null;
+  }
+  render();   /* charts resolve their colours at construction, so rebuild them */
+}
+addEventListener('beforeprint', () => printForPaper(true));
+addEventListener('afterprint', () => printForPaper(false));
+
 F('themeSel').onchange = (e) => {
   localStorage.setItem(THEME_KEY, e.target.value);
   applyTheme();
