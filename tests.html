@@ -8123,11 +8123,12 @@ t('sw.js and its kill switch are both present', async () => {
 });
 
 /* ── Paper ───────────────────────────────────────────────────────────────────
-   The print block's one hard rule: it declares no colour. The palettes belong
-   to the theme pack, and a print palette written into this file would be a
-   fifth theme with nobody's contrast gate over it. Printing borrows the pack's
-   own light theme in JS instead, which is what this pins. */
-t('the print stylesheet sets no colour of its own', () => {
+   The palette and the family chrome moved into the theme pack on 2026-08-22
+   (rule 13), so there are two things to pin and they are in different files.
+   The APP's block must still declare no colour — a print palette in an app is
+   the drift the pack exists to prevent — and theme.css must actually carry the
+   print rule it is now trusted for. */
+t('the app print stylesheet sets no colour of its own', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const at = APP_SRC.indexOf('@media print');
   ok(at > 0, 'there is a print stylesheet at all');
@@ -8143,19 +8144,39 @@ t('the print stylesheet sets no colour of its own', () => {
   ok(!/\bhsla?\(/.test(block), 'nor an hsl()');
   ok(!/(^|[^-])\bcolor\s*:/.test(block.replace(/print-color-adjust/g, '')),
     'and it never sets a colour property, only what to hide and where to break');
-  ok(/beforeprint/.test(APP_SRC) && /afterprint/.test(APP_SRC),
-    'because the colour question is answered by borrowing the light theme instead');
-  ok(/data-theme', on \? 'light'/.test(APP_SRC),
-    "and it borrows the PACK's light theme rather than inventing one");
 });
-t('printing hides the furniture and opens the scrollers', () => {
+t('the palette on paper is the pack’s job now, not a script’s', () => {
+  /* The app used to swap data-theme to "light" on beforeprint and back on
+     afterprint. A page of machinery in one app for something every app needs —
+     it is CSS in theme.css now, and none of it should be left here. */
+  ok(!/beforeprint|afterprint|printUsesLightTheme/.test(APP_SRC),
+    'the JavaScript theme swap is gone');
+});
+t('theme.css carries the print rule the app is trusting it for', async () => {
+  const res = await fetch('theme.css');
+  ok(res.ok, 'theme.css is missing');
+  const css = await res.text();
+  const at = css.indexOf('@media print');
+  ok(at > 0, 'the pack copy is stale — re-copy theme.css from ~/claude-theme-pack');
+  const block = css.slice(at);
+  ok(/:root:not\(\[data-theme="light"\]\):not\(\[data-theme="sepia"\]\)/.test(block),
+    'the light palette is applied on paper, and Light and Sepia are left alone');
+  ok(/--text-primary: *#111110/.test(block),
+    "and it is the pack's own Light value, not one this app invented");
+  ok(/\.headbar select/.test(block) && /role="tablist"/.test(block),
+    'the family chrome is hidden by the pack, which is why the app block no longer does it');
+  ok(/\.no-print/.test(block), 'and .no-print is the handle an app tags its own furniture with');
+});
+t('the app block keeps only what the pack cannot know', () => {
   const at = APP_SRC.indexOf('@media print');
   const block = APP_SRC.slice(at, APP_SRC.indexOf('</style>', at));
-  for (const sel of ['.tabs', '.addbar', '#themeSel'])
-    ok(block.includes(sel), `${sel} is a way in, and there is no clicking on paper`);
   ok(/\.gridwrap[\s\S]{0,160}overflow: visible/.test(block),
     'a budget year is twelve months wide and printing one means printing the twelve');
   ok(/@page[\s\S]{0,60}landscape/.test(block), 'and it asks for landscape, for the same reason');
+  for (const sel of ['.addbar', '.gridactions-wrap'])
+    ok(block.includes(sel), `${sel} is this app's own furniture, so this app hides it`);
+  ok(!block.includes('.headbar') && !block.includes('[role="tablist"]'),
+    'while the family chrome is not repeated here — one owner per rule');
 });
 
 /* ── The footer every public page in this account carries ────────────────────

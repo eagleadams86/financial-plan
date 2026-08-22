@@ -3334,6 +3334,24 @@ page out of five is not a convention.
   — it is navigation, not the document — but "outside main" is not the same as "outside every
   landmark", which is where it sat: axe-core's `region` rule found it on all six privacy pages
   at once. The `<nav>` carries an `aria-label` naming where it goes back to.
+- **The base field rule's TYPE LIST is the theme pack's own** (2026-08-22). `select,
+  textarea, input[type=text|number|date|month|search|tel|url|email|password]` — the same
+  list the pack enumerates in its coarse-pointer rule. It has to stay a whitelist (a
+  checkbox handed a surface, a border and padding stops being a checkbox), but a whitelist
+  grown by hand is a field that arrives silently UNSTYLED, wearing the browser's own box
+  beside fields wearing the theme's. Nothing fails and nothing logs. It has happened twice
+  in this family in opposite directions: Flow Metrics was missing `date`, Golf Handicap was
+  missing `search`. Borrowing the pack's list is what stops it being a fresh discovery each
+  time, since it answers the same question ("is this a thing you type into?") in the one
+  place that should. **Adding a type to one means adding it to the other.**
+  `input[type=search]` also takes `appearance: none`, like the pack's date fields, because
+  the native inset shape ignores the border and radius — that removes Chromium's native ×
+  too, so a search box with no other way to clear itself should offer one.
+  **Sprint Predictability is the design lead**; Flow Metrics, Money Map and Golf Handicap
+  carry the identical list. PAPTrack and the dashboard style fields by CONTAINER
+  (`.field input`) and by class (`.ctl`) instead — element selectors, which have no
+  equivalent gap — and the lottery pages style their few fields per component. Those three
+  are deliberately NOT converted; don't "finish the job" by giving them a type list.
 - **Decorative glyphs on buttons are `aria-hidden` everywhere, not just in the header.** The
   header row got the treatment on 2026-08-21 and the rest of the app did not, so a screen
   reader still read "downwards black arrow, Export JSON" in every dialog. Around 50 buttons
