@@ -79,6 +79,27 @@ function approx(actual, expected, note, eps) {
     throw new Error((note ? note + ': ' : '') + 'expected ≈' + expected + ', got ' + fmt(actual));
 }
 function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy'); }
+/* HTML comments explain things by naming them — including the very elements
+   these assertions look for, and one of those notes lives in a <style> block a
+   strip does not reach. So the comments come out before the page is matched
+   against, or the prose passes the test it is describing.
+
+   Looped until the string stops changing, rather than a single .replace(). One
+   pass over a multi-character delimiter can leave a NEW opener behind that the
+   pass already went past — `<` `!--` `<` `!--` `--` `>` collapses to a live
+   `<` `!--` on the way out — so a single pass is only as good as the input is
+   well-formed. CodeQL's js/incomplete-multi-character-sanitization flagged
+   exactly this. The stakes are low (this reads local repo files to assert on
+   them, it does not sanitize anything a browser will render) but a test that
+   can be fooled about what is commented out is a test that can miss a live
+   off-origin script, so it is worth doing properly. Same helper, same wording,
+   in every sibling repo’s suite. */
+const stripHtmlComments = (s) => {
+  let out = String(s), prev;
+  do { prev = out; out = out.replace(/<!--[\s\S]*?-->/g, ''); } while (out !== prev);
+  return out;
+};
+
 
 let w, H;   // app window + its __finTestHooks
 
@@ -7439,7 +7460,7 @@ t('the privacy page carries the family footer', async () => {
      <style> block, which an HTML-comment strip does not reach — so a bare
      /<main>/ or a bare '<footer' would pass on a page that had lost the element
      and kept the comment explaining it, which is the one way this could rot. */
-  const bare = src.replace(/<!--[\s\S]*?-->/g, '');
+  const bare = stripHtmlComments(src);
   ok(/<footer class="foot">/.test(bare),
     'the footer is a real <footer> — a contentinfo landmark, not a styled paragraph');
   ok(/<main>/.test(bare),
@@ -7448,6 +7469,24 @@ t('the privacy page carries the family footer', async () => {
     'with main CLOSED before it: a <footer> inside main is not contentinfo at all');
   ok(!/href="privacy\.html"/.test(src),
     'and NOT a privacy link, which on the privacy page points at itself');
+  /* The gap this closes was found by a network trace on 2026-08-21: Google's
+     firebase-app/auth/firestore and its sign-in client are fetched on an
+     ORDINARY visit, before anyone signs in — the app cannot know whether you
+     are already signed in without asking Firebase, and cannot ask without
+     loading it. The policy listed what the app does not do and never mentioned
+     that, which left an ordinary visit unaccounted for. Tied to the CSP, which
+     is the app's own record that it loads those hosts. */
+  const cspEager = (APP_SRC.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/) || [])[1] || '';
+  ok(/gstatic\.com/.test(cspEager) && /accounts\.google\.com/.test(cspEager),
+    'this test assumes the app still loads Google code on every visit. If it no longer '
+    + 'does, the CSP should have stopped naming those hosts — and then this test, and the '
+    + 'paragraph it pins, both want revisiting rather than deleting.');
+  ok(/every visit/i.test(src),
+    'the policy must say Google’s code loads on EVERY visit, not only on sign-in');
+  ok(/gstatic/.test(src) && /accounts\.google\.com/.test(src),
+    'and must name the two hosts, so the claim is checkable against a network trace');
+  ok(!/only when you (choose to )?sign in/i.test(src),
+    'the untrue wording the sibling apps carried must never appear here');
 });
 
 t('the cache list holds only files that are already public', () => {

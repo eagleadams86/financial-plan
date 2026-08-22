@@ -1245,3 +1245,42 @@ Chart.js that is *vendored* as `chart.min.js` beside the app, pinned exactly, an
 PR would otherwise raise the manifest while the app went on serving the old bytes; a test pins
 the two to the same version, which makes a manifest-only bump fail and turns the PR into the
 right instruction — update the file too, in all three repos that carry it.
+
+## What Google's Code Does on an Ordinary Visit (2026-08-21)
+
+A network trace of a plain page load — no clicking, no signing in — shows four requests to
+Google: `firebase-app.js`, `firebase-auth.js` and `firebase-firestore.js` from
+`www.gstatic.com`, and the sign-in client from `accounts.google.com`. That is not a bug. The
+app cannot know whether you are **already** signed in on this device without asking Firebase,
+and it cannot ask without loading Firebase first, so `init()` runs on load.
+
+What was wrong was the **privacy policy**, which said Google's code loaded "only when you
+choose to sign in". It now says what actually happens, names the two hosts so the claim can be
+checked against a trace of your own, and is explicit that no app data goes with those requests
+and nothing is stored or synced until you press the button. `tests.html` ties the two
+together: while the CSP still admits `gstatic.com` and `accounts.google.com` — the app's own
+record that it loads them — the policy has to carry the "every visit" paragraph, and the old
+wording fails the suite.
+
+**If this should stop being true**, the change is to defer `init()` until either the sign-in
+button is pressed or a stored flag says this browser has signed in before. That keeps a
+returning user signed in while giving a first-time visitor a page that talks to nobody. It is
+a real refactor of the sync module, not a wording change, and the test above is written to be
+revisited rather than deleted if it happens.
+
+## The Landmarks (2026-08-21)
+
+`<main>` opens **above** the tab strip, not below it. It used to wrap the tab panel alone,
+which had two consequences: the tabs sat in no landmark at all (axe-core's `region` rule),
+and — the reason worth acting on — **the skip link jumped past them**, so a keyboard user who
+took "Skip to content" had the entire tab row behind them, reachable only by shift-tabbing
+back. The tabs and the panel they drive are one widget, so the landmark goes round both. The
+share bar comes inside with them: it describes what is on screen, so it is content rather
+than furniture.
+
+`role="tabpanel"` still goes on the inner div and never on `<main>` — putting a role ON an
+element IS its role, so it would silently replace the landmark. That older note stands
+unchanged.
+
+Every page in this repo passes axe-core at WCAG 2.1 A and AA plus its best-practice rules, in
+all four themes, with data loaded and on every tab.
