@@ -32,6 +32,7 @@ browser and stay there unless you deliberately sign in or send a link.
 
 **Beyond One Browser**
 [Backups and Starting Over](#backups-and-starting-over) ·
+[Comparing Two Plans](#comparing-two-plans) ·
 [Share a Read-Only Link](#share-a-read-only-link) ·
 [Cross-Device Sync](#cross-device-sync) ·
 [Installing It as an App](#installing-it-as-an-app) ·
@@ -111,11 +112,19 @@ Each row has a **type** (which section it lives in), a **projection rule**,
 and a **behaviour** — ordinary money, a transfer with another account, or a
 pass-through that never touches the main account.
 
-The rules: repeat last month · cycle · average so far · average of last year ·
-same month last year · interest · per-check × paychecks · overflow sweep.
+The rules: repeat last month · repeat rising a set % a year · cycle · average
+so far · average of last year · same month last year · interest · per-check ×
+paychecks · overflow sweep.
 
 **A number you type into a month always beats the rule**, and moves the same
 way.
+
+**A rising row** is "repeat the last month" with a clock on it: the figure
+steps up by the percentage you give it once each **calendar year**, never
+monthly — a renewal letter, not compound interest. Inside a year it simply
+repeats, so typing the real new rent when it lands takes over exactly as it
+does everywhere else, and the row grows from *that* from then on. No percentage
+typed means no rise; it repeats rather than inventing a figure.
 
 ### Overflow Sweeps and Caps
 
@@ -342,10 +351,19 @@ Both move as real months land.
 
 A **net worth strip** across the top adds up everything the plan knows about:
 this month's liquid total, the Investments tab's holdings, the retirement
-accounts, and the Household tab's property at your stated values minus
-anything owed. The giving fund is deliberately left out — that money is
+accounts, the Household tab's property at your stated values, and everything
+you owe. The giving fund is deliberately left out — that money is
 already given — and a part with nothing recorded shows no tile rather than a
 $0.00.
+
+Debt appears in one of two places and comes off the total either way. A debt
+**secured on a property** is inside that property's figure, which is the
+property's equity; everything else — cards, student loans, a personal loan —
+is the **Owed** tile. Nothing is ever counted twice, and the total is the same
+number whichever side of the line a debt sits.
+
+If something is held in a currency you have given no rate for, the card says
+so and leaves it out, rather than adding it in at face value.
 
 Money that honestly lives in two places is **counted once**: a brokerage
 tracked as a budget account *and* as an Investments pane is reconciled by the
@@ -410,6 +428,32 @@ so rather than letting them look comparable.
 
 *(These charts lived on a tab called History until August 2026; a tab order
 saved before then just drops the dead entry.)*
+
+### Where the Money Goes
+
+The charts above say what a year cost. This says what it was **spent on** —
+every expense row in the live year, biggest first, with its share of the year
+and what the same row came to last year beside it.
+
+The **change** column is the point. A share of spending on its own only tells
+you which row is biggest, and you already know which row is biggest.
+
+- Rows are matched to last year **by the row**, so renaming one keeps its
+  history in a single line instead of splitting it in two. Against an old
+  yearly summary, which has no rows to point at, they are matched by name.
+- **A row that has vanished since last year still gets a line.** Money that
+  stopped being spent is as much a finding as money that started.
+- Anything that spent nothing in either year is left out — a screenful of
+  $0.00 is how a table stops being read.
+- The current year includes the months the plan has worked out, so August
+  never looks like a cheap year, and those figures are set in the estimate
+  style to say so.
+- A year with no breakdown to compare against says that in words rather than
+  calling every row new.
+
+Counted exactly as the bars above are, so the parts always add to the total.
+One colour for every bar with the names on the axis: a key of forty colours is
+unreadable for anyone.
 
 ---
 
@@ -643,9 +687,9 @@ pretending.
 
 ## Tax
 
-The bracket tables **you** type, federal and state, so the retirement
-projection can work out what a withdrawal has to be *before* tax in order to
-leave you what you planned to spend.
+The bracket tables **you** type, federal and state. They answer two questions:
+what **this year** owes on what you are paid, and what a retirement withdrawal
+has to be *before* tax in order to leave you what you planned to spend.
 
 That gap was the biggest remaining dishonesty in the drawdown: a pre-tax
 401(k) has to pay out more than you spend, and the projection used to draw
@@ -675,6 +719,21 @@ exactly what you spend.
   separate state share once you have a state table. A row nobody has answered
   for is counted as 0% and **said so** — "untaxed" and "nobody has said" are
   different claims.
+- **"What ⟨year⟩ Owes"** applies your tables to the whole package on the
+  [Compensation](#compensation) tab — salary after the raise, the bonus, equity
+  that vested, an employer contribution — and shows the federal and state
+  figures, the effective rate and what the next dollar meets. The tab collected
+  brackets for a year and used them only for a withdrawal forty years out; this
+  is the nearest question, and the app had every part of it already.
+
+  **It is brackets and your deduction, and nothing else** — no credits, no
+  itemising, no payroll tax, and no notice of what has already been withheld.
+  So it is what the schedule says on that income, never what you still owe in
+  April, and the card says so in as many words. Nor is it a household figure
+  where two people earn: the app records a second earner as take-home in the
+  budget and never as gross, so there is no second package to add. It reads the
+  newest year you have recorded comp for rather than the calendar year, because
+  a raise letter arrives when it arrives.
 - **A calculator** to check an income against your own tables, and a **"What
   the Pot Has to Pay"** card that works the first whole year of retirement
   through line by line. Those figures are read off the same records the
@@ -721,11 +780,70 @@ way of reading the plan, not an input to it.
 ### Property
 
 The household's **property** — a home, a car, a boat — at what you say it
-would sell for, minus anything still owed on it.
+would sell for, minus whatever is still owed on it.
 
 Equity, not a balance: nothing flows through a house, so the budget engine
 never sees these rows, and the [Progress](#progress) tab's net worth is where
 the figure lands.
+
+### What You Owe
+
+Every debt the household carries, secured on something or not.
+
+This used to be a single number typed onto a property row, retyped by hand or
+left to rot while every other figure in the app kept itself true — and a loan
+not attached to a house or a car had nowhere to live at all.
+
+Give a debt a **balance, the month it was true, a rate and a payment** and the
+app does the rest:
+
+- **What is owed today**, worked out by paying the debt down month by month
+  from the statement you quoted — interest first, the rest off the principal.
+  That projected figure is the one net worth counts, so it stops going stale
+  the moment you look away. It is set in the estimate style, and hovering says
+  what you actually stated and when.
+- **The month it ends**, and what the remaining payments cost in interest.
+- **A debt secured on a property** comes off that property's equity; anything
+  else stands on its own. Either way it comes off your net worth once.
+
+It says what it is missing rather than filling it in. No payment typed means
+nothing is projected — the balance stands exactly as you typed it. And if the
+payment is smaller than the first month's interest the debt genuinely grows,
+so the card says so in words instead of drawing a line climbing away: that is
+a fact about the loan and it should not look like a fault in the app.
+
+**Nothing here reaches the budget grid.** The payment leaving your account is
+already a row there, and counting the debt as well would take the money out
+twice.
+
+*(A plan written before this arrives keeps its figures exactly: whatever was
+owed on a property becomes a debt secured on it, and the net worth is
+identical to the cent. No rate, payment or date is invented for it.)*
+
+### Other Currencies
+
+`Currency` in Preferences was only ever a label — it changed the symbol in
+front of every figure and nothing else — so a household with a flat in one
+country and a brokerage in another could not be written down at all.
+
+A **property, a debt and an investment pane** can each say which currency they
+are in, converted by a rate you state here.
+
+- **You state the rate; the app never looks one up.** Same rule as the tax
+  tables and the contribution limits, for the same reason: a rate fetched today
+  is wrong tomorrow, and one baked into the app is wrong for ever while looking
+  authoritative. Say when you read it and the card can tell you how old the
+  answer is.
+- **Each card reads in its own money** — the figure on the statement in front
+  of you — and only the totals convert, saying which currency they are in.
+- **Something with no rate yet is left out and named**, never counted at face
+  value. A foreign flat added in at whatever number happens to be typed is the
+  one answer worse than saying the total cannot be worked out yet.
+- **The budget grid stays in one currency**, and always will. Its balances
+  chain month to month through transfers and interest, so a rate you edited
+  would silently rewrite years of history every time you touched it.
+  Retirement accounts carry no currency either — a 401(k) is a creature of one
+  country's tax code.
 
 ---
 
@@ -743,6 +861,15 @@ Where comp stands, and how it got there.
   dollars and as a percentage of **the salary that year opened on**, which is
   the pay it was earned against and the figure a payroll system quotes. Typed
   either way round.
+- **Equity that vested, and what your employer put in.** Both optional. For
+  anyone paid partly in shares, salary and bonus are most of a package rather
+  than all of it — and this figure is not decoration: it is the denominator the
+  [Giving](#giving) tab measures every percentage against, so a third of your
+  income missing meant a giving share that read a third too generous. A column
+  appears only once there is something to put in it, and a plan that has never
+  tracked either is unchanged to the cent.
+- **A total-comp line above the salary line**, once either is recorded. It is
+  what a raise on the salary alone can hide going the other way.
 
 ---
 
@@ -852,9 +979,9 @@ choice actually uses.
   goal card, a gathered note — takes a tab stop of its own, so Enter or Space
   opens it without a mouse.
 
-### CSV Export
+### CSV, Out and Back
 
-The way out to a spreadsheet.
+The way to a spreadsheet, and the way home again.
 
 - **⇩ CSV on any budget year** downloads that year's grid — sections, months,
   year totals, account balances, raw numbers, ready for Excel or an
@@ -863,9 +990,43 @@ The way out to a spreadsheet.
   Its Deductible column is the tick you put on the row, the same field the
   table on screen reads and the year's deductible total adds up — the file and
   the screen cannot say different things about one gift.
+- **⬆ Import a year's CSV**, in the Back up dialog, reads that same file back.
+  Work a year over in a spreadsheet and bring it home instead of retyping it a
+  cell at a time.
+
+What the import reads, and what it deliberately doesn't:
+
+- **Income, Expenses and Transfers rows only.** The account balances and the
+  Interest & Dividends line are the app's own answers, so writing them back
+  would type over a computation with itself and silently pin anything that
+  disagreed. They are counted as skipped rather than dropped in silence.
+- **A figure lands exactly as a typed one would** — a fact in a month already
+  entered, your own estimate beyond it. It is typing, done faster.
+- **An empty column empties that month**, which is what a round trip means, and
+  only for the months the file has columns for. A month the file says nothing
+  about is left alone.
+- **A row the plan doesn't have is added**, since a row that appeared in the
+  spreadsheet is usually one you meant to add. Rows are matched by name within
+  their own section, however they are cased.
+- **A file that isn't an exported year is refused whole**, naming what is wrong
+  with it, and the confirmation quotes the real figures — how many cells will
+  be written, emptied, added — before anything moves.
 
 Text fields are defused against spreadsheet formula injection, and a BOM keeps
 Excel honest about UTF-8.
+
+### Printing
+
+⌘P prints the page properly. The furniture goes — the header controls, the tab
+bar, every ＋ Add and ✎ Edit — every horizontal scroller opens out so a budget
+year prints all twelve months, cards try not to be torn across a page break,
+and a long table repeats its headings. What you folded away stays folded: a
+fold is a decision about what you want to read, and printing is not the moment
+to overrule it.
+
+Printing borrows the **Light** theme and gives it back afterwards, so a dark
+theme doesn't arrive on paper. Nothing is saved, and the theme you were looking
+at is the one you are still looking at.
 
 ---
 
@@ -879,7 +1040,7 @@ that apply across the whole app rather than to a row:
 | **Subtitle** | Your own words beside "Financial Plan" in the header and the browser tab |
 | **You file taxes as** | Which bracket table the Tax tab reads and which Roth (MAGI) threshold it checks against — always asked, since the Tax tab needs no household. Filing jointly also counts both incomes once there are two of you |
 | **Compensation tab follows** | Which person that tab's salary history is about, once there are two of you |
-| **Currency** | A three-letter code (USD, EUR, GBP, CAD). It changes how figures read, not what they are |
+| **Currency** | A three-letter code (USD, EUR, GBP, CAD) — the currency the plan itself is in. It changes how figures read, not what they are. Something held in *another* currency is a rate you state on the [Household](#other-currencies) tab |
 | **Budget row order** | Your own arrangement, or alphabetical within a section (which turns dragging off and leaves your order stored underneath) |
 | **Paychecks vary by month** | Three some months, two in others — this is what lets a row be an amount per check |
 | **Donor-advised fund** | Whether the Giving tab shows a fund's holdings. Donations are tracked either way |
@@ -923,6 +1084,35 @@ file on disk.
 - **Export** writes `financial-plan-YYYY-MM-DD.json`.
 - **Restore JSON…** reads one back. It's the same path Charlie's one-time
   spreadsheet import uses.
+- **Import a year's CSV…** brings one budget year back from a spreadsheet —
+  see [CSV, Out and Back](#csv-out-and-back).
+- **Compare with a backup…** opens a saved plan beside the live one.
+
+### Comparing Two Plans
+
+"What if we bought the house" means changing a dozen figures across five tabs,
+and there was no way to see the before and the after together — two browser
+windows and a good memory.
+
+Compare with a backup puts the headline figures side by side: net worth, liquid
+savings, what you owe, this year's income and spending, the savings rate, the
+runway, the pot at retirement and the year the money runs out. **It reads the
+file and writes nothing** — there is deliberately no "use this one instead",
+because that is what Restore is and putting it here would turn a comparison
+into a way to lose your plan by mis-clicking.
+
+A scenario in this app is what it already was: **a plan you exported and then
+changed**. A second plan living inside the first was the obvious design and is
+the wrong one — it doubles what syncs, doubles what a backup carries, and gives
+the app two answers to "what am I worth" when the whole thing is built on there
+being one.
+
+Every figure is read from the same function the tab that owns it draws, so a
+comparison can never quote a number the app itself doesn't show. A difference
+is worked out only where both plans have an answer; a row only one of them can
+answer is kept and dashed, because that is itself the finding. More spending
+and more owed read as worse, not better, and a gap between two percentages is
+stated in points.
 
 Folded away at the foot of that dialog, under **Start again**, is **Delete all
 data**. It's behind a fold on purpose: the one irreversible action in the app
@@ -1133,7 +1323,10 @@ Served by GitHub Pages from `main`.
 
 **There is a sample plan.** The welcome screen offers **Load sample data** beside Start fresh:
 an invented household of three — two earners, a child, five accounts, this year's budget with two
-years of history behind it — which fills every one of the nine tabs. It exists because this is the
+years of real history behind it — which fills every one of the nine tabs. It carries one of every
+shape each feature reads differently: a secured mortgage and an unsecured student loan and a card
+with no payment said; a flat and its mortgage in another currency; equity and an employer
+contribution on the comp years; and a spending row that existed last year and does not now. It exists because this is the
 most complex app of the family and an empty grid shows none of what it does. It goes in through
 the same door a backup does, which is worth saying because `coerceShape` is built to carry an odd
 shape rather than throw: a key in the wrong place there does not fail, it settles to a default and
@@ -1144,7 +1337,11 @@ round numbers labelled *"not real tax brackets"* in the field the reader is show
 promise that it ships no tax figure of its own is kept by making the demo's obviously fake. It
 saves like any other plan and is removed with Back up → Start again.
 
-**State is versioned.** The schema is `5` today, as the `SCHEMA` constant.
+**State is versioned.** The schema is `7` today, as the `SCHEMA` constant.
+Schema 7 moved what was owed off the property rows and into debts of their own,
+once — a pure re-filing that leaves the net worth identical to the cent, since
+a debt secured on a property reduces that property's equity exactly as the old
+number did.
 Every entry point runs the payload through `coerceShape()`, whose upgrades are
 presence-based and safe to run twice. Its first act is to pin every id — people,
 accounts, goals, budget rows, portfolios, trips, and every field pointing at one — to

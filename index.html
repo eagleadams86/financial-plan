@@ -521,6 +521,9 @@ dialog.twoup { max-width: var(--dialog-w-narrow); }
    dialog, so nothing works its width out for it — but at the common 1100px it
    was the emptiest window in the app, and it belongs with the narrow ones. */
 #dataDialog { max-width: var(--dialog-w-narrow); }
+/* Four columns of figures need more room than the narrow dialog gives, and
+   less than the wide one: the table is what sizes it. */
+#compareDialog { max-width: var(--dialog-w-narrow); }
 /* The budget cell editor: an amount, what kind of number it is, and a note.
    Hand-built markup rather than the field grid, so it takes the narrow width
    outright. A split month's rows still fit — the amount box and the kind
@@ -1127,6 +1130,11 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
    row and the charts' projected bars already use, and the only one available
    here: hue alone can never carry a meaning in this app. */
 .goal.est .value, .goal.est .foot { font-style: italic; }
+/* A figure the app worked out sitting in an ordinary table — the debts card's
+   projected balance. Same grammar as a projected grid cell (`td.c-auto`) and a
+   planned donation row: italic and quieter, never a colour, because the theme
+   has four palettes and Charlie reads none of them by hue. */
+td.projected { font-style: italic; color: var(--text-secondary); }
 .goal.est .value { color: var(--text-secondary); }
 .goal.est .bar { border-style: dashed; }
 /* Two rows that MIRROR each other — three actuals, then the three projections
@@ -1176,6 +1184,54 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   var(--accent-bg) 0 4px, var(--surface) 4px 8px); }
 
 .chartbox { position: relative; height: 260px; margin-top: 12px; }
+
+/* ── On paper ───────────────────────────────────────────────────────────────
+   There was no print stylesheet at all, so ⌘P gave you a sticky header parked
+   over the first card, a grid clipped at whatever month happened to be in view,
+   and rows of buttons nobody can press on paper. CSV was the only honest way
+   out, and CSV is not what you hand an accountant or read on a train.
+
+   TWO RULES, and the first one is why this block is short.
+
+   It sets NO COLOUR. Not one. The palettes belong to the theme pack, which is
+   the source of truth for all five apps, and a "print palette" written here
+   would be exactly the drift that rule exists to stop. Printing a dark theme
+   on white paper is still wrong, so the fix is JS and not CSS: `beforeprint`
+   borrows the pack's own LIGHT theme and `afterprint` gives it back (see
+   printUsesLightTheme below). Real light-on-white, no new hex anywhere.
+
+   And it only ever hides FURNITURE — the things that exist to be clicked. What
+   the reader folded away stays folded, because a fold is a decision about what
+   they want to read and print is not the moment to overrule it. */
+@media print {
+  /* Sticky is meaningless on paper and actively harmful: it prints once, over
+     the top of whatever the first page starts with. */
+  header { position: static; border-bottom: 1px solid var(--border); }
+  /* The controls in the header, the tab bar, every ＋ Add and ✎ Edit, the help
+     buttons and the year strip's arrows: all of them are ways IN, and none of
+     them survives the journey to paper. The brand line stays — a printed page
+     with no name on it is a page you cannot file. */
+  #themeSel, #zoomSel, .headbar .btn, .tabs, .addbar, .gridactions-wrap,
+  .tile-help, .yearnav, #shareBar, .checkline, .editrow[title]::after { display: none !important; }
+  /* Every horizontal scroller opens out: a budget year is twelve months wide
+     and the whole point of printing one is to have the twelve. The page is
+     landscape by default for the same reason. */
+  .gridwrap, .tablewrap, .triprow, .yearrail { overflow: visible !important; }
+  @page { size: landscape; margin: 12mm; }
+  /* A card is the unit a reader thinks in, so it should not be torn in half by
+     a page break where that can be helped. `auto` on the tall ones, because a
+     grid taller than a page cannot avoid a break and `avoid` on it would push
+     a whole empty page ahead of it. */
+  .card { break-inside: avoid; box-shadow: none; }
+  .card:has(.gridwrap), .card:has(.chartbox) { break-inside: auto; }
+  h2 { break-after: avoid; }
+  thead { display: table-header-group; }   /* a long table repeats its headings */
+  tr { break-inside: avoid; }
+  /* The footer's links are content — who wrote this and where the privacy
+     policy is — so they print. Their URLs do not: a printed page of financial
+     figures does not need github.com spelled out under it. */
+  a[href]::after { content: none !important; }
+}
 .cards2 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
 /* Four cards that belong in pairs: two columns exactly, so the second row is
    always the pair it's meant to be rather than whatever auto-fit decides the
@@ -1361,7 +1417,25 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
     <button class="btn" id="exportBtn"><span aria-hidden="true">⬇</span> Export JSON</button>
     <button class="btn" id="importBtn"><span aria-hidden="true">⬆</span> Restore JSON…</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
+    <!-- The other direction of the ⇩ CSV button on a budget year. It reads ONE
+         year and only its Income, Expenses and Transfers rows, which is why it
+         sits beside Restore rather than replacing it: this is not a backup and
+         must not look like one. -->
+    <button class="btn" id="csvInBtn"><span aria-hidden="true">⬆</span> Import a year’s CSV…</button>
+    <input type="file" id="csvInFile" accept="text/csv,.csv" hidden>
+    <!-- Reads a backup and writes NOTHING. It sits with the other file buttons
+         because a scenario in this app is a file: a plan you exported and then
+         changed. -->
+    <button class="btn" id="compareBtn"><span aria-hidden="true">⇄</span> Compare with a backup…</button>
+    <input type="file" id="compareFile" accept="application/json,.json" hidden>
   </div>
+  <p class="sub muted" style="margin-top:10px">Comparing opens a backup beside what you have
+    now and shows the headline figures side by side — "what if we bought the house", answered
+    without keeping two plans. It only reads: nothing in this browser is touched.</p>
+  <p class="sub muted" style="margin-top:10px">A year's CSV goes back in as well as out —
+    work a year over in a spreadsheet and bring it home. It reads that year's Income,
+    Expenses and Transfers rows only; account balances and the interest line are worked out
+    by the app, so it leaves those alone.</p>
   <!-- The one-time spreadsheet import used to be explained here. It was a
        developer instruction sitting in an everyday dialog: it names a script
        you can only run from a checkout of the repo, and it was addressed to a
@@ -1380,6 +1454,20 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   </details>
   <div class="row" style="justify-content:flex-end;margin-top:18px">
     <button class="btn primary" id="dataCloseBtn">Close</button>
+  </div>
+</dialog>
+
+<!-- ── Two plans, side by side ───────────────────────────────────────────────
+     Read-only by construction: it is filled from a file and has one button,
+     which closes it. There is deliberately no "use this one instead" — that is
+     what Restore is, it already exists, and putting it here would turn a
+     comparison into a way to lose your plan by mis-clicking. -->
+<dialog id="compareDialog" aria-labelledby="compareTitle">
+  <h3 id="compareTitle">This Plan, and the One in That File</h3>
+  <p class="sub" id="compareSub"></p>
+  <div id="compareBody"></div>
+  <div class="row" style="justify-content:flex-end;margin-top:18px">
+    <button class="btn primary" id="compareCloseBtn">Close</button>
   </div>
 </dialog>
 
@@ -1653,6 +1741,49 @@ const PROPERTY_KINDS = [
 ];
 const PROPERTY_KIND_LABEL = Object.fromEntries(PROPERTY_KINDS);
 
+/* ── What the household OWES ────────────────────────────────────────────────
+   The one figure in this app that used to go stale on its own. A debt was a
+   single number typed onto a property row (`owed`), retyped by hand or not at
+   all, while every other figure here computes itself — and a loan not attached
+   to a house or a car had nowhere to live at all.
+
+   A liability is `{id, name, kind, balance, rate?, payment?, asOf?, securedOn?,
+   note?}`. Like property it never touches the budget engine: nothing flows
+   through a mortgage that the mortgage PAYMENT row isn't already recording, and
+   counting both would take the money out twice. It is read by the Household tab
+   and by net worth, and nowhere else.
+
+   `securedOn` names a property row. A secured debt reduces that property's
+   EQUITY — which is what `owed` did, so a migrated plan's net worth is
+   unchanged to the cent — and an unsecured one is its own tile. A dangling
+   `securedOn` degrades to unsecured rather than breaking, and the total is the
+   same figure either way, which is the property of the split worth knowing
+   before changing it. */
+const LIABILITY_KINDS = [
+  ['mortgage', 'Mortgage'],
+  ['auto', 'Car loan'],
+  ['student', 'Student loan'],
+  ['card', 'Credit card'],
+  ['personal', 'Personal loan'],
+  ['other', 'Other'],
+];
+const LIABILITY_KIND_LABEL = Object.fromEntries(LIABILITY_KINDS);
+/* Which kinds are USUALLY secured on something — it only picks the default in
+   the editor's dropdown, and the reader overrides it by choosing a property or
+   choosing none. A car loan on a car you never listed is unsecured here, which
+   is the honest reading of a plan that doesn't mention the car. */
+const SECURED_KINDS = new Set(['mortgage', 'auto']);
+
+/* The parts a net worth snapshot may state, in the order the card's tiles and
+   the history table below them read. Written ONCE because four things have to
+   agree about this list — what coerceShape keeps, what makes a record worth
+   keeping at all, what the Record button writes, and what a record with no
+   stated total adds up to — and the day `debts` arrived was the day a fifth
+   copy would have been missed. `debts` is the one that SUBTRACTS, which is why
+   the sum below can't just reduce over the list. */
+const SNAPSHOT_PARTS = ['total', 'liquid', 'invested', 'retirement', 'property', 'debts'];
+const SNAPSHOT_ASSETS = ['liquid', 'invested', 'retirement', 'property'];
+
 /* Federal and state, and nothing else. Outermost key of `side.tax` because the
    two move on different clocks — a state rewrites its schedule in a year the
    federal one is untouched — so the carry-forward has to be per jurisdiction.
@@ -1665,7 +1796,7 @@ const STORAGE_KEY = 'fin-state';
    here is what lets `load` spot the opposite case — a plan from the FUTURE,
    saved by a newer build — which migrate cannot help with and must not guess
    at. Bump it in the same commit as the migration step that earns it. */
-const SCHEMA = 6;
+const SCHEMA = 7;
 
 /* The strapline beside the app's name in the header, and after it in the browser
    tab. Every other app in the family carries one — "· Charlie's Epic Sprint
@@ -1889,6 +2020,32 @@ function buildMoneyFormats(code) {
 buildMoneyFormats('USD');
 const fmtMoney  = (v) => moneyFmt.format(v);
 const fmtMoney0 = (v) => moneyFmt0.format(v);
+
+/* A figure in a currency that is NOT the plan's own. Property, debts and
+   investment panes can each be held abroad, and the figure on the statement in
+   front of the reader is in that currency — so that is what their own cards
+   show, with its own symbol. Only the TOTALS convert, and they say so.
+
+   Printing £96,000 as "$96,000.00" was the first thing this got wrong: the
+   wrong figure wearing the right symbol, which is the exact failure the whole
+   rate table exists to prevent. Cached per code because a table redraws every
+   render and building an Intl formatter per cell is not free. A code Intl does
+   not know falls back to "96000 XYZ" rather than throwing — the same
+   belt-and-braces buildMoneyFormats has. */
+const otherMoneyFmt = new Map();
+function fmtMoneyIn(v, code) {
+  const own = String((state.settings || {}).currency || 'USD').toUpperCase();
+  const c = String(code || '').toUpperCase();
+  if (!c || c === own) return fmtMoney(v);
+  if (!otherMoneyFmt.has(c)) {
+    let f = null;
+    try { f = new Intl.NumberFormat('en-US', { style: 'currency', currency: c }); }
+    catch (e) { f = null; }
+    otherMoneyFmt.set(c, f);
+  }
+  const f = otherMoneyFmt.get(c);
+  return f ? f.format(v) : `${roundTo(v, 2)} ${c}`;
+}
 
 /* Money is typed and read the way it looks on a statement — $1,234.50. A
    number input can render neither the symbol nor the separator, so money
@@ -2247,6 +2404,32 @@ function blankState() {
          not accounts: nothing flows through a house, so the engine never sees
          these. */
       property: [],
+      /* What is still owed — see LIABILITY_KINDS above. A list rather than a
+         field on a property row, because most debts are not secured on
+         anything and the ones that are outlive the thing as often as not. */
+      liabilities: [],
+      /* ── Money that isn't in the plan's own currency ──────────────────────
+         `currency` in settings was only ever a LABEL: it changed the symbol in
+         front of every figure and nothing else, so a plan holding a flat in
+         one country and a brokerage in another could not be written down at
+         all — one of the two was quietly wrong by whatever the rate happened
+         to be.
+
+         This is a rate table the READER states: ISO code → {rate, asOf},
+         where rate is how much of the plan's currency one unit is worth. The
+         reader's, never the app's, and for exactly the reason no tax bracket
+         and no contribution limit ships either — a rate fetched today is wrong
+         tomorrow, and a rate baked in is wrong for ever while looking
+         authoritative. `asOf` is what lets the app say how old the answer is
+         instead of pretending it is live.
+
+         It reaches PROPERTY, DEBTS and INVESTMENT PANES — the three things
+         that sit outside the engine. The budget grid stays in one currency on
+         purpose: every balance in it chains month to month through transfers
+         and interest, and a rate that moved would rewrite eleven years of
+         history every time it was edited. The app says that rather than
+         half-doing it. */
+      rates: {},
       /* Allocation targets for the Everything You Hold card — UPPER-CASED
          ticker → the share (0–1) of all holdings it should be. A map, not a
          list: one target per ticker is the whole idea, and the rollup already
@@ -2502,6 +2685,12 @@ function normalizeIds(d) {
   for (const t of list(vac.trips)) own(t, t.name || 'trip');
   for (const a of list(side.retirementAccounts)) ref(a, 'owner', '');
   for (const r of list(side.property)) ref(r, 'person', '');
+  /* Ids for property and liabilities are MINTED in coerceShape (below), not
+     here: both lists were addressed by index until liabilities arrived, so most
+     rows carry no id at all and minting needs the uniqueness check `own` does
+     not do. What belongs here is the REFERENCE — cleaned the same way, so a
+     mangled `securedOn` still finds the row it names. */
+  for (const l of list(side.liabilities)) ref(l, 'securedOn', '');
 
   const years = (d.years && typeof d.years === 'object') ? d.years : {};
   for (const y of Object.keys(years)) {
@@ -2761,6 +2950,15 @@ function coerceShape(data) {
            STRICTLY: num() would turn junk into 0, and a $0 threshold is a
            real-looking claim ("sweep everything") the reader never made.
            goalId is checked after the goals themselves are settled, below. */
+        /* How fast a growing row rises, read STRICTLY — the account.rate
+           discipline. num() would turn a corrupt field into 0%, which reads on
+           screen as a row somebody deliberately said does not rise, and the
+           whole point of the rule is that it does. Kept only while the row IS
+           a growing one, the way `every` and `perCheck` are. */
+        if (cat.rule === 'grow') {
+          const g = rateOrNone(cat.growth);
+          if (g !== undefined) cat.growth = g; else delete cat.growth;
+        } else delete cat.growth;
         if (cat.rule === 'overflow') {
           if (!acctIds.has(cat.overflowFrom)) delete cat.overflowFrom;
           if (!acctIds.has(cat.transferTo)) delete cat.transferTo;
@@ -2846,7 +3044,27 @@ function coerceShape(data) {
   d.side = obj(d.side);
   const s = d.side;
   for (const k of ['taxable', 'otherMoney', 'hsa', 'daf', 'portfolios',
-                   'retirementAccounts', 'property']) s[k] = arr(s[k]);
+                   'retirementAccounts', 'property', 'liabilities']) s[k] = arr(s[k]);
+  /* Mint an id for a row that has none, WITHOUT moving one that has. Property
+     and liabilities are the two lists that were addressed by index before
+     anything pointed at them, so nearly every stored row arrives id-less and a
+     bare `cleanId` would hand two cars called "Car" the same id — which is
+     exactly the ambiguity `securedOn` cannot survive. A well-formed id is left
+     alone (it is already being pointed at); only the minted ones are numbered,
+     and deterministically, so two loads of one file agree. */
+  const mintIds = (rows, fallback) => {
+    const seen = new Set(rows.map(r => ID_OK.test(String(r.id || '')) ? String(r.id) : null)
+      .filter(Boolean));
+    for (const r of rows) {
+      if (ID_OK.test(String(r.id || ''))) continue;
+      const base = cleanId(r.id, r.name || fallback);
+      let id = base, n = 2;
+      while (seen.has(id)) id = `${base}-${n++}`;
+      r.id = id; seen.add(id);
+    }
+  };
+  mintIds(s.property, 'property');
+  mintIds(s.liabilities, 'debt');
   /* Allocation targets: ticker → share of all holdings. Keys are normalised
      to the rollup's own grouping key (trimmed, upper-cased — a target typed
      for "voo" must find the VOO row); values are read STRICTLY, the
@@ -2879,29 +3097,98 @@ function coerceShape(data) {
     if (key && pct !== undefined) s.classTargets[key] = Math.min(1, Math.max(0, pct));
   }
   /* Net worth snapshots: a record with no DATE means nothing (a worth without
-     a when is not a fact) and is dropped; the five figures go through the
+     a when is not a fact) and is dropped; the figures go through the
      owed discipline — numbers kept, absent stays absent, and a record left
      with no figure at all goes too. */
   s.snapshots = arr(s.snapshots).filter(r => /^\d{4}-\d{2}-\d{2}$/.test(r.date || ''));
   for (const r of s.snapshots) {
-    for (const k of ['total', 'liquid', 'invested', 'retirement', 'property']) {
+    for (const k of SNAPSHOT_PARTS) {
       const v = num(r[k]);
       if (typeof v === 'number') r[k] = v; else delete r[k];
     }
   }
   s.snapshots = s.snapshots.filter(r =>
-    ['total', 'liquid', 'invested', 'retirement', 'property'].some(k => typeof r[k] === 'number'));
+    SNAPSHOT_PARTS.some(k => typeof r[k] === 'number'));
   /* Property: a name, a kind from the fixed list, a value and optionally what
      is still owed. Value and owed feed totals through num() (the NaN class
      fix); owed is DELETED rather than zeroed when it isn't a number, because
      "nothing owed" and "never said" render the same and a stored 0 would be a
-     claim the reader didn't make. */
+     claim the reader didn't make.
+
+     `owed` is READ but no longer WRITTEN: schema 7 moves it to a liability of
+     its own. It stays coerced because a backup taken before today can be
+     restored at any point, and it is still counted by `netWorthParts` for the
+     moment between coerceShape and migrate — which is the only moment it now
+     survives, and one where reading it wrongly would be a silent change to a
+     recorded net worth. */
   for (const p of s.property) {
     p.name = String(p.name || 'Property');
     if (!PROPERTY_KIND_LABEL[p.kind]) p.kind = 'other';
     p.value = num(p.value);
     const owedNum = num(p.owed);
     if (typeof owedNum === 'number') p.owed = owedNum; else delete p.owed;
+  }
+  /* What is owed. The balance goes through num() like every other figure that
+     reaches a total; the RATE and the PAYMENT do not — they go through
+     rateOrNone, the account.rate discipline, because a corrupt field turned
+     into 0 would read as "this loan charges no interest" or "nothing is being
+     paid", both of which are claims the reader never made and both of which
+     change the payoff date on screen.
+
+     `asOf` is the month the balance was true, and it is what makes the whole
+     feature work: without it a stated balance is a fact with no date and the
+     projection has nothing to count from. A malformed one is dropped, which
+     degrades to "the balance stands as typed" — stale, but never wrong about
+     when it was said.
+
+     `securedOn` is checked against the property ids ABOVE, so it is settled by
+     the time anything reads it. Dangling drops to unsecured; the total is the
+     same figure either way. */
+  {
+    const propIds = new Set(s.property.map(p => p.id));
+    for (const l of s.liabilities) {
+      l.name = String(l.name || 'Debt');
+      if (!LIABILITY_KIND_LABEL[l.kind]) l.kind = 'other';
+      l.balance = num(l.balance);
+      if (typeof l.balance !== 'number') l.balance = 0;
+      for (const k of ['rate', 'payment']) {
+        const v = rateOrNone(l[k]);
+        if (v !== undefined) l[k] = v; else delete l[k];
+      }
+      if (!/^\d{4}-\d{2}$/.test(String(l.asOf || ''))) delete l.asOf;
+      if (l.securedOn !== undefined && !propIds.has(l.securedOn)) delete l.securedOn;
+    }
+  }
+  /* Exchange rates: ISO code → what one unit is worth in the plan's own
+     currency. The code is shaped like `settings.currency` is (three letters,
+     upper-cased) and the rate is read STRICTLY — num() would turn a corrupt
+     field into a rate of 0, which silently values a foreign holding at nothing
+     rather than refusing to value it. A rate of 0 or less is not a rate.
+     `asOf` is optional and dropped when malformed: the card then says the rate
+     has no date rather than inventing one. */
+  {
+    const rates = obj(s.rates); s.rates = {};
+    const own = String((d.settings || {}).currency || 'USD').toUpperCase();
+    for (const [k, v] of Object.entries(rates)) {
+      const code = String(k).trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(code) || code === own) continue;
+      const row = obj(v);
+      const rate = rateOrNone(row.rate);
+      if (rate === undefined || !(rate > 0)) continue;
+      s.rates[code] = { rate };
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(row.asOf || ''))) s.rates[code].asOf = row.asOf;
+    }
+  }
+  /* Which currency a thing is held in. Absent means the plan's own, which is
+     what every row written before today means and what nearly every row will
+     always mean — so it is DELETED rather than stamped, and a code with no
+     rate behind it is kept: the figure is then named as one the total could
+     not count, which is a better answer than converting it at 1:1. */
+  for (const row of [...s.property, ...s.liabilities, ...s.portfolios]) {
+    const code = String(row.cur || '').trim().toUpperCase();
+    if (/^[A-Z]{3}$/.test(code) && code !== String((d.settings || {}).currency || 'USD').toUpperCase())
+      row.cur = code;
+    else delete row.cur;
   }
   /* Investments used to be two fixed panes, "Taxable investments" and "HSA",
      because those were the two Charlie had. They're a named list now — add as
@@ -3207,6 +3494,24 @@ function coerceShape(data) {
     c.salary = num(c.salary);
     c.raisePct = num(c.raisePct);
     if (c.bonus !== undefined) c.bonus = num(c.bonus);
+    /* The rest of the package: equity that vested that year, and what the
+       employer put into a retirement account. Both DELETED rather than zeroed
+       when they are not a figure — the cost-basis discipline. A stored 0 would
+       claim "no equity, no match", which for most people is a different
+       statement from "this plan doesn't track those", and only the second is
+       true of every plan written before today. */
+    for (const k of ['equity', 'match']) {
+      if (c[k] === undefined) continue;
+      /* rateOrNone, NOT num — despite these being money. num() turns anything
+         it cannot read into 0, and here a 0 is a claim: "nothing vested",
+         "no employer contribution". The field is the denominator of every
+         giving percentage in the app, so a corrupt backup must leave it absent
+         rather than quietly shrink somebody's income. The helper is named for
+         the first three fields that wanted it; what it actually means is "read
+         it strictly or not at all". */
+      const v = rateOrNone(c[k]);
+      if (v !== undefined) c[k] = v; else delete c[k];
+    }
   }
   for (const y of Object.keys(s.bonuses)) {
     s.bonuses[y] = num(s.bonuses[y]);
@@ -3709,6 +4014,39 @@ function migrate(parsed) {
       parsed.settings.tagline = DEFAULT_TAGLINE;
     parsed.schema = 6;
   }
+  /* Schema 7 moves what is owed OFF the property rows and into liabilities of
+     its own, ONCE. Here rather than in coerceShape for the reason every step
+     above is: coerceShape runs on every load, and a reader who deleted the
+     migrated loan would find it recreated on the next one.
+
+     It is a pure re-filing, and the net worth it produces is identical to the
+     cent — the new row is `securedOn` the property it came from, and a secured
+     debt reduces that property's equity exactly the way `owed` did. What
+     changes is that the figure now has a NAME, a rate, a payment and a date it
+     was true, none of which a bare number on a house could carry.
+
+     No rate, payment or `asOf` is invented. The migrated row is the number the
+     reader typed and nothing more; the projection stays switched off until they
+     say what it costs, which is the same promise the tax tables keep. */
+  if ((parsed.schema || 1) < 7) {
+    const side = parsed.side || (parsed.side = {});
+    const list = Array.isArray(side.liabilities) ? side.liabilities : (side.liabilities = []);
+    const seen = new Set(list.map(l => l && l.id).filter(Boolean));
+    for (const prop of (Array.isArray(side.property) ? side.property : [])) {
+      if (typeof prop.owed !== 'number' || !prop.owed) { delete prop.owed; continue; }
+      let id = `${prop.id}-loan`, n = 2;
+      while (seen.has(id)) id = `${prop.id}-loan-${n++}`;
+      seen.add(id);
+      list.push({ id, name: `${prop.name} loan`,
+        /* A home carries a mortgage and a vehicle a car loan; anything else is
+           secured on something the list has no word for, and "Other" is the
+           honest label rather than a guess dressed up as a fact. */
+        kind: prop.kind === 'home' ? 'mortgage' : prop.kind === 'vehicle' ? 'auto' : 'other',
+        balance: prop.owed, securedOn: prop.id });
+      delete prop.owed;
+    }
+    parsed.schema = 7;
+  }
   return parsed;
 }
 
@@ -4061,6 +4399,38 @@ const RULES = {
       if (cell) return cell.v;
     }
     return priorYearLast(cat, m, ctx)?.v ?? null;
+  },
+
+  /* Rent, childcare, insurance: repeat the last figure, stepped up a set
+     percentage once per CALENDAR YEAR. `carry` with a clock on it.
+
+     Compounding it monthly was the obvious alternative and it is wrong twice
+     over: a 3%/yr rent would grow by cents every month, which is not a thing a
+     landlord does, and a year built ahead would then read twelve different
+     figures where the reader said one. Once a year is what actually happens —
+     the renewal letter, the January price rise — so the step is the difference
+     in YEAR NUMBERS between the month being filled and the month the figure
+     came from. Inside a year the exponent is 0 and this IS carry, which is what
+     lets a typed month take over mid-year exactly the way it does everywhere
+     else.
+
+     Reading the nearest earlier cell rather than the row's first figure is the
+     same choice `carry` makes and matters more here: the reader is expected to
+     type the real new rent when it lands, and the rule must then grow from THAT
+     rather than from a two-year-old number compounded forward past it.
+
+     No rate is a 0% rise, deliberately — a row switched to this rule before its
+     percentage is typed repeats, which is the honest reading of "rises by
+     nothing said yet" and never invents a number. */
+  grow(cat, m, ctx) {
+    const r = typeof cat.growth === 'number' ? cat.growth : 0;
+    const stepped = (v, from) => round2(v * Math.pow(1 + r, +m.slice(0, 4) - +from.slice(0, 4)));
+    for (let i = monthDiff(ctx.yr.startMonth, m) - 1; i >= 0; i--) {
+      const cell = ctx.yr.cells[`${cat.id}|${ctx.months[i]}`];
+      if (cell) return stepped(cell.v, ctx.months[i]);
+    }
+    const prev = priorYearLast(cat, m, ctx);
+    return prev ? stepped(prev.v, prev.m) : null;
   },
 
   /* Cycle bills (a quarterly water bill, semi-annual insurance, an annual
@@ -4637,12 +5007,15 @@ function computeGoals(st, computed, todayIso) {
    helpBtn(key, label) in the renderers. */
 const HELP = {
   netWorth: { title: 'What Counts toward Net Worth',
-    body: 'Four parts, each read from a tab you fill in elsewhere. Liquid is this month\'s '
+    body: 'Five parts, each read from a tab you fill in elsewhere. Liquid is this month\'s '
       + 'computed total across the budget grid\'s accounts. Invested sums the Investments '
       + 'tab\'s holdings at their listed prices. Retirement sums the retirement accounts — '
       + 'Traditional and Roth together, before any tax, so it overstates what the pot '
       + 'would hand you to spend. Property is the Household tab\'s list at your own stated '
-      + 'values, minus anything still owed. The giving fund is deliberately left out: that '
+      + 'values, minus whatever is secured on it. Owed is everything else the household '
+      + 'owes — cards, student loans, a personal loan — and it comes off the total; a debt '
+      + 'secured on a property is already inside the Property figure, so it is never '
+      + 'counted twice. The giving fund is deliberately left out: that '
       + 'money was given the day it went in, and counting it would inflate the total by '
       + 'dollars that are no longer yours. A part with nothing recorded shows no tile at '
       + 'all rather than a $0.00 — an empty list and a worthless one are different claims. '
@@ -4650,6 +5023,67 @@ const HELP = {
       + 'money (its ✎ Edit dialog). The Liquid and Invested tiles still match their tabs, '
       + 'but the Total counts that pot once — at what the holdings are worth, since a '
       + 'priced figure is the better answer to what something is worth today.' },
+  currencies: { title: 'How a Rate Is Used',
+    body: 'You state the rate; the app never looks one up. That is the same rule the tax '
+      + 'tables and the contribution limits follow, and for the same reason — a rate '
+      + 'fetched today is wrong tomorrow, and a rate baked into the app is wrong for ever '
+      + 'while looking authoritative. What the app can do is remember the day you read it '
+      + 'and show you how old the answer is. Three things can say which currency they are '
+      + 'in: a property, a debt, and an investment pane. Each is converted into the plan\u2019s '
+      + 'own currency for net worth, and each still reads in its own money on its own card, '
+      + 'because that is the figure on the statement in front of you. The BUDGET GRID stays '
+      + 'in one currency and always will: its balances chain month to month through '
+      + 'transfers and interest, so a rate you edited would silently rewrite years of '
+      + 'history every time you touched it. Retirement accounts carry no currency either — '
+      + 'a 401(k) is a creature of one country\u2019s tax code. If something is in a currency '
+      + 'you have given no rate for, it is left OUT of your net worth and named, never '
+      + 'counted at face value: a foreign flat added in at whatever number happens to be '
+      + 'typed is the one answer worse than saying the total cannot be worked out yet.' },
+  taxNow: { title: 'What This Figure Is, and Is Not',
+    body: 'It is your own bracket table and your own deduction, applied to the total '
+      + 'compensation on the Compensation tab — salary after the raise, plus the bonus, '
+      + 'plus any equity that vested and any employer contribution you have recorded. '
+      + 'That is the whole of the arithmetic. It is NOT a tax return and it is not a '
+      + 'refund estimate: there are no credits in it, nothing is itemised, payroll tax is '
+      + 'not counted, and it takes no notice of what has already been withheld from your '
+      + 'pay — so the figure is what the schedule says on that income, never what you '
+      + 'still owe in April. Nor is it a household figure where two people earn: the app '
+      + 'records a second earner as take-home in the budget and never as gross, so there '
+      + 'is no second package to add and the card counts one. It reads the newest year you '
+      + 'have recorded comp for rather than the calendar year, because a raise letter '
+      + 'arrives when it arrives and a card that went blank every January would be one '
+      + 'nobody trusted. The year with no table of its own carries the newest table before '
+      + 'it forward, exactly as the retirement projection does.' },
+  spendingMix: { title: 'How Where the Money Goes Is Counted',
+    body: 'Exactly the way the Spending, Year by Year bars are, because the two have to '
+      + 'add up to the same figure. Only rows filed under Expenses count, so money swept '
+      + 'into savings or moved between your own accounts is not spending here. A row is '
+      + 'NETTED across the year rather than added up as magnitudes: a refund lands back in '
+      + 'the row it came out of and really does reduce what that row cost you. The current '
+      + 'year includes the months the plan has worked out rather than stopping at the last '
+      + 'one you entered — otherwise August would always look like a cheap year — and the '
+      + 'figures say so by being set in the estimate style. Rows are matched to last year '
+      + 'by the row itself, so renaming one keeps its history in one line rather than '
+      + 'splitting it in two; against an old imported yearly summary, which has no rows to '
+      + 'point at, they are matched by name instead. Anything that spent nothing in either '
+      + 'year is left out, and a row that has vanished since last year still gets a line — '
+      + 'money that stopped being spent is as much a finding as money that started.' },
+  liabilities: { title: 'How a Debt Is Projected',
+    body: 'A balance on its own is a fact about a day nobody wrote down, which is why it '
+      + 'goes stale. Say WHEN it was true and the app can do the rest: each month the '
+      + 'balance takes its share of the rate you typed, the payment covers that interest '
+      + 'first, and whatever is left comes off the principal — the arithmetic on the back '
+      + 'of a mortgage statement. What the card shows is where that lands today, and the '
+      + 'month the debt reaches zero. Leave the payment out and nothing is projected: the '
+      + 'balance stands exactly as you typed it, which is honest rather than helpful. If '
+      + 'the payment is smaller than the first month\u2019s interest the debt genuinely '
+      + 'grows, and the card says so in words rather than drawing a line climbing away — '
+      + 'that is a fact about the loan, and it should not look like a fault in the app. '
+      + 'A debt secured on a property comes off that property\u2019s equity; anything '
+      + 'else gets its own figure. Either way it comes off net worth once, and the total '
+      + 'is the same number whichever side of the line it sits. Nothing here touches the '
+      + 'budget grid: the payment leaving your account is already a row there, and '
+      + 'counting the debt as well would take the money out twice.' },
   savingFor: { title: 'Saving for a Child',
     body: 'Naming the child a goal is for does two things, and only two. It files the goal '
       + 'under them on the Household tab, and — when the target date is still empty — it '
@@ -5121,6 +5555,24 @@ function welcomeCard() {
 
      2024, 2025  summary years, so Progress has history to draw and Comp has a
                  raise to measure against
+     Comp        salary, bonus AND the two parts most packages have that this
+                 app used to ignore — equity that vested and the employer's own
+                 contribution. They are what make the Comp tab draw a total-comp
+                 line above the salary line, and what the Giving shares are
+                 measured against.
+     Currency    a flat and its mortgage in GBP, with one stated rate — the
+                 case `settings.currency` could never express, because that was
+                 only ever a symbol in front of every figure.
+     History     two REAL yearly summaries, not three dead scalars — every row
+                 named, so the long-run charts have bars and Where the Money
+                 Goes has a year to compare against. `Holiday club` is in them
+                 and not in the grid: a row that stopped, which the comparison
+                 has to keep rather than quietly drop.
+     Debts       one of each shape the What You Owe card reads differently — a
+                 mortgage secured on the house, a car loan nearly done, an
+                 UNSECURED student loan (the case a number typed on a property
+                 row could never hold) and a card with no payment said, which is
+                 the state where nothing is projected and the card asks.
      Donations   one of each shape the Giving tab reads differently — money into
                  the fund, a grant out of it, cash given straight, and one still
                  pending
@@ -5257,8 +5709,60 @@ function sampleState() {
           for: 'mia', target: 90000, targetDate: '2033-09' },
       ],
       years: {
-        [PREV2]: { kind: 'summary', income: 96400, spending: 88100, saved: 8300 },
-        [PREV]:  { kind: 'summary', income: 101200, spending: 90600, saved: 10600 },
+        /* The two history years, as REAL yearly summaries — a list of what each
+           row came to, plus each account's closing balance.
+
+           They used to be `{income, spending, saved}`, three fields nothing in
+           the app reads: every chart that walks the years drew them at $0.00,
+           so the sample's own history was a pair of empty bars sitting under a
+           card explaining what history looks like. Written out properly they
+           feed money in vs money out, spending year by year, the end-of-year
+           liquidity line and Where the Money Goes, which is the card that
+           needed a second year to have anything to say.
+
+           The expense names deliberately MATCH the grid's rows, because that is
+           how a summary year lines up beside a live one — a summary has no row
+           ids, so the match is by name. `Holiday club` is the exception on
+           purpose: a row that existed then and does not now, which is the case
+           the comparison must not silently drop. */
+        [PREV2]: { kind: 'summary', categoryTotals: [
+          { name: 'Rosa — paycheck', total: 60000 },
+          { name: 'Ben — paycheck', total: 32400 },
+          { name: 'Interest & Dividends', total: 1120 },
+          { name: 'Mortgage', total: -25320 },
+          { name: 'Childcare', total: -11400 },
+          { name: 'Groceries', total: -10860 },
+          { name: 'Everything else', total: -6480 },
+          { name: 'Transport', total: -4020 },
+          { name: 'Insurance', total: -3060 },
+          { name: 'Dining out', total: -2940 },
+          { name: 'Utilities', total: -2820 },
+          { name: 'Holiday club', total: -1100 },
+          { name: 'Everyday', total: 4100, isBalance: true },
+          { name: 'Savings', total: 12800, isBalance: true },
+          { name: 'Emergency fund', total: 5400, isBalance: true },
+          { name: 'Brokerage', total: 41900, isBalance: true },
+          { name: "Mia's 529", total: 8600, isBalance: true },
+        ] },
+        [PREV]: { kind: 'summary', categoryTotals: [
+          { name: 'Rosa — paycheck', total: 62400 },
+          { name: 'Ben — paycheck', total: 33600 },
+          { name: 'Interest & Dividends', total: 1480 },
+          { name: 'Mortgage', total: -25320 },
+          { name: 'Childcare', total: -12600 },
+          { name: 'Groceries', total: -11520 },
+          { name: 'Everything else', total: -6940 },
+          { name: 'Transport', total: -4320 },
+          { name: 'Insurance', total: -3180 },
+          { name: 'Dining out', total: -3180 },
+          { name: 'Utilities', total: -2940 },
+          { name: 'Holiday club', total: -1150 },
+          { name: 'Everyday', total: 4800, isBalance: true },
+          { name: 'Savings', total: 15600, isBalance: true },
+          { name: 'Emergency fund', total: 7300, isBalance: true },
+          { name: 'Brokerage', total: 52400, isBalance: true },
+          { name: "Mia's 529", total: 11400, isBalance: true },
+        ] },
         [y]: {
           kind: 'grid', model: 'live',
           startMonth: `${Y}-01`, monthCount: 12,
@@ -5300,10 +5804,46 @@ function sampleState() {
         targets: { VTI: 0.55, VXUS: 0.25, BND: 0.20 },
         classes: { VTI: 'US stocks', VXUS: 'International stocks', BND: 'Bonds' },
         classTargets: { 'us stocks': 0.55, 'international stocks': 0.25, bonds: 0.20 },
+        /* Ids, because the debts below point at these rows. They are what
+           coerceShape would mint anyway; writing them out is what makes the
+           `securedOn` links readable in the source. */
         property: [
-          { kind: 'home', name: 'The house', value: 412000, owed: 231000,
+          { id: 'house', kind: 'home', name: 'The house', value: 412000,
             note: 'Bought 2019; the mortgage row in the budget is this one.' },
-          { kind: 'vehicle', name: 'The estate car', value: 14500, owed: 0 },
+          { id: 'car', kind: 'vehicle', name: 'The estate car', value: 14500 },
+          /* Priced in the currency it stands in, which is the whole case the
+             app could not express before: without a rate this flat was either
+             absent from the plan or counted as if 96,000 GBP were 96,000 USD. */
+          { id: 'flat', kind: 'home', name: 'The flat in Leeds', value: 96000, cur: 'GBP',
+            note: 'Rented out. Valued and mortgaged in pounds.' },
+        ],
+        /* One rate, stated with the day it was read — the app never looks one
+           up, and the card says how old the answer is. */
+        rates: { GBP: { rate: 1.27, asOf: `${Y}-07-01` } },
+        /* One of each shape the debts card reads differently, because a demo
+           that only holds mortgages never shows what the card does with the
+           rest. A mortgage SECURED on the house (so it comes off that
+           property's equity, not out of a tile of its own); a car loan close
+           to its end; an unsecured student loan, which is the case the old
+           `owed`-on-a-property model could not express at all; and a card with
+           no payment said, which is what the "add a payment" state looks like.
+           The mortgage's payment is under the budget row's $2,180 on purpose —
+           that row includes escrow, and a reader who notices is right to. */
+        liabilities: [
+          { id: 'flat-loan', name: 'The flat in Leeds — mortgage', kind: 'mortgage',
+            balance: 41000, rate: 0.0459, payment: 310, asOf: `${PREV}-12`,
+            securedOn: 'flat', cur: 'GBP',
+            note: 'In pounds, like the flat it is secured on.' },
+          { id: 'house-loan', name: 'The house — mortgage', kind: 'mortgage',
+            balance: 231000, rate: 0.0325, payment: 1620, asOf: `${PREV}-12`,
+            securedOn: 'house',
+            note: 'Principal and interest only; the budget row also carries escrow.' },
+          { id: 'car-loan', name: 'The estate car', kind: 'auto',
+            balance: 6400, rate: 0.049, payment: 340, asOf: `${Y}-01`, securedOn: 'car' },
+          { id: 'student', name: 'Ben — student loan', kind: 'student',
+            balance: 11200, rate: 0.058, payment: 190, asOf: `${PREV}-06` },
+          { id: 'visa', name: 'Visa', kind: 'card', balance: 1450, rate: 0.229,
+            note: 'Cleared most months, so there is no fixed payment to project from.' },
         ],
         snapshots: [
           { date: `${PREV2}-12-31`, total: 214800, liquid: 28400, invested: 51200,
@@ -5381,9 +5921,14 @@ function sampleState() {
            as the feature. It is also the salary her 401(k) card is filled in
            with below, so the two tabs tell one story. */
         comp: {
-          [PREV2]: { salary: 84000, raisePct: 0.03 },
-          [PREV]:  { salary: 86520, raisePct: 0.035 },
-          [y]:     { salary: 92000, raisePct: 0.027 },
+          /* Equity and the employer contribution are here so the Comp tab
+             draws its two extra columns and its total-comp line, and so the
+             Giving percentages are measured against the whole package rather
+             than the salary — which is the case they were quietly getting
+             wrong for anyone paid in shares. */
+          [PREV2]: { salary: 84000, raisePct: 0.03, equity: 6200, match: 4200 },
+          [PREV]:  { salary: 86520, raisePct: 0.035, equity: 8100, match: 4480 },
+          [y]:     { salary: 92000, raisePct: 0.027, equity: 11400, match: 4750 },
         },
         bonuses: { [PREV2]: 4200, [PREV]: 5100, [y]: 6000 },
         k401: {}, rothContribs: {},
@@ -6456,6 +7001,7 @@ function balanceYearTip(e, closing, label) {
 const RULE_LABEL = {
   none: 'no rule — stays blank until you type',
   carry: 'repeats the last month',
+  grow: 'repeats, rising a set % each year',
   quarterly: 'repeats on a cycle (every few months)',
   avg: 'average of the months so far',
   avglastyear: 'average of last year',
@@ -6475,6 +7021,10 @@ function ruleDesc(cat, st = state) {
     return `${fmtMoney(cat.perCheck || 0)} per check × that month's paychecks`;
   if (r === 'quarterly')
     return `repeats every ${Math.max(1, Math.round(cat.every || 3))} months`;
+  if (r === 'grow')
+    return cat.growth
+      ? `repeats, rising ${round2(cat.growth * 100)}% each January`
+      : 'repeats — say what % a year it rises in Row settings';
   if (r === 'dividends') {
     const on = dividendAccounts(cat).map(id => accountName(st, id));
     return `${round2(((cat.rate ?? st.settings.midTermRateAnnual) || 0) * 100)}%/yr interest on ${
@@ -6547,20 +7097,151 @@ function goalCard(g, idx) {
    tile reading $0.00 would say something else. The giving fund is measured but
    NEVER added to the total — that money is already given; only its being
    left out is worth a sentence. */
-function netWorthParts(st) {
+/* ── What a debt does over time ─────────────────────────────────────────────
+   The arithmetic every mortgage statement runs: each month the balance earns
+   its share of the annual rate, the payment covers that first, and whatever is
+   left comes off the principal.
+
+   Three answers rather than one, because the interesting cases are the ones
+   that aren't a number. `null` is "not enough said to project anything" — no
+   payment typed, which is the state every migrated row starts in. `never: true`
+   is a payment that does not even cover the first month's interest, which is a
+   real thing that happens and which the app must SAY rather than draw: the
+   balance genuinely grows, and a chart of it climbing away would look like a
+   bug in the plan rather than a fact about the loan.
+
+   The schedule is kept because two different questions read it — what is owed
+   in some later month, and what the whole thing costs in interest — and
+   walking it twice would be two chances to walk it differently.
+
+   MAX_AMORT_MONTHS is a backstop against a rate and payment that converge too
+   slowly to terminate, not a policy about loan length: a hundred years is past
+   any real schedule, and a plan that reaches it has already told the reader the
+   payment barely covers the interest. */
+const MAX_AMORT_MONTHS = 1200;
+
+function amortize(l) {
+  const balance = Math.max(0, (l && l.balance) || 0);
+  const monthly = (typeof (l || {}).rate === 'number' ? l.rate : 0) / 12;
+  const pay = Math.max(0, (l && l.payment) || 0);
+  if (!balance) return { months: 0, interest: 0, never: false, schedule: [] };
+  if (!pay) return null;
+  /* Equality counts as never: a payment exactly equal to the interest leaves
+     the principal untouched for ever, which is the same answer. */
+  if (pay <= round2(balance * monthly)) return { months: null, interest: null, never: true, schedule: [] };
+  let bal = balance, interest = 0, months = 0;
+  const schedule = [];
+  while (bal > 0 && months < MAX_AMORT_MONTHS) {
+    const int = round2(bal * monthly);
+    /* The last payment is only what is left — a schedule that overshoots into a
+       negative balance would report a payoff date a month late and a total
+       interest figure that never happened. */
+    const principal = Math.min(round2(pay - int), bal);
+    bal = round2(bal - principal);
+    interest = round2(interest + int);
+    months++;
+    schedule.push({ n: months, interest: int, principal, balance: bal });
+  }
+  return { months, interest, never: false, schedule };
+}
+
+/* What is owed in a given month — the whole point of `asOf`. A balance with no
+   date is a fact about no particular day, so it simply stands; so does one the
+   reader has said nothing else about. Nothing is ever projected BACKWARDS: a
+   month before the statement reads the stated figure, because the app was not
+   told what the loan looked like then and running the schedule in reverse would
+   be inventing it. */
+function liabilityAt(l, month) {
+  const bal = Math.max(0, (l && l.balance) || 0);
+  if (!bal || !l.asOf || !month || month <= l.asOf) return bal;
+  const a = amortize(l);
+  if (!a || a.never) return bal;
+  const n = monthDiff(l.asOf, month);
+  if (n <= 0) return bal;
+  return n >= a.schedule.length ? 0 : a.schedule[n - 1].balance;
+}
+
+/* The month a debt is paid off, or null while there is nothing to work it out
+   from. Read by the Household card and by nothing else — the balance itself is
+   what net worth uses. */
+function payoffMonth(l) {
+  const a = amortize(l);
+  if (!a || a.never || !a.months || !l.asOf) return null;
+  return monthAdd(l.asOf, a.months);
+}
+
+/* Whether a debt is really secured on a property this plan still holds. Asked
+   in three places and worth writing once: a `securedOn` naming a property that
+   has since been deleted degrades to unsecured, which moves the figure from one
+   tile to another and leaves the total alone. */
+const securedTo = (l, propIds) => (l && l.securedOn && propIds.has(l.securedOn))
+  ? l.securedOn : null;
+
+/* ── One figure, in the plan's own money ────────────────────────────────────
+   `code` absent means the plan's currency, which is what every row written
+   before rates existed means. A code the reader has given no rate for is NOT
+   converted at 1:1 and NOT dropped in silence: it comes back `unknown`, the
+   total leaves it out, and the card names it. Guessing a rate of 1 would put a
+   foreign flat into somebody's net worth at whatever number happened to be
+   typed, which is the one outcome worse than saying "I can't count this yet". */
+function planRate(st, code) {
+  const own = String(((st.settings || {}).currency) || 'USD').toUpperCase();
+  if (!code || String(code).toUpperCase() === own) return { rate: 1 };
+  const r = ((st.side || {}).rates || {})[String(code).toUpperCase()];
+  return (r && r.rate > 0) ? r : null;
+}
+
+function inPlanCurrency(st, amount, code) {
+  const r = planRate(st, code);
+  if (!r) return { v: 0, unknown: true, code: String(code).toUpperCase() };
+  return { v: round2((amount || 0) * r.rate), rate: r.rate, asOf: r.asOf };
+}
+
+function netWorthParts(st, month) {
   const side = st.side || {};
   const portfolios = side.portfolios || [];
   const retAccts = side.retirementAccounts || [];
   const property = side.property || [];
-  const invested = round2(portfolios.reduce((s, p) => s + holdingsValue(p.rows || []), 0));
+  const liabilities = side.liabilities || [];
+  /* Anything the plan cannot value, because its currency has no rate yet. Names
+     rather than a count: a card that says "1 thing could not be counted" is a
+     card that sends you hunting. */
+  const unconverted = [];
+  const conv = (row, amount) => {
+    const got = inPlanCurrency(st, amount, row.cur);
+    if (got.unknown) unconverted.push(`${row.name || 'Untitled'} (${got.code})`);
+    return got.v;
+  };
+  const invested = round2(portfolios.reduce((s, p) => s + conv(p, holdingsValue(p.rows || [])), 0));
+  /* Retirement accounts carry no currency of their own, deliberately: a 401(k)
+     or an ISA is a creature of one country's tax code, and an app that shipped
+     one country's contribution limits could not have offered the other's
+     anyway. Nothing here pretends otherwise. */
   const retirement = round2(retAccts.reduce((s, a) => s + retAcctBalance(a), 0));
-  const owed = round2(property.reduce((s, p) => s + (p.owed || 0), 0));
-  const propertyValue = round2(property.reduce((s, p) => s + (p.value || 0), 0));
+  /* `p.owed` is the pre-schema-7 spelling. It is still added because a backup
+     from before the split is coerced before it is migrated, and this function
+     runs over both — dropping it for one tick would silently overstate a
+     recorded net worth. After migration every property carries none. */
+  const owed = round2(property.reduce((s, p) => s + conv(p, p.owed || 0), 0));
+  const propertyValue = round2(property.reduce((s, p) => s + conv(p, p.value || 0), 0));
+  const propIds = new Set(property.map(p => p.id));
+  const owedNow = (l) => liabilityAt(l, month);
+  /* Secured debt comes off the PROPERTY tile, unsecured debt gets a tile of its
+     own. Both come off the total, so the split is a matter of where a reader
+     looks for the figure, never of what the plan is worth. */
+  const secured = round2(liabilities.filter(l => securedTo(l, propIds))
+    .reduce((t, l) => t + conv(l, owedNow(l)), 0));
+  const loose = liabilities.filter(l => !securedTo(l, propIds));
+  const debts = round2(loose.reduce((t, l) => t + conv(l, owedNow(l)), 0));
   return {
     invested, hasInvested: portfolios.some(p => p && (p.rows || []).length),
     retirement, hasRetirement: retAccts.length > 0,
-    property: round2(propertyValue - owed), propertyOwed: owed,
+    property: round2(propertyValue - owed - secured), propertyOwed: round2(owed + secured),
     hasProperty: property.length > 0,
+    debts, hasDebts: loose.length > 0,
+    /* Deduped: a property and the loan on it both carrying the same unrated
+       currency is one thing to fix, not two. */
+    unconverted: [...new Set(unconverted)],
     daf: round2(holdingsValue(side.daf || [])), hasDaf: (side.daf || []).length > 0,
     /* Budget accounts whose money IS some pane's holdings (pf.accounts, the
        reader's own statement) — the renderer subtracts their computed balances
@@ -6577,7 +7258,7 @@ function netWorthParts(st) {
    EXACTLY the figures the card was showing — two computations of one number
    is how a recorded fact drifts from the screen it came off. */
 function netWorthTotals(st, liquid, c, cur) {
-  const nw = netWorthParts(st);
+  const nw = netWorthParts(st, cur);
   /* Money a pane has claimed as its holdings (pf.accounts) is in the Liquid
      figure AND the Invested one — both tiles honestly match their tabs, so
      the dedupe lives in the TOTAL alone, subtracting the linked accounts'
@@ -6587,7 +7268,7 @@ function netWorthTotals(st, liquid, c, cur) {
     .reduce((s, id) => s + (c.balances[`${id}|${cur}`] || 0), 0));
   const total = round2(liquid + (nw.hasInvested ? nw.invested : 0)
     + (nw.hasRetirement ? nw.retirement : 0) + (nw.hasProperty ? nw.property : 0)
-    - overlap);
+    - (nw.hasDebts ? nw.debts : 0) - overlap);
   return { nw, overlap, total };
 }
 
@@ -6598,8 +7279,12 @@ function snapshotPoints(st) {
   return (((st.side || {}).snapshots) || [])
     .map(r => ({ date: r.date,
       total: typeof r.total === 'number' ? r.total
-        : round2(['liquid', 'invested', 'retirement', 'property']
-            .reduce((s, k) => s + (typeof r[k] === 'number' ? r[k] : 0), 0)) }))
+        /* The assets add up and the debts come OFF — a reduce over
+           SNAPSHOT_PARTS would quietly add somebody's mortgage to their net
+           worth, which is why the two lists are separate constants. */
+        : round2(SNAPSHOT_ASSETS
+            .reduce((s, k) => s + (typeof r[k] === 'number' ? r[k] : 0), 0)
+            - (typeof r.debts === 'number' ? r.debts : 0)) }))
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -6618,8 +7303,9 @@ function netWorthCard(liquid, cur, c) {
   /* Nothing typed beyond the budget means nothing to add up — the Savings
      Goals card below already carries total liquidity, and a one-tile "net
      worth" equal to it would be the same figure wearing a grander name. */
-  const probe = netWorthParts(state);
-  if (!probe.hasInvested && !probe.hasRetirement && !probe.hasProperty) return '';
+  const probe = netWorthParts(state, cur);
+  if (!probe.hasInvested && !probe.hasRetirement && !probe.hasProperty
+      && !probe.hasDebts) return '';
   const tile = (label, value, foot) => `<div class="goal">
     <div class="label">${label}</div>
     <div class="value">${fmtMoney(value)}</div>
@@ -6636,6 +7322,12 @@ function netWorthCard(liquid, cur, c) {
       the holdings are worth.` : ''}${
       nw.hasDaf ? ` The giving fund's ${fmtMoney(nw.daf)} is not counted — that money is
       already given, and it is waiting on the Giving tab.` : ''}</p>
+    ${nw.unconverted.length ? `<p class="warn">${esc(andList(nw.unconverted))} ${
+      nw.unconverted.length === 1 ? 'is' : 'are'} left out: ${
+      nw.unconverted.length === 1 ? 'its currency has' : 'their currencies have'} no rate
+      yet. Add one on the Household tab — counting ${
+      nw.unconverted.length === 1 ? 'it' : 'them'} at face value would be the wrong
+      figure wearing the right symbol.</p>` : ''}
     <div class="goalgrid">
       ${tile('Total', total, overlap
         ? `Everything below, with ${fmtMoney(overlap)} of overlap counted once`
@@ -6646,6 +7338,12 @@ function netWorthCard(liquid, cur, c) {
       ${nw.hasProperty ? tile('Property', nw.property, nw.propertyOwed
         ? `Value minus the ${fmtMoney(nw.propertyOwed)} still owed — the Household tab lists it`
         : 'What it would sell for — the Household tab lists it') : ''}
+      ${/* Written as a positive figure with the word Owed doing the work, not
+            as a minus number: a tile reading −$18,400 beside four positives is
+            the one place in this card a reader has to stop and check the sign.
+            The foot says which way it goes. */''}
+      ${nw.hasDebts ? tile('Owed', nw.debts,
+        'Comes off the total — the Household tab lists what you owe') : ''}
     </div>
     ${(() => {
       /* The history: dated snapshots you chose to record, drawn once there are
@@ -6666,7 +7364,7 @@ function netWorthCard(liquid, cur, c) {
            one draws an em dash, never $0.00: absent and zero are different
            answers here as everywhere else. */
         const parts = [['liquid', 'Liquid'], ['invested', 'Invested'],
-          ['retirement', 'Retirement'], ['property', 'Property']]
+          ['retirement', 'Retirement'], ['property', 'Property'], ['debts', 'Owed']]
           .filter(([k]) => snaps.some(({ r }) => typeof r[k] === 'number'));
         return `<div class="tablewrap" style="margin-top:12px"><table>
         <thead><tr><th style="text-align:left">Date</th><th>Total</th>${
@@ -6900,7 +7598,115 @@ function renderGoals() {
       <div class="chartbox" style="height:300px"><canvas id="spendChart"></canvas></div>
       ${projectedKey}
     </div>
+  </div>
+  ${spendingMixCard()}`;
+}
+
+/* ── Where the Money Goes ───────────────────────────────────────────────────
+   The bar chart above says what a year cost. This says what it was SPENT ON,
+   which is the question the grid has held the answer to since 2011 and never
+   been asked: one bar a year off forty rows of per-category monthly figures.
+
+   It is the live year against the one before it, because that is the comparison
+   a person actually makes — not a matrix of every year, which is a different
+   card and a worse one. The change column is the whole point: a share of
+   spending on its own says which row is biggest, and everybody already knows
+   which row is biggest.
+
+   Deliberately NOT a pie. A pie of forty categories is a colour key, and this
+   app has a reader who cannot use one — the same reason the bars here are all
+   ONE colour with the name written beside each. */
+function spendingMixCard() {
+  const y = latestGridYear();
+  if (!y) return '';
+  const years = yearKeys();
+  const prevY = years[years.indexOf(y) - 1] || years.filter(k => k < y).pop() || null;
+  const mix = spendingMix(state, C, y, prevY);
+  if (!mix.rows.length) return '';
+  /* The live year is part estimate, so its figures are, and the card must say
+     which kind of number it is showing before the reader acts on it. The same
+     reader the bars above use, so the two cards can't disagree about whether a
+     year has finished happening. */
+  const projected = yearIsProjected(y);
+  const arrow = (v) => v > 0 ? '▲' : v < 0 ? '▼' : '';
+  const compare = !!prevY && mix.prevDetailed;
+  const rows = mix.rows.map(r => {
+    /* Up and down are said in WORDS as well as a caret, and never in colour:
+       the four palettes and a red-green reader make hue the one thing that
+       cannot carry this. */
+    const chg = r.change === null ? '<span class="muted">new this year</span>'
+      : !r.change ? '<span class="muted">the same</span>'
+      : `${arrow(r.change)} ${r.change > 0 ? 'up' : 'down'} ${fmtMoney(Math.abs(r.change))}${
+          r.was ? ` <span class="muted">(${Math.abs(r.change / r.was * 100).toFixed(0)}%)</span>` : ''}`;
+    return `<tr>
+      <th scope="row">${esc(r.name)}</th>
+      <td${projected ? ' class="projected"' : ''}>${fmtMoney(r.total)}</td>
+      <td>${r.share === null ? '<span class="muted">—</span>' : `${(r.share * 100).toFixed(1)}%`}</td>
+      ${compare ? `<td>${r.was === null ? '<span class="muted">—</span>' : fmtMoney(r.was)}</td>
+      <td style="text-align:left">${chg}</td>` : ''}</tr>`;
+  }).join('');
+  return `<div class="card">
+    <h2>Where the Money Goes${helpBtn('spendingMix', 'how these are counted')}</h2>
+    <p class="sub">Every expense row in <strong>${esc(y)}</strong>, biggest first${
+      compare ? `, with what the same row came to in ${esc(prevY)} beside it` : ''}. Money
+      moved between your own accounts is not spending and is not here${
+      projected ? `, and ${esc(y)} is still running — the figures include the months the
+      plan has worked out, so they read as the estimates they are` : ''}.${
+      prevY && !mix.prevDetailed ? ` ${esc(prevY)} is kept as a yearly summary with no rows
+      in it, so there is nothing to compare against line by line.` : ''}</p>
+    <div class="chartbox" style="height:${Math.max(180, Math.min(560, mix.rows.length * 26 + 60))}px"><canvas id="mixChart"></canvas></div>
+    <div class="tablewrap" style="margin-top:12px"><table>
+      <thead><tr><th style="text-align:left">Category</th><th>${esc(y)}</th>
+        <th title="Share of everything ${esc(y)} spent">Share</th>
+        ${compare ? `<th>${esc(prevY)}</th>
+        <th style="text-align:left">Change</th>` : ''}</tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><th>Total</th><td>${fmtMoney(mix.total)}</td><td></td>
+        ${compare ? `<td>${fmtMoney(mix.prevTotal)}</td>
+        <td style="text-align:left">${mix.prevTotal
+          ? `${arrow(mix.total - mix.prevTotal)} ${mix.total >= mix.prevTotal ? 'up' : 'down'} ${
+              fmtMoney(Math.abs(round2(mix.total - mix.prevTotal)))}` : ''}</td>` : ''}</tr></tfoot>
+    </table></div>
   </div>`;
+}
+
+/* One colour for every bar, on purpose. The categories are named on the axis
+   beside each bar, so a colour per row would be decoration carrying no
+   information — and a key of forty colours is unreadable for anyone, let alone
+   a red-green reader. `--series-1` is the theme pack's first categorical token,
+   which is what a single-series chart in this family uses. */
+function buildMixChart() {
+  const y = latestGridYear();
+  if (!y) return;
+  const years = yearKeys();
+  const prevY = years[years.indexOf(y) - 1] || years.filter(k => k < y).pop() || null;
+  const mix = spendingMix(state, C, y, prevY);
+  if (!mix.rows.length) return;
+  const tick = cssVar('--chart-tick');
+  newChart('mixChart', {
+    type: 'bar',
+    data: { labels: mix.rows.map(r => r.name), datasets: [{
+      label: `Spent in ${y}`,
+      data: mix.rows.map(r => r.total),
+      backgroundColor: cssVar('--series-1'), borderWidth: 0,
+    }]},
+    options: {
+      /* Horizontal, because a category name is a word and a word does not fit
+         under a vertical bar — the axis reads left to right like the table
+         under it. */
+      indexAxis: 'y',
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (t) => {
+          const r = mix.rows[t.dataIndex];
+          return [`${fmtMoney(r.total)}${r.share === null ? '' : ` · ${(r.share * 100).toFixed(1)}% of the year`}`,
+            r.was === null ? null
+              : `${prevY}: ${fmtMoney(r.was)}`].filter(Boolean);
+        } } } },
+      scales: { y: chartAxes(), x: Object.assign(chartAxes(),
+        { ticks: { color: tick, callback: (v) => fmtMoney0(v) } }) },
+    },
+  }, `Spending by category in ${y}: ${mix.rows.map(r =>
+    `${r.name}, ${fmtMoney(r.total)}`).join('; ')}.`);
 }
 
 /* ═══════════════════════════ Retirement view ══════════════════════════════ */
@@ -7113,31 +7919,215 @@ function contribYears(st, filter) {
    worth counts the equity (value minus owed). */
 function propertyCard() {
   const list = state.side.property || [];
-  const anyOwed = list.some(p => p.owed !== undefined);
+  const now = thisMonth();
+  /* What is owed AGAINST each thing, read off the liabilities list rather than
+     off the property row. Before schema 7 this was `p.owed`, a number retyped
+     by hand or left to rot; it is a debt with a rate and a payment now, and
+     what shows here is what it has been paid down to. */
+  const owedOn = (p) => round2((state.side.liabilities || [])
+    .filter(l => l.securedOn === p.id)
+    .reduce((t, l) => t + liabilityAt(l, now), 0));
+  const anyOwed = list.some(p => owedOn(p) > 0);
+  const foreign = list.filter(p => p.cur);
+  /* Each row reads in ITS OWN money — that is the figure on the statement. The
+     total is the only thing converted, because adding pounds to dollars is the
+     one arithmetic this table must never quietly do. */
   const rows = list.map((p, idx) => {
-    const equity = round2((p.value || 0) - (p.owed || 0));
+    const owed = owedOn(p);
+    const equity = round2((p.value || 0) - owed);
+    const money = (v) => fmtMoneyIn(v, p.cur);
+    const conv = p.cur ? inPlanCurrency(state, equity, p.cur) : null;
     return `<tr class="editrow" data-edit="property" data-idx="${idx}"
-      title="Click to edit${p.note ? ' · ' + esc(p.note) : ''}">
+      title="Click to edit${p.cur ? ` · in ${esc(p.cur)}${conv.unknown ? ', no rate stated yet'
+        : `, about ${fmtMoney(conv.v)}`}` : ''}${p.note ? ' · ' + esc(p.note) : ''}">
       <th scope="row">${esc(p.name)}${p.note ? ` <span class="muted" title="${esc(p.note)}">📝</span>` : ''}</th>
-      <td style="text-align:left">${esc(PROPERTY_KIND_LABEL[p.kind] || 'Other')}</td>
-      <td>${p.value === undefined ? '<span class="muted">—</span>' : fmtMoney(p.value)}</td>
-      ${anyOwed ? `<td>${p.owed === undefined ? '<span class="muted">—</span>' : fmtMoney(p.owed)}</td>` : ''}
-      <td>${fmtMoney(equity)}</td></tr>`;
+      <td style="text-align:left">${esc(PROPERTY_KIND_LABEL[p.kind] || 'Other')}${
+        p.cur ? ` <span class="muted">${esc(p.cur)}</span>` : ''}</td>
+      <td>${p.value === undefined ? '<span class="muted">—</span>' : money(p.value)}</td>
+      ${anyOwed ? `<td>${owed ? money(owed) : '<span class="muted">—</span>'}</td>` : ''}
+      <td>${money(equity)}</td></tr>`;
   }).join('');
-  const totalEquity = round2(list.reduce((s, p) => s + (p.value || 0) - (p.owed || 0), 0));
+  const equities = list.map(p => ({ p, v: round2((p.value || 0) - owedOn(p)) }))
+    .map(({ p, v }) => inPlanCurrency(state, v, p.cur));
+  const totalEquity = round2(equities.reduce((s, e) => s + e.v, 0));
+  const uncounted = equities.filter(e => e.unknown).length;
   return `<div class="card">
     <h2>Property</h2>
-    <p class="sub">What the household owns outright — a home, a car, a boat — at what it
-      would sell for. Equity is that value minus anything still owed, and it is what the
-      Progress tab's net worth counts.${viewOnly || !list.length ? '' : ' Click a row to update a value.'}</p>
+    <p class="sub">What the household owns — a home, a car, a boat — at what it
+      would sell for. Equity is that value minus whatever is still owed on it, and it is
+      what the Progress tab's net worth counts.${anyOwed ? ' The Owed column is read from What You Owe, below.' : ''}${
+      foreign.length ? ` A row held abroad reads in its own money; only the total is
+      converted${uncounted ? ', and it leaves out what has no rate yet' : ''}.` : ''}${
+      viewOnly || !list.length ? '' : ' Click a row to update a value.'}</p>
     ${list.length ? `<div class="tablewrap"><table>
       <thead><tr><th style="text-align:left">Property</th><th style="text-align:left">Kind</th>
-        <th>Value</th>${anyOwed ? '<th>Still owed</th>' : ''}<th>Equity</th></tr></thead>
+        <th>Value</th>${anyOwed ? '<th>Owed</th>' : ''}<th>Equity</th></tr></thead>
       <tbody>${rows}</tbody>
-      ${list.length > 1 ? `<tfoot><tr><th>Total</th><td></td><td></td>${anyOwed ? '<td></td>' : ''}
-        <td>${fmtMoney(totalEquity)}</td></tr></tfoot>` : ''}
+      ${list.length > 1 ? `<tfoot><tr><th>Total${foreign.length
+        ? ` <span class="muted">in ${esc(String(state.settings.currency || 'USD').toUpperCase())}</span>` : ''}</th>
+        <td></td><td></td>${anyOwed ? '<td></td>' : ''}
+        <td${uncounted ? ' title="Leaves out what has no exchange rate yet"' : ''}>${
+          fmtMoney(totalEquity)}</td></tr></tfoot>` : ''}
     </table></div>` : '<p class="sub">Nothing listed yet.</p>'}
     <div class="addbar"><button class="btn small" data-add="property">＋ Add property</button></div>
+  </div>`;
+}
+
+/* ── Other currencies ───────────────────────────────────────────────────────
+   A rate table the reader types, for the same reason the tax tables and the
+   contribution limits are: a rate fetched today is wrong tomorrow, and one
+   baked into the app is wrong for ever while looking authoritative. What the
+   app can do is say how old the answer is, which is what `asOf` is for.
+
+   Drawn on the Household tab even when it is empty, because a card that only
+   appears once you have used the feature is a feature nobody finds. It says
+   plainly what rates do NOT reach — the budget grid — rather than leaving that
+   to be discovered by a figure that didn't move. */
+function currenciesCard() {
+  const own = String(state.settings.currency || 'USD').toUpperCase();
+  const rates = state.side.rates || {};
+  const codes = Object.keys(rates).sort();
+  /* Everything wearing a currency, so the card can say what each rate is
+     actually doing and flag a code nothing uses. */
+  const held = {};
+  for (const row of [...(state.side.property || []), ...(state.side.liabilities || []),
+                     ...(state.side.portfolios || [])])
+    if (row.cur) (held[row.cur] = held[row.cur] || []).push(row.name);
+  const orphans = Object.keys(held).filter(c => !rates[c]).sort();
+  const rows = codes.map(c => {
+    const uses = held[c] || [];
+    return `<tr class="editrow" data-edit="rate" data-key="${esc(c)}"
+      title="Click to change or remove this rate">
+      <th scope="row">${esc(c)}</th>
+      <td>${esc(String(round2(rates[c].rate)))} ${esc(own)}</td>
+      <td style="text-align:left">${rates[c].asOf
+        ? esc(rates[c].asOf)
+        : '<span class="muted">no date given</span>'}</td>
+      <td style="text-align:left">${uses.length
+        ? esc(andList(uses))
+        : '<span class="muted">nothing yet</span>'}</td></tr>`;
+  }).join('');
+  return `<div class="card">
+    <h2>Other Currencies${helpBtn('currencies', 'how a rate is used')}</h2>
+    <p class="sub">${codes.length || orphans.length
+      ? `What one unit is worth in ${esc(own)}, as you state it — the app never looks a rate
+         up, the same rule the tax tables keep. Property, debts and investment panes can
+         each say which currency they are in.`
+      : `Everything in this plan is in ${esc(own)}. If you hold a property, a debt or a
+         brokerage in another currency, add its rate here and those three can say so.`}
+      <strong>The budget grid stays in ${esc(own)}</strong> — its balances chain month to
+      month, and a rate you edited would rewrite years of them.</p>
+    ${codes.length ? `<div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Currency</th><th>One unit is</th>
+        <th style="text-align:left">Rate from</th>
+        <th style="text-align:left">Used by</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>` : ''}
+    ${orphans.length ? `<p class="warn" style="margin-top:10px">${
+      esc(andList(orphans))} ${orphans.length === 1 ? 'has' : 'have'} no rate yet, so
+      ${esc(andList(orphans.flatMap(c => held[c])))} ${
+      orphans.flatMap(c => held[c]).length === 1 ? 'is' : 'are'} left out of your net worth
+      rather than counted at the wrong figure.</p>` : ''}
+    <div class="addbar"><button class="btn small" data-add="rate">＋ Add a currency</button></div>
+  </div>`;
+}
+
+/* ── What You Owe ───────────────────────────────────────────────────────────
+   The card the app went without for a year. Every other figure here computes
+   itself; a debt was one number on a property row that only ever changed when
+   somebody remembered to change it.
+
+   Two things it does that the number could not. It projects: a balance stated
+   in a month, a rate and a payment are enough to say what is owed TODAY, and
+   that is the figure net worth counts. And it names the end — the month the
+   thing is paid off and what the borrowing costs between now and then, which is
+   the question a debt is actually carried to answer.
+
+   It says which parts it is missing rather than filling them in. A row with no
+   payment shows its stated balance and asks for one; a payment that does not
+   cover the interest says so outright instead of drawing a balance climbing
+   away, which would read as a bug in the app rather than a fact about the
+   loan. */
+function liabilitiesCard() {
+  const list = state.side.liabilities || [];
+  const now = thisMonth();
+  const propName = (id) => (state.side.property || []).find(p => p.id === id)?.name;
+  const rows = list.map((l, idx) => {
+    const a = amortize(l);
+    const bal = liabilityAt(l, now);
+    const off = payoffMonth(l);
+    /* Interest LEFT, so the schedule is re-walked from where the balance is
+       now rather than from where it was stated. Reading `a.interest` here
+       showed a mortgage's whole lifetime cost under a column headed "left",
+       which is the same figure wearing the wrong question. */
+    const rest = amortize({ ...l, balance: bal });
+    const moved = l.asOf && bal !== l.balance;
+    /* The stated figure is named in the tooltip whenever the projection has
+       moved it, so a balance nobody typed is never mistaken for one somebody
+       did. */
+    const money = (v) => fmtMoneyIn(v, l.cur);
+    const balTitle = (moved
+      ? `Stated ${money(l.balance)} in ${monthLabelFull(l.asOf)}, paid down to here`
+      : l.asOf ? `As stated in ${monthLabelFull(l.asOf)}` : 'As typed — no month said')
+      + (l.cur ? ` · in ${l.cur}${(() => {
+        const c = inPlanCurrency(state, bal, l.cur);
+        return c.unknown ? ', no rate stated yet' : `, about ${fmtMoney(c.v)}`;
+      })()}` : '');
+    const ends = !a ? '<span class="muted">Add a payment</span>'
+      : a.never ? '<span class="muted">The payment is under the interest</span>'
+      : !l.asOf ? '<span class="muted">Add the month it was true</span>'
+      : bal <= 0 ? 'Paid off'
+      : `${esc(monthLabelFull(off))}`;
+    return `<tr class="editrow" data-edit="liability" data-idx="${idx}"
+      title="Click to edit${l.note ? ' · ' + esc(l.note) : ''}">
+      <th scope="row">${esc(l.name)}${l.note ? ` <span class="muted" title="${esc(l.note)}">📝</span>` : ''}</th>
+      <td style="text-align:left">${esc(LIABILITY_KIND_LABEL[l.kind] || 'Other')}${
+        l.securedOn && propName(l.securedOn)
+          ? ` <span class="muted">on ${esc(propName(l.securedOn))}</span>` : ''}${
+        l.cur ? ` <span class="muted">${esc(l.cur)}</span>` : ''}</td>
+      <td title="${esc(balTitle)}"${moved ? ' class="projected"' : ''}>${money(bal)}</td>
+      <td>${typeof l.rate === 'number' ? `${round2(l.rate * 100)}%` : '<span class="muted">—</span>'}</td>
+      <td>${typeof l.payment === 'number' ? money(l.payment) : '<span class="muted">—</span>'}</td>
+      <td style="text-align:left">${ends}</td>
+      <td>${rest && !rest.never && rest.interest !== null && bal > 0
+        ? money(rest.interest) : '<span class="muted">—</span>'}</td></tr>`;
+  }).join('');
+  /* Both totals convert, and both leave out what they cannot value — a column
+     of pounds and dollars added together is the one figure this card must never
+     print. */
+  const owedEach = list.map(l => inPlanCurrency(state, liabilityAt(l, now), l.cur));
+  const total = round2(owedEach.reduce((t, e) => t + e.v, 0));
+  const payTotal = round2(list
+    .reduce((t, l) => t + inPlanCurrency(state, l.payment || 0, l.cur).v, 0));
+  const uncounted = owedEach.filter(e => e.unknown).length;
+  const foreign = list.filter(l => l.cur).length;
+  const anyProjected = list.some(l => l.asOf && liabilityAt(l, now) !== l.balance);
+  return `<div class="card" style="grid-column:1/-1">
+    <h2>What You Owe${helpBtn('liabilities', 'how a debt is projected')}</h2>
+    <p class="sub">Every debt the household carries, whether or not it is secured on
+      something. ${anyProjected
+        ? `A balance in <em>this style</em> has been paid down from what you
+           stated — the app works out what is left, so the figure stops going stale the
+           moment you look away.`
+        : `Say what a balance was, when it was true, the rate and the payment, and the app
+           works out what is left today and when it ends.`} Nothing here reaches the budget:
+      the payment is already an expense row, and counting it twice would take the money out
+      twice.${foreign ? ` A debt held abroad reads in its own money; only the totals are
+      converted${uncounted ? ', and they leave out what has no rate yet' : ''}.` : ''}</p>
+    ${list.length ? `<div class="tablewrap"><table>
+      <thead><tr><th style="text-align:left">Debt</th><th style="text-align:left">Kind</th>
+        <th>Owed now</th><th>Rate</th><th>Payment</th>
+        <th style="text-align:left">Paid off</th>
+        <th title="What the remaining payments cost in interest, at this rate">Interest left</th></tr></thead>
+      <tbody>${rows}</tbody>
+      ${list.length > 1 ? `<tfoot><tr><th>Total${foreign
+        ? ` <span class="muted">in ${esc(String(state.settings.currency || 'USD').toUpperCase())}</span>` : ''}</th>
+        <td></td><td${uncounted ? ' title="Leaves out what has no exchange rate yet"' : ''}>${
+          fmtMoney(total)}</td>
+        <td></td><td>${fmtMoney(payTotal)}</td>
+        <td></td><td></td></tr></tfoot>` : ''}
+    </table></div>` : `<p class="sub">Nothing owed${viewOnly ? '.' : ' — or nothing recorded yet.'}</p>`}
+    <div class="addbar"><button class="btn small" data-add="liability">＋ Add a debt</button></div>
   </div>`;
 }
 
@@ -7150,7 +8140,8 @@ function renderHousehold() {
       <p>Your Total doesn't move: this records who owns the money, not how much
         of it there is.</p>
       <p style="margin-top:14px"><button class="btn primary" data-add="person">＋ Add the first person</button></p>
-    </div></div>` + propertyCard();
+    </div></div>` + `<div class="cards2 pairs">${propertyCard()}${liabilitiesCard()}${
+      currenciesCard()}</div>`;
 
   const now = thisMonth();
   const rows = people.map((p, idx) => {
@@ -7251,6 +8242,8 @@ function renderHousehold() {
        No backticks in here — this comment is inside a template literal, and one
        ends the string. It did, and the app came up blank. -->
   ${propertyCard()}
+  ${liabilitiesCard()}
+  ${currenciesCard()}
   <div class="card">
     <h2>Who Owns What</h2>
     <p class="sub">Every account, grouped by whose it is${
@@ -9471,6 +10464,94 @@ function taxCheckCard() {
   </div>`;
 }
 
+/* ── What this year owes ────────────────────────────────────────────────────
+   The tab typed a set of brackets and then used them for exactly one thing: the
+   retirement gross-up, forty years out. The nearest question — what THIS year
+   owes on what you are actually paid — was one the app had every part of and
+   never asked.
+
+   It reads the Compensation tab's own total, so the two tabs agree about what
+   somebody was paid, and it names the year it read rather than assuming the
+   current one: comp is usually recorded a letter at a time, and a card that
+   went blank every January until the raise landed would be a card nobody
+   trusted.
+
+   What it deliberately is NOT: a return. Brackets and the deduction you typed,
+   applied to one figure. No credits, no itemising, no payroll tax, nothing
+   withheld — and it says all of that out loud, because a number under a heading
+   with the word Tax in it will be read as an answer unless it explains that it
+   isn't one. The same discipline the tab already keeps about not shipping a
+   bracket: the app may work tax out, it may not claim to know your tax. */
+function taxNowCard() {
+  const comp = state.side.comp || {};
+  const years = Object.keys(comp).filter(k => /^\d{4}$/.test(k)).sort();
+  const y = years[years.length - 1];
+  if (!y) return '';
+  const gross = grossIncome(state, y);
+  if (!gross) return '';
+  const tables = taxTablesFor(state, y);
+  if (!tables.federal && !tables.state) return '';
+  const parts = compParts(state, y);
+  const owed = (side) => {
+    const t = tables[side];
+    return t ? taxOn(taxableAfter(gross, t.table), t.table) : null;
+  };
+  const fed = owed('federal'), sta = owed('state');
+  const total = round2((fed || 0) + (sta || 0));
+  const eff = gross ? total / gross : null;
+  /* The FEDERAL marginal rate where there is a federal table — the calculator's
+     own rule, for the same reason: two jurisdictions have two marginal rates
+     and adding them together is a figure that exists nowhere. */
+  const mt = tables.federal || tables.state;
+  const marg = marginalRateOn(taxableAfter(gross, mt.table), mt.table);
+  const tile = (label, value, foot) => `<div class="goal">
+    <div class="label">${label}</div>
+    <div class="value${value === null ? ' muted' : ''}">${value === null ? '—' : value}</div>
+    <div class="foot">${foot}</div></div>`;
+  const row = (label, v, note) => `<tr><th scope="row">${label}</th>
+    <td>${v}</td><td style="text-align:left" class="muted">${note || ''}</td></tr>`;
+  const named = [parts.bonus ? 'the bonus' : null,
+    parts.equity ? 'equity that vested' : null,
+    parts.match ? "your employer's contribution" : null].filter(Boolean);
+  const twoEarners = adultsOf(state).length > 1;
+  return `<div class="card" style="grid-column:1/-1">
+    <h2>What ${esc(y)} Owes${helpBtn('taxNow', 'what this figure is and is not')}</h2>
+    <p class="sub">Your own tables, applied to what the Compensation tab says you were paid
+      in <strong>${esc(y)}</strong>${named.length ? ` — salary after the raise, plus ${
+        esc(andList(named))}` : ''}. <strong>This is brackets and your deduction, and
+      nothing else</strong>: no credits, no itemising, no payroll tax, and nothing you have
+      already had withheld. It is what the schedule says on that figure, which is the
+      question the tab could always answer and never did.${
+      twoEarners ? ` It counts one person's package — the app records a second earner's
+      take-home as a budget row, and never their gross, so there is nothing here to add.` : ''}</p>
+    <div class="goalgrid">
+      ${tile('Federal', fed === null ? null : fmtMoney(fed),
+        tables.federal ? `Your ${esc(tables.federal.fromYear)} table` : 'No federal table')}
+      ${tile(esc(jurLabel('state')), sta === null ? null : fmtMoney(sta),
+        tables.state ? `Your ${esc(tables.state.fromYear)} table` : 'No state table')}
+      ${tile('Total', fmtMoney(total), `Leaving ${fmtMoney(round2(gross - total))} of it`)}
+      ${tile('Effective rate', eff === null ? null : `${(eff * 100).toFixed(2)}%`,
+        `Of the whole package · next dollar at ${(marg * 100).toFixed(2)}%`)}
+    </div>
+    <div class="tablewrap" style="margin-top:14px"><table><tbody>
+      ${row('What you were paid', fmtMoney(gross), 'The Compensation tab’s total comp')}
+      ${tables.federal && tables.federal.table.deduction
+        ? row('Less the deduction', `−${fmtMoney(tables.federal.table.deduction)}`,
+            'The federal one you typed') : ''}
+      ${tables.federal
+        ? row('Federally taxable', fmtMoney(taxableAfter(gross, tables.federal.table)),
+            esc(FILING_LABEL[state.settings.filingStatus])) : ''}
+      ${fed === null ? '' : row('Federal tax', fmtMoney(fed), '')}
+      ${sta === null ? '' : row(`${esc(jurLabel('state'))} tax`, fmtMoney(sta),
+        tables.state.table.deduction
+          ? `After a ${fmtMoney(tables.state.table.deduction)} deduction` : 'No deduction typed')}
+      <tr><th scope="row"><strong>Left after tax</strong></th>
+        <td><strong>${fmtMoney(round2(gross - total))}</strong></td>
+        <td style="text-align:left" class="muted">Before anything else comes out of it</td></tr>
+    </tbody></table></div>
+  </div>`;
+}
+
 /* THE BRIDGE CARD. Read straight off `drawdownYears`, which is the same
    function the Retirement chart and its year-by-year table are drawn from, so
    this can never disagree with them — the `givingStats` arrangement, and the
@@ -9533,8 +10614,9 @@ function renderTax() {
       looking authoritative.</p>
     <p><strong>A year with no table means no tax.</strong>${any ? ''
       : ' You have none yet, so every figure on Retirement is exactly what it has always been.'
-      } What a table changes is the <em>withdrawal</em>: a pre-tax pot has to pay out more
-      than you spend, and the projection now works out how much more.</p>
+      } A table does two things once you have one. It says what <em>this</em> year owes on
+      what you are paid, below. And it changes the <em>withdrawal</em>: a pre-tax pot has to
+      pay out more than you spend, and the projection works out how much more.</p>
     <p>What it will not do: required minimum distributions, a Roth-versus-traditional
       withdrawal order, the Social Security provisional-income formula, itemising, capital
       gains, NIIT or IRMAA. Each is a figure with a year attached, and each would need to be
@@ -9542,6 +10624,7 @@ function renderTax() {
   </div>
   <div class="cards2 pairs">${bracketsCard('federal')}${bracketsCard('state')}</div>
   ${taxYearsStoredCard()}
+  ${taxNowCard()}
   ${taxCheckCard()}
   ${taxPotCard()}`;
 }
@@ -9557,7 +10640,16 @@ function renderComp() {
   const bonuses = s.bonuses || {};
   /* One bonus, read from one place — the same figure the table below shows. */
   const bonusFor = (y) => bonuses[y] || 0;
-  const totalComp = (y) => round2(afterRaise(comp[y]) + bonusFor(y));
+  /* One reader for the whole package, shared with the Giving tab's denominator
+     — `grossIncome` IS this figure, so the two tabs can never disagree about
+     what somebody was paid. It used to be salary + bonus written out here and
+     salary + bonus written out there. */
+  const totalComp = (y) => grossIncome(state, y) ?? round2(afterRaise(comp[y]) + bonusFor(y));
+  /* Which of the two newer parts anybody has recorded. A column of dashes is a
+     question the reader has to decide to ignore, so a part nobody tracks draws
+     no column at all — the Cost/Gain rule from the holdings tables. */
+  const anyEquity = years.some(y => typeof comp[y].equity === 'number');
+  const anyMatch = years.some(y => typeof comp[y].match === 'number');
 
   /* This tab is ONE career, and says so once there is more than one to confuse
      it with — `sinceLastYear` asks whether this salary picked up where last
@@ -9569,13 +10661,20 @@ function renderComp() {
     <h2>Where Comp Stands${latest ? ` — ${esc(latest)}` : ''}</h2>
     ${whose ? `<p class="sub">${esc(whose)}'s salary history (Preferences picks whose). A second
       earner's pay is tracked as an income row in the budget instead.</p>` : ''}
-    ${cur ? `<p class="sub">Total comp is salary with this year's raise applied, plus the bonus.</p>
+    ${cur ? `<p class="sub">Total comp is salary with this year's raise applied, plus the
+      bonus${anyEquity || anyMatch ? `, ${andList([anyEquity ? 'any equity that vested'
+        : null, anyMatch ? 'what your employer put in' : null].filter(Boolean))}` : ''}. It is
+      the same figure the Giving tab measures your giving against.</p>
       <div class="tablewrap"><table><tbody>
       <tr><th scope="row">Salary</th><td>${fmtMoney(cur.salary || 0)}</td></tr>
       <tr><th scope="row">Raise</th><td>${((cur.raisePct || 0) * 100).toFixed(2)}%</td></tr>
       <tr><th scope="row">Salary after the raise</th>
         <td>${fmtMoney(afterRaise(cur))}</td></tr>
       <tr><th scope="row">Bonus</th><td>${fmtMoney(bonusFor(latest))}</td></tr>
+      ${anyEquity ? `<tr><th scope="row">Equity vested</th><td>${
+        typeof cur.equity === 'number' ? fmtMoney(cur.equity) : '<span class="muted">—</span>'}</td></tr>` : ''}
+      ${anyMatch ? `<tr><th scope="row">Employer contribution</th><td>${
+        typeof cur.match === 'number' ? fmtMoney(cur.match) : '<span class="muted">—</span>'}</td></tr>` : ''}
       <tr><th scope="row">Total comp</th><td>${fmtMoney(totalComp(latest))}</td></tr>
     </tbody></table></div>` : '<p class="sub">Nothing recorded yet.</p>'}
     <div class="addbar">
@@ -9608,13 +10707,19 @@ function renderComp() {
     const sinceTitle = s.state === 'first' ? 'Nothing recorded before this year'
       : `${y} started on ${fmtMoney(c.salary || 0)}; ${prevY} ended on ${
           fmtMoney(prevAfter)}`;
+    const part = (v) => typeof v === 'number' ? fmtMoney(v) : '<span class="muted">—</span>';
     return `<tr class="editrow" data-edit="comp" data-key="${esc(y)}">
       <th scope="row">${esc(y)}</th>
       <td>${fmtMoney(c.salary || 0)}</td>
       <td>${((c.raisePct || 0) * 100).toFixed(2)}%</td>
       <td>${raiseAmt ? '+' + fmtMoney(raiseAmt) : '—'}</td>
       <td title="${esc(sinceTitle)}">${since}</td>
-      <td>${fmtMoney(afterRaise(c))}</td></tr>`;
+      <td>${fmtMoney(afterRaise(c))}</td>
+      ${anyEquity ? `<td>${part(c.equity)}</td>` : ''}
+      ${anyMatch ? `<td>${part(c.match)}</td>` : ''}
+      ${anyEquity || anyMatch ? `<td title="Salary after the raise, plus the bonus${
+        anyEquity ? ', equity' : ''}${anyMatch ? ' and the employer contribution' : ''
+        }">${fmtMoney(totalComp(y))}</td>` : ''}</tr>`;
   }).join('');
 
   const historyCard = `<div class="card">
@@ -9622,14 +10727,18 @@ function renderComp() {
     <p class="sub">Raise $ is this year's percentage applied to this year's salary. Since last
       year checks this salary against what last year's ended at${
       helpBtn('raiseVsMoved', 'the two change columns')} — "as planned" means the raise was
-      the only thing that moved your pay, and a figure there means something else landed.</p>
+      the only thing that moved your pay, and a figure there means something else landed.${
+      anyEquity || anyMatch ? ' Total comp is the whole package, which is what a raise on the '
+        + 'salary alone can hide going the other way.' : ''}</p>
     ${years.length > 1
       ? '<div class="chartbox" style="height:220px"><canvas id="compChart"></canvas></div>'
       : '<p class="sub">A second year is what turns this into a trend — add one below.</p>'}
     ${years.length ? `<div class="tablewrap" style="margin-top:12px"><table>
       <thead><tr><th style="text-align:left">Year</th><th>Salary</th><th>Raise</th>
         <th>Raise $</th><th>Since last year</th>
-        <th>Salary after the raise</th></tr></thead>
+        <th>Salary after the raise</th>
+        ${anyEquity ? '<th>Equity</th>' : ''}${anyMatch ? '<th>Employer</th>' : ''}
+        ${anyEquity || anyMatch ? '<th>Total comp</th>' : ''}</tr></thead>
       <tbody>${raiseRows}</tbody></table></div>` : '<p class="sub">Add a year to get started.</p>'}
     <div class="addbar"><button class="btn small" data-add="comp">＋ Add a year</button></div>
   </div>`;
@@ -9666,6 +10775,21 @@ function buildCompChart() {
   const years = Object.keys(comp).sort();
   if (years.length < 2) return;
   const accent = cssVar('--accent');
+  /* A second line only where there is a second story to tell. With no equity
+     and no employer contribution recorded, total comp is salary plus bonus and
+     the two lines would sit on top of each other saying nothing. */
+  const anyExtra = years.some(y => typeof comp[y].equity === 'number'
+    || typeof comp[y].match === 'number');
+  const totalLine = anyExtra ? [{
+    label: 'Total comp',
+    data: years.map(y => grossIncome(state, y) || 0),
+    borderColor: cssVar('--series-2'), backgroundColor: 'transparent',
+    /* Dashed as well as a different colour: the whole family's rule is that a
+       distinction never rides on hue alone. */
+    borderDash: [6, 4], pointStyle: 'rectRot',
+    borderWidth: 2, pointRadius: 3, pointBackgroundColor: cssVar('--series-2'),
+    tension: .2, pointHoverRadius: 5,
+  }] : [];
   newChart('compChart', {
     type: 'line',
     data: { labels: years, datasets: [{
@@ -9674,20 +10798,24 @@ function buildCompChart() {
       borderColor: accent, backgroundColor: 'transparent',
       borderWidth: 2, pointRadius: 3, pointBackgroundColor: accent, tension: .2,
       pointHoverRadius: 5,
-    }]},
+    }, ...totalLine]},
     options: {
       /* Hover anywhere in a year's column — the sparse-line rule the pot and
          liquidity charts follow; a 3px point is a target nobody should have
          to hit. */
       interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: (t) => `${fmtMoney(t.parsed.y)} · raise ${
-          ((comp[years[t.dataIndex]].raisePct || 0) * 100).toFixed(2)}%` } } },
+      plugins: { legend: { display: anyExtra, labels: { color: cssVar('--chart-tick') } },
+        tooltip: { callbacks: { label: (t) => t.datasetIndex
+          ? `Total comp ${fmtMoney(t.parsed.y)}`
+          : `${fmtMoney(t.parsed.y)} · raise ${
+            ((comp[years[t.dataIndex]].raisePct || 0) * 100).toFixed(2)}%` } } },
       scales: { x: chartAxes(), y: Object.assign(chartAxes(),
         { ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
     },
   }, `Salary by year: ${years.map(y =>
-    `${y}, ${fmtMoney(comp[y].salary || 0)}`).join('; ')}.`);
+    `${y}, ${fmtMoney(comp[y].salary || 0)}`).join('; ')}.${anyExtra
+      ? ` Total comp: ${years.map(y => `${y}, ${fmtMoney(grossIncome(state, y) || 0)}`).join('; ')}.`
+      : ''}`);
 }
 
 /* ═══════════════════════════ Investments view ═════════════════════════════ */
@@ -10165,10 +11293,31 @@ function dropDonationYear(st, y) {
    consumer, never written out again. A year with no comp record has no gross —
    the bonus alone would be a nonsense denominator, so it returns null and the
    tile says why rather than showing a share of nothing. */
+/* The whole package for a year: the salary the year ended on, the bonus that
+   landed, equity that vested, and what the employer put in on top.
+
+   The last two are additive by design — absent in every plan written before
+   they existed, so nobody's giving percentage moved the day this changed. They
+   are counted because they ARE compensation: a plan that measures giving
+   against "gross income" while leaving out a third of what somebody is paid is
+   measuring against the wrong denominator, and the person with equity is
+   exactly the person for whom the answer is most wrong. */
 function grossIncome(st, y) {
   const c = (st.side.comp || {})[y];
   if (!c || !c.salary) return null;
-  return round2(afterRaise(c) + ((st.side.bonuses || {})[y] || 0));
+  return round2(afterRaise(c) + ((st.side.bonuses || {})[y] || 0)
+    + (c.equity || 0) + (c.match || 0));
+}
+
+/* The parts of it, for the tab that has to show its working. Absent stays
+   absent so the table can draw a dash rather than a $0.00 — "no equity" and
+   "this plan doesn't track equity" are different answers, and only the tiles
+   for parts somebody has actually recorded are drawn. */
+function compParts(st, y) {
+  const c = (st.side.comp || {})[y];
+  if (!c) return null;
+  return { salary: afterRaise(c), bonus: (st.side.bonuses || {})[y],
+    equity: c.equity, match: c.match, total: grossIncome(st, y) };
 }
 
 /* A budget row that PAYS you. Take-home is what actually reached the bank, so
@@ -10711,6 +11860,93 @@ function yearSpending(yr, computed, y) {
     if (spending.has(id) && m.startsWith(y)) out += cell.v;
   }
   return round2(-out);
+}
+
+/* yearSpending, but kept in its parts — what each expense ROW came to, rather
+   than what they came to together. The app held eleven years of this and drew
+   one bar a year off it, so "where does the money actually go" was a question
+   the data could answer and the screen could not.
+
+   Everything about how a figure is read is yearSpending's, deliberately, so the
+   parts and the total can never disagree: the COMPUTED cells (a year still
+   running has to show what it comes to), netted rather than summed as
+   magnitudes (a refund really does reduce what its row spent), and a summary
+   year read off its `categoryTotals` flows because the old sheets predate
+   sections.
+
+   Signed the way a reader reads it — spending is POSITIVE here, as it is on the
+   bars — while the cells themselves are negative. One negation, at the end,
+   where yearSpending does its own.
+
+   Rows are returned in GRID ORDER with the zeroes still in. Sorting and
+   dropping is the card's business: a row that spent nothing this year but
+   something last year is a fall the reader wants to see, and a function that
+   dropped it here would have thrown that away before anything could ask. */
+function categorySpend(yr, computed, y) {
+  if (!yr) return [];
+  if (yr.kind === 'summary')
+    return (yr.categoryTotals || [])
+      .filter(it => !it.isBalance && (it.total || 0) < 0)
+      .map(it => ({ id: null, name: String(it.name || 'Unnamed'), total: round2(-it.total) }));
+  const cells = (computed && computed.cells) || yr.cells || {};
+  const rows = (yr.categories || []).filter(c => (c.section || 'expense') === 'expense');
+  const byId = new Map(rows.map(c => [c.id, 0]));
+  for (const [key, cell] of Object.entries(cells)) {
+    const [id, m] = key.split('|');
+    if (!byId.has(id) || !m.startsWith(y)) continue;
+    byId.set(id, byId.get(id) + cell.v);
+  }
+  return rows.map(c => ({ id: c.id, name: c.name, total: round2(-(byId.get(c.id) || 0)) }));
+}
+
+/* Two years' worth of that, lined up by ROW rather than by position — matched
+   on the row id where both years are grids (a rename then follows the row
+   rather than splitting it in two) and on the NAME where either side is a
+   summary, which is the only handle those years have.
+
+   Sorted by this year's figure, biggest first, with anything that spent nothing
+   in EITHER year dropped: a row that has never been used is not a finding, and
+   a screenful of $0.00 is how a table stops being read. `share` is of this
+   year's spending, and it is null rather than 0 when the year spent nothing at
+   all — the house rule for a denominator that isn't there. */
+function spendingMix(st, computed, y, prevY) {
+  const yr = (st.years || {})[y];
+  if (!yr) return { rows: [], total: 0, prevTotal: 0, prevDetailed: false };
+  const now = categorySpend(yr, (computed || {})[y], y);
+  const prevYr = prevY && (st.years || {})[prevY];
+  const before = prevYr ? categorySpend(prevYr, (computed || {})[prevY], prevY) : [];
+  const key = (r) => (r.id === null ? `name:${r.name.trim().toLowerCase()}` : `id:${r.id}`);
+  /* A summary year has no ids, so a grid year beside one has to fall back to
+     names on BOTH sides or nothing would ever match. Decided once, up here,
+     rather than per row — a mixed answer would match half a table. */
+  const byName = now.some(r => r.id === null) || before.some(r => r.id === null);
+  const k = (r) => (byName ? `name:${r.name.trim().toLowerCase()}` : key(r));
+  const prevBy = new Map(before.map(r => [k(r), r.total]));
+  const total = round2(now.reduce((t, r) => t + r.total, 0));
+  const prevTotal = round2(before.reduce((t, r) => t + r.total, 0));
+  const seen = new Set();
+  const rows = [];
+  for (const r of now) {
+    seen.add(k(r));
+    const was = prevBy.has(k(r)) ? prevBy.get(k(r)) : null;
+    if (!r.total && !was) continue;
+    rows.push({ id: r.id, name: r.name, total: r.total, was,
+      change: was === null ? null : round2(r.total - was),
+      share: total ? r.total / total : null });
+  }
+  /* A row that existed last year and is gone from this one still spent money,
+     and dropping it would make the two columns describe different tables. */
+  for (const r of before) {
+    if (seen.has(k(r)) || !r.total) continue;
+    rows.push({ id: r.id, name: r.name, total: 0, was: r.total,
+      change: round2(-r.total), share: total ? 0 : null });
+  }
+  rows.sort((a, b) => b.total - a.total || (b.was || 0) - (a.was || 0));
+  /* Whether last year can be compared with at all. A yearly summary that
+     recorded only its totals has no rows in it, and without this flag every
+     line would read "new this year" — which is a claim about the ROW, where the
+     truth is about the YEAR. Two different absences, and the card says which. */
+  return { rows, total, prevTotal, prevDetailed: before.length > 0 };
 }
 
 /* The mirror of yearSpending: the income rows, netted across the year, off the
@@ -11378,7 +12614,7 @@ function wireView(view) {
   /* Progress draws the goal line AND the three long-run charts that used to be
      a History tab of their own. */
   if (view === 'goals') {
-    buildGoalChart(); buildHistoryCharts(); buildWorthChart();
+    buildGoalChart(); buildHistoryCharts(); buildWorthChart(); buildMixChart();
     const rec = F('recordWorthBtn');
     if (rec) rec.onclick = () => {
       const liveKey = latestGridYear();
@@ -11391,6 +12627,7 @@ function wireView(view) {
       if (nw.hasInvested) snap.invested = nw.invested;
       if (nw.hasRetirement) snap.retirement = nw.retirement;
       if (nw.hasProperty) snap.property = nw.property;
+      if (nw.hasDebts) snap.debts = nw.debts;
       const replaced = upsertSnapshot(state.side.snapshots, snap);
       save(); render();
       toast(replaced ? `Restated today's snapshot — ${fmtMoney(total)}`
@@ -12698,6 +13935,18 @@ const andList = (xs) => xs.length < 2 ? xs.join('')
   : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 
 /* ── The registry ─────────────────────────────────────────────────────────── */
+/* The Currency box the three off-engine things share. Offered only once a rate
+   exists: a dropdown whose one option is the currency you are already in is a
+   question with no answer, and the card that adds rates says so in prose. */
+const currencyField = (hint) => {
+  const own = String(state.settings.currency || 'USD').toUpperCase();
+  const codes = Object.keys((state.side || {}).rates || {}).sort();
+  if (!codes.length) return [];
+  return [{ key: 'cur', label: 'Currency', type: 'select',
+    options: [[own, `${own} — this plan's own`], ...codes.map(c => [c, c])],
+    hint: hint || 'Converted into ' + own + ' at the rate on the Household tab.' }];
+};
+
 const EDITORS = {
 
   /* Budget category rows (the grid's left column) */
@@ -12729,6 +13978,7 @@ const EDITORS = {
       { key: 'rule', label: 'Future months rule', type: 'select', options: [
         ['none', 'Blank (type estimates by hand)'],
         ['carry', 'Repeat the last month'],
+        ['grow', 'Repeat, rising a set % each year'],
         ['quarterly', 'Repeat on a cycle (every N months)'],
         ['avg', 'Average of the months so far'],
         ['avglastyear', 'Average of last year'],
@@ -12745,6 +13995,14 @@ const EDITORS = {
         showIf: (v) => v.rule === 'paycheck' },
       { key: 'every', label: 'Months between payments', type: 'number', step: 1,
         showIf: (v) => v.rule === 'quarterly' },
+      /* Its own key rather than sharing `rate` with the dividends rule. The two
+         are different questions — what an account earns, and what a bill rises
+         by — and a row moved between the rules would otherwise carry the other
+         one's figure into an answer that looked typed. */
+      { key: 'growth', label: 'Rises %/yr', type: 'percent',
+        showIf: (v) => v.rule === 'grow',
+        hint: 'Applied once each January, never monthly \u2014 a renewal, not compound interest. '
+            + 'Type the real figure when it lands and the row grows from that instead.' },
       { key: 'rate', label: 'Interest %/yr', type: 'percent',
         showIf: (v) => v.rule === 'dividends' },
       /* Which rows count as pay, for the Giving tab's share-of-take-home. It
@@ -12941,6 +14199,9 @@ const EDITORS = {
         if (v.rule === 'dividends' && v.rate !== null && v.rate !== undefined)
           cat.rate = v.rate;
         else delete cat.rate;
+        if (v.rule === 'grow' && v.growth !== null && v.growth !== undefined)
+          cat.growth = v.growth;
+        else delete cat.growth;
         /* Kept only while it is a dividends row, and stored even when empty:
            an empty list is the reader saying "earn on nothing", which reads
            differently from never having been asked — coerceShape backfills the
@@ -13451,8 +14712,10 @@ const EDITORS = {
     title: (ds, isNew) => isNew ? 'Add Property' : 'Property',
     cols: 2,
     sub: () => 'A value you state, not a balance the app computes — update it whenever '
-      + 'your idea of what it would fetch changes. Equity (value minus owed) is what '
-      + 'the net worth on the Progress tab counts.',
+      + 'your idea of what it would fetch changes. What is owed on it is a debt of its '
+      + 'own now, in What You Owe below, so it can carry a rate and a payment and work '
+      + 'out its own payoff date. Equity — value minus that debt — is what the net worth '
+      + 'on the Progress tab counts.',
     fields: () => [
       /* NOT `wide`: a wide field takes a row to itself, which left Name alone
          above and Kind stranded beside an empty half. The four questions pair
@@ -13462,9 +14725,8 @@ const EDITORS = {
       { key: 'kind', label: 'Kind', type: 'select',
         options: PROPERTY_KINDS.map(([v, label]) => [v, label]) },
       { key: 'value', label: 'What it would sell for', type: 'money' },
-      { key: 'owed', label: 'Still owed on it', type: 'money',
-        hint: 'Optional — a mortgage or loan balance. Leave it empty when the thing is '
-          + 'paid off.' },
+      ...currencyField('The currency it is worth that much IN — a flat abroad is priced '
+        + 'where it stands, not where you bank.'),
       noteField,
     ],
     get: (ds) => ({ ...state.side.property[+ds.idx] }),
@@ -13475,15 +14737,144 @@ const EDITORS = {
         name: v.name,
         kind: PROPERTY_KIND_LABEL[v.kind] ? v.kind : 'other',
         /* An empty money box is null — keep the field absent rather than
-           storing a 0 that claims the thing is worthless / debt-free. */
+           storing a 0 that claims the thing is worthless. */
         value: typeof v.value === 'number' ? v.value : undefined,
-        owed: typeof v.owed === 'number' ? v.owed : undefined,
+        cur: (state.side.rates || {})[v.cur] ? v.cur : undefined,
         note: v.note || undefined,
       };
-      if (ds.idx !== undefined) Object.assign(state.side.property[+ds.idx], row);
-      else state.side.property.push(row);
+      if (ds.idx !== undefined) {
+        Object.assign(state.side.property[+ds.idx], row);
+        if (row.cur === undefined) delete state.side.property[+ds.idx].cur;
+      }
+      /* A new row is minted an id here rather than left to coerceShape,
+         because a debt secured on it needs something to point at the moment
+         the reader adds one — which is usually the very next thing they do. */
+      else state.side.property.push({ ...row, id: uniqueId(state.side.property, v.name, 'property') });
     },
-    del(ds) { state.side.property.splice(+ds.idx, 1); },
+    del(ds) {
+      const gone = state.side.property[+ds.idx];
+      state.side.property.splice(+ds.idx, 1);
+      /* A debt secured on a property that is being deleted keeps its balance
+         and simply stops being secured. Deleting it too would throw away a
+         figure the reader never asked to lose — selling the house does not
+         clear the mortgage, and the app has no business assuming it did.
+         coerceShape would drop the dangling pointer on the next load anyway;
+         doing it here is what makes the card read right immediately. */
+      if (gone) for (const l of state.side.liabilities || [])
+        if (l.securedOn === gone.id) delete l.securedOn;
+    },
+  },
+
+  /* One exchange rate. Keyed by the CODE rather than an index, because that is
+     what everything else points at — `cur` on a property, a debt or a pane. */
+  rate: {
+    title: (ds, isNew) => isNew ? 'Add a Currency' : 'Exchange Rate',
+    cols: 2,
+    sub: () => `What one unit is worth in ${String(state.settings.currency || 'USD')
+      .toUpperCase()}. You state it; the app never looks one up — a rate fetched today is `
+      + 'wrong tomorrow, and one baked in is wrong for ever. Say when it was true and the '
+      + 'card can tell you how old it is.',
+    fields: () => [
+      { key: 'code', label: 'Currency code', type: 'text',
+        hint: 'Three letters — GBP, EUR, CAD.' },
+      { key: 'rate', label: `One unit is`, type: 'money' },
+      { key: 'asOf', label: 'Rate from', type: 'date',
+        hint: 'The day you read it. Optional, but a rate with no date is a rate you '
+          + 'cannot judge.' },
+    ],
+    get: (ds) => ({ code: ds.key, ...(state.side.rates[ds.key] || {}) }),
+    blank: () => ({}),
+    save(ds, v) {
+      const code = String(v.code || '').trim().toUpperCase();
+      const own = String(state.settings.currency || 'USD').toUpperCase();
+      if (!/^[A-Z]{3}$/.test(code)) { toast('A currency code is three letters — GBP, EUR, CAD'); return; }
+      if (code === own) { toast(`${code} is already this plan's own currency`); return; }
+      if (!(v.rate > 0)) { toast('A rate has to be more than nothing'); return; }
+      /* Renaming the code moves the row AND everything pointing at it: a
+         property saying GBP whose rate had just become EUR would drop out of
+         net worth with no explanation on screen. */
+      if (ds.key !== undefined && ds.key !== code) {
+        delete state.side.rates[ds.key];
+        for (const row of [...state.side.property, ...state.side.liabilities,
+                           ...state.side.portfolios])
+          if (row.cur === ds.key) row.cur = code;
+      }
+      state.side.rates[code] = { rate: v.rate };
+      if (v.asOf) state.side.rates[code].asOf = v.asOf;
+    },
+    /* The rate goes; what was priced in it does NOT. Those rows keep their
+       currency and drop out of the total, and the card says which and why —
+       silently repricing somebody's flat into dollars because a rate was
+       deleted is exactly the wrong answer. */
+    del: (ds) => { delete state.side.rates[ds.key]; },
+  },
+
+  /* What is still owed. Deliberately its own list rather than a field on a
+     property row — see LIABILITY_KINDS. */
+  liability: {
+    title: (ds, isNew) => isNew ? 'Add a Debt' : 'Debt',
+    cols: 2,
+    sub: () => 'The balance and the month it was true are what let the app work out what '
+      + 'is left today, so it stops going stale. Add the rate and the payment and it also '
+      + 'says when the debt ends and what the rest of it costs. None of this reaches the '
+      + 'budget — the payment is already a row there.',
+    fields: () => [
+      { key: 'name', label: 'Name', type: 'text',
+        hint: 'Whatever you call it — "The house", "Mia\u2019s car", "Visa".' },
+      { key: 'kind', label: 'Kind', type: 'select',
+        options: LIABILITY_KINDS.map(([v, label]) => [v, label]) },
+      { key: 'balance', label: 'Balance', type: 'money' },
+      { key: 'asOf', label: 'True as of', type: 'month',
+        hint: 'The month that balance was right \u2014 off a statement. Without it the '
+          + 'figure simply stands as typed.' },
+      { key: 'rate', label: 'Rate %/yr', type: 'percent' },
+      { key: 'payment', label: 'Paid each month', type: 'money' },
+      ...currencyField('The currency the debt is IN — the balance and the payment are both '
+        + 'read as that.'),
+      /* Only offered when there is something to secure it ON. A dropdown whose
+         only option is "Nothing" is a question with one answer. */
+      ...((state.side.property || []).length ? [{ key: 'securedOn', label: 'Secured on',
+        type: 'select',
+        options: [['', 'Nothing \u2014 count it on its own'],
+          ...(state.side.property || []).map(p => [p.id, p.name])],
+        hint: 'A secured debt comes off that property\u2019s equity instead of standing '
+          + 'as its own figure. Either way it comes off your net worth.' }] : []),
+      noteField,
+    ],
+    get: (ds) => ({ ...state.side.liabilities[+ds.idx] }),
+    blank: () => ({ kind: 'other' }),
+    save(ds, v) {
+      if (!v.name) return;
+      const kind = LIABILITY_KIND_LABEL[v.kind] ? v.kind : 'other';
+      const row = {
+        name: v.name, kind,
+        balance: typeof v.balance === 'number' ? v.balance : 0,
+        /* Rate, payment and the month are each ABSENT rather than 0 when they
+           are not answered — the card reads absence as "not said yet" and asks
+           for it, where a 0 would read as a loan that charges nothing or one
+           nobody is paying. */
+        rate: typeof v.rate === 'number' ? v.rate : undefined,
+        payment: typeof v.payment === 'number' ? v.payment : undefined,
+        asOf: /^\d{4}-\d{2}$/.test(String(v.asOf || '')) ? v.asOf : undefined,
+        securedOn: (state.side.property || []).some(p => p.id === v.securedOn)
+          ? v.securedOn : undefined,
+        cur: (state.side.rates || {})[v.cur] ? v.cur : undefined,
+        note: v.note || undefined,
+      };
+      if (ds.idx !== undefined) {
+        /* Object.assign copies an explicit undefined straight over a stored
+           value, which is exactly what a cleared box should do here — the
+           settings-defaults trap in reverse, and the reason it is safe is that
+           nothing merges this row over a set of defaults. */
+        Object.assign(state.side.liabilities[+ds.idx], row);
+        for (const k of ['rate', 'payment', 'asOf', 'securedOn', 'cur', 'note'])
+          if (row[k] === undefined) delete state.side.liabilities[+ds.idx][k];
+      } else {
+        state.side.liabilities.push({ ...row,
+          id: uniqueId(state.side.liabilities, v.name, 'debt') });
+      }
+    },
+    del(ds) { state.side.liabilities.splice(+ds.idx, 1); },
   },
 
   /* Someone this plan is for. Renaming NEVER changes the id — accounts,
@@ -13942,10 +15333,16 @@ const EDITORS = {
           + 'real-world account that isn\'t listed here should stay unticked, or its money '
           + 'would vanish from the total. Leave them all unticked for money the budget '
           + 'doesn\'t track.' },
+      /* A pane held abroad. It applies to the PANE, not to a holding: a
+         brokerage account has one currency, and letting each ticker carry its
+         own would be a claim about where a fund is listed that the app has no
+         way to check. */
+      ...currencyField('The currency this account\'s prices are in. It converts for net '
+        + 'worth; the pane itself still reads in its own money.'),
     ],
     get: (ds) => {
       const pf = state.side.portfolios.find(p => p.id === ds.id) || {};
-      return { name: pf.name, accounts: pf.accounts || [] };
+      return { name: pf.name, accounts: pf.accounts || [], cur: pf.cur };
     },
     save(ds, v) {
       if (!v.name) return;
@@ -13956,14 +15353,16 @@ const EDITORS = {
         .filter(id => accountById(state, id));
       if (ds.id) {
         const pf = state.side.portfolios.find(p => p.id === ds.id);
+        const cur = (state.side.rates || {})[v.cur] ? v.cur : null;
         if (pf) { pf.name = v.name;
-          if (accounts.length) pf.accounts = accounts; else delete pf.accounts; }
+          if (accounts.length) pf.accounts = accounts; else delete pf.accounts;
+          if (cur) pf.cur = cur; else delete pf.cur; }
         return;
       }
-      let id = slugJs(v.name), n = 2;
-      while (state.side.portfolios.some(p => p.id === id)) id = `${slugJs(v.name)}-${n++}`;
+      const id = uniqueId(state.side.portfolios, v.name, 'account');
       state.side.portfolios.push({ id, name: v.name,
-        ...(accounts.length ? { accounts } : {}), rows: [] });
+        ...(accounts.length ? { accounts } : {}),
+        ...((state.side.rates || {})[v.cur] ? { cur: v.cur } : {}), rows: [] });
     },
     del(ds) {
       state.side.portfolios = state.side.portfolios.filter(p => p.id !== ds.id);
@@ -14708,6 +16107,14 @@ const EDITORS = {
       { key: 'bonus', label: 'Bonus', type: 'money' },
       { key: 'bonusPct', label: 'Bonus %', type: 'percent', dp: 4,
         hint: 'A share of the salary the year starts on — type either box.' },
+      /* The rest of the package. Both optional and both absent by default: a
+         plan that has never had either is unchanged, figure for figure. */
+      { key: 'equity', label: 'Equity vested', type: 'money',
+        hint: 'What actually vested that year, at the price it vested at — RSUs, shares. '
+          + 'Not a grant you have not received.' },
+      { key: 'match', label: 'Employer contribution', type: 'money',
+        hint: 'What your employer put into a retirement account that year. It is pay you '
+          + 'were given; it is just paid somewhere you cannot spend it yet.' },
     ],
     /* The two raise boxes are one fact written two ways, so typing in either
        fills the other. Whichever box you are in is the one that's right.
@@ -14785,7 +16192,13 @@ const EDITORS = {
          a path that fires no input event, a paste or an autofill. */
       const raisePct = v.raisePct
         ?? (salary && v.after ? raiseFor(salary, v.after) / 100 : 0);
-      state.side.comp[key] = { salary, raisePct };
+      const row = { salary, raisePct };
+      /* Written only when there is something to write. An empty box removes
+         the key rather than storing a 0, so a year clears back to "not
+         tracked" and the tab's columns disappear with the last figure. */
+      for (const k of ['equity', 'match'])
+        if (typeof v[k] === 'number') row[k] = v[k];
+      state.side.comp[key] = row;
     },
     /* The bonus stays: what landed that year is still true whether or not the
        salary record is, and Bonuses by year covers years with no comp row. */
@@ -15036,6 +16449,21 @@ const EDITORS = {
 };
 
 /* id helper for user-created rows (mirrors the importer's slug()) */
+/* A fresh id for a row joining a list that already has some: slug the name,
+   then number it until nothing else claims it. The pattern was written out five
+   times in this file before the two new id-bearing lists arrived and would have
+   made it seven. Deterministic from the name, and by construction unable to
+   collide with an id something else is already pointing at.
+
+   A function DECLARATION beside `slugJs` for the same hoisting reason
+   everything coerceShape reaches has to obey. */
+function uniqueId(list, name, fallback) {
+  const base = slugJs(name || fallback) || fallback;
+  let id = base, n = 2;
+  while ((list || []).some(r => r && r.id === id)) id = `${base}-${n++}`;
+  return id;
+}
+
 function slugJs(name) {
   const s = String(name).replace(/\(.*?\)/g, '').trim().toLowerCase()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -16183,6 +17611,256 @@ function gridToCsv(st, computed, y) {
   return lines.join('\n');
 }
 
+/* ── Two plans, side by side ────────────────────────────────────────────────
+   The what-if the app had no answer for. "What if we bought the house", "what
+   if I took the job" — every one of them means changing a dozen figures across
+   five tabs, and there was no way to hold the before and the after next to each
+   other except two browser windows and a good memory.
+
+   The thing NOT built here is a second plan living inside the first. That was
+   the obvious design and it is the wrong one: it doubles what syncs, it doubles
+   what a backup carries, and above all it gives the app two answers to "what am
+   I worth" — where the whole file is built on there being exactly one. What a
+   scenario really is, is a plan you exported and then changed. So a comparison
+   reads a BACKUP FILE, which already exists, is already the plan's own format,
+   costs nothing to store and cannot drift, and it writes absolutely nothing.
+
+   `planHeadlines` is the whole of the arithmetic and it is pure, so what the
+   dialog shows is a test rather than a screenshot. Every figure in it comes
+   from the same function the tab that owns it draws — net worth from
+   `netWorthTotals`, the rate and the runway from `savingsPulse`, the retirement
+   figures from `drawdownOutlook` — so a comparison can never quote a number the
+   app itself doesn't show. */
+function planHeadlines(st, today) {
+  const iso = today || todayISO();
+  const thisYear = +iso.slice(0, 4);
+  const C = computeAll(st, iso);
+  /* The date is passed DOWN, never left to the wall clock: this function is
+     pinned by tests over fixture years that have not happened yet, and a
+     `startedGridYears(st)` reading today would filter every one of them out and
+     report a plan with nothing in it. */
+  const started = startedGridYears(st, iso);
+  const y = started.length ? started[started.length - 1] : null;
+  const c = y ? C[y] : null;
+  const cur = y ? currentMonthOf(st.years[y], iso) : null;
+  const liquid = (c && cur) ? (c.balances[`total|${cur}`] || 0) : null;
+  const pulse = y ? savingsPulse(st.years[y], c, y, liquid) : null;
+  const worth = (c && cur) ? netWorthTotals(st, liquid || 0, c, cur) : null;
+  /* The retirement half is skipped where there is no household to hang it on —
+     `drawdownYears` over a plan with nobody in it is a long walk to zero. */
+  const anyone = peopleOf(st).some(p => retirementYearOf(p));
+  const out = anyone
+    ? drawdownOutlook(drawdownYears(st, thisYear, retirementHorizon(st, thisYear)))
+    : null;
+  return {
+    year: y,
+    netWorth: worth ? worth.total : null,
+    liquid,
+    owed: worth ? round2((worth.nw.debts || 0) + (worth.nw.propertyOwed || 0)) : null,
+    income: pulse ? pulse.income : null,
+    spending: pulse ? pulse.spent : null,
+    savingsRate: pulse ? pulse.rate : null,
+    runwayMonths: pulse ? pulse.runwayMonths : null,
+    retirementPot: out ? out.firstPot : null,
+    runsOutYear: out ? out.runsOutYear : null,
+  };
+}
+
+/* The rows the dialog draws. `kind` says how to read a difference, and it is
+   here rather than in the markup because two of them are the wrong way round
+   from the rest: more spending and more owed are not an improvement, and a
+   comparison that drew every increase as good would be worse than no comparison
+   at all. `higher: null` means neither — a year, where later is simply later. */
+const COMPARE_ROWS = [
+  { key: 'netWorth', label: 'Net worth', kind: 'money', higher: true },
+  { key: 'liquid', label: 'Liquid savings', kind: 'money', higher: true },
+  { key: 'owed', label: 'Owed', kind: 'money', higher: false },
+  { key: 'income', label: 'Income this year', kind: 'money', higher: true },
+  { key: 'spending', label: 'Spending this year', kind: 'money', higher: false },
+  { key: 'savingsRate', label: 'Savings rate', kind: 'pct', higher: true },
+  { key: 'runwayMonths', label: 'Runway', kind: 'months', higher: true },
+  { key: 'retirementPot', label: 'Pot at retirement', kind: 'money', higher: true },
+  { key: 'runsOutYear', label: 'Money runs out', kind: 'year', higher: null },
+];
+
+/* Both plans reduced to the same rows, with the difference worked out only
+   where BOTH sides have an answer. A row neither plan can answer is dropped;
+   one only the other can is kept and dashed, because "this plan says nothing
+   about retirement and that one does" is itself the finding. */
+function comparePlans(mine, theirs, today) {
+  const a = planHeadlines(mine, today), b = planHeadlines(theirs, today);
+  return COMPARE_ROWS.map(r => {
+    const av = a[r.key], bv = b[r.key];
+    const both = typeof av === 'number' && typeof bv === 'number';
+    return { ...r, a: av, b: bv,
+      /* Rounded the way the FIGURE is, not the way money is. round2 on a
+         savings rate turned a 10.8-point gap into 11.0, because two decimals
+         of a fraction is one decimal of a percentage — a rounding error big
+         enough to be quoted at somebody. */
+      delta: both ? (r.kind === 'pct' ? roundTo(bv - av, 6) : round2(bv - av)) : null,
+      /* Null where it cannot be read as better or worse: no comparison, no
+         direction, and a year has none by nature. */
+      better: (!both || r.higher === null || bv === av) ? null
+        : (bv > av) === r.higher };
+  }).filter(r => r.a !== null || r.b !== null);
+}
+
+/* ── And back in again ──────────────────────────────────────────────────────
+   CSV was a one-way door: out to a spreadsheet, and no way home. Somebody who
+   worked a year over in Excel — which is what the export exists for — had to
+   retype it a cell at a time.
+
+   Three functions, all pure, because every decision worth arguing about is in
+   them and none of it should live in a file-picker handler.
+
+   `csvRows` is an actual parser rather than `split(',')`. The export quotes any
+   field with a comma in it and doubles embedded quotes, so a row called
+   "Rent, water and rates" round-trips — and splitting on commas would break it
+   into two columns and put the year out by a row. It handles CRLF, because that
+   is what Excel writes back. */
+/* A budget year is fourteen columns by fifty-odd rows. These caps are three
+   orders of magnitude past that, and they are here because the parser walks the
+   file a character at a time: a reader who picks the wrong file out of a
+   Downloads folder should get a refusal, not a locked tab. */
+const CSV_MAX_BYTES = 2_000_000;
+const CSV_MAX_ROWS = 5000;
+
+function csvRows(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  /* A byte-order mark is what downloadCsv PUTS THERE, so the file this reads
+     will normally have one; left in place it becomes part of the first header
+     and the header check fails on a file the app itself wrote. */
+  const src = String(text || '').slice(0, CSV_MAX_BYTES).replace(/^\uFEFF/, '');
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch !== '"') { field += ch; continue; }
+      /* A doubled quote inside a quoted field is one literal quote. */
+      if (src[i + 1] === '"') { field += '"'; i++; continue; }
+      quoted = false;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === ',') { row.push(field); field = ''; continue; }
+    if (ch === '\r') continue;
+    if (ch === '\n') {
+      row.push(field); rows.push(row); row = []; field = '';
+      if (rows.length >= CSV_MAX_ROWS) break;
+      continue;
+    }
+    field += ch;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ''));
+}
+
+/* One exported year, read back. Returns what it found or a `refusal` naming
+   what is wrong with the file — never a half-import, the tax-paste rule.
+
+   What it deliberately DOESN'T read: the Accounts block and the Interest &
+   Dividends line. Both are computed — a balance is the sum of everything above
+   it, and the earnings line is the accounts' own rates — so writing them back
+   would be typing over the engine's answer with the engine's answer, and any
+   figure that disagreed would be silently pinned instead. They are counted and
+   named as skipped rather than ignored in silence.
+
+   The MONTHS in the header are the file's own claim about which year it is;
+   a file whose columns span two years is refused, because "the 2026 export"
+   has to mean one year for the confirmation to be able to say what it will do. */
+function readGridCsv(text) {
+  if (String(text || '').length > CSV_MAX_BYTES)
+    return { refusal: 'That file is far too big to be a year of budget — nothing was read.' };
+  const rows = csvRows(text);
+  if (!rows.length) return { refusal: 'That file is empty.' };
+  const head = rows[0].map(c => c.trim());
+  if (head[0].toLowerCase() !== 'section' || head[1].toLowerCase() !== 'row')
+    return { refusal: 'That is not a budget year exported from this app — its first two '
+      + 'columns should be Section and Row.' };
+  const months = [], colOf = {};
+  head.forEach((h, i) => {
+    if (/^\d{4}-\d{2}$/.test(h)) { months.push(h); colOf[h] = i; }
+  });
+  if (!months.length)
+    return { refusal: 'That file has no month columns in it, so there is nothing to read.' };
+  const years = [...new Set(months.map(m => m.slice(0, 4)))];
+  if (years.length !== 1)
+    return { refusal: `Those columns span ${years.join(' and ')}. Import one year at a time.` };
+  const y = years[0];
+  const wanted = { Income: 'income', Expenses: 'expense', Transfers: 'transfer' };
+  const out = [];
+  let skipped = 0;
+  for (const r of rows.slice(1)) {
+    const section = (r[0] || '').trim();
+    const name = (r[1] || '').trim();
+    if (!name) continue;
+    if (!wanted[section] || name === 'Interest & Dividends') { skipped++; continue; }
+    const values = {};
+    for (const m of months) {
+      const raw = (r[colOf[m]] ?? '').trim();
+      /* An empty column is a real answer — "nothing typed here" — and it is
+         what the export writes for a month the plan merely worked out. Kept as
+         null rather than skipped, so a round trip clears what it should. */
+      values[m] = raw === '' ? null : parseMoney(raw);
+    }
+    /* A row where every month failed to parse is a row of words, not figures —
+       most likely a header repeated mid-file, or a column the reader added. */
+    if (months.every(m => values[m] !== null && Number.isNaN(values[m]))) { skipped++; continue; }
+    out.push({ section: wanted[section], name, values });
+  }
+  if (!out.length)
+    return { refusal: 'Nothing in that file is an Income, Expenses or Transfers row.' };
+  return { year: y, months, rows: out, skipped };
+}
+
+/* Write one back. Mutates the state it is handed and reports what it did, so
+   the confirmation before it and the toast after it read the same figures.
+
+   Matching is by NAME within the row's own section, which is the only handle a
+   CSV has — the export writes no ids, deliberately, since ids are this app's
+   business and not a spreadsheet's. A name that matches nothing is ADDED as a
+   new row with no rule, because a file with a row the plan lacks is usually a
+   row the reader added in the spreadsheet, and dropping it would be the import
+   quietly disagreeing with the file it just read.
+
+   The cell KIND is decided exactly as typing into the cell decides it — actual
+   in a month already entered, manual beyond it — because that is what this is:
+   typing, done faster. */
+function applyGridCsv(st, parsed, today) {
+  const yr = (st.years || {})[parsed.year];
+  if (!yr || yr.kind !== 'grid')
+    return { refusal: `There is no ${parsed.year} budget grid in this plan to import into.` };
+  const live = yr.model === 'live';
+  const through = yr.enteredThrough || '';
+  let set = 0, cleared = 0, added = 0;
+  for (const r of parsed.rows) {
+    let cat = (yr.categories || []).find(c =>
+      (c.section || 'expense') === r.section
+      && c.name.trim().toLowerCase() === r.name.trim().toLowerCase());
+    if (!cat) {
+      cat = { id: uniqueId(yr.categories, r.name, 'row'), name: r.name,
+        rule: 'none', role: 'normal', section: r.section };
+      yr.categories.push(cat);
+      added++;
+    }
+    for (const m of parsed.months) {
+      const key = `${cat.id}|${m}`;
+      const v = r.values[m];
+      if (v === null || Number.isNaN(v)) {
+        if (yr.cells[key] !== undefined) { delete yr.cells[key]; cleared++; }
+        continue;
+      }
+      const future = live && m > through;
+      /* A note or a split already on the cell is REPLACED, not merged: the file
+         is a statement about that month, and half-keeping a split whose parts
+         no longer add to the figure beside them would be worse than either. */
+      yr.cells[key] = { v: round2(v), kind: future ? 'manual' : 'actual' };
+      set++;
+    }
+  }
+  return { year: parsed.year, set, cleared, added, skipped: parsed.skipped };
+}
+
 /* Every donation, every year — the tax-season table. The How/Status/
    Deductible derivations mirror the Giving tab's own rows exactly.
 
@@ -16496,6 +18174,126 @@ F('importFile').onchange = (e) => {
   reader.readAsText(file);
 };
 
+/* ── Comparing against a file ───────────────────────────────────────────────
+   The one path in this dialog that cannot lose anything: it parses, computes
+   and draws, and never touches `state`. The refusals are the JSON restore's,
+   because it is the same kind of file and a reader who picked the wrong one
+   deserves the same sentence either way. */
+const compareDialog = F('compareDialog');
+F('compareCloseBtn').onclick = () => compareDialog.close();
+F('compareBtn').onclick = () => F('compareFile').click();
+F('compareFile').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const raw = safeParse(reader.result);
+      if (!raw || typeof raw !== 'object' || typeof raw.years !== 'object'
+          || Array.isArray(raw.years)) throw new Error('not a Financial Plan file');
+      if ((raw.schema || 1) > SCHEMA) {
+        toast('That backup was saved by a newer version of the app — reload to update, then compare it');
+        return;
+      }
+      const other = migrate(coerceShape(raw));
+      const rows = comparePlans(state, other, todayISO());
+      const fmt = (r, v) => v === null || v === undefined ? '<span class="muted">—</span>'
+        : r.kind === 'money' ? fmtMoney(v)
+        : r.kind === 'pct' ? `${(v * 100).toFixed(1)}%`
+        : r.kind === 'months' ? `${roundTo(v, 1)} months`
+        : String(v);
+      F('compareSub').textContent = `${file.name} against what is in this browser now. `
+        + 'Nothing here has been changed — this only reads the file.';
+      F('compareBody').innerHTML = `<div class="tablewrap"><table>
+        <thead><tr><th style="text-align:left"></th><th>Now</th><th>That file</th>
+          <th style="text-align:left">Difference</th></tr></thead>
+        <tbody>${rows.map(r => `<tr>
+          <th scope="row">${esc(r.label)}</th>
+          <td>${fmt(r, r.a)}</td>
+          <td>${fmt(r, r.b)}</td>
+          <td style="text-align:left">${r.delta === null
+            ? '<span class="muted">nothing to compare</span>'
+            : !r.delta ? '<span class="muted">the same</span>'
+            /* Said in words, with an arrow beside them and never a colour: four
+               palettes and a red-green reader mean hue cannot carry this. */
+            /* A gap between two percentages is POINTS, not a percentage: 28%
+               against 18% is ten points, and calling it "10%" invites the
+               reader to think it is a tenth of the first figure. */
+            : `${r.delta > 0 ? '▲' : '▼'} ${r.kind === 'pct'
+                ? `${(Math.abs(r.delta) * 100).toFixed(1)} points`
+                : fmt(r, Math.abs(r.delta))}${
+                r.better === null ? ''
+                  : ` <span class="muted">${r.better ? 'better' : 'worse'}</span>`}`
+          }</td></tr>`).join('')}</tbody>
+      </table></div>
+      <p class="sub" style="margin-top:12px">Headline figures only — each one read from the
+        same place the tab that owns it draws it. To work from the other plan instead, use
+        Restore JSON, which replaces what is here.</p>`;
+      openModal(compareDialog);
+    } catch (err) {
+      toast('That file doesn’t look like a Financial Plan backup');
+      console.warn('compare failed', err);
+    } finally {
+      e.target.value = '';
+    }
+  };
+  reader.readAsText(file);
+};
+
+/* ── A year's CSV, coming back ──────────────────────────────────────────────
+   The refusal path is the point of this handler. `readGridCsv` and
+   `applyGridCsv` each return either an answer or a `refusal` naming exactly
+   what is wrong, and both are shown as they are: "that file doesn't look
+   right" is the message that makes somebody try the same file three times.
+
+   The confirmation says what WILL happen in figures, before anything moves —
+   how many cells will be written, how many cleared, how many rows the file has
+   that the plan doesn't. A cleared cell is the one that can surprise: an empty
+   column in the file empties the month, which is right for a round trip and
+   worth saying out loud. */
+F('csvInBtn').onclick = () => F('csvInFile').click();
+F('csvInFile').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = readGridCsv(reader.result);
+      if (parsed.refusal) { toast(parsed.refusal); return; }
+      /* Rehearsed on a COPY first, so the confirmation can quote real figures
+         without anything having happened yet. A dry run that lied about what it
+         was going to do would be worse than no confirmation at all. */
+      const trial = JSON.parse(JSON.stringify({ years: state.years }));
+      const dry = applyGridCsv(trial, parsed, todayISO());
+      if (dry.refusal) { toast(dry.refusal); return; }
+      const bits = [`${dry.set} figure${dry.set === 1 ? '' : 's'} written`];
+      if (dry.cleared) bits.push(`${dry.cleared} month${dry.cleared === 1 ? '' : 's'} emptied`);
+      if (dry.added) bits.push(`${dry.added} new row${dry.added === 1 ? '' : 's'}`);
+      if (dry.skipped) bits.push(`${dry.skipped} line${dry.skipped === 1 ? '' : 's'} skipped`);
+      if (!confirm(`Import this file into ${parsed.year}?\n\n${bits.join('\n')}\n\n`
+        + 'Account balances and the Interest & Dividends line are worked out by the app, so '
+        + 'they are left alone. A month left empty in the file empties that month here.'))
+        return;
+      const done = applyGridCsv(state, parsed, todayISO());
+      save(); render();
+      /* The toast counts the REAL run, not the rehearsal. They agree, and the
+         day they stop agreeing is the day the reader should be told what
+         actually happened rather than what was promised. */
+      const said = [`${done.set} written`];
+      if (done.cleared) said.push(`${done.cleared} emptied`);
+      if (done.added) said.push(`${done.added} new row${done.added === 1 ? '' : 's'}`);
+      toast(`${parsed.year} imported — ${said.join(', ')}`);
+      dataDialog.close();
+    } catch (err) {
+      toast('That file could not be read as a CSV');
+      console.warn('csv import failed', err);
+    } finally {
+      e.target.value = '';
+    }
+  };
+  reader.readAsText(file);
+};
+
 /* ── Opening a dialog on a touch screen ─────────────────────────────────────
    `showModal()` runs the spec's dialog focusing steps: focus the `autofocus`
    element, or failing that the FIRST FOCUSABLE ONE, whatever it happens to be.
@@ -16599,6 +18397,44 @@ function applyTheme() {
     .getPropertyValue('--bg').trim();
   if (bar && bg) bar.setAttribute('content', bg);
 }
+/* ── Printing borrows the light theme ───────────────────────────────────────
+   The print stylesheet sets no colour, on purpose: the palettes live in the
+   theme pack and a print palette written into this file would be a fifth theme
+   nobody had gated. So printing simply asks for the theme the pack already has
+   for exactly this — real ink-on-paper colours, contrast-checked with the other
+   three.
+
+   Nothing is saved. `themeId()` still reads localStorage, the picker is left
+   alone, and `afterprint` puts the attribute back, so a print never changes
+   what the reader sees afterwards.
+
+   Both mechanisms, because they are not the same event in every browser:
+   before/afterprint is the modern pair, and the `matchMedia('print')` change is
+   what Safari fires. Either one landing twice is harmless — setting the
+   attribute to the value it already has is a no-op, and the restore reads
+   `themeId()` rather than a remembered value, so two restores agree.
+
+   The CHARTS are deliberately not rebuilt. Chart.js resolves its colours when
+   it is constructed, so a printed chart keeps the screen theme's line colours
+   on a light card. Redrawing them would mean a full render() inside a print
+   handler — which in some browsers happens after the page has been snapshotted,
+   and would leave the screen mid-rebuild if the print was cancelled. The lines
+   stay legible because every series token clears AA on both grounds; it is the
+   one thing on the page that does not change, and that is the trade. */
+function printUsesLightTheme(on) {
+  document.documentElement.setAttribute('data-theme', on ? 'light' : themeId());
+}
+addEventListener('beforeprint', () => printUsesLightTheme(true));
+addEventListener('afterprint', () => printUsesLightTheme(false));
+{
+  const mq = matchMedia('print');
+  /* addEventListener on a MediaQueryList is the modern spelling; the guard is
+     for the browsers where it is still addListener-only. */
+  const onChange = (e) => printUsesLightTheme(e.matches);
+  if (mq.addEventListener) mq.addEventListener('change', onChange);
+  else if (mq.addListener) mq.addListener(onChange);
+}
+
 F('themeSel').onchange = (e) => {
   localStorage.setItem(THEME_KEY, e.target.value);
   applyTheme();
@@ -16962,9 +18798,15 @@ const SECTION_NEEDS = {
      investment panes, the retirement accounts, the property list and measures
      the giving fund. All four belong to other tabs, so a Progress link names
      them out loud in the dialog (shareCarriesNote). */
+  /* `side.rates` rides with anything that can be held abroad. It is the least
+     personal branch in the file — a number off a bank's website — and without
+     it a shared Progress tab would show the sender's foreign flat as something
+     it could not value, which is a worse leak than the rate is. */
   goals:       ['years', 'goals', 'side.portfolios', 'side.retirementAccounts',
-                'side.property', 'side.daf', 'side.snapshots'],
-  household:   ['years', 'goals', 'people', 'side.property'],
+                'side.property', 'side.liabilities', 'side.rates', 'side.daf',
+                'side.snapshots'],
+  household:   ['years', 'goals', 'people', 'side.property', 'side.liabilities',
+                'side.rates'],
   /* No 'years', deliberately, though the drawdown's spending target is SEEDED
      from the budget's own expense total: the seed fills the box, the figure is
      stored, and a shared Retirement tab reads the stored one. Adding the grid
@@ -16985,7 +18827,7 @@ const SECTION_NEEDS = {
      an Investments link carries them — Retirement owns the branch, and the
      dialog names it out loud (shareCarriesNote). */
   investments: ['side.portfolios', 'side.taxable', 'side.retirementAccounts',
-                'side.targets', 'side.classes', 'side.classTargets'],
+                'side.targets', 'side.classes', 'side.classTargets', 'side.rates'],
   /* No people: the trips and PTO tables name nobody — checked, not assumed. */
   vacations:   ['vacations'],
   giving:      ['years', 'side.donations', 'side.daf', 'side.comp', 'side.bonuses'],
@@ -17000,7 +18842,8 @@ const BRANCH_OWNERS = {
   goals: ['goals'],
   'side.snapshots': ['goals'],
   people: ['household'],
-  'side.property': ['household'],
+  'side.property': ['household'], 'side.liabilities': ['household'],
+  'side.rates': ['household'],
   vacations: ['vacations'],
   'side.comp': ['comp'], 'side.bonuses': ['comp'],
   'side.portfolios': ['investments'], 'side.taxable': ['investments'],
@@ -17021,6 +18864,8 @@ const BRANCH_LABEL = {
   'side.snapshots': 'your net worth history',
   people: 'the people in your plan',
   'side.property': 'your property values',
+  'side.liabilities': 'what you owe',
+  'side.rates': 'the exchange rates you typed',
   vacations: 'your trips and PTO',
   'side.comp': 'your salary and bonus history',
   'side.bonuses': 'your salary and bonus history',
@@ -17918,7 +19763,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   /* The sample plan, so its tests measure the SAME object the button loads
      rather than a copy of it that can drift. */
   sampleState,
-  afterRaise, bonusBase, bonusShare, yearFlows, yearSpending, summaryRowIsFlow, notesOfYear,
+  afterRaise, compParts, bonusBase, bonusShare, yearFlows, yearSpending, summaryRowIsFlow, notesOfYear,
   givenOutOfPocket, plannedOutOfPocket, grossIncome, takeHomePay, givingStats,
   givingCeiling, isPayRow,
   nextUnplannedYear, isLeapYear, reDate, cloneDonationsForward, dropDonationYear,
@@ -17931,7 +19776,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote,
   priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
   coerceQuotes,
-  fmtMoney, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
+  fmtMoney, fmtMoneyIn, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
   reconcileNote,
   blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   mergeAccountsByName, nominateHub, hubAccount, dividendAccounts, statedAfter,
@@ -17949,7 +19794,12 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
-  netWorthParts, PROPERTY_KINDS, vacationYearStats, cellTip, balanceTip,
+  netWorthParts, PROPERTY_KINDS, vacationYearStats,
+  /* Debts: the schedule, where it lands in a given month, and when it ends.
+     Pure over one row, so a test pins the arithmetic rather than the card. */
+  amortize, liabilityAt, payoffMonth, LIABILITY_KINDS, SECURED_KINDS,
+  planRate, inPlanCurrency,
+  SNAPSHOT_PARTS, SNAPSHOT_ASSETS, uniqueId, cellTip, balanceTip,
   receivedInto, earningsOver, earningLines, balanceYearTip, flowTransferNote, internalRows,
   raisesKeyboard,
   accountEarnings, earningsTip,
@@ -17959,8 +19809,10 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   overflowOrder, overflowMeasure, sweepArrivals, freezeOverflowThresholds, ruleDesc,
   KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
+  categorySpend, spendingMix,
   coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
-  csvCell, gridToCsv, donationsToCsv, searchPlan, SEARCH_CAP, snapshotPoints,
+  csvCell, gridToCsv, donationsToCsv, csvRows, readGridCsv, applyGridCsv,
+  planHeadlines, comparePlans, COMPARE_ROWS, searchPlan, SEARCH_CAP, snapshotPoints,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,

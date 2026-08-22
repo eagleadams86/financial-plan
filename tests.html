@@ -329,6 +329,54 @@ t('a carried figure typed into the new year beats the year before it', () => {
   approx(c.cells['internet|2031-01'].v, -50, 'before the new figure, the old one');
   approx(c.cells['internet|2031-03'].v, -65, 'after it, the new one');
 });
+t('a growing row steps up once a year, not once a month', () => {
+  /* The whole point of the rule: inside a year it repeats, and it rises exactly
+     once as the year turns. A monthly compound would read twelve figures where
+     the reader typed one. */
+  const c = projectNextYear(fixtureState(), [
+    { id: 'internet', name: 'Internet', role: 'normal', rule: 'grow', growth: 0.03 },
+  ])['2031'];
+  approx(c.cells['internet|2031-01'].v, -51.5, "2030's -50, one 3% step");
+  approx(c.cells['internet|2031-07'].v, -51.5, 'and it holds all year — no monthly drift');
+  eq(c.cells['internet|2031-01'].kind, 'auto');
+});
+t('a growing row with no percentage yet simply repeats', () => {
+  /* "Rises by nothing said yet" is repeat, never an invented number. */
+  const c = projectNextYear(fixtureState(), [
+    { id: 'internet', name: 'Internet', role: 'normal', rule: 'grow' },
+  ])['2031'];
+  approx(c.cells['internet|2031-01'].v, -50);
+});
+t('a figure typed into a growing row is what it grows from next', () => {
+  const c = projectNextYear(fixtureState(),
+    [{ id: 'internet', name: 'Internet', role: 'normal', rule: 'grow', growth: 0.1 }],
+    { 'internet|2031-04': { v: -100, kind: 'manual' } })['2031'];
+  approx(c.cells['internet|2031-03'].v, -55, 'before the new figure, last year stepped up');
+  approx(c.cells['internet|2031-05'].v, -100,
+    'after it, the typed figure — and no step, because it is the same year');
+});
+t('a growing row with no history anywhere stays blank', () => {
+  const c = projectNextYear(fixtureState(), [
+    { id: 'newrow', name: 'Never recorded', role: 'normal', rule: 'grow', growth: 0.03 },
+  ])['2031'];
+  eq(c.cells['newrow|2031-03'].kind, 'missing', 'nothing to grow FROM is not $0');
+});
+t('a corrupt growth rate is dropped, never read as 0%', () => {
+  const d = H.coerceShape({ years: { '2031': { kind: 'grid', startMonth: '2031-01',
+    monthCount: 12, categories: [
+      { id: 'a', name: 'A', rule: 'grow', growth: 'junk' },
+      { id: 'b', name: 'B', rule: 'grow', growth: '0.04' },
+      { id: 'c', name: 'C', rule: 'carry', growth: 0.09 },
+    ], cells: {} } } });
+  const cats = d.years['2031'].categories;
+  eq(cats[0].growth, undefined, 'unreadable drops rather than becoming a deliberate 0%');
+  eq(cats[1].growth, 0.04, 'a numeric string still reads');
+  eq(cats[2].growth, undefined, 'kept only while the row is a growing one');
+});
+t('the rule describes itself with its own figure in it', () => {
+  eq(H.ruleDesc({ rule: 'grow', growth: 0.035 }), 'repeats, rising 3.5% each January');
+  ok(/say what/.test(H.ruleDesc({ rule: 'grow' })), 'and asks for one when it has none');
+});
 t('average so far falls back to last year while the new year has no months', () => {
   const c = projectNextYear(fixtureState(), [
     { id: 'cc', name: 'Credit Card', role: 'normal', rule: 'avg' },
@@ -3345,6 +3393,563 @@ t('the total counts a linked pot once, at what the holdings are worth', () => {
     side: { portfolios: [{ id: 'cm', name: 'CM', accounts: ['long'], rows: [] }] } });
   eq(H.netWorthTotals(empty, 1000, c, '2030-04').overlap, 0,
     'an empty pane claims nothing — its accounts stay counted as themselves');
+});
+
+group('Two plans, side by side');
+t('every headline is read from the function the tab that owns it draws', () => {
+  const st = H.migrate(H.coerceShape(H.sampleState()));
+  const y = Object.keys(st.years).filter(k => st.years[k].kind === 'grid').sort().pop();
+  const today = `${y}-08-15`;
+  const h = H.planHeadlines(st, today);
+  const C = H.computeAll(st, today);
+  const cur = H.currentMonthOf(st.years[y], today);
+  const liquid = C[y].balances[`total|${cur}`];
+  eq(h.year, y);
+  eq(h.liquid, liquid, 'the same figure the grid shows this month');
+  eq(h.netWorth, H.netWorthTotals(st, liquid, C[y], cur).total,
+    'and the same total the Net Worth card does');
+  const pulse = H.savingsPulse(st.years[y], C[y], y, liquid);
+  eq(h.savingsRate, pulse.rate);
+  eq(h.income, pulse.income);
+  eq(h.spending, pulse.spent);
+  ok(typeof h.retirementPot === 'number', 'the sample has a household, so it has a pot');
+});
+t('a plan with nothing in it answers nothing, rather than answering zero', () => {
+  const h = H.planHeadlines(H.coerceShape({}), '2030-06-15');
+  eq(h.year, null);
+  eq(h.netWorth, null, 'no plan is not a net worth of nothing');
+  eq(h.savingsRate, null);
+  eq(h.retirementPot, null, 'and nobody retiring is not a pot of zero');
+});
+t('a difference is only worked out where both sides have an answer', () => {
+  const a = H.coerceShape({ settings: { accounts: [{ id: 'cash', name: 'Cash', hub: true }] },
+    years: { '2030': { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 12,
+      enteredThrough: '2030-06',
+      categories: [{ id: 'pay', name: 'Pay', section: 'income' },
+                   { id: 'rent', name: 'Rent', section: 'expense' }],
+      cells: { 'pay|2030-01': { v: 1000, kind: 'actual' },
+               'rent|2030-01': { v: -400, kind: 'actual' } },
+      seeds: { cash: 5000 } } } });
+  const b = JSON.parse(JSON.stringify(a));
+  b.years['2030'].cells['rent|2030-01'] = { v: -800, kind: 'actual' };
+  const rows = H.comparePlans(a, H.coerceShape(b), '2030-03-15');
+  const by = Object.fromEntries(rows.map(r => [r.key, r]));
+  ok(by.spending.delta > 0, 'the second plan spends more');
+  eq(by.spending.better, false, 'and more spending is NOT an improvement');
+  eq(by.netWorth.better, false, 'nor is the smaller net worth that follows');
+  ok(!rows.some(r => r.key === 'retirementPot'),
+    'neither plan has anybody retiring, so the row is dropped rather than dashed');
+});
+t('more owed reads as worse, and a year reads as neither', () => {
+  const rows = H.COMPARE_ROWS;
+  eq(rows.find(r => r.key === 'owed').higher, false,
+    'a comparison that drew every increase as good would be worse than none');
+  eq(rows.find(r => r.key === 'spending').higher, false);
+  eq(rows.find(r => r.key === 'runsOutYear').higher, null, 'later is simply later');
+  eq(rows.find(r => r.key === 'netWorth').higher, true);
+});
+t('a row only one plan can answer is kept, dashed, because that IS the finding', () => {
+  const bare = H.coerceShape({ settings: { accounts: [{ id: 'cash', name: 'Cash', hub: true }] },
+    years: { '2030': { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 12,
+      enteredThrough: '2030-06',
+      categories: [{ id: 'pay', name: 'Pay', section: 'income' }],
+      cells: { 'pay|2030-01': { v: 1000, kind: 'actual' } }, seeds: { cash: 100 } } } });
+  const withPeople = H.migrate(H.coerceShape(H.sampleState()));
+  const rows = H.comparePlans(bare, withPeople, '2030-03-15');
+  const pot = rows.find(r => r.key === 'retirementPot');
+  ok(pot, 'the row survives');
+  eq(pot.a, null, 'one side says nothing');
+  ok(typeof pot.b === 'number', 'the other does');
+  eq(pot.delta, null, 'and no difference is invented between a figure and a silence');
+});
+t('comparing changes nothing at all', () => {
+  const st = H.migrate(H.coerceShape(H.sampleState()));
+  const before = JSON.stringify(st);
+  const other = H.migrate(H.coerceShape(H.sampleState()));
+  H.comparePlans(st, other, '2030-03-15');
+  eq(JSON.stringify(st), before, 'a comparison that could edit a plan is a bug waiting');
+});
+
+group('Money in another currency');
+t('a rate is the reader’s, read strictly, and never the plan’s own currency', () => {
+  const d = H.coerceShape({ settings: { currency: 'USD' }, side: { rates: {
+    gbp: { rate: '1.27', asOf: '2026-07-01' },
+    EUR: { rate: 0 },
+    JPY: { rate: 'junk' },
+    USD: { rate: 2 },
+    TOOLONG: { rate: 1.1 } } } });
+  eq(Object.keys(d.side.rates), ['GBP'], 'upper-cased, and only what is a rate');
+  eq(d.side.rates.GBP, { rate: 1.27, asOf: '2026-07-01' });
+});
+t('an unrated currency is left out and named, never counted at face value', () => {
+  const st = H.coerceShape({ settings: { currency: 'USD' }, side: {
+    property: [{ id: 'flat', name: 'Flat', kind: 'home', value: 100000, cur: 'GBP' },
+               { id: 'house', name: 'House', kind: 'home', value: 50 }] } });
+  const nw = H.netWorthParts(st, '2030-04');
+  eq(nw.property, 50, 'the flat is not added in at 100,000 dollars');
+  eq(nw.unconverted, ['Flat (GBP)'], 'and the card can say which and why');
+});
+t('a rate converts the property, the debt on it and a whole pane', () => {
+  const st = H.coerceShape({ settings: { currency: 'USD' }, side: {
+    rates: { GBP: { rate: 2 } },
+    property: [{ id: 'flat', name: 'Flat', kind: 'home', value: 100, cur: 'GBP' }],
+    liabilities: [{ id: 'm', name: 'Mortgage', balance: 40, securedOn: 'flat', cur: 'GBP' },
+                  { id: 'v', name: 'Visa', kind: 'card', balance: 10, cur: 'GBP' }],
+    portfolios: [{ id: 'isa', name: 'ISA', cur: 'GBP',
+      rows: [{ ticker: 'VWRL', shares: 10, price: 5 }] }] } });
+  const nw = H.netWorthParts(st, '2030-04');
+  eq(nw.unconverted, [], 'everything can be valued');
+  eq(nw.property, 120, '(100 − 40) × 2');
+  eq(nw.debts, 20, '10 × 2');
+  eq(nw.invested, 100, '50 of holdings at 2');
+});
+t('the plan’s own currency needs no rate and never gets one', () => {
+  const st = H.coerceShape({ settings: { currency: 'GBP' }, side: {
+    property: [{ id: 'flat', name: 'Flat', kind: 'home', value: 100, cur: 'GBP' }] } });
+  eq(st.side.property[0].cur, undefined, 'the plan currency is not a foreign one');
+  eq(H.planRate(st, 'GBP').rate, 1);
+  eq(H.planRate(st, undefined).rate, 1, 'and absent means the same thing');
+  eq(H.planRate(st, 'USD'), null, 'while an unrated one has no answer at all');
+});
+t('conversion is one function, and it says when it cannot', () => {
+  const st = H.coerceShape({ settings: { currency: 'USD' },
+    side: { rates: { GBP: { rate: 1.25 } } } });
+  eq(H.inPlanCurrency(st, 80, 'GBP').v, 100);
+  eq(H.inPlanCurrency(st, 80, 'gbp').v, 100, 'however it is cased');
+  eq(H.inPlanCurrency(st, 80).v, 80, 'no code is the plan’s own money');
+  eq(H.inPlanCurrency(st, 80, 'JPY'), { v: 0, unknown: true, code: 'JPY' });
+});
+t('a foreign figure keeps its own symbol, and only totals convert', () => {
+  /* The first thing this got wrong: printing 96,000 pounds as "$96,000.00" —
+     the wrong figure wearing the right symbol, which is the exact failure the
+     rate table exists to prevent. */
+  ok(/£/.test(H.fmtMoneyIn(96000, 'GBP')), 'pounds are drawn as pounds');
+  eq(H.fmtMoneyIn(96000, 'USD'), H.fmtMoney(96000), "the plan's own currency is unchanged");
+  eq(H.fmtMoneyIn(96000), H.fmtMoney(96000), 'and so is no currency at all');
+  ok(/ZZZ/.test(H.fmtMoneyIn(5, 'ZZZ')), 'a code Intl does not know falls back rather than throwing');
+});
+t('the sample holds something abroad, or the feature never shows itself', () => {
+  const s = H.sampleState();
+  ok(Object.keys(s.side.rates || {}).length, 'a stated rate');
+  ok(s.side.property.some(p => p.cur), 'and something priced in it');
+  const st = H.migrate(H.coerceShape(s));
+  eq(H.netWorthParts(st, `${new Date().getFullYear()}-08`).unconverted, [],
+    'every foreign figure in the sample has a rate behind it');
+});
+
+group('A year, coming back from a spreadsheet');
+t('the parser survives quotes, commas and the BOM the export writes', () => {
+  const rows = H.csvRows('﻿a,b\r\n"Rent, water","say ""hi"""\r\n');
+  eq(rows, [['a', 'b'], ['Rent, water', 'say "hi"']],
+    'split(",") would make three columns of the second row and put the year out');
+});
+t('a file that is not an exported year is refused whole, and says why', () => {
+  ok(/Section and Row/.test(H.readGridCsv('Date,Amount\n2026-01-01,5').refusal));
+  ok(/no month columns/.test(H.readGridCsv('Section,Row,Total\nIncome,Pay,5').refusal));
+  ok(/one year at a time/.test(
+    H.readGridCsv('Section,Row,2025-12,2026-01\nIncome,Pay,5,6').refusal));
+  ok(/empty/.test(H.readGridCsv('').refusal));
+  ok(/Income, Expenses or Transfers/.test(
+    H.readGridCsv('Section,Row,2026-01\nAccounts,Everyday,500').refusal),
+    'a file of nothing but balances has nothing this can import');
+});
+t('an absurd file is refused rather than walked a character at a time', () => {
+  const huge = 'Section,Row,2026-01\n' + 'Expenses,Rent,-1\n'.repeat(5);
+  ok(!H.readGridCsv(huge).refusal, 'a normal file is fine');
+  ok(/far too big/.test(H.readGridCsv('x'.repeat(2_000_001)).refusal),
+    'the wrong file out of a Downloads folder gets a refusal, not a locked tab');
+});
+t('the computed lines are skipped rather than typed over the engine', () => {
+  const p = H.readGridCsv(['Section,Row,2026-01,2026-02,2026 total',
+    'Income,Pay,100,100,200',
+    'Income,Interest & Dividends,4,4,8',
+    'Expenses,Rent,-50,-50,-100',
+    'Accounts,Everyday,900,950,950'].join('\n'));
+  eq(p.year, '2026');
+  eq(p.months, ['2026-01', '2026-02'], 'the total column is not a month');
+  eq(p.rows.map(r => r.name), ['Pay', 'Rent']);
+  eq(p.skipped, 2, 'the earnings line and the balance row, counted rather than ignored');
+});
+t('an imported figure lands the way a typed one would', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-02',
+    categories: [{ id: 'rent', name: 'Rent', section: 'expense' }], cells: {} } } });
+  const p = H.readGridCsv(['Section,Row,2026-01,2026-05',
+    'Expenses,Rent,-50,-60'].join('\n'));
+  const out = H.applyGridCsv(st, p, '2026-03-01');
+  eq(out.set, 2);
+  eq(st.years['2026'].cells['rent|2026-01'], { v: -50, kind: 'actual' },
+    'a month already entered is a fact');
+  eq(st.years['2026'].cells['rent|2026-05'], { v: -60, kind: 'manual' },
+    'and one beyond it is the reader’s own estimate — exactly what typing does');
+});
+t('an empty column empties the month, which is what a round trip means', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-12',
+    categories: [{ id: 'rent', name: 'Rent', section: 'expense' }],
+    cells: { 'rent|2026-01': { v: -50, kind: 'actual' },
+             'rent|2026-02': { v: -50, kind: 'actual' },
+             'rent|2026-09': { v: -70, kind: 'actual' } } } } });
+  const out = H.applyGridCsv(st,
+    H.readGridCsv('Section,Row,2026-01,2026-02\nExpenses,Rent,-55,'), '2026-03-01');
+  eq(out.set, 1); eq(out.cleared, 1);
+  eq(st.years['2026'].cells['rent|2026-02'], undefined, 'the file speaks for its columns');
+  eq(st.years['2026'].cells['rent|2026-09'].v, -70,
+    'and only for its columns — a month the file has no column for is untouched');
+});
+t('a row the plan does not have is added, not dropped', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-12',
+    categories: [{ id: 'rent', name: 'Rent', section: 'expense' }], cells: {} } } });
+  const out = H.applyGridCsv(st,
+    H.readGridCsv('Section,Row,2026-01\nExpenses,Nursery,-600\nIncome,Rent,5'), '2026-03-01');
+  eq(out.added, 2, 'a new name, AND a name that only matches in another section');
+  const cats = st.years['2026'].categories.map(c => [c.id, c.name, c.section]);
+  eq(cats.length, 3);
+  ok(cats.some(c => c[1] === 'Nursery' && c[2] === 'expense'));
+  ok(cats.some(c => c[1] === 'Rent' && c[2] === 'income'),
+    'matching is within a section — an income row called Rent is not the expense one');
+});
+t('a name matches however it is cased, so a rename in Excel does not fork the row', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-12',
+    categories: [{ id: 'rent', name: 'Rent', section: 'expense' }], cells: {} } } });
+  H.applyGridCsv(st, H.readGridCsv('Section,Row,2026-01\nExpenses,  rent ,-50'), '2026-03-01');
+  eq(st.years['2026'].categories.length, 1, 'one row, not two');
+  eq(st.years['2026'].cells['rent|2026-01'].v, -50);
+});
+t('there is nowhere to import a year the plan has never had', () => {
+  const st = H.coerceShape({ years: {} });
+  ok(/no 2026 budget grid/.test(
+    H.applyGridCsv(st, H.readGridCsv('Section,Row,2026-01\nExpenses,Rent,-50'), '2026-03-01').refusal));
+});
+t('a year exported and imported comes back the same', () => {
+  /* The round trip that is the whole point. Export a year, empty a copy's typed
+     cells, read the file straight back in, and every figure returns. */
+  const st = H.migrate(H.coerceShape(H.sampleState()));
+  const y = Object.keys(st.years).filter(k => st.years[k].kind === 'grid').sort().pop();
+  const C = H.computeAll(st, `${y}-08-15`);
+  const csv = H.gridToCsv(st, C[y], y);
+  const copy = H.migrate(H.coerceShape(JSON.parse(JSON.stringify(st))));
+  copy.years[y].cells = {};
+  const out = H.applyGridCsv(copy, H.readGridCsv(csv), `${y}-08-15`);
+  ok(out.set > 0, 'something came back');
+  eq(out.added, 0, 'every row matched by name — nothing forked into a new one');
+  const before = C[y];
+  const after = H.computeAll(copy, `${y}-08-15`)[y];
+  for (const cat of st.years[y].categories)
+    for (const m of before.months)
+      eq(H.round2((after.cells[`${cat.id}|${m}`] || {}).v || 0),
+         H.round2((before.cells[`${cat.id}|${m}`] || {}).v || 0),
+         `${cat.name} ${m}`);
+});
+
+group('What this year owes');
+t('the tables answer the nearest question as well as the furthest one', () => {
+  /* The card is markup, so what is pinned here is the arithmetic under it —
+     the same three functions it calls, over an invented table. */
+  const st = H.coerceShape({
+    settings: { filingStatus: 'single' },
+    side: {
+      comp: { '2030': { salary: 100000, raisePct: 0, equity: 20000 } },
+      bonuses: { '2030': 10000 },
+      tax: { federal: { '2030': { single: { deduction: 30000, bands: [
+        { upTo: 50000, rate: 0.10 }, { upTo: null, rate: 0.20 }] } } },
+        state: {} } } });
+  const gross = H.grossIncome(st, '2030');
+  eq(gross, 130000, 'the whole package, not the salary');
+  const t = H.taxTableFor(st, 'federal', '2030', 'single').table;
+  eq(H.taxableAfter(gross, t), 100000, 'less the deduction typed');
+  eq(H.taxOn(100000, t), 15000, '10% of the first 50k, 20% of the rest');
+  eq(H.round2(H.effectiveRateOn(gross, t) * 100), 11.54, 'measured on the whole package');
+  eq(H.marginalRateOn(100000, t), 0.20, 'and the next dollar is named separately');
+});
+t('a year with no table of its own carries the newest one forward', () => {
+  const st = H.coerceShape({ settings: { filingStatus: 'single' }, side: {
+    comp: { '2033': { salary: 50000, raisePct: 0 } },
+    tax: { federal: { '2030': { single: { bands: [{ upTo: null, rate: 0.10 }] } } }, state: {} } } });
+  const got = H.taxTableFor(st, 'federal', '2033', 'single');
+  eq(got.fromYear, '2030', 'the card names the year it is reading, never assumes');
+});
+t('no table means no figure, which is the promise the whole tab keeps', () => {
+  const st = H.coerceShape({ side: { comp: { '2030': { salary: 100000 } },
+    tax: { federal: {}, state: {} } } });
+  eq(H.taxTablesFor(st, '2030').federal, null);
+  eq(H.taxTablesFor(st, '2030').state, null, 'so the card does not draw at all');
+});
+
+group('The whole package');
+t('gross income counts equity and the employer contribution', () => {
+  const d = H.coerceShape({ side: {
+    comp: { '2030': { salary: 100000, raisePct: 0.05, equity: 20000, match: 9000 } },
+    bonuses: { '2030': 10000 } } });
+  eq(H.grossIncome(d, '2030'), 144000, '105,000 after the raise, plus 10k, 20k and 9k');
+  const parts = H.compParts(d, '2030');
+  eq([parts.salary, parts.bonus, parts.equity, parts.match, parts.total],
+     [105000, 10000, 20000, 9000, 144000]);
+});
+t('a plan that has never tracked either is unchanged, to the cent', () => {
+  /* The whole reason both fields are absent rather than 0: this figure is the
+     denominator of every giving percentage in the app. */
+  const d = H.coerceShape({ side: {
+    comp: { '2030': { salary: 100000, raisePct: 0 } }, bonuses: { '2030': 5000 } } });
+  eq(H.grossIncome(d, '2030'), 105000);
+  const parts = H.compParts(d, '2030');
+  eq(parts.equity, undefined, 'so the tab draws a column only once somebody records one');
+  eq(parts.match, undefined);
+});
+t('an unreadable equity figure is dropped, never stored as nothing-vested', () => {
+  const d = H.coerceShape({ side: { comp: {
+    '2030': { salary: 1, equity: 'junk', match: '4000' },
+    '2031': { salary: 1, equity: 0 } } } });
+  eq(d.side.comp['2030'].equity, undefined);
+  eq(d.side.comp['2030'].match, 4000, 'a numeric string still reads');
+  eq(d.side.comp['2031'].equity, 0, 'but a typed zero is a statement and is kept');
+});
+t('the giving share is measured against the whole package', () => {
+  const st = H.coerceShape({ side: {
+    comp: { '2030': { salary: 100000, raisePct: 0, equity: 25000 } },
+    bonuses: {},
+    donations: { '2030': [{ date: '2030-03-01', cash: -5000 }] } } });
+  const stats = H.givingStats(st, {}, '2031-01-01');
+  eq(stats[0].gross, 125000, 'or somebody paid in shares reads a share of the wrong number');
+  eq(H.round2(stats[0].grossPct * 100), 4);
+});
+t('the sample records both, so the tab shows what it can do', () => {
+  const s = H.sampleState();
+  const years = Object.keys(s.side.comp);
+  ok(years.some(y => typeof s.side.comp[y].equity === 'number'), 'equity');
+  ok(years.some(y => typeof s.side.comp[y].match === 'number'), 'an employer contribution');
+});
+
+group('Where the money goes');
+t('a year splits into its expense rows, netted and read as positives', () => {
+  const st = H.coerceShape({ years: { '2030': { kind: 'grid', startMonth: '2030-01',
+    monthCount: 12, categories: [
+      { id: 'rent', name: 'Rent', section: 'expense' },
+      { id: 'food', name: 'Food', section: 'expense' },
+      { id: 'pay', name: 'Pay', section: 'income' },
+      { id: 'sav', name: 'To savings', section: 'transfer' },
+    ], cells: {
+      'rent|2030-01': { v: -1000, kind: 'actual' },
+      'rent|2030-02': { v: -1000, kind: 'actual' },
+      'food|2030-01': { v: -400, kind: 'actual' },
+      'food|2030-02': { v: 50, kind: 'actual' },      // a refund
+      'pay|2030-01': { v: 5000, kind: 'actual' },
+      'sav|2030-01': { v: -900, kind: 'actual' },
+    } } } });
+  const rows = H.categorySpend(st.years['2030'], null, '2030');
+  eq(rows.map(r => [r.name, r.total]), [['Rent', 2000], ['Food', 350]],
+    'expenses only, netted — the refund comes off Food, and a transfer is not spending');
+  eq(H.round2(rows.reduce((t, r) => t + r.total, 0)),
+     H.yearSpending(st.years['2030'], null, '2030'),
+     'the parts add up to the total the bars are drawn from');
+});
+t('a yearly summary splits into its own flow rows', () => {
+  const st = H.coerceShape({ years: { '2020': { kind: 'summary', categoryTotals: [
+    { name: 'Rent', total: -900 }, { name: 'Pay', total: 4000 },
+    { name: 'Savings', total: 1200, isBalance: true } ] } } });
+  eq(H.categorySpend(st.years['2020'], null, '2020').map(r => [r.name, r.total]),
+    [['Rent', 900]], 'money out only, and never a balance row');
+});
+t('two years line up by row, so a rename keeps its history in one line', () => {
+  const st = H.coerceShape({ years: {
+    '2029': { kind: 'grid', startMonth: '2029-01', monthCount: 12, categories: [
+      { id: 'rent', name: 'Rent', section: 'expense' },
+      { id: 'gone', name: 'Gym', section: 'expense' }],
+      cells: { 'rent|2029-01': { v: -900 }, 'gone|2029-01': { v: -40 } } },
+    '2030': { kind: 'grid', startMonth: '2030-01', monthCount: 12, categories: [
+      { id: 'rent', name: 'Rent, renamed', section: 'expense' },
+      { id: 'new', name: 'Nursery', section: 'expense' }],
+      cells: { 'rent|2030-01': { v: -1000 }, 'new|2030-01': { v: -600 } } } } });
+  const mix = H.spendingMix(st, null, '2030', '2029');
+  eq(mix.prevDetailed, true);
+  const by = Object.fromEntries(mix.rows.map(r => [r.name, r]));
+  eq(by['Rent, renamed'].was, 900, 'matched on the row, not on what it is called');
+  eq(by['Rent, renamed'].change, 100);
+  eq(by['Nursery'].was, null, 'genuinely new');
+  eq(by['Gym'].total, 0, 'a row that stopped still gets a line');
+  eq(by['Gym'].change, -40);
+  eq(mix.rows[0].name, 'Rent, renamed', 'biggest first');
+  eq(H.round2(by['Rent, renamed'].share * 100), 62.5, 'share of what THIS year spent');
+});
+t('against a yearly summary the match falls back to names', () => {
+  const st = H.coerceShape({ years: {
+    '2029': { kind: 'summary', categoryTotals: [{ name: 'Rent', total: -900 }] },
+    '2030': { kind: 'grid', startMonth: '2030-01', monthCount: 12,
+      categories: [{ id: 'rent', name: 'Rent', section: 'expense' }],
+      cells: { 'rent|2030-01': { v: -1000 } } } } });
+  const mix = H.spendingMix(st, null, '2030', '2029');
+  eq(mix.rows[0].was, 900, 'a summary has no ids, so the name is the only handle');
+  eq(mix.prevTotal, 900);
+});
+t('a year with nothing to compare says so rather than calling every row new', () => {
+  const st = H.coerceShape({ years: {
+    '2029': { kind: 'summary', categoryTotals: [] },
+    '2030': { kind: 'grid', startMonth: '2030-01', monthCount: 12,
+      categories: [{ id: 'rent', name: 'Rent', section: 'expense' }],
+      cells: { 'rent|2030-01': { v: -1000 } } } } });
+  const mix = H.spendingMix(st, null, '2030', '2029');
+  eq(mix.prevDetailed, false, 'the card drops the columns rather than printing "new"');
+  eq(mix.rows[0].was, null);
+});
+t('a row that has never been used is not a finding', () => {
+  const st = H.coerceShape({ years: { '2030': { kind: 'grid', startMonth: '2030-01',
+    monthCount: 12, categories: [
+      { id: 'rent', name: 'Rent', section: 'expense' },
+      { id: 'idle', name: 'Never used', section: 'expense' }],
+    cells: { 'rent|2030-01': { v: -1000 } } } } });
+  const mix = H.spendingMix(st, null, '2030', null);
+  eq(mix.rows.map(r => r.name), ['Rent'], 'a screenful of $0.00 is how a table stops being read');
+});
+t('the sample history has rows in it, or three charts draw nothing', () => {
+  const s = H.sampleState();
+  const years = Object.keys(s.years).filter(y => s.years[y].kind === 'summary');
+  ok(years.length >= 2, 'two years of history');
+  for (const y of years) {
+    const rows = s.years[y].categoryTotals || [];
+    ok(rows.some(r => !r.isBalance && r.total < 0), `${y} records what it spent`);
+    ok(rows.some(r => r.isBalance), `${y} closes its accounts`);
+  }
+  const st = H.migrate(H.coerceShape(s));
+  const live = Object.keys(st.years).filter(y => st.years[y].kind === 'grid').sort().pop();
+  const prev = Object.keys(st.years).filter(y => y < live).sort().pop();
+  const mix = H.spendingMix(st, H.computeAll(st, `${live}-08-15`), live, prev);
+  ok(mix.prevDetailed, 'so Where the Money Goes has a year to compare against');
+  ok(mix.rows.some(r => r.total === 0 && r.was),
+    'including a row that stopped — the case the comparison must not drop');
+});
+
+group('What you owe');
+t('a schedule pays the interest first and the last payment is only what is left', () => {
+  const a = H.amortize({ balance: 1000, rate: 0.12, payment: 300 });
+  eq(a.schedule[0].interest, 10, '1% of 1000 in the first month');
+  eq(a.schedule[0].principal, 290);
+  eq(a.months, 4, 'four payments clears it');
+  ok(a.schedule[3].principal < 300, 'the last one is only the remainder, never an overshoot');
+  eq(a.schedule[3].balance, 0, 'and it lands exactly on zero, never below');
+});
+t('no payment is no projection, and a payment under the interest says so', () => {
+  eq(H.amortize({ balance: 1000, rate: 0.12 }), null, 'nothing said, nothing claimed');
+  const never = H.amortize({ balance: 1000, rate: 0.12, payment: 10 });
+  eq(never.never, true, 'a payment exactly equal to the interest never clears it');
+  eq(never.months, null, 'and there is no month to name');
+  eq(H.amortize({ balance: 0, rate: 0.12, payment: 10 }).months, 0, 'nothing owed is nothing owed');
+});
+t('a balance is paid down to the month you ask about, never before its statement', () => {
+  const l = { balance: 1000, rate: 0.12, payment: 300, asOf: '2030-01' };
+  eq(H.liabilityAt(l, '2030-01'), 1000, 'the month it was stated is the stated figure');
+  eq(H.liabilityAt(l, '2029-06'), 1000, 'and nothing is ever run backwards');
+  eq(H.liabilityAt(l, '2030-02'), 710, 'one payment on');
+  eq(H.liabilityAt(l, '2030-09'), 0, 'past the end it is paid off, not negative');
+  eq(H.liabilityAt({ balance: 1000, rate: 0.12, payment: 300 }, '2030-09'), 1000,
+    'no asOf, so the figure simply stands — a fact about no particular day');
+  eq(H.payoffMonth(l), '2030-05', 'four payments from January');
+  eq(H.payoffMonth({ balance: 1000, rate: 0.12, payment: 10, asOf: '2030-01' }), null,
+    'a debt that never clears has no payoff month to name');
+});
+t('a secured debt comes off the property, an unsecured one stands on its own', () => {
+  const st = H.coerceShape({ side: {
+    property: [{ id: 'house', name: 'House', kind: 'home', value: 400 }],
+    liabilities: [
+      { id: 'm', name: 'Mortgage', kind: 'mortgage', balance: 250, securedOn: 'house' },
+      { id: 'v', name: 'Visa', kind: 'card', balance: 30 },
+    ] } });
+  const nw = H.netWorthParts(st, '2030-04');
+  eq(nw.property, 150, 'value minus what is secured on it — the old owed arithmetic');
+  eq(nw.debts, 30, 'and the card stands on its own');
+  eq(nw.hasDebts, true);
+  eq(nw.propertyOwed, 250);
+});
+t('a debt secured on a property that is gone still counts, just elsewhere', () => {
+  /* The property of the split worth knowing: which tile a figure lands in can
+     change, the total cannot. */
+  const st = H.coerceShape({ side: {
+    property: [{ id: 'house', name: 'House', kind: 'home', value: 400 }],
+    liabilities: [{ id: 'm', name: 'Mortgage', balance: 250, securedOn: 'house' }] } });
+  const gone = H.coerceShape({ side: {
+    property: [{ id: 'house', name: 'House', kind: 'home', value: 400 }],
+    liabilities: [{ id: 'm', name: 'Mortgage', balance: 250, securedOn: 'shed' }] } });
+  eq(gone.side.liabilities[0].securedOn, undefined, 'the dangling pointer is dropped');
+  const c = { balances: {} };
+  eq(H.netWorthTotals(st, 0, c, '2030-04').total,
+     H.netWorthTotals(gone, 0, c, '2030-04').total, 'same net worth either way');
+  eq(H.netWorthTotals(st, 0, c, '2030-04').total, 150);
+});
+t('net worth uses what is owed NOW, not what was stated', () => {
+  const st = H.coerceShape({ side: { liabilities: [
+    { id: 'v', name: 'Visa', kind: 'card', balance: 1000, rate: 0.12,
+      payment: 300, asOf: '2030-01' } ] } });
+  eq(H.netWorthParts(st, '2030-03').debts, 417.1, 'two payments in');
+  eq(H.netWorthParts(st, '2030-01').debts, 1000, 'as stated, in the month it was stated');
+});
+t('a debt is read strictly — a corrupt rate is not a free loan', () => {
+  const d = H.coerceShape({ side: { liabilities: [
+    { name: 'Loan', kind: 'nonsense', balance: '5000', rate: 'junk', payment: '250',
+      asOf: 'whenever', securedOn: 'nothing-here' } ] } });
+  const l = d.side.liabilities[0];
+  eq(l.kind, 'other', 'an unknown kind is Other, the property rule');
+  eq(l.balance, 5000, 'a numeric string still reads');
+  eq(l.rate, undefined, 'unreadable drops — it must not become "charges no interest"');
+  eq(l.payment, 250);
+  eq(l.asOf, undefined, 'and a malformed month is no month');
+  eq(l.securedOn, undefined);
+  ok(H.ID_OK === undefined || true);
+  ok(/^[A-Za-z0-9_-]{1,64}$/.test(l.id), 'a row with no id is minted one');
+});
+t('two things with the same name get different ids', () => {
+  const d = H.coerceShape({ side: { property: [
+    { name: 'Car', kind: 'vehicle', value: 1 }, { name: 'Car', kind: 'vehicle', value: 2 } ] } });
+  const ids = d.side.property.map(p => p.id);
+  eq(ids, ['car', 'car-2'], 'or securedOn could not tell them apart');
+  eq(H.uniqueId(d.side.property, 'Car', 'property'), 'car-3', 'and a third joins the queue');
+});
+t('a well-formed id is never moved, because something may point at it', () => {
+  const d = H.coerceShape({ side: {
+    property: [{ id: 'the-shed', name: 'Renamed since', kind: 'other', value: 1 }],
+    liabilities: [{ id: 'x', name: 'Loan', balance: 1, securedOn: 'the-shed' }] } });
+  eq(d.side.property[0].id, 'the-shed', 'the id is not re-slugged from the new name');
+  eq(d.side.liabilities[0].securedOn, 'the-shed', 'so the link survives the rename');
+});
+t('schema 7 moves what was owed onto a debt of its own, once', () => {
+  const before = { schema: 6, side: { property: [
+    { name: 'House', kind: 'home', value: 400000, owed: 250000 },
+    { name: 'Bike', kind: 'other', value: 900 } ] } };
+  const st = H.migrate(H.coerceShape(before));
+  eq(st.schema, 7);
+  eq(st.side.property[0].owed, undefined, 'the number is off the property row');
+  eq(st.side.liabilities.length, 1, 'and nothing was invented for the row that owed nothing');
+  const l = st.side.liabilities[0];
+  eq(l.kind, 'mortgage', 'a home carries a mortgage');
+  eq(l.balance, 250000);
+  eq(l.securedOn, st.side.property[0].id);
+  eq(l.rate, undefined, 'no rate, payment or date is invented — the reader says those');
+  /* The migration must not move the number the reader already recorded. */
+  eq(H.netWorthParts(st, '2030-04').property, 150900,
+    'net worth is identical to the cent after the move');
+  eq(H.netWorthParts(H.coerceShape(before), '2030-04').property, 150900, 'as it was before it');
+  const twice = H.migrate(H.migrate(H.coerceShape(before)));
+  eq(twice.side.liabilities.length, 1, 'and it happens once, not on every load');
+});
+t('a snapshot can state what was owed, and it comes OFF the total', () => {
+  const pts = H.snapshotPoints(H.coerceShape({ side: { snapshots: [
+    { date: '2030-01-01', liquid: 100, property: 400, debts: 250 } ] } }));
+  eq(pts[0].total, 250, 'assets add up, debts come off — never all six reduced together');
+  eq(H.SNAPSHOT_PARTS.includes('debts'), true);
+  eq(H.SNAPSHOT_ASSETS.includes('debts'), false, 'the two lists must not drift into one');
+});
+t('the sample plan shows every shape of debt', () => {
+  const s = H.sampleState();
+  const kinds = s.side.liabilities.map(l => l.kind);
+  ok(kinds.includes('mortgage') && kinds.includes('student'),
+    'a secured one and an unsecured one, or the card only ever shows half itself');
+  ok(s.side.liabilities.some(l => !l.payment),
+    'and one with nothing to project from, which is the state that asks for a payment');
+  ok(s.side.property.every(p => p.owed === undefined),
+    'no property row carries the old owed field — it would migrate into a duplicate');
+  const ids = new Set(s.side.property.map(p => p.id));
+  for (const l of s.side.liabilities)
+    ok(!l.securedOn || ids.has(l.securedOn), `${l.id} points at a property that exists`);
 });
 
 group('CSV export');
@@ -7499,6 +8104,42 @@ t('sw.js and its kill switch are both present', async () => {
   ok(b.ok, 'sw-kill.js is missing — the escape hatch has to exist BEFORE it is needed');
   ok(c.ok, 'index.html is missing');
   SW_SRC = await a.text(); KILL_SRC = await b.text(); APP_SRC = await c.text();
+});
+
+/* ── Paper ───────────────────────────────────────────────────────────────────
+   The print block's one hard rule: it declares no colour. The palettes belong
+   to the theme pack, and a print palette written into this file would be a
+   fifth theme with nobody's contrast gate over it. Printing borrows the pack's
+   own light theme in JS instead, which is what this pins. */
+t('the print stylesheet sets no colour of its own', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const at = APP_SRC.indexOf('@media print');
+  ok(at > 0, 'there is a print stylesheet at all');
+  /* To the end of the block, counting braces from the one that opens it. */
+  let i = APP_SRC.indexOf('{', at), depth = 0, end = i;
+  for (; i < APP_SRC.length; i++) {
+    if (APP_SRC[i] === '{') depth++;
+    else if (APP_SRC[i] === '}' && !--depth) { end = i; break; }
+  }
+  const block = APP_SRC.slice(at, end);
+  ok(!/#[0-9a-fA-F]{3,8}\b/.test(block), 'no hex — that is a palette, and palettes live in the pack');
+  ok(!/\brgba?\(/.test(block), 'nor an rgb()');
+  ok(!/\bhsla?\(/.test(block), 'nor an hsl()');
+  ok(!/(^|[^-])\bcolor\s*:/.test(block.replace(/print-color-adjust/g, '')),
+    'and it never sets a colour property, only what to hide and where to break');
+  ok(/beforeprint/.test(APP_SRC) && /afterprint/.test(APP_SRC),
+    'because the colour question is answered by borrowing the light theme instead');
+  ok(/data-theme', on \? 'light'/.test(APP_SRC),
+    "and it borrows the PACK's light theme rather than inventing one");
+});
+t('printing hides the furniture and opens the scrollers', () => {
+  const at = APP_SRC.indexOf('@media print');
+  const block = APP_SRC.slice(at, APP_SRC.indexOf('</style>', at));
+  for (const sel of ['.tabs', '.addbar', '#themeSel'])
+    ok(block.includes(sel), `${sel} is a way in, and there is no clicking on paper`);
+  ok(/\.gridwrap[\s\S]{0,160}overflow: visible/.test(block),
+    'a budget year is twelve months wide and printing one means printing the twelve');
+  ok(/@page[\s\S]{0,60}landscape/.test(block), 'and it asks for landscape, for the same reason');
 });
 
 /* ── The footer every public page in this account carries ────────────────────
