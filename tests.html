@@ -3395,6 +3395,107 @@ t('the total counts a linked pot once, at what the holdings are worth', () => {
     'an empty pane claims nothing — its accounts stay counted as themselves');
 });
 
+group('A year, coming back from a spreadsheet');
+t('the parser survives quotes, commas and the BOM the export writes', () => {
+  const rows = H.csvRows('﻿a,b\r\n"Rent, water","say ""hi"""\r\n');
+  eq(rows, [['a', 'b'], ['Rent, water', 'say "hi"']],
+    'split(",") would make three columns of the second row and put the year out');
+});
+t('a file that is not an exported year is refused whole, and says why', () => {
+  ok(/Section and Row/.test(H.readGridCsv('Date,Amount\n2026-01-01,5').refusal));
+  ok(/no month columns/.test(H.readGridCsv('Section,Row,Total\nIncome,Pay,5').refusal));
+  ok(/one year at a time/.test(
+    H.readGridCsv('Section,Row,2025-12,2026-01\nIncome,Pay,5,6').refusal));
+  ok(/empty/.test(H.readGridCsv('').refusal));
+  ok(/Income, Expenses or Transfers/.test(
+    H.readGridCsv('Section,Row,2026-01\nAccounts,Everyday,500').refusal),
+    'a file of nothing but balances has nothing this can import');
+});
+t('the computed lines are skipped rather than typed over the engine', () => {
+  const p = H.readGridCsv(['Section,Row,2026-01,2026-02,2026 total',
+    'Income,Pay,100,100,200',
+    'Income,Interest & Dividends,4,4,8',
+    'Expenses,Rent,-50,-50,-100',
+    'Accounts,Everyday,900,950,950'].join('\n'));
+  eq(p.year, '2026');
+  eq(p.months, ['2026-01', '2026-02'], 'the total column is not a month');
+  eq(p.rows.map(r => r.name), ['Pay', 'Rent']);
+  eq(p.skipped, 2, 'the earnings line and the balance row, counted rather than ignored');
+});
+t('an imported figure lands the way a typed one would', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-02',
+    categories: [{ id: 'rent', name: 'Rent', section: 'expense' }], cells: {} } } });
+  const p = H.readGridCsv(['Section,Row,2026-01,2026-05',
+    'Expenses,Rent,-50,-60'].join('\n'));
+  const out = H.applyGridCsv(st, p, '2026-03-01');
+  eq(out.set, 2);
+  eq(st.years['2026'].cells['rent|2026-01'], { v: -50, kind: 'actual' },
+    'a month already entered is a fact');
+  eq(st.years['2026'].cells['rent|2026-05'], { v: -60, kind: 'manual' },
+    'and one beyond it is the reader’s own estimate — exactly what typing does');
+});
+t('an empty column empties the month, which is what a round trip means', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-12',
+    categories: [{ id: 'rent', name: 'Rent', section: 'expense' }],
+    cells: { 'rent|2026-01': { v: -50, kind: 'actual' },
+             'rent|2026-02': { v: -50, kind: 'actual' },
+             'rent|2026-09': { v: -70, kind: 'actual' } } } } });
+  const out = H.applyGridCsv(st,
+    H.readGridCsv('Section,Row,2026-01,2026-02\nExpenses,Rent,-55,'), '2026-03-01');
+  eq(out.set, 1); eq(out.cleared, 1);
+  eq(st.years['2026'].cells['rent|2026-02'], undefined, 'the file speaks for its columns');
+  eq(st.years['2026'].cells['rent|2026-09'].v, -70,
+    'and only for its columns — a month the file has no column for is untouched');
+});
+t('a row the plan does not have is added, not dropped', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-12',
+    categories: [{ id: 'rent', name: 'Rent', section: 'expense' }], cells: {} } } });
+  const out = H.applyGridCsv(st,
+    H.readGridCsv('Section,Row,2026-01\nExpenses,Nursery,-600\nIncome,Rent,5'), '2026-03-01');
+  eq(out.added, 2, 'a new name, AND a name that only matches in another section');
+  const cats = st.years['2026'].categories.map(c => [c.id, c.name, c.section]);
+  eq(cats.length, 3);
+  ok(cats.some(c => c[1] === 'Nursery' && c[2] === 'expense'));
+  ok(cats.some(c => c[1] === 'Rent' && c[2] === 'income'),
+    'matching is within a section — an income row called Rent is not the expense one');
+});
+t('a name matches however it is cased, so a rename in Excel does not fork the row', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-12',
+    categories: [{ id: 'rent', name: 'Rent', section: 'expense' }], cells: {} } } });
+  H.applyGridCsv(st, H.readGridCsv('Section,Row,2026-01\nExpenses,  rent ,-50'), '2026-03-01');
+  eq(st.years['2026'].categories.length, 1, 'one row, not two');
+  eq(st.years['2026'].cells['rent|2026-01'].v, -50);
+});
+t('there is nowhere to import a year the plan has never had', () => {
+  const st = H.coerceShape({ years: {} });
+  ok(/no 2026 budget grid/.test(
+    H.applyGridCsv(st, H.readGridCsv('Section,Row,2026-01\nExpenses,Rent,-50'), '2026-03-01').refusal));
+});
+t('a year exported and imported comes back the same', () => {
+  /* The round trip that is the whole point. Export a year, empty a copy's typed
+     cells, read the file straight back in, and every figure returns. */
+  const st = H.migrate(H.coerceShape(H.sampleState()));
+  const y = Object.keys(st.years).filter(k => st.years[k].kind === 'grid').sort().pop();
+  const C = H.computeAll(st, `${y}-08-15`);
+  const csv = H.gridToCsv(st, C[y], y);
+  const copy = H.migrate(H.coerceShape(JSON.parse(JSON.stringify(st))));
+  copy.years[y].cells = {};
+  const out = H.applyGridCsv(copy, H.readGridCsv(csv), `${y}-08-15`);
+  ok(out.set > 0, 'something came back');
+  eq(out.added, 0, 'every row matched by name — nothing forked into a new one');
+  const before = C[y];
+  const after = H.computeAll(copy, `${y}-08-15`)[y];
+  for (const cat of st.years[y].categories)
+    for (const m of before.months)
+      eq(H.round2((after.cells[`${cat.id}|${m}`] || {}).v || 0),
+         H.round2((before.cells[`${cat.id}|${m}`] || {}).v || 0),
+         `${cat.name} ${m}`);
+});
+
 group('What this year owes');
 t('the tables answer the nearest question as well as the furthest one', () => {
   /* The card is markup, so what is pinned here is the arithmetic under it —

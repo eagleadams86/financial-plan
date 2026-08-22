@@ -1414,7 +1414,17 @@ td.projected { font-style: italic; color: var(--text-secondary); }
     <button class="btn" id="exportBtn"><span aria-hidden="true">⬇</span> Export JSON</button>
     <button class="btn" id="importBtn"><span aria-hidden="true">⬆</span> Restore JSON…</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
+    <!-- The other direction of the ⇩ CSV button on a budget year. It reads ONE
+         year and only its Income, Expenses and Transfers rows, which is why it
+         sits beside Restore rather than replacing it: this is not a backup and
+         must not look like one. -->
+    <button class="btn" id="csvInBtn"><span aria-hidden="true">⬆</span> Import a year’s CSV…</button>
+    <input type="file" id="csvInFile" accept="text/csv,.csv" hidden>
   </div>
+  <p class="sub muted" style="margin-top:10px">A year's CSV goes back in as well as out —
+    work a year over in a spreadsheet and bring it home. It reads that year's Income,
+    Expenses and Transfers rows only; account balances and the interest line are worked out
+    by the app, so it leaves those alone.</p>
   <!-- The one-time spreadsheet import used to be explained here. It was a
        developer instruction sitting in an everyday dialog: it names a script
        you can only run from a checkout of the repo, and it was addressed to a
@@ -17255,6 +17265,149 @@ function gridToCsv(st, computed, y) {
   return lines.join('\n');
 }
 
+/* ── And back in again ──────────────────────────────────────────────────────
+   CSV was a one-way door: out to a spreadsheet, and no way home. Somebody who
+   worked a year over in Excel — which is what the export exists for — had to
+   retype it a cell at a time.
+
+   Three functions, all pure, because every decision worth arguing about is in
+   them and none of it should live in a file-picker handler.
+
+   `csvRows` is an actual parser rather than `split(',')`. The export quotes any
+   field with a comma in it and doubles embedded quotes, so a row called
+   "Rent, water and rates" round-trips — and splitting on commas would break it
+   into two columns and put the year out by a row. It handles CRLF, because that
+   is what Excel writes back. */
+function csvRows(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  /* A byte-order mark is what downloadCsv PUTS THERE, so the file this reads
+     will normally have one; left in place it becomes part of the first header
+     and the header check fails on a file the app itself wrote. */
+  const src = String(text || '').replace(/^\uFEFF/, '');
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch !== '"') { field += ch; continue; }
+      /* A doubled quote inside a quoted field is one literal quote. */
+      if (src[i + 1] === '"') { field += '"'; i++; continue; }
+      quoted = false;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === ',') { row.push(field); field = ''; continue; }
+    if (ch === '\r') continue;
+    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
+    field += ch;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ''));
+}
+
+/* One exported year, read back. Returns what it found or a `refusal` naming
+   what is wrong with the file — never a half-import, the tax-paste rule.
+
+   What it deliberately DOESN'T read: the Accounts block and the Interest &
+   Dividends line. Both are computed — a balance is the sum of everything above
+   it, and the earnings line is the accounts' own rates — so writing them back
+   would be typing over the engine's answer with the engine's answer, and any
+   figure that disagreed would be silently pinned instead. They are counted and
+   named as skipped rather than ignored in silence.
+
+   The MONTHS in the header are the file's own claim about which year it is;
+   a file whose columns span two years is refused, because "the 2026 export"
+   has to mean one year for the confirmation to be able to say what it will do. */
+function readGridCsv(text) {
+  const rows = csvRows(text);
+  if (!rows.length) return { refusal: 'That file is empty.' };
+  const head = rows[0].map(c => c.trim());
+  if (head[0].toLowerCase() !== 'section' || head[1].toLowerCase() !== 'row')
+    return { refusal: 'That is not a budget year exported from this app — its first two '
+      + 'columns should be Section and Row.' };
+  const months = [], colOf = {};
+  head.forEach((h, i) => {
+    if (/^\d{4}-\d{2}$/.test(h)) { months.push(h); colOf[h] = i; }
+  });
+  if (!months.length)
+    return { refusal: 'That file has no month columns in it, so there is nothing to read.' };
+  const years = [...new Set(months.map(m => m.slice(0, 4)))];
+  if (years.length !== 1)
+    return { refusal: `Those columns span ${years.join(' and ')}. Import one year at a time.` };
+  const y = years[0];
+  const wanted = { Income: 'income', Expenses: 'expense', Transfers: 'transfer' };
+  const out = [];
+  let skipped = 0;
+  for (const r of rows.slice(1)) {
+    const section = (r[0] || '').trim();
+    const name = (r[1] || '').trim();
+    if (!name) continue;
+    if (!wanted[section] || name === 'Interest & Dividends') { skipped++; continue; }
+    const values = {};
+    for (const m of months) {
+      const raw = (r[colOf[m]] ?? '').trim();
+      /* An empty column is a real answer — "nothing typed here" — and it is
+         what the export writes for a month the plan merely worked out. Kept as
+         null rather than skipped, so a round trip clears what it should. */
+      values[m] = raw === '' ? null : parseMoney(raw);
+    }
+    /* A row where every month failed to parse is a row of words, not figures —
+       most likely a header repeated mid-file, or a column the reader added. */
+    if (months.every(m => values[m] !== null && Number.isNaN(values[m]))) { skipped++; continue; }
+    out.push({ section: wanted[section], name, values });
+  }
+  if (!out.length)
+    return { refusal: 'Nothing in that file is an Income, Expenses or Transfers row.' };
+  return { year: y, months, rows: out, skipped };
+}
+
+/* Write one back. Mutates the state it is handed and reports what it did, so
+   the confirmation before it and the toast after it read the same figures.
+
+   Matching is by NAME within the row's own section, which is the only handle a
+   CSV has — the export writes no ids, deliberately, since ids are this app's
+   business and not a spreadsheet's. A name that matches nothing is ADDED as a
+   new row with no rule, because a file with a row the plan lacks is usually a
+   row the reader added in the spreadsheet, and dropping it would be the import
+   quietly disagreeing with the file it just read.
+
+   The cell KIND is decided exactly as typing into the cell decides it — actual
+   in a month already entered, manual beyond it — because that is what this is:
+   typing, done faster. */
+function applyGridCsv(st, parsed, today) {
+  const yr = (st.years || {})[parsed.year];
+  if (!yr || yr.kind !== 'grid')
+    return { refusal: `There is no ${parsed.year} budget grid in this plan to import into.` };
+  const live = yr.model === 'live';
+  const through = yr.enteredThrough || '';
+  let set = 0, cleared = 0, added = 0;
+  for (const r of parsed.rows) {
+    let cat = (yr.categories || []).find(c =>
+      (c.section || 'expense') === r.section
+      && c.name.trim().toLowerCase() === r.name.trim().toLowerCase());
+    if (!cat) {
+      cat = { id: uniqueId(yr.categories, r.name, 'row'), name: r.name,
+        rule: 'none', role: 'normal', section: r.section };
+      yr.categories.push(cat);
+      added++;
+    }
+    for (const m of parsed.months) {
+      const key = `${cat.id}|${m}`;
+      const v = r.values[m];
+      if (v === null || Number.isNaN(v)) {
+        if (yr.cells[key] !== undefined) { delete yr.cells[key]; cleared++; }
+        continue;
+      }
+      const future = live && m > through;
+      /* A note or a split already on the cell is REPLACED, not merged: the file
+         is a statement about that month, and half-keeping a split whose parts
+         no longer add to the figure beside them would be worse than either. */
+      yr.cells[key] = { v: round2(v), kind: future ? 'manual' : 'actual' };
+      set++;
+    }
+  }
+  return { year: parsed.year, set, cleared, added, skipped: parsed.skipped };
+}
+
 /* Every donation, every year — the tax-season table. The How/Status/
    Deductible derivations mirror the Giving tab's own rows exactly.
 
@@ -17561,6 +17714,60 @@ F('importFile').onchange = (e) => {
     } catch (err) {
       toast('That file doesn’t look like a Financial Plan backup');
       console.warn('restore failed', err);
+    } finally {
+      e.target.value = '';
+    }
+  };
+  reader.readAsText(file);
+};
+
+/* ── A year's CSV, coming back ──────────────────────────────────────────────
+   The refusal path is the point of this handler. `readGridCsv` and
+   `applyGridCsv` each return either an answer or a `refusal` naming exactly
+   what is wrong, and both are shown as they are: "that file doesn't look
+   right" is the message that makes somebody try the same file three times.
+
+   The confirmation says what WILL happen in figures, before anything moves —
+   how many cells will be written, how many cleared, how many rows the file has
+   that the plan doesn't. A cleared cell is the one that can surprise: an empty
+   column in the file empties the month, which is right for a round trip and
+   worth saying out loud. */
+F('csvInBtn').onclick = () => F('csvInFile').click();
+F('csvInFile').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = readGridCsv(reader.result);
+      if (parsed.refusal) { toast(parsed.refusal); return; }
+      /* Rehearsed on a COPY first, so the confirmation can quote real figures
+         without anything having happened yet. A dry run that lied about what it
+         was going to do would be worse than no confirmation at all. */
+      const trial = JSON.parse(JSON.stringify({ years: state.years }));
+      const dry = applyGridCsv(trial, parsed, todayISO());
+      if (dry.refusal) { toast(dry.refusal); return; }
+      const bits = [`${dry.set} figure${dry.set === 1 ? '' : 's'} written`];
+      if (dry.cleared) bits.push(`${dry.cleared} month${dry.cleared === 1 ? '' : 's'} emptied`);
+      if (dry.added) bits.push(`${dry.added} new row${dry.added === 1 ? '' : 's'}`);
+      if (dry.skipped) bits.push(`${dry.skipped} line${dry.skipped === 1 ? '' : 's'} skipped`);
+      if (!confirm(`Import this file into ${parsed.year}?\n\n${bits.join('\n')}\n\n`
+        + 'Account balances and the Interest & Dividends line are worked out by the app, so '
+        + 'they are left alone. A month left empty in the file empties that month here.'))
+        return;
+      const done = applyGridCsv(state, parsed, todayISO());
+      save(); render();
+      /* The toast counts the REAL run, not the rehearsal. They agree, and the
+         day they stop agreeing is the day the reader should be told what
+         actually happened rather than what was promised. */
+      const said = [`${done.set} written`];
+      if (done.cleared) said.push(`${done.cleared} emptied`);
+      if (done.added) said.push(`${done.added} new row${done.added === 1 ? '' : 's'}`);
+      toast(`${parsed.year} imported — ${said.join(', ')}`);
+      dataDialog.close();
+    } catch (err) {
+      toast('That file could not be read as a CSV');
+      console.warn('csv import failed', err);
     } finally {
       e.target.value = '';
     }
@@ -19076,7 +19283,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
   categorySpend, spendingMix,
   coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
-  csvCell, gridToCsv, donationsToCsv, searchPlan, SEARCH_CAP, snapshotPoints,
+  csvCell, gridToCsv, donationsToCsv, csvRows, readGridCsv, applyGridCsv, searchPlan, SEARCH_CAP, snapshotPoints,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,
   adultsOf, compPersonId, limitEarners, FILING_LABEL, FILING_STATUSES,
   /* Tax. The shape a stored table is allowed to have, what the brackets say,
