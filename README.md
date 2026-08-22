@@ -47,6 +47,13 @@ browser and stay there unless you deliberately sign in or send a link.
 
 ## Start Here
 
+**The tabs are not there yet, and that is deliberate.** Nine tabs above a
+welcome card would every one of them lead to an empty state explaining that
+there is nothing there — so nothing is offered until there is something behind
+it, the same rule that shows no net-worth tile for a part you have never
+recorded. They appear together the moment a plan exists. (A read-only link is
+the exception: its tabs are what the sender chose to send.)
+
 Open the page and press **Start fresh**. That sets up the current year's
 budget with a starter set of rows — all renameable, deletable and
 reorderable — and every tab's ＋ Add button does the rest. No import, no
