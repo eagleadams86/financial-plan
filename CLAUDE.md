@@ -2830,11 +2830,15 @@ goes looking for the thing that should have been there.
   out of the CSS and check every threshold against them rather than pinning the
   figures a second time, so a change to the tile floor fails the suite instead
   of quietly making a row too tight.
-- **Only counts that come out EVEN are offered.** Five tiles go 5, or 3 + 2, or
-  one per line — never 2 + 2 + 1. Seven go 7 or 4 + 3. Where the only
-  alternative would strand a single tile the grid drops to ONE column and
-  stacks, which is why three tiles between 472px and 714px are stacked rather
-  than laid out 2 + 1.
+- **Only counts that leave rows differing by at most one tile are offered, and
+  never a row holding a single tile.** Five tiles go 5, or 3 + 2, or one per
+  line — never 2 + 2 + 1. Seven go 7 or 4 + 3; eight go 8, 4 + 4, 3 + 3 + 2 or
+  2 + 2 + 2 + 2. Where the only alternative would strand a single tile the grid
+  drops to ONE column and stacks, which is why three tiles between 472px and
+  714px are stacked rather than laid out 2 + 1. **It is the same table in every
+  app in the family** (2026-08-23), worked out against each one's own minimum
+  tile: Sprint Predictability's `.tiles` at 160px, Flow Metrics' `.tiles.group`
+  at 200px. A change to the table belongs in all three.
 - **Nine or more tiles fall back to auto-fit.** Only the Savings Goals grid can
   get there, and a list that long is a scroll at every width.
 - **FOUR tiles are no longer pinned to 2 × 2.** The old rule forced two columns
