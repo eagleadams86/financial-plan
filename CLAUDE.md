@@ -1488,6 +1488,17 @@ Things that go with it and will look arbitrary later:
   is entirely bold, that a body over 450 characters has a break in it, and that every run is
   a string or a `{ b }`. Short entries are deliberately left whole: three sentences split
   into three paragraphs is its own kind of unreadable.
+- **EVERY dialog closes on a backdrop click, and `tests.html` enumerates them out of the
+  markup rather than from a list** (2026-08-23). `compareDialog` had been missing from the
+  registration list — read-only, one Close button, nothing about it that wanted an exception
+  — and a hand-written test would have gone on agreeing with the hand-written list. **The
+  one documented exception is family-wide and it is `syncChoiceDialog`**: "which copy of
+  your data?" has no safe default, so it must be answered rather than dismissed, and the
+  test pins that it stays excluded as well as that everything else is included.
+  The handler requires **both the press and the release outside**, and tests the pointer
+  against the dialog's BOX rather than trusting `e.target`: a click on the backdrop reports
+  the dialog as the target, but so does one on the dialog's own 20px of padding. Both
+  lottery pages shipped the naive version and had to be fixed the same day.
 - **`#helpDialog` is the exception, and the READING MEASURE is what sizes it
   (2026-08-23).** It is the one dialog that is nothing but prose, so `#helpBody`
   (a `<div>` since the bodies became paragraphs — a `<p>` cannot hold them)

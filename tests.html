@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 702;
+const EXPECTED = 704;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -8443,6 +8443,38 @@ t('the help sheet is as wide as its text, not the common width', () => {
   ok(/#helpBody p, #helpBody li \{ font-size: inherit; line-height: inherit;\s*color: inherit; margin: 0 0 10px; \}/.test(APP_SRC),
     'and the block is carried whole, including the rule the siblings need for '
     + 'help text written as paragraphs inside the box');
+});
+t('EVERY dialog closes on a backdrop click, bar the one documented exception', () => {
+  /* Enumerated from the markup rather than listed here, and that is the whole
+     point of the test: a dialog added later is covered the day it is added.
+     compareDialog was missing from the registration list until 2026-08-23 —
+     read-only, one Close button, nothing about it that wanted an exception —
+     and a hand-written list would have gone on agreeing with itself.
+     The lottery portfolio's help window shipped with the same gap on the same
+     day, which is why every suite in the family now checks it this way. */
+  const ids = [...stripHtmlComments(APP_SRC).matchAll(/<dialog id="(\w+)"/g)].map((m) => m[1]);
+  ok(ids.length >= 8, 'the dialogs were found — ' + ids.length);
+  /* THE ONE DOCUMENTED EXCEPTION, family-wide: "which copy of your data?" has
+     no safe default, so it must be answered rather than dismissed. */
+  const exempt = ['syncChoiceDialog'];
+  const at = APP_SRC.indexOf('closeOnBackdropClick(F(id))');
+  const list = APP_SRC.slice(APP_SRC.lastIndexOf('[', at), at);
+  eq(ids.filter((id) => !exempt.includes(id) && !list.includes("'" + id + "'")).join(', '), '',
+    'a dialog you cannot dismiss by clicking off it');
+  eq(exempt.filter((id) => list.includes("'" + id + "'")).join(', '), '',
+    'and the exception is still excluded — it must be answered, not dismissed');
+});
+t('and the handler needs both the press and the release outside', () => {
+  /* Not `e.target === this` on its own: a click on the backdrop reports the
+     dialog as the target, but so does one on the dialog's own 20px of padding.
+     Requiring the press too is what stops a selection dragged out of a field
+     from throwing the edit away. */
+  const fn = (APP_SRC.match(/function closeOnBackdropClick\(dlg\) \{[\s\S]*?\n\}/) || [''])[0];
+  ok(fn, 'the helper is missing');
+  ok(/getBoundingClientRect\(\)/.test(fn) && /e\.clientX < r\.left/.test(fn),
+    'the pointer is tested against the box, not just the target');
+  ok(/startedOutside && outside\(e\)/.test(fn),
+    'and both the press and the release have to land outside');
 });
 t('the info dot is the family circle, declared property by property', () => {
   ok(/\.tile-help \{[^}]*width: 16px; height: 16px; min-height: 0;/.test(APP_SRC),
