@@ -2837,8 +2837,20 @@ goes looking for the thing that should have been there.
   drops to ONE column and stacks, which is why three tiles between 472px and
   714px are stacked rather than laid out 2 + 1. **It is the same table in every
   app in the family** (2026-08-23), worked out against each one's own minimum
-  tile: Sprint Predictability's `.tiles` at 160px, Flow Metrics' `.tiles.group`
-  at 200px. A change to the table belongs in all three.
+  tile: Sprint Predictability's `.tiles` and the starter's `.stats` at 160px,
+  Flow Metrics' `.tiles.group` at 200px. A change to the table belongs in all of
+  them.
+- **A SHORT LAST ROW IS STRETCHED TO FINISH THE LINE**, never left with a hole
+  at the end of it. `lcm(columns, last row)` tracks, the full rows' tiles
+  spanning `lcm/columns` and the last row's `lcm/last row`: 3 + 2 is six tracks
+  at span 2 and span 3. That is Golf Handicap's hand-counted grid — which its
+  own file says has to be redone by hand if a tile is ever added — generalised
+  to every count. The stretch is undone at the width where the tiles all fit on
+  one line, and **undone on BOTH selectors**: `:nth-child` out-ranks a bare
+  `> *` and would otherwise carry its span into the wider layout, which is a
+  four-column row with two tiles spanning three tracks apiece. The test walks
+  the queries in cascade order keeping each count's state, so that mistake fails
+  as "the row is not full" rather than passing unnoticed.
 - **Nine or more tiles fall back to auto-fit.** Only the Savings Goals grid can
   get there, and a list that long is a scroll at every width.
 - **FOUR tiles are no longer pinned to 2 × 2.** The old rule forced two columns
