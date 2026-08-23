@@ -810,6 +810,20 @@ suite passed while the card was wrong.
   way `computeGoals` derives over `computed.balances`. That is what keeps the
   real-data cross-check passing untouched — if it ever moves after a household
   change, the change is wrong.
+  - **A brand-new plan starts with one adult called "Me", and that lives in
+    `newPlanState()` — NOT in `blankState()`** (2026-08-22). The split is not
+    tidiness. `blankState()` is the base of `Object.assign(blankState(), parsed,
+    …)` in every load, import, restore and share path, and the baseline
+    `buildSharePayload` diffs against; a person put there is handed to any backup
+    that predates the household, and an adult appearing in a plan that had none
+    re-keys the 401(k) cards from `undefined` to that id (`limitEarners`), so the
+    reader watches their contribution limits come back empty from a restore that
+    was meant to be lossless. Only the four genuinely-new-plan sites call
+    `newPlanState()`: `load()` with nothing saved, `load()`'s unreadable-JSON
+    catch, `startFresh()` and Start again. `tests.html` pins both halves,
+    including the old-backup merge. The default carries **no birth month** on
+    purpose — every age, retirement year and 18th birthday is derived from it, so
+    a guessed one prints a wrong date as the app's own answer.
   - `birth` is a **`YYYY-MM` month**, guarded like `since`/`until`. Age, the
     retirement year and the month a child turns 18 are DERIVED (`ageAt`,
     `retirementYearOf`, `majorityMonthOf`) — a stored age is wrong within a year.

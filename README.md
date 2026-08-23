@@ -759,6 +759,14 @@ be quietly wrong within twelve months while looking authoritative.
 
 Who the plan is for: a partner, your children.
 
+**A new plan starts with one adult called "Me"** — a placeholder to type your own
+name over, so the tab opens on a household of one rather than on an empty screen
+asking you to declare that you exist. It has no birth month: every age,
+retirement year and 18th birthday here is worked out from that field, so a
+guessed one would print a wrong date as though the app had worked it out. Fill it
+in and the rest follows. Restoring a backup never adds anyone — only a plan
+created from nothing gets the default.
+
 Each person has a role, an optional birth month and — for an adult — a
 retirement age (halves allowed, for anyone waiting until exactly 59½),
 **which month of that year it lands in** (their birthday, or the January

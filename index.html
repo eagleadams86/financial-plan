@@ -2461,6 +2461,34 @@ const isMixedType = (a) => a && a.type === '401k-mixed';
 const RET_TYPE_LABEL = Object.fromEntries(RET_TYPES.map(([v, l]) => [v, l]));
 const retKind = (a) => a.kind === 'roth' ? 'roth' : 'traditional';
 
+/* A BRAND-NEW plan: blankState() plus the one person every plan has, an adult
+   called "Me". Golf Handicap opens on the same default golfer, for the same
+   reason — the Household tab greeting a first-time reader with "No One Here Yet"
+   asks them to declare something the app already knows, and every place that
+   says "whose is this?" needs somebody in the list before it can be answered.
+   The name is a placeholder to type over, like Golf's; the id is what `slugJs`
+   would mint from it, so somebody who later adds a second person actually called
+   Me gets `me-2` from person.save exactly as they always would.
+
+   No BIRTH MONTH, deliberately. Every age, retirement year and 18th birthday in
+   this app is worked out from that field, so a guessed one would put a wrong
+   date on the projection and look like the app's own answer. Absent, it reads
+   "—" and asks to be filled in.
+
+   SEPARATE FROM blankState(), which is not decoration. blankState() is also the
+   base of `Object.assign(blankState(), parsed, …)` in every load, import,
+   restore and share path, and the baseline `buildSharePayload` diffs against.
+   A person in there would be handed to any older backup that predates the
+   household — and an adult appearing in a plan that had none re-keys the 401(k)
+   cards from `undefined` to that person's id, so a reader restoring a backup
+   would watch their contribution limits come back empty. Only a plan being
+   created from nothing gets this. */
+function newPlanState() {
+  const st = blankState();
+  st.people = [{ id: 'me', name: 'Me', role: 'adult' }];
+  return st;
+}
+
 function blankState() {
   return {
     schema: SCHEMA,
@@ -4216,7 +4244,7 @@ function load() {
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return blankState();
+    if (!raw) return newPlanState();
     const parsed = migrate(coerceShape(safeParse(raw)));
     return Object.assign(blankState(), parsed, {
       settings: Object.assign(blankState().settings, parsed.settings || {}),
@@ -4224,8 +4252,12 @@ function load() {
       ui: Object.assign(blankState().ui, parsed.ui || {})
     });
   } catch (e) {
+    /* Unreadable is not the same as absent, but the reader is looking at an empty
+       app either way, so they get the same one a first visit does. Nothing is
+       written here — save() is what would overwrite the unreadable copy, and
+       this path does not call it. */
     console.warn('Could not read saved data', e);
-    return blankState();
+    return newPlanState();
   }
 }
 
@@ -6189,7 +6221,7 @@ const STARTER_CATEGORIES = [
 
 function startFresh() {
   const y = String(new Date().getFullYear());
-  state = blankState();
+  state = newPlanState();
   state.years[y] = {
     kind: 'grid', model: 'live',
     startMonth: `${y}-01`, monthCount: 12,
@@ -18269,7 +18301,10 @@ F('wipeBtn').onclick = () => {
 F('clearBackupBtn').onclick = downloadBackup;
 F('clearCancel').onclick = () => clearDialog.close();
 F('clearConfirm').onclick = () => {
-  state = blankState();
+  /* Starting again lands where a first visit lands, default person and all —
+     "delete everything" means an empty plan, not a plan missing something a new
+     one would have. */
+  state = newPlanState();
   /* The quote cache is inside state now, so blankState() has already taken it.
      What is left outside is the run report and the API credential, and both
      still have to go by hand: a ticker list and a working key readable by every
@@ -19968,7 +20003,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   coerceQuotes,
   fmtMoney, fmtMoneyIn, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
   reconcileNote,
-  blankState, coerceShape, migrate, computeYear, computeAll, computeGoals,
+  blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   mergeAccountsByName, nominateHub, hubAccount, dividendAccounts, statedAfter,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
   normRole, gridToSummary, gridToPinned, pinnedToLive,
