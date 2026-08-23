@@ -73,8 +73,11 @@ family names as well as balances.
   cards; `buildHistoryCharts` still draws them and kept its name. The view ID
   stays `goals` — stored tab orders, folded-box keys and share-link section
   lists all speak it, so renaming the id would orphan all three. `tabOrder()`
-  drops `history` from any stored order on its own; no migration. A NET WORTH
-  strip tops the tab: `netWorthParts(st)` (pure, tested) sums the investment
+  drops `history` from any stored order on its own; no migration. **Savings
+  Goals leads the tab since 2026-08-23** — the card you come to this tab to
+  read; Net Worth and the pulse are derived summaries and follow it, and the
+  charts stay last. The NET WORTH strip sits second:
+  `netWorthParts(st)` (pure, tested) sums the investment
   panes, the retirement accounts and the property equity, the renderer adds
   this month's computed liquid total, and the giving fund is measured but NEVER
   added — that money is already given. Each part carries `has*` because absent

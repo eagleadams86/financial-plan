@@ -343,20 +343,23 @@ reading this one — until 1 January, or until you mark December entered.
 
 Where the whole plan stands and where it has been, on one tab.
 
-### Savings Rate and Runway
+### Savings Goals
 
-The year's totals in the units the questions are actually asked in:
+Goals add up whichever accounts you tick, so splitting an account is a matter
+of ticking the new ones. Each goal counts its accounts up to the target, in
+full, or only what another goal hasn't already claimed.
 
-- **Savings rate** — income minus expenses, over income. Money moved between
-  your own accounts never counts as spending, and income is the Budget tab's
-  own Income total (the income rows plus what the accounts earned).
-- **Runway** — liquid savings against a month of expenses.
+Plus progress, target dates, required monthly saving, and a pace check that
+follows whichever goal is next — the soonest deadline you haven't met yet.
 
-Both move as real months land.
+**Where the Total Is Heading** goes **dashed the moment it passes the month
+you've entered through**, so a month the plan has merely worked out never
+reads as one that happened, whether it's next month or a year you've built
+ahead.
 
 ### Net Worth
 
-A **net worth strip** across the top adds up everything the plan knows about:
+A **net worth strip** under the goals adds up everything the plan knows about:
 this month's liquid total, the Investments tab's holdings, the retirement
 accounts, the Household tab's property at your stated values, and everything
 you owe. The giving fund is deliberately left out — that money is
@@ -390,19 +393,16 @@ net-worth-over-time line, with the parts in the hover.
 - Old statements can be typed in by hand to backfill the line.
 - Every snapshot is clickable to correct or delete.
 
-### Savings Goals
+### Savings Rate and Runway
 
-Goals add up whichever accounts you tick, so splitting an account is a matter
-of ticking the new ones. Each goal counts its accounts up to the target, in
-full, or only what another goal hasn't already claimed.
+The year's totals in the units the questions are actually asked in:
 
-Plus progress, target dates, required monthly saving, and a pace check that
-follows whichever goal is next — the soonest deadline you haven't met yet.
+- **Savings rate** — income minus expenses, over income. Money moved between
+  your own accounts never counts as spending, and income is the Budget tab's
+  own Income total (the income rows plus what the accounts earned).
+- **Runway** — liquid savings against a month of expenses.
 
-**Where the Total Is Heading** goes **dashed the moment it passes the month
-you've entered through**, so a month the plan has merely worked out never
-reads as one that happened, whether it's next month or a year you've built
-ahead.
+Both move as real months land.
 
 ### The Long-Run Charts
 
