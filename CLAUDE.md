@@ -28,8 +28,9 @@ family names as well as balances.
   Charlie is red-green colourblind: no new colours, ever — reuse tokens, and
   never let hue alone carry a meaning (estimate kind is typography — italics /
   underlines; charts pair colour with dashes, point shapes or stripes).
-- The chrome (sticky header, button tabs, four-theme picker with Midnight
-  default, anti-flash boot script, Back up dialog, privacy footer, Recent
+- The chrome (sticky header, button tabs, four-theme picker — plus Auto, which is
+  the DEFAULT since 2026-08-22 and follows the reader's system; Midnight is the
+  base palette — anti-flash boot script, Back up dialog, privacy footer, Recent
   changes box) is the family pattern from Sprint Velocity — if a chrome rule
   changes in the family, mirror it here.
 - **Page width is the ONE deliberate divergence from the family** (`--page-w`,

@@ -1073,8 +1073,9 @@ colour at all.
 **Your theme belongs to the device**, like the zoom: it lives under its own
 localStorage key rather than with the plan, so it is never synced, never in a
 backup, and a share link never carries the sender's theme. Anything
-unrecognised falls back to Midnight, and the picker's own options are the only
-list of themes the app has.
+unrecognised falls back to **Auto** — the default since 2026-08-22, which follows
+your own system rather than opening dark on a machine set to light — and the
+picker's own options are the only list of themes the app has.
 
 **Colour is never the only thing saying what a figure is.** A projection is
 *italic*, a total spanning actual and projected months is dashed, a snapshot's
