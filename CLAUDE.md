@@ -1506,6 +1506,17 @@ Things that go with it and will look arbitrary later:
   `#helpBody p, #helpBody li { font-size: inherit }`, does nothing here (the box
   IS the paragraph) and is carried anyway so the block stays whole; Golf Handicap
   and the NY calculator write real `<p>` tags into theirs and need it.
+  **THE TYPE, THE COLOUR AND THE PADDING ARE IN THE BLOCK TOO** (2026-08-23, a second pass
+  after Charles spotted differences between the windows). Measured across all seven windows,
+  four things were drifting on inheritance alone: the heading came out at **700** on the two
+  lottery pages, where nothing sets a weight and an `<h2>`/`<h3>` defaults to bold; the prose
+  came out at `--text-primary` on the NY calculator, where no `dialog p` rule reaches it, so
+  it read brighter than everywhere else AND its `<strong>` had nothing to contrast with;
+  Golf Handicap's paragraphs were spaced by the browser's 1em (15px) against 10px elsewhere;
+  and the window's own padding was 24px there and 18px in PAPTrack, which is what made three
+  different window widths out of one measure. `#helpTitle`, `#helpBody`'s colour, the
+  paragraph margins, `#helpBody strong` and `padding: 20px` are all declared now, so none of
+  it depends on what the app happens to style a dialog with. All seven windows are 666px.
 - **A dialog laid out TWO-UP is narrowed to 700px** (asked for 2026-08-17), and
   only two: three and four columns already fill the common width, and a single
   column never had the problem. At 1100px a two-question dialog put each box at
