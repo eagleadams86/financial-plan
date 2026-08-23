@@ -2772,6 +2772,39 @@ side.tax = {
   existing shares across untouched when they don't — **a dialog that never asked
   the question must not answer it.**
 
+## Card order: the thing you DO leads (2026-08-23)
+
+A tab's first card is the one it is for, not the one that summarises it. Four
+tabs were re-ordered on 2026-08-23 because a derived summary or a long-run
+chart had drifted to the top and pushed the working card below the fold:
+
+- **Progress** — Savings Goals first, then Net Worth, then Savings Rate &
+  Runway, then the four long-run charts, then Where the Money Goes.
+- **Vacations** — the add bar, then the trips by year, then the PTO cards,
+  then Trip Spending, Year by Year. Leave counting follows the trips it counts.
+- **Giving** — the filing note (it carries the CSV export and says a year's
+  table appears *below*, so it stays welded to them), then the year tables,
+  then the Giving Fund, then Giving over Time.
+- **Tax** — the disclaimer note, then What ⟨year⟩ Owes / What You'd Pay / What
+  the Pot Has to Pay, then the bracket cards and Years You've Stored.
+  **With no table stored the order FLIPS** and the tables come first. That is
+  not tidiness: `taxNowCard` and `taxCheckCard` both return `''` without a
+  table, so answers-first would open the tab on "nothing is being drawn down
+  yet" sitting above the very tables that would fill it in.
+
+Two tabs deliberately keep a summary near the top and are not a bug to fix.
+**Household** pairs the two SHORT tables in `.cards2 pairs` (pairing the long
+account list with the people card stretched it to nine accounts of empty
+space), and **Retirement** is explicitly split by two `.yearhead` rules into
+"Now — Where You Stand" and "Later — the Projection". **Investments** already
+reads the right way round: the panes you edit, then the `Everything You Hold`
+roll-up.
+
+The cost to watch when moving a card is empty space, not scroll depth: a card
+lifted OUT of a `.cards2` pair leaves its partner half-width with nothing
+beside it. All four moves above are between full-width cards, which is why
+none of them needed a layout change.
+
 ## The tile rows (2026-08-23)
 
 **A `.goalgrid` fills ONE line when the line has room for every tile, and splits

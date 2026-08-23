@@ -466,17 +466,20 @@ unreadable for anyone.
 
 ## Vacations
 
-- **Trip Spending, Year by Year** — a chart, once two years have trips. Each
-  bar adds a year's trips up (paid, minus credits, plus still due), with the
-  trips themselves broken out in the hover, a dotted average across the
-  finished years, and a dashed edge on a year whose figure can still grow.
+The trips come first — they are what the tab is for and what you edit.
+
 - **Per-trip cost tables**, grouped into one row per year, newest first, and
   reorderable within a year. A new trip starts from the lines most trips need
   — airfare, stay, transport, excursions, food, tips, spa — or from nothing,
   your choice.
 - **Each line tracks what's paid, what's credited and what's still due**, with
   a **✓ Paid** button that settles the rest in one click.
-- **A holidays & PTO planner**, with from/to dates.
+- **A holidays & PTO planner**, with from/to dates, under the trips it counts.
+- **Trip Spending, Year by Year** — a chart at the foot of the tab, once two
+  years have trips. Each bar adds a year's trips up (paid, minus credits, plus
+  still due), with the trips themselves broken out in the hover, a dotted
+  average across the finished years, and a dashed edge on a year whose figure
+  can still grow.
 
 ---
 
@@ -491,9 +494,9 @@ appeal) beside the foundation receiving it, and is either done or
 **planned**. A planned one reads in italics, stays out of the year's totals,
 and is counted up separately as what's still to go.
 
-There's also a **donor-advised fund's holdings**, for those who have one — a
-Preferences switch, since plenty of people don't. Donations are tracked either
-way.
+Under the year tables sits a **donor-advised fund's holdings**, for those who
+have one — a Preferences switch, since plenty of people don't. Donations are
+tracked either way, and the giving-over-time chart is last.
 
 ### Giving as a Share of Income
 
@@ -697,6 +700,11 @@ pretending.
 The bracket tables **you** type, federal and state. They answer two questions:
 what **this year** owes on what you are paid, and what a retirement withdrawal
 has to be *before* tax in order to leave you what you planned to spend.
+
+**The answers lead the tab and the tables sit under them** — the tables are a
+year's typing you do once and then read back, the answers are what you come
+back for. Until you have stored a table there are no answers to lead with, so
+the order flips and the tables come first.
 
 That gap was the biggest remaining dishonesty in the drawdown: a pre-tax
 401(k) has to pay out more than you spend, and the projection used to draw
