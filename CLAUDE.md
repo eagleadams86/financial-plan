@@ -1475,7 +1475,7 @@ Things that go with it and will look arbitrary later:
   window makes right. See the shared note below.
 - **THE WINDOW ITSELF IS PINNED, PROPERTY BY PROPERTY, AND THE SAME BLOCK IS IN ALL SIX APPS VERBATIM (2026-08-23).** 700px on 18px of padding — the Back Up & Restore window's size, the family's other fixed-width window — with the heading, the intro line, the box, the hit and its three lines, and the "Nothing matches" line all declared inside the `#searchDialog` block rather than borrowed from whatever quiet-text class the app happens to have. That borrowing is what made one window into six: 360px and 420px wide, a 320px box inside a 360px dialog, a hittab at `--fs-sm` here and `--fs-xs` there, `.04em` typed out beside `--ls-label`, and four different colours on the same sentence. A change to any of it belongs in all six. Two details worth keeping: `#searchDialog > p` is the DIRECT child only (the results list's message is a `<p>` too, and an id in that selector would out-rank `.searchresults .hint` and hand it the intro line's colour), and the block deliberately declares NO dialog chrome — backdrop, shadow, a field's touch-height floor, and the max-height Money Map divides by its own zoom all belong to the app's `dialog` rule and are shared with every other window it opens.
 - **`#helpDialog` is the exception, and the READING MEASURE is what sizes it
-  (2026-08-23).** It is the one dialog that is nothing but prose, so `.helpbody`
+  (2026-08-23).** It is the one dialog that is nothing but prose, so `#helpBody`
   is held to 66ch — at the full 1100px its lines ran to about 150 characters,
   roughly twice a comfortable measure — and the window is `width: fit-content`
   so it takes that measure rather than the common width. The cap came first and
@@ -1494,6 +1494,18 @@ Things that go with it and will look arbitrary later:
   it in both directions: a key with no entry opens a sheet with no words in it
   and nothing on screen can say so, and an entry no `helpBtn` points at is a
   second copy waiting to drift. `HELP` is on `__finTestHooks` for that.
+  **BOTH RULES ARE FAMILY-WIDE AS OF 2026-08-23, AND SO IS THE `.tile-help` DOT
+  BLOCK ABOVE** — the same declarations are in Sprint Predictability, Flow
+  Metrics, Golf Handicap and the NY calculator, and a change to any of them
+  belongs in all five. Two things moved in this app to get there. The type came
+  out of a `style` attribute on the `<p>` and into `#helpBody` in the block, and
+  the `.helpbody` class went with it: a shared block cannot key off a class only
+  one app has. And **the dot's hover is Flow Metrics' now, not this app's** — it
+  fills with `--surface-alt` where this app reached for `--focus-border`, which
+  says "focused" to anybody reading the two states side by side. The third rule,
+  `#helpBody p, #helpBody li { font-size: inherit }`, does nothing here (the box
+  IS the paragraph) and is carried anyway so the block stays whole; Golf Handicap
+  and the NY calculator write real `<p>` tags into theirs and need it.
 - **A dialog laid out TWO-UP is narrowed to 700px** (asked for 2026-08-17), and
   only two: three and four columns already fill the common width, and a single
   column never had the problem. At 1100px a two-question dialog put each box at
