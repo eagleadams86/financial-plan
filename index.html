@@ -1873,7 +1873,7 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
      Opened by any info dot; its text comes from the HELP table in the script. -->
 <dialog id="helpDialog" aria-labelledby="helpTitle">
   <h3 id="helpTitle"></h3>
-  <p id="helpBody" class="sub"></p>
+  <div id="helpBody" class="sub"></div>
   <div class="row" style="justify-content:flex-end;margin-top:18px">
     <button type="button" class="btn primary" id="helpCloseBtn">Got It</button>
   </div>
@@ -5324,319 +5324,377 @@ function computeGoals(st, computed, todayIso) {
 /* ── Info dots ──────────────────────────────────────────────────────────────
    Anywhere a number is the result of arithmetic the reader can't see, a small
    "i" explains it. The text lives here rather than in a title attribute so it
-   can be a paragraph and can be read on a phone. Keys are referenced by
-   helpBtn(key, label) in the renderers. */
+   can be several paragraphs and can be read on a phone. Keys are referenced by
+   helpBtn(key, label) in the renderers.
+
+   A BODY IS AN ARRAY OF PARAGRAPHS, and a paragraph is an array of runs — a
+   plain string, or b('…') for bold. renderHelpBody builds it with
+   createElement and textContent, so none of this is ever parsed as markup.
+   Bold carries the thing being defined or the load-bearing claim, one per
+   paragraph at most: a page where half the words are bold has no emphasis
+   left. These were single blocks of 200 to 1,400 characters until 2026-08-23,
+   which is a wall of text on a phone and unskimmable anywhere. */
+const b = (text) => ({ b: text });
 const HELP = {
-  netWorth: { title: 'What Counts toward Net Worth',
-    body: 'Five parts, each read from a tab you fill in elsewhere. Liquid is this month\'s '
-      + 'computed total across the budget grid\'s accounts. Invested sums the Investments '
-      + 'tab\'s holdings at their listed prices. Retirement sums the retirement accounts — '
-      + 'Traditional and Roth together, before any tax, so it overstates what the pot '
-      + 'would hand you to spend. Property is the Household tab\'s list at your own stated '
-      + 'values, minus whatever is secured on it. Owed is everything else the household '
-      + 'owes — cards, student loans, a personal loan — and it comes off the total; a debt '
-      + 'secured on a property is already inside the Property figure, so it is never '
-      + 'counted twice. The giving fund is deliberately left out: that '
-      + 'money was given the day it went in, and counting it would inflate the total by '
-      + 'dollars that are no longer yours. A part with nothing recorded shows no tile at '
-      + 'all rather than a $0.00 — an empty list and a worthless one are different claims. '
-      + 'One more rule: an Investments pane can say its holdings ARE a budget account\'s '
-      + 'money (its ✎ Edit dialog). The Liquid and Invested tiles still match their tabs, '
-      + 'but the Total counts that pot once — at what the holdings are worth, since a '
-      + 'priced figure is the better answer to what something is worth today.' },
-  currencies: { title: 'How a Rate Is Used',
-    body: 'You state the rate; the app never looks one up. That is the same rule the tax '
-      + 'tables and the contribution limits follow, and for the same reason — a rate '
-      + 'fetched today is wrong tomorrow, and a rate baked into the app is wrong for ever '
-      + 'while looking authoritative. What the app can do is remember the day you read it '
-      + 'and show you how old the answer is. Three things can say which currency they are '
-      + 'in: a property, a debt, and an investment pane. Each is converted into the plan\u2019s '
-      + 'own currency for net worth, and each still reads in its own money on its own card, '
-      + 'because that is the figure on the statement in front of you. The BUDGET GRID stays '
-      + 'in one currency and always will: its balances chain month to month through '
-      + 'transfers and interest, so a rate you edited would silently rewrite years of '
-      + 'history every time you touched it. Retirement accounts carry no currency either — '
-      + 'a 401(k) is a creature of one country\u2019s tax code. If something is in a currency '
-      + 'you have given no rate for, it is left OUT of your net worth and named, never '
-      + 'counted at face value: a foreign flat added in at whatever number happens to be '
-      + 'typed is the one answer worse than saying the total cannot be worked out yet.' },
-  taxNow: { title: 'What This Figure Is, and Is Not',
-    body: 'It is your own bracket table and your own deduction, applied to the total '
-      + 'compensation on the Compensation tab — salary after the raise, plus the bonus, '
-      + 'plus any equity that vested and any employer contribution you have recorded. '
-      + 'That is the whole of the arithmetic. It is NOT a tax return and it is not a '
-      + 'refund estimate: there are no credits in it, nothing is itemised, payroll tax is '
-      + 'not counted, and it takes no notice of what has already been withheld from your '
-      + 'pay — so the figure is what the schedule says on that income, never what you '
-      + 'still owe in April. Nor is it a household figure where two people earn: the app '
-      + 'records a second earner as take-home in the budget and never as gross, so there '
-      + 'is no second package to add and the card counts one. It reads the newest year you '
-      + 'have recorded comp for rather than the calendar year, because a raise letter '
-      + 'arrives when it arrives and a card that went blank every January would be one '
-      + 'nobody trusted. The year with no table of its own carries the newest table before '
-      + 'it forward, exactly as the retirement projection does.' },
-  spendingMix: { title: 'How Where the Money Goes Is Counted',
-    body: 'Exactly the way the Spending, Year by Year bars are, because the two have to '
-      + 'add up to the same figure. Only rows filed under Expenses count, so money swept '
-      + 'into savings or moved between your own accounts is not spending here. A row is '
-      + 'NETTED across the year rather than added up as magnitudes: a refund lands back in '
-      + 'the row it came out of and really does reduce what that row cost you. The current '
-      + 'year includes the months the plan has worked out rather than stopping at the last '
-      + 'one you entered — otherwise August would always look like a cheap year — and the '
-      + 'figures say so by being set in the estimate style. Rows are matched to last year '
-      + 'by the row itself, so renaming one keeps its history in one line rather than '
-      + 'splitting it in two; against an old imported yearly summary, which has no rows to '
-      + 'point at, they are matched by name instead. Anything that spent nothing in either '
-      + 'year is left out, and a row that has vanished since last year still gets a line — '
-      + 'money that stopped being spent is as much a finding as money that started.' },
-  liabilities: { title: 'How a Debt Is Projected',
-    body: 'A balance on its own is a fact about a day nobody wrote down, which is why it '
-      + 'goes stale. Say WHEN it was true and the app can do the rest: each month the '
+  netWorth: { title: 'What Counts toward Net Worth', body: [
+    [b('Five parts'), ', each read from a tab you fill in elsewhere. ', b('Liquid'),
+      ' is this month\'s computed total across the budget grid\'s accounts. ', b('Invested'),
+      ' sums the Investments tab\'s holdings at their listed prices. ', b('Retirement'),
+      ' sums the retirement accounts — Traditional and Roth together, before any tax, so it '
+      + 'overstates what the pot would hand you to spend.'],
+    [b('Property'), ' is the Household tab\'s list at your own stated values, minus whatever '
+      + 'is secured on it. ', b('Owed'), ' is everything else the household owes — cards, '
+      + 'student loans, a personal loan — and it comes off the total; a debt secured on a '
+      + 'property is already inside the Property figure, so it is never counted twice.'],
+    [b('The giving fund is deliberately left out'), ': that money was given the day it went '
+      + 'in, and counting it would inflate the total by dollars that are no longer yours.'],
+    ['A part with nothing recorded shows ', b('no tile at all'), ' rather than a $0.00 — an '
+      + 'empty list and a worthless one are different claims.'],
+    ['One more rule: an Investments pane can say its holdings ', b('are'), ' a budget '
+      + 'account\'s money (its ✎ Edit dialog). The Liquid and Invested tiles still match '
+      + 'their tabs, but the Total counts that pot once — at what the holdings are worth, '
+      + 'since a priced figure is the better answer to what something is worth today.'],
+  ] },
+  currencies: { title: 'How a Rate Is Used', body: [
+    [b('You state the rate; the app never looks one up.'), ' That is the same rule the tax '
+      + 'tables and the contribution limits follow, and for the same reason — a rate fetched '
+      + 'today is wrong tomorrow, and a rate baked into the app is wrong for ever while '
+      + 'looking authoritative. What the app can do is remember the day you read it and show '
+      + 'you how old the answer is.'],
+    ['Three things can say which currency they are in: ', b('a property, a debt, and an '
+      + 'investment pane'), '. Each is converted into the plan’s own currency for net '
+      + 'worth, and each still reads in its own money on its own card, because that is the '
+      + 'figure on the statement in front of you.'],
+    ['The ', b('budget grid'), ' stays in one currency and always will: its balances chain '
+      + 'month to month through transfers and interest, so a rate you edited would silently '
+      + 'rewrite years of history every time you touched it. Retirement accounts carry no '
+      + 'currency either — a 401(k) is a creature of one country’s tax code.'],
+    ['If something is in a currency you have given no rate for, it is ', b('left out of your '
+      + 'net worth and named'), ', never counted at face value: a foreign flat added in at '
+      + 'whatever number happens to be typed is the one answer worse than saying the total '
+      + 'cannot be worked out yet.'],
+  ] },
+  taxNow: { title: 'What This Figure Is, and Is Not', body: [
+    ['It is your own bracket table and your own deduction, applied to the total compensation '
+      + 'on the Compensation tab — salary after the raise, plus the bonus, plus any equity '
+      + 'that vested and any employer contribution you have recorded. That is the whole of '
+      + 'the arithmetic.'],
+    [b('It is not a tax return and it is not a refund estimate'), ': there are no credits in '
+      + 'it, nothing is itemised, payroll tax is not counted, and it takes no notice of what '
+      + 'has already been withheld from your pay — so the figure is what the schedule says '
+      + 'on that income, never what you still owe in April.'],
+    [b('Nor is it a household figure where two people earn'), ': the app records a second '
+      + 'earner as take-home in the budget and never as gross, so there is no second package '
+      + 'to add and the card counts one.'],
+    ['It reads ', b('the newest year you have recorded comp for'), ' rather than the calendar '
+      + 'year, because a raise letter arrives when it arrives and a card that went blank '
+      + 'every January would be one nobody trusted. The year with no table of its own carries '
+      + 'the newest table before it forward, exactly as the retirement projection does.'],
+  ] },
+  spendingMix: { title: 'How Where the Money Goes Is Counted', body: [
+    ['Exactly the way the Spending, Year by Year bars are, because the two have to add up to '
+      + 'the same figure. ', b('Only rows filed under Expenses count'), ', so money swept '
+      + 'into savings or moved between your own accounts is not spending here.'],
+    ['A row is ', b('netted'), ' across the year rather than added up as magnitudes: a refund '
+      + 'lands back in the row it came out of and really does reduce what that row cost you.'],
+    ['The current year includes ', b('the months the plan has worked out'), ' rather than '
+      + 'stopping at the last one you entered — otherwise August would always look like a '
+      + 'cheap year — and the figures say so by being set in the estimate style.'],
+    ['Rows are matched to last year ', b('by the row itself'), ', so renaming one keeps its '
+      + 'history in one line rather than splitting it in two; against an old imported yearly '
+      + 'summary, which has no rows to point at, they are matched by name instead.'],
+    ['Anything that spent nothing in either year is left out, and ', b('a row that has '
+      + 'vanished since last year still gets a line'), ' — money that stopped being spent is '
+      + 'as much a finding as money that started.'],
+  ] },
+  liabilities: { title: 'How a Debt Is Projected', body: [
+    ['A balance on its own is a fact about a day nobody wrote down, which is why it goes '
+      + 'stale. ', b('Say when it was true'), ' and the app can do the rest: each month the '
       + 'balance takes its share of the rate you typed, the payment covers that interest '
-      + 'first, and whatever is left comes off the principal — the arithmetic on the back '
-      + 'of a mortgage statement. What the card shows is where that lands today, and the '
-      + 'month the debt reaches zero. Leave the payment out and nothing is projected: the '
-      + 'balance stands exactly as you typed it, which is honest rather than helpful. If '
-      + 'the payment is smaller than the first month\u2019s interest the debt genuinely '
-      + 'grows, and the card says so in words rather than drawing a line climbing away — '
-      + 'that is a fact about the loan, and it should not look like a fault in the app. '
-      + 'A debt secured on a property comes off that property\u2019s equity; anything '
-      + 'else gets its own figure. Either way it comes off net worth once, and the total '
-      + 'is the same number whichever side of the line it sits. Nothing here touches the '
-      + 'budget grid: the payment leaving your account is already a row there, and '
-      + 'counting the debt as well would take the money out twice.' },
-  savingFor: { title: 'Saving for a Child',
-    body: 'Naming the child a goal is for does two things, and only two. It files the goal '
-      + 'under them on the Household tab, and — when the target date is still empty — it '
-      + 'suggests the month they turn 18. That is a starting point, not a rule: fees are '
-      + 'usually spread over several years, and plenty of people want the money a year '
-      + 'earlier or four years later. Type over it. Nothing about the goal\'s arithmetic '
-      + 'changes either way; it still watches the accounts you ticked against the target and '
-      + 'the date, and it never spends itself.' },
-  perCheck: { title: 'Per-Check Amount',
-    body: 'Some money arrives (or leaves) once per paycheck rather than once per month, '
-      + 'and the number of paychecks changes: two in most months, three in a few. A row on '
-      + 'the paycheck rule multiplies its per-check amount by that month\'s paycheck count '
-      + 'from the Paychecks row at the foot of the grid. Set the per-check amount in the '
-      + 'row\'s settings, and correct any month\'s count by clicking it. If you don\'t get '
-      + 'paid this way, turn the whole thing off in Preferences.' },
-  rowTotal: { title: 'The Year-Total Column',
-    body: 'Every month of THIS calendar year in the row, added up — actuals and estimates '
+      + 'first, and whatever is left comes off the principal — the arithmetic on the back of '
+      + 'a mortgage statement. What the card shows is where that lands today, and the month '
+      + 'the debt reaches zero.'],
+    [b('Leave the payment out and nothing is projected'), ': the balance stands exactly as '
+      + 'you typed it, which is honest rather than helpful.'],
+    ['If the payment is smaller than the first month’s interest the debt genuinely grows, '
+      + 'and the card ', b('says so in words'), ' rather than drawing a line climbing away — '
+      + 'that is a fact about the loan, and it should not look like a fault in the app.'],
+    ['A debt secured on a property comes off that property’s equity; anything else gets '
+      + 'its own figure. Either way ', b('it comes off net worth once'), ', and the total is '
+      + 'the same number whichever side of the line it sits.'],
+    [b('Nothing here touches the budget grid'), ': the payment leaving your account is '
+      + 'already a row there, and counting the debt as well would take the money out twice.'],
+  ] },
+  savingFor: { title: 'Saving for a Child', body: [
+    ['Naming the child a goal is for does two things, and only two. It ', b('files the goal '
+      + 'under them'), ' on the Household tab, and — when the target date is still empty — it ',
+      b('suggests the month they turn 18'), '.'],
+    ['That is a starting point, not a rule: fees are usually spread over several years, and '
+      + 'plenty of people want the money a year earlier or four years later. Type over it.'],
+    [b('Nothing about the goal\'s arithmetic changes either way'), '; it still watches the '
+      + 'accounts you ticked against the target and the date, and it never spends itself.'],
+  ] },
+  perCheck: { title: 'Per-Check Amount', body: [
+    ['Some money arrives (or leaves) ', b('once per paycheck rather than once per month'),
+      ', and the number of paychecks changes: two in most months, three in a few.'],
+    ['A row on the paycheck rule multiplies its per-check amount by that month\'s paycheck '
+      + 'count from the Paychecks row at the foot of the grid. Set the per-check amount in '
+      + 'the row\'s settings, and correct any month\'s count by clicking it.'],
+    ['If you don\'t get paid this way, turn the whole thing off in Preferences.'],
+  ] },
+  rowTotal: { title: 'The Year-Total Column', body: [
+    [b('Every month of this calendar year in the row, added up'), ' — actuals and estimates '
       + 'alike. A live grid can run past its own December to project the next year; those '
-      + 'months are deliberately left out, because a total spanning two years would not '
-      + 'mean anything. An ACCOUNT row is the exception: a balance is what the account '
-      + 'holds, not something that happened that month, so adding twelve of them up would '
-      + 'be the same money counted twelve times. Those rows show where the year ended '
-      + 'instead — the last month that states a balance — and hovering one gives the '
-      + 'year\'s interest and dividends, which is what the account really made.' },
-  overflowRule: { title: 'Sweeping an Account’s Overflow',
-    body: 'A row on the overflow rule watches one account and moves whatever it would end '
-      + 'the month holding above a threshold — a goal\'s target, read live, or a dollar '
-      + 'amount — into another account. A goal that adds up several accounts is measured '
-      + 'across all of them: the sweep fires when those balances TOGETHER would end the '
-      + 'month above the target, and the transfer still leaves the one watched account, '
-      + 'which must be among the ones the goal counts. It is worked out at the END of the month, after '
-      + 'the account\'s interest and dividends, so the account lands exactly on the '
-      + 'threshold; the money arrives at the destination at month end too and earns '
-      + 'nothing there until the month after. A month that ends under the threshold stays '
-      + 'blank — nothing to sweep is not a $0 transfer. A row can also CAP its '
-      + 'destination — fill it only up to a goal\'s target — which is how several rows '
-      + 'sweep from one account the way real transfers are made: the first fills '
-      + 'Mid-term until it reaches its goal, and the row below it takes whatever '
-      + 'overflow is left to Long-term. Rows are worked out in row order, an account '
+      + 'months are deliberately left out, because a total spanning two years would not mean '
+      + 'anything.'],
+    ['An ', b('account row'), ' is the exception: a balance is what the account holds, not '
+      + 'something that happened that month, so adding twelve of them up would be the same '
+      + 'money counted twelve times. Those rows show where the year ended instead — the last '
+      + 'month that states a balance — and hovering one gives the year\'s interest and '
+      + 'dividends, which is what the account really made.'],
+  ] },
+  overflowRule: { title: 'Sweeping an Account’s Overflow', body: [
+    ['A row on the overflow rule watches one account and ', b('moves whatever it would end '
+      + 'the month holding above a threshold'), ' — a goal\'s target, read live, or a dollar '
+      + 'amount — into another account.'],
+    ['A goal that adds up several accounts is measured across all of them: the sweep fires '
+      + 'when those balances ', b('together'), ' would end the month above the target, and '
+      + 'the transfer still leaves the one watched account, which must be among the ones the '
+      + 'goal counts.'],
+    ['It is worked out at the ', b('end of the month'), ', after the account\'s interest and '
+      + 'dividends, so the account lands exactly on the threshold; the money arrives at the '
+      + 'destination at month end too and earns nothing there until the month after. A month '
+      + 'that ends under the threshold stays blank — nothing to sweep is not a $0 transfer.'],
+    ['A row can also ', b('cap its destination'), ' — fill it only up to a goal\'s target — '
+      + 'which is how several rows sweep from one account the way real transfers are made: '
+      + 'the first fills Mid-term until it reaches its goal, and the row below it takes '
+      + 'whatever overflow is left to Long-term. Rows are worked out in row order, an account '
       + 'that dips under its cap refills before anything flows past it, and a full '
-      + 'destination keeps its own interest — the cap stops money going in, it never '
-      + 'sweeps money out. Two rows sweeping into each other\'s accounts is a loop with '
-      + 'no answer, so both stay blank until one is repointed. A number you type into a '
-      + 'month always beats the rule.' },
-  mixedCell: { title: 'Part Actual, Part Estimate',
-    body: 'A month can hold several amounts — two grocery runs and a delivery, or a bill '
-      + 'you have paid next to one you have only guessed at. The cell shows their sum, and '
-      + 'a dashed underline means the amounts inside disagree about being real: some '
-      + 'happened, some are still estimates. Click the cell and choose "Split into amounts".' },
-  interestDest: { title: 'Where Interest Is Paid',
-    body: 'An account grows by its own rate each month, applied to what it held after that '
-      + 'month\'s transfers. That growth normally stays in the account — but a brokerage '
+      + 'destination keeps its own interest — the cap stops money going in, it never sweeps '
+      + 'money out.'],
+    ['Two rows sweeping into each other\'s accounts is a loop with no answer, so both stay '
+      + 'blank until one is repointed. ', b('A number you type into a month always beats the '
+      + 'rule.')],
+  ] },
+  mixedCell: { title: 'Part Actual, Part Estimate', body: [
+    ['A month can hold several amounts — two grocery runs and a delivery, or a bill you have '
+      + 'paid next to one you have only guessed at.'],
+    ['The cell shows their sum, and ', b('a dashed underline'), ' means the amounts inside '
+      + 'disagree about being real: some happened, some are still estimates. Click the cell '
+      + 'and choose "Split into amounts".'],
+  ] },
+  interestDest: { title: 'Where Interest Is Paid', body: [
+    ['An account grows by its own rate each month, applied to what it held ', b('after that '
+      + 'month\'s transfers'), '. That growth normally stays in the account — but a brokerage '
       + 'often sweeps dividends into cash instead, so each account can name where its '
-      + 'interest lands. Any month\'s interest can also be overridden with what really '
-      + 'arrived, by clicking that month\'s balance. A PAST year works the other way '
-      + 'round: nothing is computed there, so clicking a balance is how you STATE what '
-      + 'the account earned that month. Those figures count as income for the year and '
-      + 'leave the stated balance beside them alone, which already holds the money.' },
+      + 'interest lands.'],
+    ['Any month\'s interest can also be ', b('overridden with what really arrived'), ', by '
+      + 'clicking that month\'s balance.'],
+    ['A ', b('past year'), ' works the other way round: nothing is computed there, so '
+      + 'clicking a balance is how you state what the account earned that month. Those '
+      + 'figures count as income for the year and leave the stated balance beside them '
+      + 'alone, which already holds the money.'],
+  ] },
   /* accountSince, convertSummary and avgLastYear used to sit here unrendered —
      entries no helpBtn ever pointed at. Each is told where the reader actually
      is: the account editor's own sub explains the partway start, the convert
      confirm spells out what a summary keeps and loses, and the rule picker's
      option labels are already whole sentences. An explanation nothing renders
      is not help; it is a second copy waiting to drift. */
-  paceCheck: { title: 'The Pace Check',
-    body: 'It takes this year\'s projected growth (December\'s total minus last year\'s), '
-      + 'spreads it over twelve months, and compares that with what your next unmet goal '
-      + 'needs each month to arrive on time. The "behind / ahead" figure converts the '
-      + 'monthly gap into how much sooner or later the goal lands at this pace.' },
-  k401Limit: { title: 'The 401(k) Limit Check',
-    body: 'Your own contributions are salary × the salary percentage, plus bonus × the '
-      + 'bonus percentage. Only your own money counts toward the IRS elective-deferral '
-      + 'limit — the employer match does not — so that total is what this compares with '
-      + 'the limit. The limit is editable because it changes every year.' },
-  magi: { title: 'The Roth IRA Income Check',
-    body: 'Modified adjusted gross income here is salary plus bonus, less the money that '
-      + 'never shows up as income: pre-tax 401(k) contributions and pre-tax HSA. Roth IRA '
-      + 'eligibility phases out across a band above the limit — inside the band you can '
-      + 'still contribute a reduced amount, above it you cannot contribute directly.' },
-  retProjection: { title: 'The Retirement Projection',
-    body: 'Each year the balance grows by the assumed return (set in Preferences) and then '
-      + 'the year\'s planned contributions are added. It is a straight-line sketch, not a '
-      + 'forecast: real returns arrive unevenly, and a bad first decade matters far more '
-      + 'than the average suggests. A dotted rule down the chart marks each person\'s '
-      + 'retirement year, worked out from the birth month and retirement age on the '
-      + 'Household tab — so the chart runs at least far enough to show it. Nobody without '
-      + 'both of those gets a rule: the date would be a guess. '
-      + 'From the FIRST of those retirements the line bends: the pot starts paying the '
-      + 'spending target you set, less whatever arrives from elsewhere, and the drawing '
-      + 'years are drawn in a tighter dash. "Retires at 55" is several different dates, so '
-      + 'each person says which one they mean — their birthday month, or the January '
-      + 'before or after it. Retire mid-year and that first year only spends the months '
-      + 'left in it, which is why the figures on the card beside the chart describe the '
-      + 'first WHOLE year instead. Everything is in today\'s money, so the return '
-      + 'is a real one — growth after inflation. There is no tax in any of it, and no '
-      + 'required minimum distributions; this app keeps no tax tables and will not grow '
-      + 'any.' },
-  splitAtRetirement: { title: 'Traditional vs Roth at Retirement',
-    body: 'The same split as the bar at the top of this tab, but worked out for the month '
-      + 'the pot starts paying out rather than for today — which is the date the mix '
-      + 'actually matters on, since it decides how much of what you spend is taxable. '
-      + 'Every account grows at its own rate (set one on the account itself, or leave it '
-      + 'following Preferences) and takes its own contributions, so pots invested '
-      + 'differently pull the split apart over the years. Balances follow each account\'s '
-      + 'own type — your accounts have said which is a pre-tax 401(k) and which is a Roth '
-      + 'one since the day they had types. What could not say so was the 401(k) Limit '
-      + 'Check, which holds ONE percentage for your ongoing contributions and cannot know '
-      + 'which of your 401(k)s it goes into; its "Of that, Roth %" is what settles that, '
-      + 'and it is 0 unless you say otherwise. Everything is in '
-      + 'today\'s money and before tax — this app keeps no tax tables, so it says how much '
-      + 'is on each side and not what either is worth after tax.' },
-  iraProjection: { title: 'Where the IRAs Land',
-    body: 'Each IRA\'s balance today, plus what goes in every year between now and the '
-      + 'month the paying-in stops, all grown at the real return in Preferences. The '
-      + 'contributions come from the table above: a year you have typed is used exactly '
-      + 'as typed, and the years you have not are filled in from the last figure you did '
-      + '— which is what "I put in $7,000 a year" usually means. Type a year of your own '
-      + 'and it wins, a 0 included, so a year you deliberately skipped stays skipped. '
-      + 'Paying-in stops at the owner\'s retirement, or at the first retirement in the '
-      + 'household for an IRA that hasn\'t been assigned to anybody. Everything is in '
-      + 'today\'s money and before tax: a Traditional IRA is taxed on the way out and a '
-      + 'Roth is not, and this app keeps no tax tables.' },
-  safeRate: { title: 'The Withdrawal Rate',
-    body: 'What the first year out of the pot comes to as a share of the pot it came out '
-      + 'of. It is shown against a rate YOU set, and 4% is only where the box starts — '
-      + 'that figure is the one most often quoted, not one this app endorses. It assumes '
-      + 'a particular mix of investments, a particular length of retirement and one '
-      + 'country\'s history, and none of those are checked here. Set the rate you '
-      + 'believe, the same way you set the Roth income threshold. '
-      + 'It is measured on the first WHOLE year of retirement, not on the year you '
+  paceCheck: { title: 'The Pace Check', body: [
+    ['It takes ', b('this year\'s projected growth'), ' (December\'s total minus last '
+      + 'year\'s), spreads it over twelve months, and compares that with what your next '
+      + 'unmet goal needs each month to arrive on time.'],
+    ['The "behind / ahead" figure converts the monthly gap into ', b('how much sooner or '
+      + 'later the goal lands at this pace'), '.'],
+  ] },
+  k401Limit: { title: 'The 401(k) Limit Check', body: [
+    ['Your own contributions are salary × the salary percentage, plus bonus × the bonus '
+      + 'percentage.'],
+    [b('Only your own money counts toward the IRS elective-deferral limit'), ' — the '
+      + 'employer match does not — so that total is what this compares with the limit. The '
+      + 'limit is editable because it changes every year.'],
+  ] },
+  magi: { title: 'The Roth IRA Income Check', body: [
+    ['Modified adjusted gross income here is ', b('salary plus bonus, less the money that '
+      + 'never shows up as income'), ': pre-tax 401(k) contributions and pre-tax HSA.'],
+    ['Roth IRA eligibility ', b('phases out across a band'), ' above the limit — inside the '
+      + 'band you can still contribute a reduced amount, above it you cannot contribute '
+      + 'directly.'],
+  ] },
+  retProjection: { title: 'The Retirement Projection', body: [
+    ['Each year the balance grows by the assumed return (set in Preferences) and then the '
+      + 'year\'s planned contributions are added. It is ', b('a straight-line sketch, not a '
+      + 'forecast'), ': real returns arrive unevenly, and a bad first decade matters far '
+      + 'more than the average suggests.'],
+    ['A dotted rule down the chart marks ', b('each person\'s retirement year'), ', worked '
+      + 'out from the birth month and retirement age on the Household tab — so the chart '
+      + 'runs at least far enough to show it. Nobody without both of those gets a rule: the '
+      + 'date would be a guess.'],
+    ['From the ', b('first'), ' of those retirements the line bends: the pot starts paying '
+      + 'the spending target you set, less whatever arrives from elsewhere, and the drawing '
+      + 'years are drawn in a tighter dash.'],
+    ['"Retires at 55" is several different dates, so each person says which one they mean — '
+      + 'their birthday month, or the January before or after it. Retire mid-year and that '
+      + 'first year only spends the months left in it, which is why the figures on the card '
+      + 'beside the chart describe ', b('the first whole year'), ' instead.'],
+    ['Everything is in ', b('today\'s money'), ', so the return is a real one — growth after '
+      + 'inflation. There is ', b('no tax in any of it'), ', and no required minimum '
+      + 'distributions; this app keeps no tax tables and will not grow any.'],
+  ] },
+  splitAtRetirement: { title: 'Traditional vs Roth at Retirement', body: [
+    ['The same split as the bar at the top of this tab, but worked out ', b('for the month '
+      + 'the pot starts paying out'), ' rather than for today — which is the date the mix '
+      + 'actually matters on, since it decides how much of what you spend is taxable.'],
+    ['Every account grows at its own rate (set one on the account itself, or leave it '
+      + 'following Preferences) and takes its own contributions, so ', b('pots invested '
+      + 'differently pull the split apart'), ' over the years. Balances follow each '
+      + 'account\'s own type — your accounts have said which is a pre-tax 401(k) and which '
+      + 'is a Roth one since the day they had types.'],
+    ['What could not say so was the ', b('401(k) Limit Check'), ', which holds one percentage '
+      + 'for your ongoing contributions and cannot know which of your 401(k)s it goes into; '
+      + 'its "Of that, Roth %" is what settles that, and it is 0 unless you say otherwise.'],
+    ['Everything is in today\'s money and ', b('before tax'), ' — this app keeps no tax '
+      + 'tables, so it says how much is on each side and not what either is worth after tax.'],
+  ] },
+  iraProjection: { title: 'Where the IRAs Land', body: [
+    ['Each IRA\'s balance today, plus what goes in every year between now and the month the '
+      + 'paying-in stops, all grown at ', b('the real return in Preferences'), '.'],
+    ['The contributions come from the table above: ', b('a year you have typed is used '
+      + 'exactly as typed'), ', and the years you have not are filled in from the last figure '
+      + 'you did — which is what "I put in $7,000 a year" usually means. Type a year of your '
+      + 'own and it wins, a 0 included, so a year you deliberately skipped stays skipped.'],
+    ['Paying-in stops at ', b('the owner\'s retirement'), ', or at the first retirement in '
+      + 'the household for an IRA that hasn\'t been assigned to anybody.'],
+    ['Everything is in today\'s money and before tax: a Traditional IRA is taxed on the way '
+      + 'out and a Roth is not, and this app keeps no tax tables.'],
+  ] },
+  safeRate: { title: 'The Withdrawal Rate', body: [
+    [b('What the first year out of the pot comes to as a share of the pot it came out of'),
+      '.'],
+    ['It is shown against ', b('a rate you set'), ', and 4% is only where the box starts — '
+      + 'that figure is the one most often quoted, not one this app endorses. It assumes a '
+      + 'particular mix of investments, a particular length of retirement and one country\'s '
+      + 'history, and none of those are checked here. Set the rate you believe, the same way '
+      + 'you set the Roth income threshold.'],
+    ['It is measured on ', b('the first whole year of retirement'), ', not on the year you '
       + 'actually go: retire in November and that year takes two months of spending, so a '
-      + 'rate read there would be a sixth of the real one and would call a plan safe on '
-      + 'the strength of a year that never happens again.' },
-  retIncome: { title: 'Other Retirement Income',
-    body: 'Money that arrives in retirement without coming out of the pot — Social '
+      + 'rate read there would be a sixth of the real one and would call a plan safe on the '
+      + 'strength of a year that never happens again.'],
+  ] },
+  retIncome: { title: 'Other Retirement Income', body: [
+    ['Money that arrives in retirement ', b('without coming out of the pot'), ' — Social '
       + 'Security, a pension, part-time work. The pot only covers what these don\'t, so '
-      + 'leaving them out makes the plan look far worse than it is. Type today\'s '
-      + 'estimate: everything on this tab is in today\'s money, and Social Security rises '
-      + 'with inflation, so today\'s figure is the right one. Leave the last year empty '
-      + 'for something that carries on for life. If one of you keeps working after the '
-      + 'other retires, that pay belongs here too, ending in their own retirement year — '
-      + 'the pot starts paying at the FIRST retirement in the household.' },
-  summaryBalances: { title: 'Balances in a Summary Year',
-    body: 'Flow rows in a summary hold the year\'s total. Balance rows can\'t — adding up '
-      + 'twelve monthly balances would be meaningless — so they hold December\'s figure, '
-      + 'what the account held at the end of the year.' },
-  raiseVsMoved: { title: 'Raise $ vs Since Last Year',
-    body: 'Raise $ is this year\'s raise percentage applied to this year\'s salary — the '
-      + 'money the raise itself is worth. "Since last year" compares this year\'s starting '
-      + 'salary with what last year\'s salary came to after ITS raise. Matching is the '
-      + 'ordinary case and reads "as planned" — the annual raise was the only thing that '
-      + 'moved your pay. A figure there instead means something else landed in between: a '
-      + 'promotion, an adjustment, or a raise that took effect partway through the year. It '
-      + 'is not a year-on-year comparison of what you earn — that is the raise itself, one '
+      + 'leaving them out makes the plan look far worse than it is.'],
+    ['Type ', b('today\'s estimate'), ': everything on this tab is in today\'s money, and '
+      + 'Social Security rises with inflation, so today\'s figure is the right one. Leave the '
+      + 'last year empty for something that carries on for life.'],
+    ['If one of you keeps working after the other retires, that pay belongs here too, ending '
+      + 'in their own retirement year — the pot starts paying at the ', b('first'),
+      ' retirement in the household.'],
+  ] },
+  summaryBalances: { title: 'Balances in a Summary Year', body: [
+    ['Flow rows in a summary hold the year\'s total. ', b('Balance rows can\'t'), ' — adding '
+      + 'up twelve monthly balances would be meaningless — so they hold December\'s figure, '
+      + 'what the account held at the end of the year.'],
+  ] },
+  raiseVsMoved: { title: 'Raise $ vs Since Last Year', body: [
+    [b('Raise $'), ' is this year\'s raise percentage applied to this year\'s salary — the '
+      + 'money the raise itself is worth. ', b('Since last year'), ' compares this year\'s '
+      + 'starting salary with what last year\'s salary came to after its raise.'],
+    ['Matching is the ordinary case and reads "as planned" — the annual raise was the only '
+      + 'thing that moved your pay. ', b('A figure there instead means something else landed '
+      + 'in between'), ': a promotion, an adjustment, or a raise that took effect partway '
+      + 'through the year.'],
+    ['It is not a year-on-year comparison of what you earn — that is the raise itself, one '
       + 'row up. Where a year is missing from the table the column says which year it did '
-      + 'read, since the one before is not always last year.' },
-  givingShare: { title: 'Giving as a Share of Income',
-    body: 'Given is what left your own accounts: deposits into the giving fund plus cash '
+      + 'read, since the one before is not always last year.'],
+  ] },
+  givingShare: { title: 'Giving as a Share of Income', body: [
+    [b('Given'), ' is what left your own accounts: deposits into the giving fund plus cash '
       + 'gifts. A grant out of the fund is not added — that money was already counted the '
       + 'day it went in, and counting it again on the way out would double every figure '
-      + 'here. Anything still only planned waits until you mark it done. Gross income is '
-      + 'the Comp tab\'s total comp: the salary after this year\'s raise, plus the bonus. '
-      + 'Take-home pay is the pay rows of that year\'s budget added up — what actually '
-      + 'reached the bank, after tax and every deduction — so a tax refund, a dividend or '
-      + 'a reimbursement is not counted as pay. A percentage is left as a dash where the '
-      + 'year has no salary recorded or no pay row to measure against, rather than being '
-      + 'guessed at. The current year measures what you have given so far against the '
-      + 'whole year\'s income, so it reads low until December — which is what the '
-      + 'projection is for. Where the year still running has giving planned in it, a '
-      + 'second row of tiles adds those deposits and cash gifts to what has already '
-      + 'gone, and says the share each percentage is heading for directly under the '
-      + 'one it is at. '
-      + 'A planned grant is left out of that, the same way a made one is: the money left '
-      + 'your account when its deposit did. So the projection can be smaller than the '
-      + '"more is planned" figure above the table, which counts every planned row.' },
-  priceLookup: { title: 'Looking up Prices',
-    body: 'Prices come from Twelve Data, which needs a free API key (Preferences). Only '
-      + 'the ticker is sent. Shares, ETFs and mutual funds are all quoted, though a fund '
-      + 'strikes one price a day after the close, so its figure is the last one published '
-      + 'rather than a live one. The free allowance is 800 lookups a day and eight a '
-      + 'minute; a fetched price is cached for six hours, so opening this tab repeatedly '
-      + 'costs nothing. The Refresh button ignores that cache and fetches everything on '
-      + 'the spot — the six hours only ever held back the automatic top-up. Every price '
-      + 'stays editable by hand, and typing one over a fetched price is fine; open a '
-      + 'holding to see where its price came from and when.' },
-  taxBrackets: { title: 'The Bracket Tables',
-    body: 'Every figure here is one you typed. The app ships no bracket, no rate and no '
-      + 'deduction, and it never looks any up — a threshold baked in would be quietly '
-      + 'wrong within twelve months while looking authoritative, which is the same reason '
-      + 'the Roth income limit is yours to set. A band runs from wherever the one above '
-      + 'it stopped up to the figure you give, and the last band is left open so '
-      + 'everything above it falls in there. If you do stop the table early, income above '
-      + 'the top band is taxed at that band\'s rate rather than at nothing — a schedule '
-      + 'typed halfway must not make the next dollar free. Tables are filed by filing '
-      + 'status, and one for a status you have left is kept rather than deleted: it is '
-      + 'still the truth about the year it was for.' },
-  taxCarry: { title: 'How a Table Carries Forward',
-    body: 'A year with no table of its own uses the newest one before it. That is what '
-      + 'lets a single schedule cover a forty-year projection without asking you to type '
-      + 'forty of them, and it is deliberately said out loud here rather than left to be '
-      + 'inferred — a 2026 table silently governing 2060 would be the app putting words '
-      + 'in your mouth. Federal and state carry separately, because they move on '
-      + 'different clocks. Nothing is adjusted for inflation on the way: everything on '
-      + 'these tabs is in today\'s money, so a table typed in today\'s money is the '
-      + 'consistent thing to carry.' },
-  taxCheck: { title: 'Checking an Income',
-    body: 'A plain calculator over your own tables — what a given taxable income would '
-      + 'owe. It exists because a schedule you have just typed is a column of numbers '
-      + 'until something turns it into a figure, and one income is the fastest way to see '
-      + 'whether it is the table you meant. The effective rate is the tax over the whole '
-      + 'income; the marginal rate is what the next dollar would meet. Nothing here '
-      + 'touches the projection.' },
-  taxGrossUp: { title: 'What the Pot Has to Pay',
-    body: 'A pre-tax 401(k) has to pay out MORE than you spend, because the withdrawal '
-      + 'itself is income and is taxed. This works out how much more: the withdrawal '
-      + 'whose after-tax remainder is exactly the spending target you set. It is solved '
-      + 'rather than estimated — the figure is checked to the cent, and a penny less '
-      + 'would not cover the target. How much of a withdrawal is taxable comes from the '
-      + 'pot\'s own mix of pre-tax and Roth money; because the drawdown takes the same '
-      + 'proportion out of every account, that share does not move as the pot is spent. '
-      + 'The figures here are read off the same records the Retirement chart is drawn '
-      + 'from, so the two can never disagree.' },
-  taxableShare: { title: 'How Much of This Is Taxable',
-    body: 'Different retirement income is taxed differently, and the app cannot know '
-      + 'which is which — so it asks. Social Security is taxed on part of itself under a '
-      + 'formula this app deliberately does not model; a pension is usually taxed in '
-      + 'full; a Roth withdrawal is not taxed at all. Give each row the share the '
-      + 'brackets should see. A state share is asked separately once you have a state '
-      + 'table, because states commonly tax retirement income differently from the '
-      + 'federal government — left empty it follows the federal figure rather than '
-      + 'dropping to zero. A row nobody has answered for is counted as 0% and SAID SO, '
-      + 'never quietly assumed: "untaxed" and "nobody has said" are different claims.' },
+      + 'here. Anything still only planned waits until you mark it done.'],
+    [b('Gross income'), ' is the Comp tab\'s total comp: the salary after this year\'s raise, '
+      + 'plus the bonus. ', b('Take-home pay'), ' is the pay rows of that year\'s budget '
+      + 'added up — what actually reached the bank, after tax and every deduction — so a tax '
+      + 'refund, a dividend or a reimbursement is not counted as pay.'],
+    ['A percentage is ', b('left as a dash'), ' where the year has no salary recorded or no '
+      + 'pay row to measure against, rather than being guessed at.'],
+    ['The current year measures what you have given so far against the whole year\'s income, '
+      + 'so it reads low until December — which is what ', b('the projection'), ' is for. '
+      + 'Where the year still running has giving planned in it, a second row of tiles adds '
+      + 'those deposits and cash gifts to what has already gone, and says the share each '
+      + 'percentage is heading for directly under the one it is at.'],
+    ['A planned grant is left out of that, the same way a made one is: the money left your '
+      + 'account when its deposit did. So the projection can be smaller than the "more is '
+      + 'planned" figure above the table, which counts every planned row.'],
+  ] },
+  priceLookup: { title: 'Looking up Prices', body: [
+    ['Prices come from ', b('Twelve Data'), ', which needs a free API key (Preferences). ',
+      b('Only the ticker is sent.'), ' Shares, ETFs and mutual funds are all quoted, though a '
+      + 'fund strikes one price a day after the close, so its figure is the last one '
+      + 'published rather than a live one.'],
+    ['The free allowance is ', b('800 lookups a day and eight a minute'), '; a fetched price '
+      + 'is cached for six hours, so opening this tab repeatedly costs nothing. The Refresh '
+      + 'button ignores that cache and fetches everything on the spot — the six hours only '
+      + 'ever held back the automatic top-up.'],
+    ['Every price stays ', b('editable by hand'), ', and typing one over a fetched price is '
+      + 'fine; open a holding to see where its price came from and when.'],
+  ] },
+  taxBrackets: { title: 'The Bracket Tables', body: [
+    [b('Every figure here is one you typed.'), ' The app ships no bracket, no rate and no '
+      + 'deduction, and it never looks any up — a threshold baked in would be quietly wrong '
+      + 'within twelve months while looking authoritative, which is the same reason the Roth '
+      + 'income limit is yours to set.'],
+    ['A band runs from wherever the one above it stopped up to the figure you give, and ',
+      b('the last band is left open'), ' so everything above it falls in there. If you do '
+      + 'stop the table early, income above the top band is taxed at that band\'s rate rather '
+      + 'than at nothing — a schedule typed halfway must not make the next dollar free.'],
+    ['Tables are filed by filing status, and ', b('one for a status you have left is kept'),
+      ' rather than deleted: it is still the truth about the year it was for.'],
+  ] },
+  taxCarry: { title: 'How a Table Carries Forward', body: [
+    [b('A year with no table of its own uses the newest one before it.'), ' That is what lets '
+      + 'a single schedule cover a forty-year projection without asking you to type forty of '
+      + 'them, and it is deliberately said out loud here rather than left to be inferred — a '
+      + '2026 table silently governing 2060 would be the app putting words in your mouth.'],
+    ['Federal and state ', b('carry separately'), ', because they move on different clocks.'],
+    [b('Nothing is adjusted for inflation on the way'), ': everything on these tabs is in '
+      + 'today\'s money, so a table typed in today\'s money is the consistent thing to carry.'],
+  ] },
+  taxCheck: { title: 'Checking an Income', body: [
+    ['A plain calculator over your own tables — ', b('what a given taxable income would owe'),
+      '. It exists because a schedule you have just typed is a column of numbers until '
+      + 'something turns it into a figure, and one income is the fastest way to see whether '
+      + 'it is the table you meant.'],
+    ['The ', b('effective rate'), ' is the tax over the whole income; the ', b('marginal '
+      + 'rate'), ' is what the next dollar would meet. Nothing here touches the projection.'],
+  ] },
+  taxGrossUp: { title: 'What the Pot Has to Pay', body: [
+    ['A pre-tax 401(k) has to pay out ', b('more than you spend'), ', because the withdrawal '
+      + 'itself is income and is taxed. This works out how much more: the withdrawal whose '
+      + 'after-tax remainder is exactly the spending target you set.'],
+    ['It is ', b('solved rather than estimated'), ' — the figure is checked to the cent, and '
+      + 'a penny less would not cover the target.'],
+    ['How much of a withdrawal is taxable comes from ', b('the pot\'s own mix of pre-tax and '
+      + 'Roth money'), '; because the drawdown takes the same proportion out of every '
+      + 'account, that share does not move as the pot is spent. The figures here are read '
+      + 'off the same records the Retirement chart is drawn from, so the two can never '
+      + 'disagree.'],
+  ] },
+  taxableShare: { title: 'How Much of This Is Taxable', body: [
+    ['Different retirement income is taxed differently, and the app cannot know which is '
+      + 'which — ', b('so it asks'), '. Social Security is taxed on part of itself under a '
+      + 'formula this app deliberately does not model; a pension is usually taxed in full; a '
+      + 'Roth withdrawal is not taxed at all. Give each row the share the brackets should '
+      + 'see.'],
+    ['A ', b('state share'), ' is asked separately once you have a state table, because '
+      + 'states commonly tax retirement income differently from the federal government — '
+      + 'left empty it follows the federal figure rather than dropping to zero.'],
+    ['A row nobody has answered for is counted as 0% and ', b('said so'), ', never quietly '
+      + 'assumed: "untaxed" and "nobody has said" are different claims.'],
+  ] },
 };
 
 function helpBtn(key, label) {
@@ -16902,12 +16960,34 @@ function wireEditFocus(root) {
 }
 
 const helpDialog = F('helpDialog');
+/* A help body is an ARRAY OF PARAGRAPHS, and a paragraph is an array of RUNS: a
+   plain string is plain text and b('…') is bold. It is built with
+   createElement and textContent — NEVER innerHTML — which is the whole point of
+   the shape. Five sibling apps write their help as HTML literals and are fine
+   doing it, because nothing a reader typed goes near those strings; this app
+   holds household names and every figure of a family's finances, and the rule
+   here has always been that help text is copy and not a template. Keeping that
+   rule cost one small renderer and bought paragraphs and bold anyway, so there
+   was never a trade to make. Flow Metrics carries the same pair for the same
+   reason. */
+function renderHelpBody(box, paras) {
+  box.textContent = '';
+  for (const runs of paras) {
+    const para = document.createElement('p');
+    for (const run of runs) {
+      if (typeof run === 'string') { para.appendChild(document.createTextNode(run)); continue; }
+      const strong = document.createElement('strong');
+      strong.textContent = run.b;
+      para.appendChild(strong);
+    }
+    box.appendChild(para);
+  }
+}
 function openHelp(key) {
   const h = HELP[key];
   if (!h) return;
   F('helpTitle').textContent = h.title;
-  /* textContent, never markup: help text is copy, not a template. */
-  F('helpBody').textContent = h.body;
+  renderHelpBody(F('helpBody'), h.body);
   openModal(helpDialog);
 }
 F('helpCloseBtn').onclick = () => helpDialog.close();

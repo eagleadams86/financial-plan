@@ -1474,8 +1474,23 @@ Things that go with it and will look arbitrary later:
   and the box is now the full width of the list under it, which is what a 700px
   window makes right. See the shared note below.
 - **THE WINDOW ITSELF IS PINNED, PROPERTY BY PROPERTY, AND THE SAME BLOCK IS IN ALL SIX APPS VERBATIM (2026-08-23).** 700px on 18px of padding — the Back Up & Restore window's size, the family's other fixed-width window — with the heading, the intro line, the box, the hit and its three lines, and the "Nothing matches" line all declared inside the `#searchDialog` block rather than borrowed from whatever quiet-text class the app happens to have. That borrowing is what made one window into six: 360px and 420px wide, a 320px box inside a 360px dialog, a hittab at `--fs-sm` here and `--fs-xs` there, `.04em` typed out beside `--ls-label`, and four different colours on the same sentence. A change to any of it belongs in all six. Two details worth keeping: `#searchDialog > p` is the DIRECT child only (the results list's message is a `<p>` too, and an id in that selector would out-rank `.searchresults .hint` and hand it the intro line's colour), and the block deliberately declares NO dialog chrome — backdrop, shadow, a field's touch-height floor, and the max-height Money Map divides by its own zoom all belong to the app's `dialog` rule and are shared with every other window it opens.
+- **A HELP BODY IS AN ARRAY OF PARAGRAPHS, NOT A STRING** (2026-08-23), and a paragraph is
+  an array of runs: a plain string, or `b('…')` for bold. `renderHelpBody` walks it with
+  `createElement` and `textContent`, so **no part of this is ever parsed as markup** — which
+  is the whole reason the shape exists. Five sibling apps write their help as HTML literals
+  and are right to; this app holds household names and every figure of a family's finances,
+  and the standing rule that help text is copy and not a template was worth keeping. It cost
+  one nine-line renderer and bought paragraphs and bold anyway, so there was no trade to
+  make. Flow Metrics carries the same pair for the same reason.
+  Every entry was ONE paragraph of 200–1,400 characters until this date, which is a wall on
+  a phone. Bold carries the thing being defined or the load-bearing claim, **at most one per
+  paragraph** — `tests.html` pins that bold stays a minority of the runs, that no paragraph
+  is entirely bold, that a body over 450 characters has a break in it, and that every run is
+  a string or a `{ b }`. Short entries are deliberately left whole: three sentences split
+  into three paragraphs is its own kind of unreadable.
 - **`#helpDialog` is the exception, and the READING MEASURE is what sizes it
   (2026-08-23).** It is the one dialog that is nothing but prose, so `#helpBody`
+  (a `<div>` since the bodies became paragraphs — a `<p>` cannot hold them)
   is held to 66ch — at the full 1100px its lines ran to about 150 characters,
   roughly twice a comfortable measure — and the window is `width: fit-content`
   so it takes that measure rather than the common width. The cap came first and

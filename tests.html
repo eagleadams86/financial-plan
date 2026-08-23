@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 700;
+const EXPECTED = 702;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -8352,19 +8352,65 @@ t('every info dot has words behind it', () => {
   eq(Object.keys(H.HELP).filter(k => !used.includes(k)).join(', '), '',
     'and no entry sits unrendered, which is a second copy of an explanation waiting to drift');
 });
+/* A body is an array of paragraphs, and a paragraph an array of runs — a plain
+   string, or { b } for bold. `flat` is what the reader ends up seeing. */
+const helpText = (h) => h.body.map((para) =>
+  para.map((run) => (typeof run === 'string' ? run : run.b)).join('')).join('\n\n');
 t('no info window opens half written', () => {
   const entries = Object.entries(H.HELP);
   eq(entries.filter(([, h]) => !h.title || !h.title.trim()).map(([k]) => k).join(', '), '',
     'each one is headed — the dialog has no fallback title');
   /* 120 characters is well under the shortest real entry (about 200) and well
      over a heading restated as a sentence, which is what a stub looks like. */
-  eq(entries.filter(([, h]) => !h.body || h.body.trim().length < 120).map(([k]) => k).join(', '), '',
+  eq(entries.filter(([, h]) => helpText(h).trim().length < 120).map(([k]) => k).join(', '), '',
     'and each one explains something — a stub is worse than no dot, having been asked for');
   /* The bodies are written as one string per line, joined with +. Miss the
      space at a join and two words run together; leave one at both ends of a
-     join and the sentence gets a gap the reader can see. */
-  eq(entries.filter(([, h]) => /\s\s/.test(h.body)).map(([k]) => k).join(', '), '',
-    'with no doubled space, which is a + join that was given the space twice');
+     join and the sentence gets a gap the reader can see. A run boundary is the
+     same trap by another route — b('…') sitting flush against the word before
+     it, or with a space at both ends of the seam. */
+  const paraText = (para) => para.map((r) => (typeof r === 'string' ? r : r.b)).join('');
+  eq(entries.filter(([, h]) => h.body.some((para) => / {2}/.test(paraText(para))))
+    .map(([k]) => k).join(', '), '',
+    'with no doubled space, which is a + join or a run seam given the space twice');
+});
+t('every body is paragraphs of runs, and every run is text', () => {
+  /* The shape IS the safety property: renderHelpBody walks this with
+     createElement and textContent, so there is no path by which any of it is
+     parsed as markup. A body that arrived as a bare string would still render
+     — as one paragraph of characters — which is exactly the silent kind of
+     wrong worth a test. */
+  const entries = Object.entries(H.HELP);
+  eq(entries.filter(([, h]) => !Array.isArray(h.body) || !h.body.length).map(([k]) => k).join(', '),
+    '', 'a body is an array of paragraphs');
+  const badRun = entries.filter(([, h]) => h.body.some((para) =>
+    !Array.isArray(para) || !para.length
+    || para.some((run) => typeof run !== 'string'
+      && !(run && typeof run.b === 'string' && run.b.length))));
+  eq(badRun.map(([k]) => k).join(', '), '',
+    "a paragraph is an array of runs, and a run is a string or b('…')");
+  /* No angle brackets anywhere: nothing here is trying to be markup, and if a
+     body ever starts to, this is where it is caught rather than in the DOM. */
+  eq(entries.filter(([, h]) => /[<>]/.test(helpText(h))).map(([k]) => k).join(', '), '',
+    'and no run reaches for a tag — this renderer would print it as characters');
+});
+t('the wall of text is broken up, and the bold is not everywhere', () => {
+  /* Every entry was ONE paragraph of 200 to 1,400 characters until 2026-08-23.
+     A body over about 450 characters needs a break in it or it is a wall on a
+     phone; the short ones are left alone deliberately, because splitting three
+     sentences into three paragraphs is its own kind of unreadable. */
+  const entries = Object.entries(H.HELP);
+  eq(entries.filter(([, h]) => helpText(h).length > 450 && h.body.length < 2)
+    .map(([k]) => k).join(', '), '',
+    'a long entry with no paragraph break in it');
+  eq(entries.filter(([, h]) => h.body.some((para) =>
+    para.every((run) => typeof run !== 'string'))).map(([k]) => k).join(', '), '',
+    'a paragraph that is nothing but bold, which is a heading pretending to be prose');
+  const runs = entries.reduce((n, [, h]) => n + h.body.reduce((m, p) => m + p.length, 0), 0);
+  const bolds = entries.reduce((n, [, h]) => n + h.body.reduce((m, p) =>
+    m + p.filter((r) => typeof r !== 'string').length, 0), 0);
+  ok(bolds / runs < 0.5, 'bold is the minority of the runs — ' + bolds + ' of ' + runs
+    + '. A page where half the words are bold has no emphasis left');
 });
 t('the help sheet is as wide as its text, not the common width', () => {
   /* Two rules, and only together: the measure caps the LINE, `fit-content`
