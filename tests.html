@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 704;
+const EXPECTED = 705;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -8475,6 +8475,39 @@ t('and the handler needs both the press and the release outside', () => {
     'the pointer is tested against the box, not just the target');
   ok(/startedOutside && outside\(e\)/.test(fn),
     'and both the press and the release have to land outside');
+});
+t('every dialog closes on a click off it, bar the one documented exception', () => {
+  /* EVERY dialog closes on a click off it, and this tests the BEHAVIOUR rather
+     than the registration list. A source scan only ever proves an id is on a
+     list; it cannot see a dialog wired through a variable, and a hand-written
+     list checked by a hand-written test agrees with itself forever. Both of
+     those bit on 2026-08-23 — the lottery portfolio's help window had no
+     handler at all and Money Map's compare window was simply left off the list.
+     Far outside rather than a few pixels: the app runs in a 1px frame here, so
+     the dialog's box is degenerate and only an unambiguous point is safe. What
+     this cannot check at 1px is the padding case — a click just INSIDE the
+     frame must NOT close it — so that one is verified by hand in a browser. */
+  const EXEMPT = ['syncChoiceDialog'];
+  const dialogs = [...w.document.querySelectorAll('dialog')];
+  ok(dialogs.length >= 2, 'the dialogs were found — ' + dialogs.length);
+  const stuck = [], leaky = [];
+  for (const d of dialogs) {
+    if (d.open) d.close();
+    d.showModal();
+    for (const type of ['pointerdown', 'mousedown', 'click']) {
+      const E = type === 'pointerdown' ? w.PointerEvent : w.MouseEvent;
+      d.dispatchEvent(new E(type, { clientX: -1000, clientY: -1000,
+        bubbles: true, cancelable: true }));
+    }
+    const closed = !d.open;
+    d.close();
+    if (EXEMPT.includes(d.id)) { if (closed) leaky.push(d.id); }
+    else if (!closed) stuck.push(d.id);
+  }
+  eq(stuck.join(', '), '', 'a dialog you cannot dismiss by clicking off it');
+  /* THE ONE DOCUMENTED EXCEPTION, family-wide: "which copy of your data?" has
+     no safe default, so it must be answered rather than dismissed. */
+  eq(leaky.join(', '), '', 'and the exception must still refuse to be dismissed');
 });
 t('the info dot is the family circle, declared property by property', () => {
   ok(/\.tile-help \{[^}]*width: 16px; height: 16px; min-height: 0;/.test(APP_SRC),
