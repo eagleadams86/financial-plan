@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 705;
+const EXPECTED = 707;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -8257,6 +8257,52 @@ t('the app print stylesheet sets no colour of its own', () => {
   ok(!/\bhsla?\(/.test(block), 'nor an hsl()');
   ok(!/(^|[^-])\bcolor\s*:/.test(block.replace(/print-color-adjust/g, '')),
     'and it never sets a colour property, only what to hide and where to break');
+});
+/* ── The tile rows ──────────────────────────────────────────────────────────
+   A `.goalgrid` fills ONE line when the line has room for every tile, and
+   splits into EQUAL rows when it does not — a full row with a lone tile under
+   it is the shape being designed out. The rules are container queries, and the
+   two numbers they were worked out from — the smallest a tile may be and the
+   gap between them — live in a different rule higher up the sheet. So both are
+   read back out of the CSS and the thresholds checked AGAINST them, rather
+   than copied here as magic numbers that would agree with a stale sheet. */
+t('every tile row fits the tiles it promises, and none strands a lone tile', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const floor = APP_SRC.match(/\.goalgrid \{ display: grid; gap: (\d+)px;[^}]*minmax\((\d+)px/);
+  ok(floor, 'the auto-fit fallback still states a gap and a smallest tile');
+  const gap = +floor[1], min = +floor[2];
+  const blocks = [...APP_SRC.matchAll(/@container tiles \(min-width: (\d+)px\) \{([\s\S]*?)\n\}/g)];
+  ok(blocks.length >= 5, 'the container queries are still there');
+  let checked = 0;
+  for (const [, atStr, body] of blocks) {
+    const at = +atStr;
+    for (const rule of body.split('}').filter((r) => r.includes('grid-template-columns'))) {
+      const counts = [...rule.matchAll(/nth-child\((\d+)\):last-child/g)].map((m) => +m[1]);
+      ok(counts.length, 'every rule says which tile counts it answers');
+      const cols = rule.match(/grid-template-columns: repeat\((\d+),/);
+      const c = cols ? +cols[1] : 1;
+      ok(c * min + (c - 1) * gap <= at,
+        c + ' columns need ' + (c * min + (c - 1) * gap) + 'px of tiles and gaps, and the '
+        + 'query lets them in at ' + at + 'px');
+      for (const n of counts) {
+        ok(n >= c, n + ' tiles can never fill ' + c + ' columns');
+        ok(c === 1 || n % c !== 1,
+          n + ' tiles across ' + c + ' columns leaves one tile alone on the last row');
+        checked++;
+      }
+    }
+  }
+  ok(checked >= 16, 'and every count from three to eight is still answered');
+});
+t('the tile grid has something to measure, and leaves the giving pairs alone', () => {
+  ok(/:has\(> \.goalgrid\) \{ container: tiles \/ inline-size; \}/.test(APP_SRC),
+    "the grid's own parent is the named container — without it every query above "
+    + 'matches nothing and the counts silently stop applying');
+  const rules = [...APP_SRC.matchAll(/\.goalgrid([^{,]*):has\(> :nth-child/g)];
+  ok(rules.length >= 16, 'the count rules are still written against .goalgrid');
+  ok(rules.every((m) => m[1].includes(':not(.pairs)')),
+    'and every one of them excludes .pairs, whose columns pair a projection with the '
+    + 'figure it projects and must not be re-flowed');
 });
 /* ── The default theme ───────────────────────────────────────────────────────
    It moved from midnight to auto on 2026-08-22, so a reader who has never touched the

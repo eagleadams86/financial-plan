@@ -2769,6 +2769,48 @@ side.tax = {
   existing shares across untouched when they don't — **a dialog that never asked
   the question must not answer it.**
 
+## The tile rows (2026-08-23)
+
+**A `.goalgrid` fills ONE line when the line has room for every tile, and splits
+into EQUAL rows when it does not.** Six net-worth tiles in a 1,283px card used
+to come out five across with the sixth stranded underneath: plain `auto-fit`
+takes as many as fit and drops the remainder wherever it lands. A lone tile
+after a full row reads as a mistake — the eye finishes the row, finds a gap, and
+goes looking for the thing that should have been there.
+- **The count comes from `:has(> :nth-child(N):last-child)`**, which is "exactly
+  N children" — the idiom the old four-tile rule already used, so nothing that
+  isn't a grid of that size is touched.
+- **The width comes from a CONTAINER query, never the viewport.** The same card
+  is 1,283px wide on a desktop Progress tab, 710px in a `.cards2` half on
+  Retirement, and a phone's width on a phone; a viewport breakpoint would answer
+  the wrong question in two of those three. `:has(> .goalgrid)` makes the grid's
+  own parent the named container `tiles` — a `.card-body` once `wireBoxes()` has
+  run, a `.card` before that — so the width asked about is the width the tiles
+  actually get, with no card padding counted in. Where no container is found the
+  grid keeps the plain auto-fit line, which is what it always had.
+- **The thresholds are the 230px minimum tile and the 12px gap, multiplied
+  out**: 2→472, 3→714, 4→956, 5→1198, 6→1440, 7→1682, 8→1924. Narrowest first,
+  so the widest rule that matches wins. The tests read those two numbers back
+  out of the CSS and check every threshold against them rather than pinning the
+  figures a second time, so a change to the tile floor fails the suite instead
+  of quietly making a row too tight.
+- **Only counts that come out EVEN are offered.** Five tiles go 5, or 3 + 2, or
+  one per line — never 2 + 2 + 1. Seven go 7 or 4 + 3. Where the only
+  alternative would strand a single tile the grid drops to ONE column and
+  stacks, which is why three tiles between 472px and 714px are stacked rather
+  than laid out 2 + 1.
+- **Nine or more tiles fall back to auto-fit.** Only the Savings Goals grid can
+  get there, and a list that long is a scroll at every width.
+- **FOUR tiles are no longer pinned to 2 × 2.** The old rule forced two columns
+  at every width to avoid 3 + 1; it also stopped four tiles ever using a wide
+  screen, which is what "one line when it fits" asked for on 2026-08-23. They go
+  2 × 2 below 956px and four across above it, and the Tax tab's two check-a-
+  figure cards are where that shows.
+- **`.pairs` is excluded by name from every one of these rules.** Its columns
+  pair a projection with the figure it projects (see the Giving section); re-
+  flowing them by count would pair each tile with the wrong partner. A test
+  walks the rules and fails if any of them forgets the `:not(.pairs)`.
+
 ## Folding a box up
 
 **Every card on every tab collapses to its heading, and the renderers know
@@ -2785,7 +2827,9 @@ fold and every other one does" arrives months later.
 - **`.card-body` is listed beside `.card` in every `.card > x` rule.** The wrap
   reparents a card's second `<h2>` and every one of its `.sub` lines, so a rule
   written only against `.card >` silently stops applying to them — which is
-  exactly what happened to `.sub` the first time round, on every tab at once.
+  exactly what happened to `.sub` the first time round, on every tab at once. It
+  is also the element a tile grid's container query measures, since the wrap
+  puts it between the grid and the card — see "The tile rows" above.
 - **The set of folded boxes is `state.ui.collapsed`**, beside `ui.tabOrder`, so
   it syncs and follows you to the phone — a deliberate reversal of the old
   `fin-open` localStorage key. The argument for keeping it local was that
