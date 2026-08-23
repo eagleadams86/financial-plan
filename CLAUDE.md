@@ -824,6 +824,12 @@ suite passed while the card was wrong.
     including the old-backup merge. The default carries **no birth month** on
     purpose — every age, retirement year and 18th birthday is derived from it, so
     a guessed one prints a wrong date as the app's own answer.
+    It also trims the fresh plan's ACCOUNTS to the two the starter budget uses — Cash
+    (the hub) and Savings — and puts both in that person's name. `DEFAULT_ACCOUNTS`
+    still carries four, because coerceShape rebuilds all four for a backup saved
+    before accounts became a list; the other two simply never appeared anywhere on a
+    fresh plan, so they read as furniture at $0.00 beside a "+ Add Account" button
+    that is the answer for anyone who wants them back.
   - `birth` is a **`YYYY-MM` month**, guarded like `since`/`until`. Age, the
     retirement year and the month a child turns 18 are DERIVED (`ageAt`,
     `retirementYearOf`, `majorityMonthOf`) — a stored age is wrong within a year.
