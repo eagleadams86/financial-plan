@@ -767,6 +767,12 @@ guessed one would print a wrong date as though the app had worked it out. Fill i
 in and the rest follows. Restoring a backup never adds anyone — only a plan
 created from nothing gets the default.
 
+A new plan also starts with **two accounts, Cash and Savings, both in that person's
+name** — the two the starter budget actually moves money through. Investments and
+Other bank used to be there too and appeared nowhere else on a fresh plan, so they
+read as two empty rows of furniture; **+ Add Account** is how you get them, or
+anything else, back.
+
 Each person has a role, an optional birth month and — for an adult — a
 retirement age (halves allowed, for anyone waiting until exactly 59½),
 **which month of that year it lands in** (their birthday, or the January
