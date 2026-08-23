@@ -1474,14 +1474,26 @@ Things that go with it and will look arbitrary later:
   and the box is now the full width of the list under it, which is what a 700px
   window makes right. See the shared note below.
 - **THE WINDOW ITSELF IS PINNED, PROPERTY BY PROPERTY, AND THE SAME BLOCK IS IN ALL SIX APPS VERBATIM (2026-08-23).** 700px on 18px of padding — the Back Up & Restore window's size, the family's other fixed-width window — with the heading, the intro line, the box, the hit and its three lines, and the "Nothing matches" line all declared inside the `#searchDialog` block rather than borrowed from whatever quiet-text class the app happens to have. That borrowing is what made one window into six: 360px and 420px wide, a 320px box inside a 360px dialog, a hittab at `--fs-sm` here and `--fs-xs` there, `.04em` typed out beside `--ls-label`, and four different colours on the same sentence. A change to any of it belongs in all six. Two details worth keeping: `#searchDialog > p` is the DIRECT child only (the results list's message is a `<p>` too, and an id in that selector would out-rank `.searchresults .hint` and hand it the intro line's colour), and the block deliberately declares NO dialog chrome — backdrop, shadow, a field's touch-height floor, and the max-height Money Map divides by its own zoom all belong to the app's `dialog` rule and are shared with every other window it opens.
-- **`#helpDialog` is the exception that proves the rule, and it is about the
-  TEXT, not the window.** It is the one dialog that is nothing but prose, so it
-  takes the common width like everything else and holds `.helpbody` to 66ch
-  instead: at the full 1100px its lines ran to about 150 characters, roughly
-  twice a comfortable measure. That is `.empty`'s exception applied to a dialog —
-  prose with no table under it costs nothing vertically by being wrapped, so the
-  measure is free. Left-aligned, unlike `.empty`, because a heading and a button
-  are anchored left here and centring the paragraph would set it adrift of both.
+- **`#helpDialog` is the exception, and the READING MEASURE is what sizes it
+  (2026-08-23).** It is the one dialog that is nothing but prose, so `.helpbody`
+  is held to 66ch — at the full 1100px its lines ran to about 150 characters,
+  roughly twice a comfortable measure — and the window is `width: fit-content`
+  so it takes that measure rather than the common width. The cap came first and
+  on its own it only moved the problem: the lines read, but the paragraph hugged
+  the left of a 1100px box built for four columns of figures with half the
+  window empty beside it, which is the `.twoup` complaint in a dialog with one
+  column. Both rules or neither — drop the 66ch and `fit-content` grows the
+  window back to 1100px and the 150-character line with it. `max-width` is
+  restated as `calc(100% - 32px)` because the base `dialog` rule's `width` is
+  the thing being overridden; a phone gets the screen less its margin, as
+  before. Left-aligned, unlike `.empty`, because a heading and a button anchor
+  the left edge and centring the paragraph would set it adrift of both. All 28
+  entries open at the same 666px — the shortest still runs several lines at this
+  measure — so the window does not resize as you read your way round the app.
+  `tests.html` pins the pair, and pins the HELP table against the dots that open
+  it in both directions: a key with no entry opens a sheet with no words in it
+  and nothing on screen can say so, and an entry no `helpBtn` points at is a
+  second copy waiting to drift. `HELP` is on `__finTestHooks` for that.
 - **A dialog laid out TWO-UP is narrowed to 700px** (asked for 2026-08-17), and
   only two: three and four columns already fill the common width, and a single
   column never had the problem. At 1100px a two-question dialog put each box at
