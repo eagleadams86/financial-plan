@@ -1468,13 +1468,12 @@ Things that go with it and will look arbitrary later:
 - **`#shareDialog` sets no width of its own.** Its two side-by-side panels and a
   link readable in one line are what the common width buys; its own 760px
   two-column breakpoint is untouched, so a phone still stacks as before.
-- **`#searchDialog` is 360px — one box, sized the way a two-up dialog is sized
-  to its two**: 20px of padding, a 320px box, 20px of padding (asked for
-  2026-08-17). `#searchBox` takes the standard 320px rather than the full width
-  it used to, as a `max-width` so it still shrinks with the dialog on a phone.
-  The results list and the intro line live inside that 320px, which is the
-  trade: a hit naming a long row wraps onto a second line instead of running
-  across a window that was mostly empty.
+- **`#searchDialog` is 700px on 18px of padding, and every property of it is
+  pinned in one block that all six apps carry verbatim (2026-08-23).** It was
+  360px sized to a 320px box — the window WAS the box, asked for 2026-08-17 —
+  and the box is now the full width of the list under it, which is what a 700px
+  window makes right. See the shared note below.
+- **THE WINDOW ITSELF IS PINNED, PROPERTY BY PROPERTY, AND THE SAME BLOCK IS IN ALL SIX APPS VERBATIM (2026-08-23).** 700px on 18px of padding — the Back Up & Restore window's size, the family's other fixed-width window — with the heading, the intro line, the box, the hit and its three lines, and the "Nothing matches" line all declared inside the `#searchDialog` block rather than borrowed from whatever quiet-text class the app happens to have. That borrowing is what made one window into six: 360px and 420px wide, a 320px box inside a 360px dialog, a hittab at `--fs-sm` here and `--fs-xs` there, `.04em` typed out beside `--ls-label`, and four different colours on the same sentence. A change to any of it belongs in all six. Two details worth keeping: `#searchDialog > p` is the DIRECT child only (the results list's message is a `<p>` too, and an id in that selector would out-rank `.searchresults .hint` and hand it the intro line's colour), and the block deliberately declares NO dialog chrome — backdrop, shadow, a field's touch-height floor, and the max-height Money Map divides by its own zoom all belong to the app's `dialog` rule and are shared with every other window it opens.
 - **`#helpDialog` is the exception that proves the rule, and it is about the
   TEXT, not the window.** It is the one dialog that is nothing but prose, so it
   takes the common width like everything else and holds `.helpbody` to 66ch
