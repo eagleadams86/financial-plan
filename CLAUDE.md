@@ -2959,13 +2959,34 @@ thirteen-column table to reach one cell.
 - **Income ADDS `accountEarnings`**, exactly as the grid's Income subtotal
   does — that function stays the one reader for "what did the accounts earn?"
   and this must not become a second.
-- **A transfer between two tracked accounts is in NEITHER headline figure**,
-  and that is the one piece of arithmetic here worth arguing about. Counting a
-  $2,000 sweep into savings as spending would report a good month as a loss.
-  `internalRows(yr)` already draws that line for the flow bars, so it draws it
-  here; `net` adds income, expenses and the EXTERNAL transfers, `internal` is
-  reported in a tile of its own rather than silently dropped, and the Transfers
-  section total carries a note saying it counts both.
+- **NO TRANSFER COUNTS AGAINST `net`** (2026-08-24, a day after it shipped the
+  other way), and it is the one piece of arithmetic here worth arguing about.
+  **Expenses means gone; Transfers means moved**, and the reader has already
+  said which by choosing the section — so whether the far end is an account this
+  app tracks decides only whether the other side of the move can be SHOWN, never
+  whether the money counts as lost. It shipped adding the EXTERNAL transfers, on
+  the reasoning that money leaving the tracked accounts had left; the first real
+  month it met held a $7,500 Roth IRA contribution, and Left Over read
+  −$7,275.89 IN RED over a month that earned $6,071.90, spent $5,847.79 and
+  saved seven and a half thousand — while the same month's $1,000 sweep to
+  Mid-term was excluded merely because that account is on this tab. Same act,
+  opposite verdict, decided by where the far end is filed. `internal` and
+  `external` are still reported (the Moved tile says how much stayed inside);
+  `net` reads neither. A transfer that genuinely stops being yours belongs in
+  Expenses, and the help says so.
+- **The Moved tile shows exactly what the Transfers card totals, sign and all.**
+  It used to show the internal part alone, NEGATED — two numbers on one screen
+  computed differently and signed differently, which is what got asked about.
+  Which rows stayed inside the reader's own accounts is marked on the rows
+  themselves. Drawn whenever a transfer row carries a FIGURE rather than when
+  the total is non-zero: two moves that cancel still moved money.
+- **A row pointing the other way from its section is a REFUND** — cash back, a
+  reimbursement, a returned purchase — and its line says it reduced the section
+  rather than making it up. "2% of expenses" on a reimbursement said the
+  opposite of what happened; `yearSpending` already netted these, only the
+  sentence was wrong. For the same reason the Money Out tile's "most of it X"
+  considers only rows that actually went OUT — a large refund sorts to the top
+  by size and would otherwise be announced as the month's biggest spend.
 - **`prior` is the year before's computed object**, for the same reason
   `computeYear` takes one: January's previous month is last December, which
   lives in another year's maps. Absent, the change is simply not reported —

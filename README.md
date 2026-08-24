@@ -131,17 +131,20 @@ month underscored wherever it has got to, and every month still to come
 underlined with dots, the same mark a year that hasn't begun wears. It draws:
 
 - **The headline figures** — money in (the income rows plus what the accounts
-  themselves earned), money out, what was left over, what only moved between
-  your own accounts, and what every account closed the month holding, with how
-  far that moved since the month before. **Left over is the one that goes green
-  or red**, since it is the only one of the five with a direction of its own: a
-  month that went backwards is the thing you most want to spot on the page.
+  themselves earned), money out, what was left over, what you only moved, and
+  what every account closed the month holding, with how far that moved since the
+  month before. **Left over is the one that goes green or red**, since it is the
+  only one of the five with a direction of its own: a month that went backwards
+  is the thing you most want to spot on the page.
 - **Each section as a list, biggest first**, with a bar for each row's share of
   its section and, underneath, where the figure came from: something that
-  happened, an estimate of yours, or the rule that worked it out, named. Click
-  any line to open the same editor the grid opens — notes, split months, revert
-  and the balance reconciliation all included. A row with nothing recorded stays
-  on the list, quietly, because opening it is how a month gets filled in.
+  happened, an estimate of yours, or the rule that worked it out, named. A row
+  pointing the other way from its section is a **refund** — cash back, a
+  reimbursement — and says it reduced the section rather than making it up;
+  money out is what the month really cost you, net of those. Click any line to
+  open the same editor the grid opens — notes, split months, revert and the
+  balance reconciliation all included. A row with nothing recorded stays on the
+  list, quietly, because opening it is how a month gets filled in.
 - **The accounts**, each with what it held at the end of the month, how far that
   moved, and what it earned.
 - **A bar per month of the year**, so the month you are reading has somewhere to
@@ -157,9 +160,18 @@ a window about that one thing rather than about the page.
 
 Nothing is worked out twice — every figure on the month page comes out of the
 same engine the grid draws from, so the two lenses cannot disagree about a
-month. A transfer between two accounts the plan tracks is deliberately in
-neither money in nor money out, since the money is still yours; it gets a
-figure of its own, and the Transfers total underneath says that it counts them.
+month.
+
+**No transfer counts against what was left over**, wherever you moved the money
+to. Expenses means gone and transfers means moved, and filing a row under one or
+the other is how you say which — so paying into your own retirement account is
+not a loss just because that account is kept on a different tab. The Moved tile
+shows exactly what the Transfers card totals, sign and all, and its own line
+says how much of that stayed inside accounts the budget tracks: that part leaves
+your closing total untouched, and the rest is why the closing total can fall in
+a month you came out ahead. The other side of the rule: a transfer to something
+that genuinely **stops being yours** belongs under Expenses, which is what that
+section is for.
 
 Picking a month moves the Year lens to that month's year, and opening the Month
 lens over a year you are not already inside lands you in it — so switching
