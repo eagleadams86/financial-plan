@@ -2891,6 +2891,95 @@ goes looking for the thing that should have been there.
   flowing them by count would pair each tile with the wrong partner. A test
   walks the rules and fails if any of them forgets the `:not(.pairs)`.
 
+## The month view (2026-08-24)
+
+**The Budget has two lenses on one object, and the second one lives INSIDE the
+Budget tab rather than as a tenth tab.** `ui.budgetView` picks between them
+(`'month'`, or absent for the grid) and `ui.activeMonth` says which month. The
+grid is the right shape for planning a year on a wide screen — it is the
+Numbers file this app replaces — and the wrong shape for the question a phone
+gets asked, which is "what is this month doing, and can I fix that one row
+while I'm standing in a shop": on a phone that meant pinching into a
+thirteen-column table to reach one cell.
+
+- **Why not a tenth tab.** The two are one object read two ways, the tab bar
+  already wraps at nine, and a share link's own tab list, `SECTION_NEEDS`,
+  `tabOrder`, `allowedViews` and the search's view filter would all have needed
+  a tenth entry to say something the Budget tab already says. The switch sits
+  in the year strip's row, where the Budget keeps its chrome, and it is a
+  RADIOGROUP for the strip's own reason — it redraws the panel the Budget tab
+  already labels rather than revealing one of its own. Neither a `.tab`'s
+  rectangle nor a `.yearchip`'s bare pill: a segmented pair inside one hairline
+  frame, which is what says the two words are alternatives to each other.
+- **Nothing on it computes anything.** Every figure comes out of `C`, the same
+  computed year `gridCard` draws from. `monthTotals(c, yr, m, prior)` is the
+  ONE place a month is added up and it is pure — it takes no state, because
+  everything it needs is the computed year and the year's own rows. The test
+  that matters holds it against the grid's own subtotals over every month of
+  `sampleState()`: two lenses on one object disagreeing is the only way this
+  can be wrong while both pages look right.
+- **Income ADDS `accountEarnings`**, exactly as the grid's Income subtotal
+  does — that function stays the one reader for "what did the accounts earn?"
+  and this must not become a second.
+- **A transfer between two tracked accounts is in NEITHER headline figure**,
+  and that is the one piece of arithmetic here worth arguing about. Counting a
+  $2,000 sweep into savings as spending would report a good month as a loss.
+  `internalRows(yr)` already draws that line for the flow bars, so it draws it
+  here; `net` adds income, expenses and the EXTERNAL transfers, `internal` is
+  reported in a tile of its own rather than silently dropped, and the Transfers
+  section total carries a note saying it counts both.
+- **`prior` is the year before's computed object**, for the same reason
+  `computeYear` takes one: January's previous month is last December, which
+  lives in another year's maps. Absent, the change is simply not reported —
+  never zero, which would claim the balance stood still.
+- **Editing is the grid's editor.** A row opens `openCellEditor` with the same
+  three arguments the grid passes it, which is why notes, split months, the
+  revert button and the reconcile note all work with no code of their own. Two
+  things had to learn about these rows: `refocusGridCell` (after a save the
+  view redraws and the element that opened the dialog is a dead node — the trap
+  the tab bar and the year strip both hit) and `stripEditAffordances`, which
+  takes `data-cat`/`data-bal` off in a shared view. Removing those attributes
+  is what closes the door: the pointer, the hover and the tab stop all key off
+  them in CSS, and `wireMonthRows` looks for them too.
+- **`yearOfMonth` decides which grid a month is read from** — its own calendar
+  year whenever there is a grid HOLDING it, else the year whose projection tail
+  reaches it. Membership is checked rather than assumed off the key, because a
+  grid year need not start in January. Getting this backwards would draw
+  January's cells out of December's projection while the editor wrote them into
+  January, and the two would disagree for ever.
+- **The two lenses stay on the same place**, and that is a PAIR of moves:
+  `pickMonth` sets `ui.activeYear` from the month, and the switch, on the way
+  into the month lens, moves `ui.activeMonth` into the active year when it
+  isn't already there. Without both, switching lenses teleported the reader to
+  whatever the other one was last left on.
+- **Rows are sorted BIGGEST FIRST**, and that ordering is the view's whole
+  argument — a grid keeps the order you arranged because you read ACROSS it; a
+  month is read DOWN. `settings.rowSort` is deliberately not consulted here.
+  A row with nothing recorded sinks to the bottom rather than disappearing:
+  opening one is how a month gets filled in, and on a phone this list is the
+  way in.
+- **The estimate kinds are the GRID's**, and the `.c-*` selectors name both
+  readers (`.grid td.c-auto, .mamt.c-auto`) rather than being copied — a line
+  style that drifted between the lenses would be one month claiming to be
+  settled in one and estimated in the other. Nothing here rests on a hue: the
+  tiles italicise, the section totals wear the same marks, the chart's
+  projected months are outlined by `dashedBarEdge` (Chart.js 4's bar element
+  ignores `borderDash`), and the month you are reading is the one bar drawn
+  solid.
+- **The chart has ONE dataset on purpose.** "Left over" can go either way, and
+  up-or-down carries that without a second colour to tell apart.
+- **The tooltip is the grid's.** `wireGridTip` looks for `.gridwrap, .tipzone`
+  now — one selector rather than a second copy of a handler that never asked
+  what kind of box it was in. The month view wraps itself in `.tipzone`.
+- **On a phone the strip stacks** (≤700px): switch and arrows on the line
+  above, rail full-width underneath. Three controls in one row is one too many
+  at 430px — the switch alone took more than half of it and the rail was left
+  showing a month and a half. It reshapes the YEAR strip the same way, which is
+  the same improvement for the same reason.
+- **A share link sends `ui: {}`**, so a link always opens on the grid, which is
+  what somebody sending "the budget" means by it. The switch still draws in a
+  shared view — choosing how to read someone's figures is reading.
+
 ## Folding a box up
 
 **Every card on every tab collapses to its heading, and the renderers know

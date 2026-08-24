@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 707;
+const EXPECTED = 721;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -2415,6 +2415,174 @@ t('the years that cannot answer are named, and only then', () => {
     'a plan whose years can all answer says nothing at all');
   ok(H.flowTransferNote({ years: { '2013': { kind: 'summary' } } }, ['2013'], true)
     .startsWith('2013 has'), 'one year reads as one year');
+});
+
+/* ── The month view ─────────────────────────────────────────────────────────
+   The Budget's second lens. Nothing it draws is computed here — every figure
+   comes out of the same computed year the grid reads — so what is worth pinning
+   is the three pure pieces between the engine and the page: which months the
+   plan holds, which grid year a month is read from, and what one month adds up
+   to. The last test in the group is the one that matters most: it holds the
+   month view's own arithmetic against the grid's subtotals over the whole
+   sample plan, because two lenses on one object disagreeing is the only way
+   this feature can be wrong without anything looking broken. */
+group('The month view');
+function monthYear(entered) {
+  return { kind: 'grid', model: 'live', enteredThrough: entered || '2030-02',
+    startMonth: '2030-01', monthCount: 12,
+    categories: [
+      { id: 'pay', name: 'Paycheck', section: 'income', role: 'normal' },
+      { id: 'rent', name: 'Rent', section: 'expense', role: 'normal' },
+      /* Internal: the far side is an account the plan tracks. */
+      { id: 'sweep', name: 'To savings', section: 'transfer',
+        role: 'transfer', transferTo: 'mid' },
+      /* External: filed under Transfers, but the money really leaves — the
+         Roth IRA case the flow bars already know about. */
+      { id: 'roth', name: 'Roth IRA', section: 'transfer', role: 'normal' },
+    ],
+    cells: {}, overrides: {}, seeds: {}, balAdjust: {} };
+}
+const MONTH_COMPUTED = {
+  months: ['2030-01', '2030-02'],
+  cells: {
+    'pay|2030-01': { v: 4000, kind: 'actual' },
+    'rent|2030-01': { v: -1500, kind: 'actual' },
+    'sweep|2030-01': { v: -1000, kind: 'actual' },
+    'roth|2030-01': { v: -500, kind: 'actual' },
+    'pay|2030-02': { v: 4000, kind: 'auto' },
+  },
+  interest: { 'cash|2030-01': 25 },
+  dividend: {},
+  balances: { 'total|2030-01': 9000, 'total|2030-02': 11000 },
+  balanceKinds: { 'total|2030-01': 'actual', 'total|2030-02': 'actual' },
+  paychecks: {},
+};
+t('planMonths lists every grid month once, oldest first', () => {
+  const st = { years: {
+    '2028': { kind: 'summary', categoryTotals: [] },
+    /* Thirteen months: a live year runs past its own December, so this one
+       offers 2030-01 as well and the two must not both appear. */
+    '2029': { kind: 'grid', startMonth: '2029-01', monthCount: 13 },
+    '2030': { kind: 'grid', startMonth: '2030-01', monthCount: 12 },
+  } };
+  const all = H.planMonths(st);
+  eq(all.length, 24, 'twelve of 2029 and twelve of 2030 — the shared month once');
+  eq(all[0], '2029-01');
+  eq(all[all.length - 1], '2030-12');
+  eq(all.filter(m => m === '2030-01').length, 1);
+});
+t('a summary year offers no months at all', () => {
+  /* A year folded into totals has none to look at, which is why the view sends
+     the reader back to the grid rather than drawing an empty month. */
+  eq(H.planMonths({ years: { '2015': { kind: 'summary', categoryTotals: [] } } }), []);
+});
+t('a month is read from its own calendar year, not from a tail reaching it', () => {
+  const st = { years: {
+    '2029': { kind: 'grid', startMonth: '2029-01', monthCount: 13 },
+    '2030': { kind: 'grid', startMonth: '2030-01', monthCount: 12 },
+  } };
+  eq(H.yearOfMonth(st, '2030-01'), '2030',
+    'January’s figures are typed into 2030, so 2030 is where they are read');
+  eq(H.yearOfMonth(st, '2029-06'), '2029');
+});
+t('a month only a projection tail reaches is read from that year', () => {
+  const st = { years: { '2029': { kind: 'grid', startMonth: '2029-01', monthCount: 14 } } };
+  eq(H.yearOfMonth(st, '2030-02'), '2029');
+});
+t('membership is checked, not assumed from the key', () => {
+  /* A grid year need not start in January. Reading "2030" off the month and
+     stopping there would hand back a year that holds no such month. */
+  const st = { years: { '2030': { kind: 'grid', startMonth: '2030-03', monthCount: 4 } } };
+  eq(H.yearOfMonth(st, '2030-01'), null);
+  eq(H.yearOfMonth(st, '2030-04'), '2030');
+  eq(H.yearOfMonth({ years: { '2015': { kind: 'summary' } } }, '2015-05'), null);
+});
+t('money in adds what the accounts themselves earned', () => {
+  const t1 = H.monthTotals(MONTH_COMPUTED, monthYear(), '2030-01', null);
+  approx(t1.income.v, 4025, '4000 of pay + 25 of interest');
+  approx(t1.rows.v, 4000, 'the rows on their own are still reported');
+  approx(t1.earned.v, 25);
+});
+t('a transfer between your own accounts is in neither headline figure', () => {
+  const t1 = H.monthTotals(MONTH_COMPUTED, monthYear(), '2030-01', null);
+  approx(t1.out.v, 1500, 'money out is the expense rows, and the sweep is not one');
+  approx(t1.internal.v, -1000, 'the sweep is reported, not silently dropped');
+  approx(t1.external.v, -500, 'the Roth row really left');
+  approx(t1.net.v, 2025, '4025 in, 1500 of rent, 500 out to the Roth');
+  approx(t1.transfer.v, -1500, 'the section total still counts both');
+});
+t('the closing total is the engine’s, and the change is against the month before', () => {
+  const feb = H.monthTotals(MONTH_COMPUTED, monthYear(), '2030-02', null);
+  approx(feb.closing, 11000);
+  approx(feb.opening, 9000);
+  approx(feb.change, 2000);
+  const jan = H.monthTotals(MONTH_COMPUTED, monthYear(), '2030-01', null);
+  eq(jan.change, undefined, 'no month before it computed, so no claim is made');
+  eq(jan.opening, undefined, 'and not zero, which would say the accounts were empty');
+});
+t('January reads last December out of the year before', () => {
+  const prior = { balances: { 'total|2029-12': 8000 }, balanceKinds: {},
+    interest: {}, dividend: {}, cells: {} };
+  const jan = H.monthTotals(MONTH_COMPUTED, monthYear(), '2030-01', prior);
+  approx(jan.change, 1000, '9000 now against 8000 at the end of 2029');
+});
+t('every figure says what it is made of', () => {
+  const jan = H.monthTotals(MONTH_COMPUTED, monthYear(), '2030-01', null);
+  eq(jan.income.kind, 'actual');
+  eq(jan.net.kind, 'actual');
+  const feb = H.monthTotals(MONTH_COMPUTED, monthYear(), '2030-02', null);
+  eq(feb.income.kind, 'auto', 'February’s pay is the rule’s guess');
+  eq(feb.expense.kind, 'missing', 'and nothing is recorded against it');
+  eq(feb.net.kind, 'auto');
+});
+t('the bars mark the months still to come', () => {
+  const st = { years: { '2030': monthYear('2030-01') } };
+  const pts = H.monthNetPoints(st, { '2030': MONTH_COMPUTED }, '2030');
+  eq(pts.map(p => p.m), ['2030-01', '2030-02']);
+  eq(pts.map(p => p.ahead), [false, true]);
+  approx(pts[0].v, 2025);
+});
+t('a finished year has no months still to come', () => {
+  /* Nothing in a pinned year is projected — every figure in it was read off a
+     statement — so none of its bars may be drawn as an estimate. */
+  const yr = Object.assign(monthYear(), { model: 'pinned' });
+  const pts = H.monthNetPoints({ years: { '2030': yr } }, { '2030': MONTH_COMPUTED }, '2030');
+  eq(pts.map(p => p.ahead), [false, false]);
+});
+t('monthTitle writes the month out in full', () => {
+  eq(H.monthTitle('2030-01'), 'January 2030');
+  eq(H.monthTitle('2026-09'), 'September 2026');
+});
+t('every month of the sample plan agrees with the grid’s own subtotals', () => {
+  /* THE TEST THIS GROUP EXISTS FOR. Two lenses on one object, and the failure
+     mode is silent: both pages look right and one of them is quietly adding a
+     row the other leaves out. So the month view's arithmetic is measured
+     against the grid's, month by month, over the whole demo plan — which is the
+     one fixture that carries an overflow sweep, a pass-through, dividends on a
+     brokerage and a pinned balance all at once. */
+  const st = H.migrate(H.coerceShape(H.sampleState()));
+  const C = H.computeAll(st, '2026-08-24');
+  const bad = [];
+  for (const y of Object.keys(st.years)) {
+    const yr = st.years[y];
+    if (yr.kind !== 'grid') continue;
+    const c = C[y], prior = C[String(+y - 1)] || null;
+    const sum = (sec, m) => H.round2((yr.categories || [])
+      .filter(cat => (cat.section || 'expense') === sec)
+      .reduce((s, cat) => s + ((c.cells[`${cat.id}|${m}`] || { v: 0 }).v), 0));
+    for (const m of c.months) {
+      const mt = H.monthTotals(c, yr, m, prior);
+      const earned = H.accountEarnings(c, yr, [m]).v;
+      if (Math.abs(mt.income.v - H.round2(sum('income', m) + earned)) > 0.005)
+        bad.push(`${m} income`);
+      if (Math.abs(mt.expense.v - sum('expense', m)) > 0.005) bad.push(`${m} expenses`);
+      if (Math.abs(H.round2(mt.internal.v + mt.external.v) - sum('transfer', m)) > 0.005)
+        bad.push(`${m} transfers split`);
+      if (mt.closing !== c.balances[`total|${m}`]) bad.push(`${m} closing total`);
+    }
+  }
+  eq(bad.join(', '), '', 'the month view and the grid add the same month up the same way');
+  ok(Object.keys(C).length >= 1, 'and the sample really did compute a grid year');
 });
 
 group('Spending, year by year');
