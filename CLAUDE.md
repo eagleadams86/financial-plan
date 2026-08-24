@@ -151,6 +151,16 @@ family names as well as balances.
   is off the end, parking the strip against its right edge;
   (4) **no smooth scrolling** — an animated scroll is a silent no-op in some
   engines (it was in the pane this was built in), and the arrows must land.
+  (5) **the CURRENT year wears `chip-now`** — an accent underscore under the
+  chip — since 2026-08-24, the mark the month strip already had. It is the
+  CALENDAR year (`todayISO().slice(0,4)`), the same kind of fact `thisMonth()`
+  is, and deliberately not `latestGridYear()`: that is a claim about the plan
+  rather than about today, and it would leave the mark on 2026 halfway through
+  2027 because December had not been entered. A plan that is all history marks
+  nothing, exactly as a month strip that does not reach this month marks none.
+  The mark is a SHAPE and sits on the box's bottom edge, so it never competes
+  with the fill that says "this is the one you are reading" — the point is the
+  visit where the two differ.
   A keyboard move sets `yearKeyMove` so the redraw can hand focus back: picking
   a year rebuilds the view, which blurs the chip, and without it the second
   arrow key goes nowhere — the same trap the tab bar hit.
@@ -3030,6 +3040,32 @@ thirteen-column table to reach one cell.
   `--text-secondary` on both tints was measured before shipping: the worst pair
   across the four palettes is 4.63:1, so the label and the foot clear AA
   everywhere.
+- **The strip's two chip marks are SHARED, and `monthAhead` is why they can be**
+  (2026-08-24). `y-future` — the dotted underline — is on a year that has not
+  begun AND on a month still to come; `chip-now` is on this year and on this
+  month. Three places make the "still to come" claim on one page (the chip, the
+  chart's dashed bar, and the estimate kind on every figure), so `monthAhead(yr,
+  m)` is the ONE reader: past the entered marker on a live year, never on a
+  finished one, which computes nothing. `monthNetPoints` reads it too rather
+  than keeping the inline comparison it was born with. `y-summary` stays
+  year-only, because a month is never a summary.
+- **Clicking a bar SCROLLS THE PAGE TO THE TOP**, and that is not decoration:
+  the month changes at the top of the page and the bar is at the bottom of it,
+  so the only visible effect was the bar under the pointer going solid — which
+  reads as the click doing nothing, and was reported that way. The family's rule
+  for an action that moves you somewhere is to put the place you moved to in
+  view (`scrollGridToNow`, the year strip's settle, the tab bar's nudge). It is
+  INSTANT, never smooth — an animated scroll is a silent no-op in some engines —
+  and `pickMonth` returns a boolean so a click on the month you are already
+  reading does not throw the page about.
+- **ONE INFO DOT PER THING IT EXPLAINS.** The five tiles, the three section
+  cards, Accounts and the chart each carry their own, and each opens a sheet
+  about that heading alone. It shipped as ONE entry behind ONE dot on the Money
+  In tile, which put the explanation of the closing total three paragraphs deep
+  in a window opened from a different figure — the dot convention says a dot
+  answers for the heading beside it, and a five-part sheet under the first of
+  five tiles was not keeping it. The three section cards share `monthRows`,
+  which is where the estimate-italic convention is explained now.
 - **`dashedBarEdge`'s `_trueBorder` may be a LIST**, one colour per bar, because
   of the above — a scalar is the old behaviour and is what the three earlier
   callers pass. The plugin must never fall through to `ds.borderColor` on a

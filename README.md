@@ -126,8 +126,9 @@ the one for planning a whole year on a wide screen.
 fixing a single row without pinching into a thirteen-column table. It opens on
 the current month and steps back and forward with the ‹ › arrows, across a year
 end as easily as within one; a **This Month** button appears once you have
-wandered off it, and the strip itself lists every month the plan holds. It
-draws:
+wandered off it, and the strip itself lists every month the plan holds — this
+month underscored wherever it has got to, and every month still to come
+underlined with dots, the same mark a year that hasn't begun wears. It draws:
 
 - **The headline figures** — money in (the income rows plus what the accounts
   themselves earned), money out, what was left over, what only moved between
@@ -148,7 +149,11 @@ draws:
   since it is the line that means something here — a month added to your money
   and the bar is green; below it the month cost you some and the bar is red.
   Months still to come are outlined with a dash, the month you are reading is
-  the one filled solid, and clicking any bar opens that month.
+  the one filled solid, and clicking any bar opens that month and takes you back
+  to the top of the page to see it.
+
+Every figure and every heading on the page carries its own **i**, and each opens
+a window about that one thing rather than about the page.
 
 Nothing is worked out twice — every figure on the month page comes out of the
 same engine the grid draws from, so the two lenses cannot disagree about a
@@ -1010,7 +1015,8 @@ strip and the left and right arrow keys walk along it (Home for the newest
 year, End for the oldest).
 
 A year kept as a yearly summary is set in italics, one built before it has
-started is underlined with dots, and hovering either says which in words.
+started is underlined with dots, **this year carries an underscore** wherever it
+has got to in the strip, and hovering any of them says which in words.
 
 The same strip carries the Budget's **Year / Month** switch at its left end, and
 in the Month lens the years are replaced by the plan's months — the arrows there
