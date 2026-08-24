@@ -113,6 +113,51 @@ Rows are grouped into **Income, Expenses, Transfers and Accounts**, with
 per-month subtotals (a section holding a single row skips its subtotal) and a
 year-total column pinned to the right.
 
+### Year or Month
+
+The Budget has two lenses on the same figures, and a **Year / Month** switch at
+the left of the strip along the top picks between them. Whichever you leave it
+on is where it opens next time, on every device you sync to.
+
+**Year** is the grid: twelve columns of rows, the shape the spreadsheet had, and
+the one for planning a whole year on a wide screen.
+
+**Month** is one month laid out as a page — the shape for a phone, and for
+fixing a single row without pinching into a thirteen-column table. It opens on
+the current month and steps back and forward with the ‹ › arrows, across a year
+end as easily as within one; a **This Month** button appears once you have
+wandered off it, and the strip itself lists every month the plan holds. It
+draws:
+
+- **The headline figures** — money in (the income rows plus what the accounts
+  themselves earned), money out, what was left over, what only moved between
+  your own accounts, and what every account closed the month holding, with how
+  far that moved since the month before.
+- **Each section as a list, biggest first**, with a bar for each row's share of
+  its section and, underneath, where the figure came from: something that
+  happened, an estimate of yours, or the rule that worked it out, named. Click
+  any line to open the same editor the grid opens — notes, split months, revert
+  and the balance reconciliation all included. A row with nothing recorded stays
+  on the list, quietly, because opening it is how a month gets filled in.
+- **The accounts**, each with what it held at the end of the month, how far that
+  moved, and what it earned.
+- **A bar per month of the year**, so the month you are reading has somewhere to
+  sit. Months still to come are outlined with a dash; clicking a bar opens that
+  month.
+
+Nothing is worked out twice — every figure on the month page comes out of the
+same engine the grid draws from, so the two lenses cannot disagree about a
+month. A transfer between two accounts the plan tracks is deliberately in
+neither money in nor money out, since the money is still yours; it gets a
+figure of its own, and the Transfers total underneath says that it counts them.
+
+Picking a month moves the Year lens to that month's year, and opening the Month
+lens over a year you are not already inside lands you in it — so switching
+lenses shows you the same place differently rather than losing it.
+
+A year kept as a **yearly summary** has no months in it, so the Month lens sends
+you back to Year for those.
+
 ### How a Row Projects Itself
 
 Each row has a **type** (which section it lives in), a **projection rule**,
@@ -961,6 +1006,13 @@ year, End for the oldest).
 
 A year kept as a yearly summary is set in italics, one built before it has
 started is underlined with dots, and hovering either says which in words.
+
+The same strip carries the Budget's **Year / Month** switch at its left end, and
+in the Month lens the years are replaced by the plan's months — the arrows there
+step from one month to the next rather than scrolling, and the current month is
+marked with an underscore wherever it has got to. On a phone the switch and the
+arrows take the line above and the strip gets the full width underneath.
+See [Year or Month](#year-or-month).
 
 ### Arranging Things
 
