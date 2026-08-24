@@ -1421,6 +1421,30 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 .yearchip.m-now[aria-checked="true"] {
   box-shadow: inset 0 0 0 1px var(--border-control), inset 0 -2px 0 var(--accent); }
 
+/* The month view's four cards, side by side wherever the window has room for
+   them. Its OWN grid rather than `.cards2`, and the difference in the floor is
+   the whole reason it exists: a card here is a LIST — a name, a figure and a
+   bar — where the cards `.cards2` was sized for hold charts and multi-column
+   money tables that genuinely need 340px.
+
+   320 is what puts all four on one line in a 1444px window, which is the width
+   Charlie actually reads this at. Four tracks and three 18px gaps is 1,334
+   against the 1,397 such a window leaves inside the wrap's 16px padding and a
+   scrollbar — so it clears with room to spare rather than landing on the edge.
+   340 missed by two pixels with no scrollbar and by seventeen with one, which
+   is exactly the kind of margin that comes back the next time a scrollbar or a
+   padding changes anywhere.
+
+   `min(100%, …)` rather than a bare floor, so a phone narrower than the track
+   gets ONE column instead of a track wider than the screen. */
+.monthgrid { display: grid; gap: 18px; margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.monthgrid > .card { margin-bottom: 0; }
+/* Cards side by side stretch to a common height, which is what makes a row of
+   them read as a row — and a FOLDED one must not, or its heading floats in a
+   box the height of the list beside it. `.cards2`'s rule, for its reason. */
+.monthgrid > .card.boxshut { align-self: start; }
+
 /* A month's rows. On the grid a row is a figure in a column; here it is a LINE
    — what it is, what it came to, how big a share of the month that is, and
    where the figure came from — and the WHOLE line is the hit area, because a
@@ -8185,12 +8209,13 @@ function renderMonthView() {
       less everything that went out, with moves between your own accounts left out.
       Click a bar to open that month.</p>
     <div class="chartbox"><canvas id="monthNetChart"></canvas></div>
-    <p class="chartkey"><i></i> Dashed — a month still to come, so the figure is
-      an estimate.</p>
+    <p class="chartkey"><i></i> Above the line the month added to your money;
+      below it, the month cost you some. Dashed — a month still to come, so the
+      figure is an estimate.</p>
   </div>`;
 
   return `<div class="tipzone">${monthPickerHtml(m, all)}${head}
-    <div class="cards2">${['income', 'expense', 'transfer'].map(sectionCard).join('')}${
+    <div class="monthgrid">${['income', 'expense', 'transfer'].map(sectionCard).join('')}${
       acctCard}</div>${chartCard}</div>`;
 }
 
@@ -8209,21 +8234,47 @@ function monthNetPoints(st, computed, y) {
 function buildMonthNetChart(y, active) {
   const pts = monthNetPoints(state, C, y);
   if (pts.length < 2) return;
-  const accent = cssVar('--accent'), tick = cssVar('--chart-tick');
+  const tick = cssVar('--chart-tick'), grid = cssVar('--chart-grid');
   const ahead = pts.map(p => p.ahead);
+  /* RAG, and this is the ONE chart in the app entitled to it. The file's
+     standing rule is that hue may never carry a meaning ON ITS OWN — Charlie
+     reads none of the four palettes by colour — and here it does not have to:
+     the bar's SIDE of the zero line already says which way the month went, and
+     the line itself is drawn heavy for exactly that reason. The colour is
+     redundancy laid over a signal that is already there, which is what the rule
+     asks for rather than what it forbids. `--ok` is the pack's green at hue
+     ~150 and `--err` its red; no colour is invented here, and the key under the
+     chart says what the sides mean in words. */
+  const ok = cssVar('--ok'), okBg = cssVar('--ok-bg');
+  const err = cssVar('--err'), errBg = cssVar('--err-bg');
+  const down = pts.map(p => p.v < 0);
+  const edge = down.map(d => d ? err : ok);
+  const tint = down.map(d => d ? errBg : okBg);
+  /* ZERO IS THE LINE THAT MEANS SOMETHING HERE: above it the month added to
+     your money, below it the month cost you some. This is the only chart in the
+     app whose bars cross it — every other one measures a quantity that cannot
+     go backwards — so the emphasis lives on this chart rather than in the
+     shared `chartAxes()`, where it would put a heavy rule through the middle of
+     charts that have no such crossing to mark.
+     The mark is WEIGHT, not a hue: the axis label's own ink at twice the width,
+     with the $0 label bold to match, so it reads as the axis saying where zero
+     is rather than as another series. Both colours are resolved ONCE here — a
+     scriptable option runs per tick per frame, and getComputedStyle is no place
+     to be on that path. */
+  const atZero = (ctx) => ctx.tick && ctx.tick.value === 0;
   newChart('monthNetChart', {
     type: 'bar',
     data: { labels: pts.map(p => monthLabel(p.m)), datasets: [{
       label: 'Left over',
       data: pts.map(p => p.v),
-      /* The month being read is the one solid bar. A transient "this one",
-         never an encoding — it reuses the accent rather than inventing a
-         colour, exactly as the spending chart's hover does. */
-      backgroundColor: (ctx) => pts[ctx.dataIndex]?.m === active
-        ? accent : cssVar('--accent-bg'),
-      borderColor: (ctx) => ahead[ctx.dataIndex] ? 'transparent' : accent,
-      _trueBorder: accent, borderWidth: 2, borderSkipped: false,
-      hoverBackgroundColor: accent, hoverBorderColor: accent, hoverBorderWidth: 2,
+      /* The month being read is the one bar filled SOLID — its own status
+         colour rather than the tint every other bar wears. A transient "this
+         one", never an encoding, exactly as the spending chart's hover does;
+         it invents nothing, because the solid and the tint are the same pair. */
+      backgroundColor: pts.map((p, i) => p.m === active ? edge[i] : tint[i]),
+      borderColor: pts.map((p, i) => ahead[i] ? 'transparent' : edge[i]),
+      _trueBorder: edge, borderWidth: 2, borderSkipped: false,
+      hoverBackgroundColor: edge, hoverBorderColor: edge, hoverBorderWidth: 2,
       maxBarThickness: 72,
     }]},
     options: {
@@ -8237,8 +8288,13 @@ function buildMonthNetChart(y, active) {
       scales: {
         x: Object.assign(chartAxes(), { ticks: { color: tick,
           maxRotation: 0, autoSkipPadding: 12 } }),
-        y: Object.assign(chartAxes(), { ticks: { color: tick,
-          callback: (v) => fmtMoney0(v) } }),
+        y: Object.assign(chartAxes(), {
+          ticks: { color: tick,
+            font: (ctx) => atZero(ctx) ? { weight: 700 } : {},
+            callback: (v) => fmtMoney0(v) },
+          grid: { color: (ctx) => atZero(ctx) ? tick : grid,
+            lineWidth: (ctx) => atZero(ctx) ? 2 : 1 },
+        }),
       },
     },
     plugins: [dashedBarEdge],
@@ -13376,7 +13432,13 @@ const dashedBarEdge = {
         const half = width / 2;
         ctx.save();
         ctx.lineWidth = 2;
-        ctx.strokeStyle = ds._trueBorder || ds.borderColor;
+        /* `_trueBorder` may be a LIST, one colour per bar, since the month
+           chart colours each bar by which side of zero it is on. A scalar is
+           the old behaviour and is what the three earlier callers pass — this
+           plugin must never read `ds.borderColor` when that is a function or an
+           array, which is exactly what a per-bar dataset sets it to. */
+        const edge = ds._trueBorder || ds.borderColor;
+        ctx.strokeStyle = Array.isArray(edge) ? edge[i] : edge;
         /* Where the outline has been pushed OUTWARD, the bar's own top is
            drawn solid first. A running bar carries a transparent border (this
            plugin is what outlines it), so with the dashed rectangle alone the

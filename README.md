@@ -142,8 +142,11 @@ draws:
 - **The accounts**, each with what it held at the end of the month, how far that
   moved, and what it earned.
 - **A bar per month of the year**, so the month you are reading has somewhere to
-  sit. Months still to come are outlined with a dash; clicking a bar opens that
-  month.
+  sit. Above the zero line — which is drawn heavier than the rest of the grid,
+  since it is the line that means something here — a month added to your money
+  and the bar is green; below it the month cost you some and the bar is red.
+  Months still to come are outlined with a dash, the month you are reading is
+  the one filled solid, and clicking any bar opens that month.
 
 Nothing is worked out twice — every figure on the month page comes out of the
 same engine the grid draws from, so the two lenses cannot disagree about a

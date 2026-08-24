@@ -2961,13 +2961,38 @@ thirteen-column table to reach one cell.
 - **The estimate kinds are the GRID's**, and the `.c-*` selectors name both
   readers (`.grid td.c-auto, .mamt.c-auto`) rather than being copied — a line
   style that drifted between the lenses would be one month claiming to be
-  settled in one and estimated in the other. Nothing here rests on a hue: the
-  tiles italicise, the section totals wear the same marks, the chart's
-  projected months are outlined by `dashedBarEdge` (Chart.js 4's bar element
-  ignores `borderDash`), and the month you are reading is the one bar drawn
-  solid.
-- **The chart has ONE dataset on purpose.** "Left over" can go either way, and
-  up-or-down carries that without a second colour to tell apart.
+  settled in one and estimated in the other. The tiles italicise, the section
+  totals wear the same marks, the chart's projected months are outlined by
+  `dashedBarEdge` (Chart.js 4's bar element ignores `borderDash`), and the month
+  you are reading is the one bar filled solid.
+- **The chart has ONE dataset on purpose.** "Left over" is one figure that can
+  go either way, so the two directions are two ends of one series rather than
+  two series to tell apart.
+- **THE ZERO LINE IS DRAWN HEAVY, and this is the only chart in the app where
+  that is right.** Above it a month added to your money, below it the month cost
+  you some — every other chart here measures a quantity that cannot go
+  backwards, so the emphasis is local to `buildMonthNetChart` rather than in the
+  shared `chartAxes()`, where it would put a rule through the middle of charts
+  with no crossing to mark. The mark is WEIGHT: `--chart-tick` (the axis label's
+  own ink, against `--chart-grid`'s near-background hairline) at 2px, with the
+  `$0` label bold to match. Both colours resolve ONCE outside the scriptable
+  options — those run per tick per frame, and `getComputedStyle` has no business
+  on that path.
+- **The bars carry RAG, and it is the one chart entitled to it** (2026-08-24, at
+  Charlie's request). The file's standing rule is that hue may never carry a
+  meaning ON ITS OWN — he reads none of the four palettes by colour. Here it
+  does not have to: the bar's SIDE of the zero line already says which way the
+  month went, and the line above is drawn heavy for exactly that reason, so the
+  colour is redundancy laid over a signal that is already there. `--ok` (the
+  pack's green at hue ~150) and `--err`, full strength for the edge and the
+  `-bg` tints for the fill; nothing is invented, and the key under the chart
+  says what the two sides mean in words. **Do not copy this to another chart**
+  without first asking what non-hue signal is carrying the meaning there.
+- **`dashedBarEdge`'s `_trueBorder` may be a LIST**, one colour per bar, because
+  of the above — a scalar is the old behaviour and is what the three earlier
+  callers pass. The plugin must never fall through to `ds.borderColor` on a
+  per-bar dataset: that is an array there, and it would stroke every projected
+  month in whatever colour index 0 happened to be.
 - **The tooltip is the grid's.** `wireGridTip` looks for `.gridwrap, .tipzone`
   now — one selector rather than a second copy of a handler that never asked
   what kind of box it was in. The month view wraps itself in `.tipzone`.
