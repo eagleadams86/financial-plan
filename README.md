@@ -132,7 +132,9 @@ draws:
 - **The headline figures** — money in (the income rows plus what the accounts
   themselves earned), money out, what was left over, what only moved between
   your own accounts, and what every account closed the month holding, with how
-  far that moved since the month before.
+  far that moved since the month before. **Left over is the one that goes green
+  or red**, since it is the only one of the five with a direction of its own: a
+  month that went backwards is the thing you most want to spot on the page.
 - **Each section as a list, biggest first**, with a bar for each row's share of
   its section and, underneath, where the figure came from: something that
   happened, an estimate of yours, or the rule that worked it out, named. Click

@@ -2988,6 +2988,20 @@ thirteen-column table to reach one cell.
   `-bg` tints for the fill; nothing is invented, and the key under the chart
   says what the two sides mean in words. **Do not copy this to another chart**
   without first asking what non-hue signal is carrying the meaning there.
+- **The LEFT OVER tile wears the same pair** (`.goal.up` / `.goal.down`,
+  `.goal.done`'s grammar applied to a figure whose SIGN is the question). It is
+  the only tile that reports a direction — money in, money out and a closing
+  balance have none of their own — and the same condition is met: the figure
+  carries its own minus sign, and it is read beside a chart saying the same
+  thing by which side of zero a bar sits on. Exactly $0 is neither and stays
+  plain. The rules sit AFTER `.goal.est` deliberately: both selectors weigh the
+  same, so source order decides, and an estimated month keeps the status ink
+  rather than going quiet — which matches the chart, where a projected month is
+  just as green or red and says it is projected with a DASH. `.goal.est`'s
+  italic still applies and is what carries "not settled yet" on the tile.
+  `--text-secondary` on both tints was measured before shipping: the worst pair
+  across the four palettes is 4.63:1, so the label and the foot clear AA
+  everywhere.
 - **`dashedBarEdge`'s `_trueBorder` may be a LIST**, one colour per bar, because
   of the above — a scalar is the old behaviour and is what the three earlier
   callers pass. The plugin must never fall through to `ds.borderColor` on a
