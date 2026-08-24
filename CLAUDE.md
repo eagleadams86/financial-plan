@@ -2772,6 +2772,34 @@ side.tax = {
   existing shares across untouched when they don't — **a dialog that never asked
   the question must not answer it.**
 
+## One vertical gap: 18px (2026-08-23)
+
+**Every seam between two blocks in this app is 18px** — card to card, card to
+a `.cards2` grid, that grid's own `row-gap`, and a toolbar strip to whatever it
+sits above. There is no second number to reach for. Measured across all nine
+tabs on 2026-08-23 and pinned there.
+
+The one exception is a heading WELDED to the thing it names: `.yearhead` keeps
+8px under it, because the label and its trip row are one object and the seam is
+the air ABOVE the label. `.cards2 > .yearhead` (Retirement's Now / Later rules)
+has its own `8px 0 -8px` and is untouched by the base rule.
+
+Vacations is the tab to watch, because its four seams are each built a
+different way and will drift apart again if one is edited alone:
+
+| seam | how the 18px is made |
+|---|---|
+| add bar → first year | the bar's own inline `margin: 0 0 18px` |
+| trip card → next year's heading | `.triprow`'s 12px collapsing into `.yearhead`'s 12px, **plus the row's 6px `padding-bottom`** |
+| trip card → the leave planner | that same 6px, with nothing to collapse into, over `.triprow`'s 12px |
+| one tail card → the next | the plain `.card` margin |
+
+**The row's `padding-bottom` is part of every gap you see**, because what a
+reader measures is the last trip card's border to the next block's — and the
+padding sits between them. Measuring the `.triprow` box instead of the CARDS
+inside it is what made three attempts at this land on three different numbers.
+Measure card border to card border.
+
 ## Card order: the thing you DO leads (2026-08-23)
 
 A tab's first card is the one it is for, not the one that summarises it. Four
