@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 725;
+const EXPECTED = 730;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -249,6 +249,59 @@ t('a new plan has only the two accounts the starter budget actually uses', () =>
   eq(H.blankState().settings.accounts.map(a => a.id), ['cash', 'mid', 'long', 'bank'],
      'and blankState() keeps all four, because coerceShape rebuilds from it for any '
      + 'backup saved before accounts became a list');
+});
+/* ── How a transfer row is named ───────────────────────────────────────
+   A transfer row's figure is what the move did to the HUB, so the money lands in
+   the account the row names when the number is NEGATIVE. "To savings" therefore
+   read as its own opposite on every month it did the thing it exists for — and
+   it was the starter budget's only transfer row, which makes it the first figure
+   a new plan is ever likely to be given. Both plans we ship name the row for the
+   account now and leave the direction to the sign.
+
+   Pinned here because nothing on screen can report it: a backwards name renders,
+   computes and totals exactly like a right one. */
+const DIRECTION_WORD = /^(to|from|into|out of)\b/i;
+t('neither plan we ship names a transfer row for a direction', () => {
+  const starter = H.STARTER_CATEGORIES.filter(([, , , sec]) => sec === 'transfer');
+  ok(starter.length, 'the starter budget still has a transfer row to check at all');
+  eq(starter.map(([name]) => name).filter(n => DIRECTION_WORD.test(n)).join(', '), '',
+     'the starter row is named for the account — the sign says which way it went');
+  const sample = H.migrate(H.coerceShape(H.sampleState()));
+  const rows = Object.values(sample.years)
+    .flatMap(yr => (yr.categories || []).filter(c => (c.section || 'expense') === 'transfer'));
+  ok(rows.length >= 3, 'and the sample still holds transfer rows, its sweep included');
+  eq(rows.filter(c => DIRECTION_WORD.test(c.name)).map(c => c.name).join(', '), '',
+     'nor does the sample — each one carries the account’s own name');
+  ok(rows.some(c => c.rule === 'overflow' && /\bto\b/i.test(c.name)),
+     'while the sweep keeps its "to": an overflow rule only ever runs one way, which '
+     + 'is the one time a name cannot end up contradicting the figure under it');
+});
+t('and the sample moves money OUT through them, which is what the negative is', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const vals = Object.values(d.years).flatMap(yr => Object.entries(yr.cells || {})
+    .filter(([k]) => k.startsWith('to-savings|') || k.startsWith('to-college|'))
+    .map(([, c]) => c.v));
+  ok(vals.length >= 8, 'the sample states these months rather than leaving them estimated');
+  eq(vals.filter(v => v >= 0).length, 0,
+     'and every one of them is negative — a positive figure on these rows would take '
+     + 'money OUT of Savings and the 529, which is exactly what the old name taught');
+});
+t('and both plans we ship name a transfer row for an account they really hold', () => {
+  /* The other half of dropping the direction word: the name has to be the
+     account's, or a row called Savings pointing at the brokerage is a worse lie
+     than "To savings" ever was. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const names = new Map(d.settings.accounts.map(a => [a.id, a.name]));
+  const rows = Object.values(d.years)
+    .flatMap(yr => (yr.categories || []).filter(c => (c.section || 'expense') === 'transfer'))
+    .filter(c => c.rule !== 'overflow');
+  ok(rows.length >= 2, 'there are typed transfer rows to check');
+  eq(rows.filter(c => c.name !== names.get(c.transferTo)).map(c => c.name).join(', '), '',
+     'each names the account it moves money to, word for word');
+  const starter = H.STARTER_CATEGORIES.find(([, , role]) => role.startsWith('transfer:'));
+  const to = starter[2].split(':')[1];
+  eq(starter[0], H.newPlanState().settings.accounts.find(a => a.id === to).name,
+     'and the starter row is named for the account a fresh plan actually starts with');
 });
 t('and both of them belong to the person the plan starts with', () => {
   /* "Not said yet — click one to say whose it is" is the app asking a household of
@@ -8655,6 +8708,38 @@ t('every info dot has words behind it', () => {
     'every dot has an entry to open — a key with none opens an empty sheet');
   eq(Object.keys(H.HELP).filter(k => !used.includes(k)).join(', '), '',
     'and no entry sits unrendered, which is a second copy of an explanation waiting to drift');
+});
+t('the Transfers band explains the sign whether or not a sweep row exists', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  ok(/secheadRow\(SECTION_LABEL\[sec\],\s*sec === 'transfer' \? helpBtn\('transferSign'/.test(src),
+     'the sign dot is drawn on every Transfers band rather than gated on an overflow '
+     + 'row: a reader with one plain transfer row is the one most likely to type the '
+     + 'figure the wrong way round, and the old gate showed them nothing');
+  ok(/cat\.rule === 'overflow' \? helpBtn\('overflowRule'/.test(src),
+     'and the overflow explanation moved onto the sweep rows it is about, so the band '
+     + 'never has to carry two identical "i"s the reader cannot choose between');
+  const sign = H.HELP.transferSign;
+  ok(sign && /negative|below zero|under zero/i.test(
+       sign.body.map(pa => pa.map(r => (typeof r === 'string' ? r : r.b)).join('')).join(' ')),
+     'and what it opens actually says which sign sends the money away — the whole '
+     + 'point of the dot, and the one fact the grid cannot show');
+});
+t('and no two headings on one page open the identical window', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  /* The Month page's Income, Expenses and Transfers headings each carried
+     helpBtn('monthRows') — one explanation printed three times, and three dots
+     a reader has no way to choose between. It answers for the PAGE, so it is
+     drawn once, on the page's own heading. */
+  eq((src.match(/helpBtn\('monthRows'/g) || []).length, 1,
+     'the ordering explanation is drawn once, on the month\u2019s own heading, rather '
+     + 'than repeated under every section it happens to describe');
+  ok(/monthTitle\(m\)\)\}\$\{helpBtn\('monthRows'/.test(src),
+     'and that heading is the month\u2019s, which is the page the ordering is about');
+  ok(/sec === 'transfer' \? helpBtn\('transferSign'/.test(src),
+     'while a Month section heading only carries a dot when it has something of its '
+     + 'OWN to say — which is Transfers, and the sign');
 });
 /* A body is an array of paragraphs, and a paragraph an array of runs — a plain
    string, or { b } for bold. `flat` is what the reader ends up seeing. */

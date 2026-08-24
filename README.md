@@ -113,6 +113,23 @@ Rows are grouped into **Income, Expenses, Transfers and Accounts**, with
 per-month subtotals (a section holding a single row skips its subtotal) and a
 year-total column pinned to the right.
 
+### Which Way a Transfer Went
+
+A transfer row's figure is **what the move did to the hub** — the account your
+pay lands in — which is the same rule the rest of the grid follows, where a
+figure below zero is money that left. So −$500 on a Savings row takes $500 out
+of the hub and puts it into Savings, and +$500 brings it back the other way.
+
+Which is why a transfer row reads best **named for the other account rather
+than for a direction**. One row carries money out in one month and back in the
+next, so "To Savings" is right only half the time and "From Savings" is wrong
+the other half; the section heading has already said these are transfers, and
+the sign says which of the two a given month was. The starter budget and the
+sample plan both name their transfer rows exactly as the account is named, and
+an **i** on the Transfers heading says so on every plan — the one thing about a
+transfer row you cannot work out by looking at it. The exception is a sweep,
+which only ever runs one way, so `Sweep to emergency` keeps its direction.
+
 ### Year or Month
 
 The Budget has two lenses on the same figures, and a **Year / Month** switch at

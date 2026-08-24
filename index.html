@@ -5673,11 +5673,11 @@ const HELP = {
       + 'projection, which is the whole point of stating one. An account with nothing '
       + 'recorded is left out rather than counted as a zero.'],
   ] },
-  monthRows: { title: 'How This List Is Ordered', body: [
+  monthRows: { title: 'How These Lists Are Ordered', body: [
     [b('Biggest first'), ', which is the difference between reading a month and reading the '
       + 'grid: a grid keeps the order you arranged because you read across it, and a month is '
       + 'read down. The bar under each row is its share of ', b('this section'), ', so the '
-      + 'bars add up to the whole rather than to whichever row happens to be largest.'],
+      + 'bars add up to the whole of it rather than to whichever row happens to be largest.'],
     ['The line beneath each figure says where it came from — something that happened, an '
       + 'estimate of yours, or the rule that worked it out, named. A figure that is not '
       + 'settled yet is drawn in ', b('italic'), ', here and everywhere else in the app; no '
@@ -5824,6 +5824,18 @@ const HELP = {
       + 'money counted twelve times. Those rows show where the year ended instead — the last '
       + 'month that states a balance — and hovering one gives the year\'s interest and '
       + 'dividends, which is what the account really made.'],
+  ] },
+  transferSign: { title: 'Which Way a Transfer Went', body: [
+    ['A transfer row is written as ', b('what it did to the account the money moves through'),
+      ' — the hub, the one your pay lands in. Below zero means it left there: −$500 on a '
+      + 'Savings row takes $500 out of the hub and puts it into Savings, and +$500 brings it '
+      + 'back the other way. It is the same rule the rest of the grid follows, where a figure '
+      + 'under zero is money that went.'],
+    ['So a row reads best ', b('named for the other account rather than for a direction'),
+      '. One row carries the money out in one month and back in the next, which makes "To '
+      + 'Savings" right only half the time and "From Savings" wrong the other half. The '
+      + 'heading above has already said these are transfers; the sign says which of the two '
+      + 'this month was.'],
   ] },
   overflowRule: { title: 'Sweeping an Account’s Overflow', body: [
     ['A row on the overflow rule watches one account and ', b('moves whatever it would end '
@@ -6453,9 +6465,15 @@ function sampleState() {
       { id: 'insurance',  name: 'Insurance',        rule: 'carry',    role: 'normal', section: 'expense' },
       { id: 'dining',     name: 'Dining out',       rule: 'avg',      role: 'normal', section: 'expense' },
       { id: 'everything-else', name: 'Everything else', rule: 'avg',  role: 'normal', section: 'expense' },
-      { id: 'to-savings', name: 'To savings',       rule: 'carry',    role: 'transfer', section: 'transfer',
+      /* Named for the account each one moves money to and from, matching the
+         `accounts` list above word for word — the same convention the starter
+         budget uses, and the reason both are −600 and −300 rather than positive.
+         The ids keep their old 'to-' prefix on purpose: an id is the prefix of
+         every cell key below, so renaming one here would silently orphan eight
+         months of sample figures. */
+      { id: 'to-savings', name: 'Savings',          rule: 'carry',    role: 'transfer', section: 'transfer',
         transferTo: 'mid' },
-      { id: 'to-college', name: "To Mia's 529",     rule: 'carry',    role: 'transfer', section: 'transfer',
+      { id: 'to-college', name: "Mia's 529",        rule: 'carry',    role: 'transfer', section: 'transfer',
         transferTo: 'college' },
       /* The sweep, and it needs `rule: 'overflow'` specifically — the engine works
          the amount out after interest rather than from a typed figure, so it is a
@@ -6826,9 +6844,14 @@ const STARTER_CATEGORIES = [
   ['Subscriptions', 'carry', 'normal', 'expense'],
   ['Dining out', 'avg', 'normal', 'expense'],
   ['Credit Card', 'avg', 'normal', 'expense'],
-  /* A real transfer, so the Savings account row works from day one:
-     type −200 here and Cash drops $200 while Savings gains it. */
-  ['To savings', 'carry', 'transfer:mid', 'transfer'],
+  /* A real transfer, so the Savings account row works from day one. Named for
+     the ACCOUNT and not for a direction, because the sign is what says which
+     way the money went: type −200 here and Cash drops $200 while Savings gains
+     it, +200 and it comes back. It read 'To savings' until 2026-08-24, which is
+     the label saying the opposite of the figure on every month it holds a
+     negative — and a negative is what it is for. The first number a new plan
+     is likely to be given should not have to be typed against its own row. */
+  ['Savings', 'carry', 'transfer:mid', 'transfer'],
   ['Everything else', 'avg', 'normal', 'expense'],
 ];
 
@@ -7140,7 +7163,16 @@ function gridCard(y, yr) {
   const catTh = (cat) => `<th class="lbl" scope="row" data-edit="category"
     data-year="${esc(y)}" data-id="${esc(cat.id)}" style="cursor:pointer"
     title="${esc(cat.name)} — ${esc(ruleDesc(cat))}${
-    cat.note ? ' · ' + esc(cat.note) : ''} — click to edit this row">${esc(cat.name)}</th>`;
+    cat.note ? ' · ' + esc(cat.note) : ''} — click to edit this row">${esc(cat.name)}${
+    /* The overflow explanation sits on the rows it is about rather than on the
+       Transfers band, where it used to be: the band now carries the sign
+       convention, which every transfer row needs, and two identical "i"s beside
+       one heading is a choice the reader cannot make. A sweep row is also the
+       one whose cells fill themselves in from a balance, so the dot is beside
+       the name whose figures it accounts for. The grid's click handler reads
+       [data-help] before [data-edit], which is what keeps this from opening the
+       row editor instead. */
+    cat.rule === 'overflow' ? helpBtn('overflowRule', 'an overflow sweep row') : ''}</th>`;
 
   /* ── The grid is grouped: Income / Expenses / Transfers, each with a header
      line and a per-month subtotal, then the Accounts block below. ── */
@@ -7213,12 +7245,15 @@ function gridCard(y, yr) {
        reader's own — alphabetical is a display sort over an untouched stored
        order, so dragging there would move a row that then springs back. */
     const drag = state.settings.rowSort === 'alpha' || viewOnly ? '' : ` data-sec="${sec}"`;
-    /* The overflow help lives on the Transfers band, and only once such a row
-       exists — its cells are the ones that fill themselves in from a balance
-       rather than a stored figure, which earns an explanation where it shows. */
+    /* The Transfers band always carries the sign convention. It is the one
+       thing about a transfer row that cannot be worked out by looking at it —
+       the figure is what the move did to the hub, so the money arrives wherever
+       the row is named for when the number is NEGATIVE — and it is exactly what
+       a row named for a direction gets wrong half the time. Always drawn, not
+       only when something looks unusual: a reader with one plain transfer row
+       is the reader most likely to type the figure the wrong way round. */
     return secheadRow(SECTION_LABEL[sec],
-        sec === 'transfer' && cats.some(cat => cat.rule === 'overflow')
-          ? ' ' + helpBtn('overflowRule', 'overflow sweep rows') : '')
+        sec === 'transfer' ? helpBtn('transferSign', 'which way a transfer went') : '')
       + cats.map(cat => `<tr data-move="${esc(cat.id)}"${drag}>${catTh(cat)}${
           months.map(m => cellTd(cat, m)).join('')}${
           rowTotalTd(catTotal(cat), false, catTotalKind(cat))}</tr>`).join('')
@@ -8242,8 +8277,15 @@ function renderMonthView() {
     : `Still to come — every figure is an estimate that updates as real numbers land.${
         viewOnly ? '' : ' Click a line to type a real one.'}`;
 
+  /* The ordering explanation belongs HERE, on the page's own heading, and it
+     is drawn once. It sat on all three section headings until 2026-08-24 —
+     Income, Expenses and Transfers each opening the identical window, which is
+     one explanation printed three times and three dots the reader cannot
+     choose between. Half of what it says is already printed under each heading
+     anyway ("biggest first", "click a line to open the month's figure"), so
+     the three dots were mostly repeating the line directly beneath them. */
   const head = `<div class="card" data-box="month-summary">
-    <h2>${esc(monthTitle(m))}</h2>
+    <h2>${esc(monthTitle(m))}${helpBtn('monthRows', 'how these lists are ordered')}</h2>
     <p class="sub">${status}</p>
     <div class="goalgrid">${tiles}</div>
   </div>`;
@@ -8311,7 +8353,14 @@ function renderMonthView() {
       : '<span class="mtot-note">Moved rather than spent, so none of it is in '
         + 'Money In or Money Out. The Moved tile above shows this figure.</span>';
     return `<div class="card" data-box="month-${sec}">
-      <h2>${esc(SECTION_LABEL[sec])}${helpBtn('monthRows', 'how this list is ordered')}</h2>
+      <h2>${esc(SECTION_LABEL[sec])}${
+        /* Only Transfers has something of its own to say: the figure is what
+           the move did to the hub, so the money lands in the account the row
+           names when the number is NEGATIVE — the one fact about these rows
+           that cannot be read off the page. Income and Expenses carry no dot,
+           because the tiles above already answer for both and the sub-line
+           below answers for the ordering. */
+        sec === 'transfer' ? helpBtn('transferSign', 'which way a transfer went') : ''}</h2>
       <p class="sub">${esc(monthTitle(m))}, biggest first.${
         viewOnly ? '' : ' Click a line to open the month’s figure.'}</p>
       <div class="mrows">${rows.map(line).join('')}${earnLine}</div>
@@ -21475,6 +21524,10 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   fmtMoney, fmtMoneyIn, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
   reconcileNote,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
+  /* The starter budget's rows, so the suite can hold their NAMES against the
+     sign convention. A row named for a direction renders, computes and totals
+     exactly like a right one, so nothing on screen would ever report it. */
+  STARTER_CATEGORIES,
   mergeAccountsByName, nominateHub, hubAccount, dividendAccounts, statedAfter,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
   normRole, gridToSummary, gridToPinned, pinnedToLive,
