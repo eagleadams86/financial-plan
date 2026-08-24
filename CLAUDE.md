@@ -680,7 +680,7 @@ suite passed while the card was wrong.
   page paints at 100% and jumps a frame later. Quarter steps in the header
   picker, an exact percentage in Preferences; a custom figure is injected into
   the picker as its own option so the two can never disagree.
-  **Four things break under zoom, and all four are the same root cause — CSS
+  **FIVE things break under zoom, and all five are the same root cause — CSS
   pixels and screen pixels stop being the same unit:**
   - `getBoundingClientRect()` reports SCREEN pixels (zoom included) while a
     `transform: translateY()` is in the element's own pre-zoom pixels, which the
@@ -722,6 +722,34 @@ suite passed while the card was wrong.
     into `{native, x, y}` that every later step reads, so one correction covers
     tooltips, hover, clicks and all eight charts. Chart.js is vendored and must
     never be hand-edited, which is why the patch lives in `index.html`.
+  - **Chart.js LAYS EVERY CHART OUT `zoom` times too wide** — the fifth, found
+    2026-08-24 while building the month view and fixed the same day
+    (`fixChartZoomSizing`, beside the pointer patch). `getMaximumSize` measures
+    the container with `getBoundingClientRect()` — screen pixels — and Chart.js
+    writes the answer back as an inline `style.width`, which is read in the
+    element's own PRE-zoom pixels. So the canvas came out `zoom` times too wide
+    and the page grew a horizontal scrollbar into a band of nothing. Measured on
+    the Progress tab at a 1,429px client width and 150%: `getMaximumSize`
+    returned 1,324 for a container whose real CSS width was 883, and
+    `documentElement.scrollWidth` read 2,038. It does NOT self-heal — Chart.js's
+    own ResizeObserver sees a container that has not changed in ITS units — and
+    it is invisible at 100%, which is how it survived the four fixes above.
+    Patched at the DOM PLATFORM for the same reason the pointer fix is; the
+    arithmetic is `zoomedSize(size, scale)`, pure and pinned, and a scale of 1
+    hands back the SAME OBJECT because this sits on every chart's resize path.
+    **The bitmap was already right** and stays right: `newChart`'s
+    `devicePixelRatio × zoomScale` still lands 2.00 device pixels per screen
+    pixel at every zoom now that the CSS size is honest. **The pointer fix is
+    untouched by it**: it divides by `rect.width / clientWidth`, and that ratio
+    is exactly the zoom before and after — measured as 0.0000 away from the zoom
+    over all six canvases at 75/100/125/150/175/200%.
+    **It is this app's bug alone.** The other three chart apps — Sprint
+    Predictability, Flow Metrics and lottery-portfolio — have no app zoom at all
+    (checked 2026-08-24: 17 zoom-feature signals here, 0 in each of them), and
+    browser zoom does not cause this, since it scales CSS pixels uniformly and
+    leaves `getBoundingClientRect` in the same units as `style.width`. Nothing
+    to mirror across the family; if an app ever gains the zoom control, it needs
+    this patch and the four above with it.
   `zoomScale` is declared beside `pinnedShift`, with the other scroll-handler
   state, rather than beside the zoom controls further down — this file has been
   bitten before by a `let` sitting below its first reader, and it is read on

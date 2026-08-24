@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 721;
+const EXPECTED = 724;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -4864,6 +4864,38 @@ t('out of range is clamped rather than refused', () => {
   eq(H.zoomPct(1000), H.ZOOM_MAX);
   eq(H.zoomPct(H.ZOOM_MIN), H.ZOOM_MIN, 'the bounds themselves are allowed');
   eq(H.zoomPct(H.ZOOM_MAX), H.ZOOM_MAX);
+});
+/* ── What a chart is measured at ────────────────────────────────────────────
+   The fifth thing CSS zoom breaks, and the one that only shows as a scrollbar
+   into a band of nothing. Chart.js measures its container with
+   `getBoundingClientRect()` — SCREEN pixels, zoom included — and writes the
+   answer back as an inline `style.width`, which is read in the element's own
+   PRE-zoom pixels, so every chart came out `zoom` times too wide.
+   The arithmetic is pinned here rather than the patch, because the patch needs
+   a canvas, a layout and a zoom to observe and this needs none of them. The
+   figures below are the ones actually measured on the Progress tab at 150%. */
+t('a chart measured under zoom is put back into its own pixels', () => {
+  const got = H.zoomedSize({ width: 1324, height: 441 }, 1.5);
+  approx(got.width, 882.67, 'the container’s real CSS width, not its screen width');
+  approx(got.height, 294);
+});
+t('an unzoomed page is handed back untouched, object and all', () => {
+  /* This sits on the resize path of every chart in the app, and the ordinary
+     page has nothing to correct — so the identity case must cost nothing and
+     must not mint a new object for Chart.js to compare against. */
+  const size = { width: 651, height: 260 };
+  ok(H.zoomedSize(size, 1) === size, 'the same object, not a copy of it');
+  ok(H.zoomedSize(size, 1.0004) === size, 'and float dust is not a zoom');
+});
+t('nothing to measure, or no scale to measure by, changes nothing', () => {
+  /* A guard, not politeness: `getMaximumSize` can be reached before there is
+     anything to size, and dividing by a zero scale would hand Chart.js an
+     Infinity to lay a canvas out at. */
+  eq(H.zoomedSize(null, 1.5), null);
+  eq(H.zoomedSize(undefined, 1.5), undefined);
+  const size = { width: 10, height: 10 };
+  ok(H.zoomedSize(size, 0) === size);
+  ok(H.zoomedSize(size, NaN) === size);
 });
 t('nonsense falls back to full size, never to zero', () => {
   eq(H.zoomPct('abc'), 100);
