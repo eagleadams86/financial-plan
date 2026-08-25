@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 777;
+const EXPECTED = 788;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -3156,6 +3156,149 @@ t('nothing is reported in a year that is not live', () => {
   const d = H.monthDues([DUE_ROW({ dueHold: '2026-12' })],
     () => ({ v: 0, kind: 'missing' }), '2026-04', '2026-08-01', 7, false);
   eq(d.dues.length, 0); eq(d.held.length, 0); eq(d.quiet.length, 0);
+});
+
+/* ── "I pay it the month before" ──────────────────────────────────────────
+   A bill due on the 3rd is one you settle a week earlier, which lands in the
+   PREVIOUS month. Nothing in the figures can tell an early payer from an
+   on-the-day one — a rent cell in August is one payment a month either way —
+   so the row has to say, and `dueOn` is the single place the shift lives. */
+const AHEAD = (extra) => Object.assign(
+  { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 3, duePayAhead: true }, extra || {});
+
+t('the money leaving in one month settles the NEXT month’s deadline', () => {
+  eq(H.dueOn(AHEAD(), '2026-08'), '2026-09-03',
+    'August’s money pays the bill due 3 September');
+  eq(H.dueOn({ ...AHEAD(), duePayAhead: false }, '2026-08'), '2026-08-03',
+    'and without it, August’s money pays August’s own');
+  eq(H.dueOn(AHEAD(), '2026-12'), '2027-01-03', 'across a year end');
+});
+t('a consistent early payer is never late on the page they are on', () => {
+  /* The failure this exists to prevent: with the deadline left in its own
+     month, somebody who always pays a week early has every month read late for
+     ever — the worst way a reminder can fail, because it teaches you to ignore
+     it. */
+  const st = (m, cell, today) => H.dueStatus(AHEAD(), m, cell, today, 7, true);
+  eq(st('2026-08', null, '2026-08-25').state, 'ahead',
+    'nine days out is still beyond a seven-day lead — the lead counts to the DUE date, '
+    + 'so "a week before the 3rd" is the 27th of the month before');
+  eq(st('2026-08', null, '2026-08-28').state, 'soon', 'six days out, in August');
+  eq(st('2026-08', null, '2026-08-28').days, 6);
+  eq(st('2026-08', CELL('actual', -1200), '2026-08-28').state, 'paid',
+    'recorded in August, where the money actually left');
+});
+t('a shifted row carries its own month in the words', () => {
+  /* "due the 3rd" on an August line would read as 3 August, which has been and
+     gone. */
+  ok(H.dueFootWords(H.dueStatus(AHEAD(), '2026-08', null, '2026-08-25', 7, true))
+    .includes('Sep 2026'));
+  ok(H.dueScheduleWords(AHEAD()).includes('The money leaves the month before.'));
+});
+t('the shift moves the WHOLE row, not just the reminder', () => {
+  /* One question — "does this row's money move in month m, and against what
+     deadline?" — so the hide rule, the estimate gate and the outstanding count
+     all move with it rather than three of them moving and one being forgotten. */
+  const q = AHEAD({ dueMonths: [1, 4, 7, 10] });   // due Jan/Apr/Jul/Oct, paid the month before
+  ok(H.paysIn(q, '2026-03'), 'March money pays the April bill');
+  ok(!H.paysIn(q, '2026-04'), 'April itself is not a paying month for this row');
+  ok(H.rowHideable(q, { v: 0, kind: 'missing' }, '2026-04'));
+  ok(!H.rowHideable(q, { v: 0, kind: 'missing' }, '2026-03'));
+  const out = H.outstandingDues(q, ['2026-03', '2026-04'], AT({}), '2026-06-01');
+  eq(out.months, ['2026-03'], 'the period is counted in the month the money should have left');
+});
+t('a shifted row is never announced twice', () => {
+  /* It is already reported in the month it PAYS, which is the month you are
+     reading; the look-ahead having it too would report the month AFTER next. */
+  const d = H.monthDues([AHEAD()], () => ({ v: 0, kind: 'missing' }),
+    '2026-08', '2026-08-28', 7, true);
+  eq(d.dues.length, 1);
+  eq(d.dues[0].status.date, '2026-09-03', 'once, on the August page, about September');
+});
+t('a bad shift value is not a shift', () => {
+  const c = COERCE_ROW({ id: 'r', name: 'R', section: 'expense', duePay: 'manual',
+    dueDay: 3, duePayAhead: 'yes please' });
+  ok(!('duePayAhead' in c), 'only a real true is stored — false and absent are one claim');
+});
+
+/* ── The schedule drives the estimate ─────────────────────────────────────
+   Before 2026-08-25 a cycle bill's beat was measured from the last month a
+   figure was TYPED into, so a bill due in January, April, July and October but
+   paid late in March estimated itself into March, June, September and December
+   — the row's own ticked months saying one thing and the grid another. */
+const YEAR_WITH = (cat, cells) => ({ '2026': { kind: 'grid', model: 'live',
+  startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-01',
+  categories: [cat], cells: cells || {}, paychecks: {}, seeds: {},
+  overrides: {}, balAdjust: {}, extraNotes: [] } });
+const CELLS_OF = (st, id) => {
+  const c = H.computeAll(st, TODAY_FIX)['2026'];
+  const out = {};
+  for (const m of c.months) { const r = c.cells[`${id}|${m}`]; out[m] = r ? r.kind : 'none'; }
+  return out;
+};
+
+t('an estimate only lands in a month the row says it falls in', () => {
+  const cat = { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    rule: 'carry', duePay: 'manual', dueMonths: [1, 4, 7, 10], dueDay: 20 };
+  const st = { schema: 7, settings: {}, years: YEAR_WITH(cat,
+    { 'water|2026-01': { v: -92, kind: 'actual' } }) };
+  const kinds = CELLS_OF(H.coerceShape(st), 'water');
+  eq(kinds['2026-04'], 'auto', 'April is one of its months');
+  eq(kinds['2026-07'], 'auto');
+  eq(kinds['2026-10'], 'auto');
+  eq(kinds['2026-05'], 'missing', 'and May is not — "repeat the last month" is safe now');
+  eq(kinds['2026-02'], 'missing');
+});
+t('the ticked months are the cycle, and a late payment cannot re-phase it', () => {
+  /* The whole point. The beat used to be measured from the last month with a
+     figure, so one bill paid two months late moved every future estimate with
+     it — and a bill paid late is exactly what a cycle rule is most often for. */
+  const cat = { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    rule: 'quarterly', every: 3, duePay: 'manual', dueMonths: [1, 4, 7, 10], dueDay: 20 };
+  const st = { schema: 7, settings: {}, years: YEAR_WITH(cat,
+    { 'water|2026-03': { v: -56, kind: 'actual' } }) };   // January's bill, paid in March
+  const kinds = CELLS_OF(H.coerceShape(st), 'water');
+  eq(kinds['2026-04'], 'auto', 'still April, not June');
+  eq(kinds['2026-06'], 'missing', 'the old modulo beat would have put it here');
+  eq(kinds['2026-07'], 'auto');
+  eq(kinds['2026-09'], 'missing');
+});
+t('the gate follows a shifted row into the month it pays', () => {
+  const cat = { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    rule: 'carry', duePay: 'manual', dueMonths: [1, 4, 7, 10], dueDay: 3,
+    duePayAhead: true };
+  const st = { schema: 7, settings: {}, years: YEAR_WITH(cat,
+    { 'water|2026-03': { v: -92, kind: 'actual' } }) };
+  const kinds = CELLS_OF(H.coerceShape(st), 'water');
+  eq(kinds['2026-06'], 'auto', 'June’s money pays the July bill');
+  eq(kinds['2026-07'], 'missing', 'July itself is not when the money moves');
+});
+t('A PLAN WITH NO SCHEDULES COMPUTES EXACTLY WHAT IT ALWAYS DID', () => {
+  /* The guard on the whole change. The gate fires only for a row that HAS a
+     ticked list, so every existing plan — and the real-data cross-check that
+     reads eight years of imported figures to the cent — is untouched. */
+  const cat = { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    rule: 'quarterly', every: 3 };
+  const st = { schema: 7, settings: {}, years: YEAR_WITH(cat,
+    { 'water|2026-03': { v: -56, kind: 'actual' } }) };
+  const kinds = CELLS_OF(H.coerceShape(st), 'water');
+  eq(kinds['2026-06'], 'auto', 'the modulo beat still runs untouched');
+  eq(kinds['2026-09'], 'auto');
+  eq(kinds['2026-04'], 'missing');
+  ok(H.paysIn(cat, '2026-05'), 'no list means every month, for every rule');
+  ok(H.paysIn({ name: 'Rent' }, '2026-05'));
+});
+t('a typed figure is never gated, whatever the schedule says', () => {
+  /* A bill that turned up in a month the schedule did not expect is a fact.
+     The gate is about ESTIMATES; a typed figure wins above it, the way a typed
+     figure wins everywhere in this app. */
+  const cat = { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    rule: 'carry', duePay: 'manual', dueMonths: [1, 4, 7, 10] };
+  const st = { schema: 7, settings: {}, years: YEAR_WITH(cat,
+    { 'water|2026-01': { v: -92, kind: 'actual' },
+      'water|2026-05': { v: -40, kind: 'manual' } }) };
+  const c = H.computeAll(H.coerceShape(st), TODAY_FIX)['2026'];
+  eq(c.cells['water|2026-05'].v, -40);
+  eq(c.cells['water|2026-05'].kind, 'manual');
 });
 
 /* ── The lead time, which arrives from a share link ──────────────────────── */

@@ -3669,7 +3669,7 @@ function coerceShape(data) {
            the field falls back to its absent meaning. */
         if (!DUE_PAY.includes(cat.duePay)) {
           delete cat.duePay; delete cat.dueMonths;
-          delete cat.dueDay; delete cat.dueHold;
+          delete cat.dueDay; delete cat.dueHold; delete cat.duePayAhead;
         } else {
           if (Array.isArray(cat.dueMonths)) {
             const ms = [...new Set(cat.dueMonths
@@ -3687,6 +3687,12 @@ function coerceShape(data) {
           /* A month, guarded exactly like an account's since/until. */
           if (typeof cat.dueHold !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.dueHold))
             delete cat.dueHold;
+          /* Whether the money leaves the month BEFORE the bill is due. Stored
+             only when true — `false` and absent are the same claim here, and an
+             absent key keeps a row that has never been asked the question
+             exactly as it was. */
+          if (cat.duePayAhead === true) cat.duePayAhead = true;
+          else delete cat.duePayAhead;
         }
         if (cat.section) continue;
         if (looksLikeTransfer) { cat.section = 'transfer'; continue; }
@@ -5203,6 +5209,15 @@ const RULES = {
       if (!prev) return null;
       lastV = prev.v; lastM = prev.m;
     }
+    /* A TICKED MONTH LIST IS THE CYCLE, and `every` steps aside for it. The
+       two are answers to one question and the list is the better one: it is
+       stated rather than inferred, and it cannot drift. The modulo beat is
+       measured from the last month with a figure, so one bill paid late
+       re-phases the whole row — which is exactly what happens to a bill whose
+       biller is behind, the case a cycle rule is most often used for.
+       Placement is the gate's job (`paysIn`), so all this has to hand back is
+       the figure to repeat. */
+    if (Array.isArray(cat.dueMonths) && cat.dueMonths.length) return lastV;
     return monthDiff(lastM, m) % interval === 0 ? lastV : null;
   },
 
@@ -5439,7 +5454,18 @@ function computeYear(st, yearKey, prior) {
         resolved[key] = { v: 0, kind: 'missing' };
         continue;
       }
-      const v = RULES[cat.rule || 'none'](cat, m, ctx);
+      /* THE SCHEDULE DECIDES WHERE AN ESTIMATE MAY LAND (2026-08-25). Before
+         this, a quarterly bill's beat was measured from the last month a figure
+         was TYPED into — so a bill due in January, April, July and October but
+         paid late in March estimated itself into March, June, September and
+         December, and the row's own ticked months said something the grid
+         contradicted. The reader had already answered the question; the engine
+         simply never asked.
+         `paysIn` is false only for a row that HAS a ticked list, so a plan with
+         no schedules anywhere computes exactly what it always did. A TYPED
+         figure is untouched either way — it wins above, before this line, the
+         way a typed figure wins everywhere. */
+      const v = paysIn(cat, m) ? RULES[cat.rule || 'none'](cat, m, ctx) : null;
       resolved[key] = v === null ? { v: 0, kind: 'missing' }
                                  : { v: round2(v), kind: 'auto' };
     }
@@ -5857,6 +5883,18 @@ const HELP = {
       + 'month\u2019s page, which is a click away.'],
     ['A row with ', b('no fixed day'), ' never counts down to a date. Its deadline is the end '
       + 'of the month and it says so, because a day the app chose is not a day you gave it.'],
+    ['Ticking the months a bill falls in also tells the ', b('projection rule where it may go'),
+      '. A "repeat the last month" row only fills the months you ticked, so it is safe on a '
+      + 'bill that is not monthly; and a cycle keeps the beat you stated rather than counting '
+      + 'from the last month you typed something into \u2014 which used to mean one bill paid '
+      + 'late moved every future estimate with it. A figure you type is never affected: it '
+      + 'wins wherever you put it.'],
+    ['If the money leaves in the ', b('month before the bill is due'), ' \u2014 a bill due on '
+      + 'the 3rd that you settle a week earlier \u2014 say so on the row, and everything moves '
+      + 'with it: the reminder lands on the page you are on, the estimate goes in the month '
+      + 'the money really leaves, and a figure recorded there counts as paying it. Without '
+      + 'that, somebody who always pays early reads as late every single month, which is the '
+      + 'fastest way to teach yourself to ignore a warning.'],
     ['A bill that has not arrived is the awkward case, and ', b('Pause reminders until'),
       ' is the answer: the warnings stop without the app forgetting. It keeps counting the '
       + 'periods that have gone by unpaid and says roughly what they come to, using what the '
@@ -8354,11 +8392,37 @@ function dueMonthsOf(cat) {
 function dueOn(cat, m) {
   if (!cat || !DUE_PAY.includes(cat.duePay)) return null;
   if (typeof m !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(m)) return null;
-  const mo = +m.slice(5, 7);
+  /* ── "I pay it the month before" ────────────────────────────────────────
+     A bill due on the 3rd is one you settle a week earlier, which is in the
+     PREVIOUS month — so the money leaves in month m and the deadline it
+     settles belongs to m + 1. Saying which is the reader's job, because
+     nothing in the figures can tell the two apart: a rent cell in August is
+     August's rent to somebody who pays on the day, and September's to somebody
+     who pays a week early, and both are one payment a month.
+
+     THIS FUNCTION IS THE ONE PLACE THE SHIFT LIVES, which is what makes it
+     safe. Everything downstream asks the same question — "does this row's
+     money move in month m, and against what deadline?" — so the hide rule, the
+     estimate gate, the outstanding count and the reminder all shift together
+     rather than four of them shifting and one being forgotten. */
+  const bill = cat.duePayAhead ? monthAdd(m, 1) : m;
+  const mo = +bill.slice(5, 7);
   if (!dueMonthsOf(cat).includes(mo)) return null;
-  const last = daysInMonth(+m.slice(0, 4), mo);
+  const last = daysInMonth(+bill.slice(0, 4), mo);
   const day = Math.min(typeof cat.dueDay === 'number' ? cat.dueDay : last, last);
-  return `${m}-${String(day).padStart(2, '0')}`;
+  return `${bill}-${String(day).padStart(2, '0')}`;
+}
+
+/* DOES THIS ROW'S MONEY MOVE IN THIS MONTH? A ticked month list is a statement
+   that it does not move in the others, and since 2026-08-25 the engine
+   believes it: an estimate is placed only where the row says money goes.
+
+   Absent means every month, so a plan that has never set a schedule computes
+   byte for byte what it always did — which is what keeps the real-data
+   cross-check honest and is worth a test of its own. */
+function paysIn(cat, m) {
+  if (!cat || !Array.isArray(cat.dueMonths) || !cat.dueMonths.length) return true;
+  return dueOn(cat, m) !== null;
 }
 
 /* THE ONE VERDICT. Everything on screen reads this and nothing builds its own
@@ -8401,7 +8465,7 @@ function dueStatus(cat, m, cell, todayIso, leadDays, live) {
   if (!live) return null;
   const exact = typeof cat.dueDay === 'number';
   const mk = (state, days) => ({ state, date, exact, pay: cat.duePay,
-    days: days === undefined ? null : days });
+    ahead: !!cat.duePayAhead, days: days === undefined ? null : days });
   if (cell && cell.kind === 'actual') return mk('paid');
   if (cat.dueHold && cat.dueHold >= m) return mk('held');
   if (cat.duePay === 'auto') return mk('auto');
@@ -8564,10 +8628,13 @@ function dueFootWords(st) {
      is still the thing the reader wants to know about this row, and losing it
      the moment the figure lands would make "autopay" a label that only appears
      on months you have not reconciled yet. */
-  if (st.pay === 'auto') return `autopay, ${when}${st.state === 'paid' ? ' — gone out' : ''}`;
+  /* A row that pays a month ahead has to NAME the month it is due, or "due the
+     3rd" on an August line reads as August the 3rd — which has been and gone. */
+  const which = st.ahead ? `${monthLabelFull(st.date.slice(0, 7))}, ${when}` : when;
+  if (st.pay === 'auto') return `autopay, ${which}${st.state === 'paid' ? ' — gone out' : ''}`;
   if (st.state === 'held') return 'waiting on the bill';
-  if (st.state === 'paid') return `due ${when} — paid`;
-  return `due ${when}`;
+  if (st.state === 'paid') return `due ${which} — paid`;
+  return `due ${which}`;
 }
 
 /* The pill, for the three states that warrant one. A GLYPH and WORDS carry the
@@ -8602,9 +8669,10 @@ function dueScheduleWords(cat) {
   const day = typeof cat.dueDay === 'number'
     ? `on the ${ordinal(cat.dueDay)}` : 'on no fixed day';
   const how = cat.duePay === 'auto' ? 'on autopay' : 'paid by hand';
+  const early = cat.duePayAhead ? ' The money leaves the month before.' : '';
   const hold = cat.dueHold
     ? ` Reminders paused until ${monthLabelFull(cat.dueHold)}.` : '';
-  return `Due ${when} ${day}, ${how}.${hold}`;
+  return `Due ${when} ${day}, ${how}.${early}${hold}`;
 }
 
 /* WHAT ONE MONTH CAME TO — pure over the computed year, so the tiles, the
@@ -8838,7 +8906,12 @@ function renderMonthView() {
     nextIn.yr.categories,
     (id) => nextIn.c.cells[`${id}|${nextM}`] || { v: 0, kind: 'missing' },
     nextM, today, lead, nextIn.yr.model === 'live')
-    .dues.filter(d => d.status.state === 'soon' || d.status.state === 'due')
+    .dues.filter(d => (d.status.state === 'soon' || d.status.state === 'due')
+      /* A row that already says it pays a month ahead is reported in the month
+         it PAYS, which is this one — `dueOn` shifted it there. Letting the
+         look-ahead have it too would report it twice, and the second copy would
+         be about the month after next. */
+      && !d.cat.duePayAhead)
     .map(d => ({ ...d, m: nextM, y: nextIn.y }));
   const dueOf = (cat) => viewOnly
     ? dueStatus(cat, m, cellAt(cat.id), today, lead, false)
@@ -16479,7 +16552,10 @@ const EDITORS = {
       { key: 'perCheck', label: 'Per-check amount', type: 'money',
         showIf: (v) => v.rule === 'paycheck' },
       { key: 'every', label: 'Months between payments', type: 'number', step: 1,
-        showIf: (v) => v.rule === 'quarterly' },
+        showIf: (v) => v.rule === 'quarterly',
+        hint: 'Counted from the last month you typed a figure into — so a bill paid late '
+            + 'moves the whole cycle. Ticking the months it falls in, below, says it outright '
+            + 'instead, and takes over from this.' },
       /* Its own key rather than sharing `rate` with the dividends rule. The two
          are different questions — what an account earns, and what a bill rises
          by — and a row moved between the rules would otherwise carry the other
@@ -16611,6 +16687,22 @@ const EDITORS = {
         hint: 'Leave it empty when the day moves about — the row then just says it is due '
             + 'this month, and never counts down to a date you did not give. 31 means the '
             + 'last day, whatever the month is.' },
+      /* WHICH MONTH THE MONEY LEAVES, and it is a question only the reader can
+         answer. A rent cell in August is August's rent to somebody who pays on
+         the day and September's to somebody who pays a week early — one payment
+         a month either way, and nothing in the figures tells them apart. Get it
+         wrong for a consistent early payer and every single month reads late
+         for ever, which is the worst way a reminder can fail.
+         It shifts the whole row by a month: the deadline this month's money
+         settles, where an estimate may land, which months the row can drop off
+         the page in, and what counts as outstanding. */
+      { key: 'duePayAhead', label: 'The money leaves', type: 'select', options: [
+        ['', 'In the month it is due'],
+        ['ahead', 'The month before — I pay it early'],
+      ], showIf: (v) => v.dueSet,
+        hint: 'Pick the second for a bill due at the start of a month that you settle before '
+            + 'the month turns. The reminder then lands on the page you are actually on, and '
+            + 'the figure goes in the month the money really left.' },
       /* The bill that has not arrived. Charlie's water is three quarters behind
          because the town cannot issue them: genuinely owed, genuinely not late.
          Pausing is not forgetting — the Month page still counts what is
@@ -16630,12 +16722,12 @@ const EDITORS = {
         options: MONTH_ABBR.map((lab, i) => [String(i + 1), lab]),
         showIf: (v) => v.dueSet,
         hint: 'Quarterly water is Jan, Apr, Jul and Oct; taxes twice a year are two boxes. '
-            + 'Tick them all (or none) for a monthly bill. In a month it does not fall in, '
-            + 'the row drops off the Month page — but only when nothing is recorded there, '
-            + 'so a row that carries a figure or a note always stays. That means a "repeat '
-            + 'the last month" row, which fills every month with an estimate, will keep '
-            + 'showing: this says when the money is OWED, and the rule above says what the '
-            + 'app guesses it will be. Two questions.' },
+            + 'Tick them all (or none) for a monthly bill. This does two things: the rule '
+            + 'above only estimates into the months you tick, so "repeat the last month" is '
+            + 'safe on a bill that is not monthly and a cycle keeps its beat however late a '
+            + 'bill is paid \u2014 and in the months it does not fall in, the row drops off '
+            + 'the Month page, though only when nothing is recorded there, so a row carrying '
+            + 'a figure or a note always stays.' },
       noteField,
     ],
     get(ds) {
@@ -16666,6 +16758,7 @@ const EDITORS = {
            something new, and one who leaves it alone saves the same schedule
            back. */
         dueSet: DUE_PAY.includes(cat.duePay),
+        duePayAhead: cat.duePayAhead ? 'ahead' : '',
         dueMonths: dueMonthsOf(cat).map(String) };
     },
     blank: () => ({ rule: 'none', role: 'normal', section: 'expense',
@@ -16793,6 +16886,8 @@ const EDITORS = {
             if (v.duePay === 'manual' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v.dueHold || ''))
               cat.dueHold = v.dueHold;
             else delete cat.dueHold;
+            if (v.duePayAhead === 'ahead') cat.duePayAhead = true;
+            else delete cat.duePayAhead;
           }
       };
       const ahead = projectionsAfter(ds.year);
@@ -22528,7 +22623,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
      skip is pinned through the state it leaves behind. */
   DUE_PAY, DUE_LEAD_DEFAULT, daysInMonth, dayNumber, daysBetween,
   dueMonthsOf, dueOn, dueStatus, leadDaysOf, monthDues, outstandingDues,
-  rowHideable, ordinal, dueFootWords, duePillWords, dueScheduleWords,
+  rowHideable, paysIn, ordinal, dueFootWords, duePillWords, dueScheduleWords,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its
      prose over a fixture). */

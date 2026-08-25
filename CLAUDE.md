@@ -465,10 +465,18 @@ family names as well as balances.
   (a split month whose parts disagree, and now also a subtotal spanning both).
   Each kind reads as a different LINE STYLE in the grid, never a colour, and
   every figure in the grid carries one — cells, balances, subtotals, totals.
-- Estimate rules are table-driven in `RULES`: `carry` (Internet only — the
+- **Every rule is now gated by the row's own schedule** — `paysIn(cat, m)`
+  around the RULES dispatch in `computeYear`, so an estimate lands only where a
+  row with a ticked `dueMonths` says its money moves. A row without one is
+  ungated and unchanged. See "Due dates" below; it is the only way a due date
+  reaches a computed figure.
+- Estimate rules are table-driven in `RULES`: `carry` (was Internet only — the
   sheet types Phone/Parking/Water into each month they apply, so a carry rule
-  there would invent charges), `quarterly` (repeat on a cycle, `cat.every`
-  months, default 3), `avg` (Credit Card, Venmo — mean of stored months
+  there invented charges; **ticking the months a bill falls in fixes that and
+  makes carry safe on a quarterly bill**, 2026-08-25), `quarterly` (repeat on a
+  cycle, `cat.every` months, default 3 — **superseded by a ticked `dueMonths`,
+  which is stated rather than inferred and cannot be re-phased by one bill paid
+  late**), `avg` (Credit Card, Venmo — mean of stored months
   before the estimate), `avglastyear` (mean of the prior calendar year's
   STORED months — never autos, so an estimate can't feed itself),
   `samemonth` (Electric, ROUND, reaches into the prior year's grid),
@@ -3126,14 +3134,34 @@ DELETED when inapplicable, never `undefined` — the Firestore rule.
   and can never move a figure. That is what makes it safe to be display-only,
   to ride in a share link unchanged, and to need **no schema bump and no
   migration** — the `a.buckets` precedent.
-- **It is ORTHOGONAL to `cat.rule`/`cat.every`, and must stay so.** The
-  `quarterly` RULE answers "what should this month's estimate be" and takes its
-  beat from the last stored month; `dueMonths` answers "when is the money
-  owed". A quarterly bill usually wants both and neither is derived from the
-  other — the `cat.growth`-vs-`cat.rate` lesson. They CAN disagree (type a bill
-  in off the beat and the rule re-phases while the schedule does not); the
-  editor hint says which question each answers rather than the code trying to
-  reconcile them.
+- **THE SCHEDULE DRIVES THE ESTIMATE ENGINE (2026-08-25), and this is the one
+  place due dates DO reach computed figures.** It shipped orthogonal — the
+  `quarterly` rule taking its beat from the last month a figure was TYPED into,
+  `dueMonths` describing when the money is owed, and the editor telling the
+  reader they were two questions. That was wrong in the way a thing is wrong
+  when the reader has already answered it: a bill due Jan/Apr/Jul/Oct but paid
+  late in March estimated itself into Mar/Jun/Sep/Dec, and the row's own ticked
+  months said one thing while the grid said another.
+  - **`paysIn(cat, m)` is the gate**, applied in `computeYear` around the RULES
+    dispatch: an estimate is placed only where the row says its money moves. A
+    ticked list is a statement that it does NOT move in the other months.
+  - **`quarterly` hands back the figure and lets the gate place it** when a list
+    is set — `every` steps aside. The two are answers to one question and the
+    list is the better one: stated rather than inferred, and it cannot drift.
+    The modulo beat is measured from the last month with a figure, so ONE bill
+    paid late re-phases the whole row — which is exactly what happens to a bill
+    whose biller is behind, the case a cycle rule is most often used for.
+  - **It makes `carry` safe on a bill that is not monthly**, which the engine
+    section's note said it could never be ("the sheet types Phone/Parking/Water
+    into each month they apply, so a carry rule there would invent charges").
+    With a ticked list it invents nothing.
+  - **A TYPED FIGURE IS NEVER GATED.** It wins above the gate, the way a typed
+    figure wins everywhere here — a bill that turned up in a month the schedule
+    did not expect is a fact.
+  - **A plan with no ticked list computes byte for byte what it always did**,
+    because `paysIn` is true for every row without one. That is what keeps the
+    real-data cross-check honest, and it has a test of its own shouting about
+    it. Verified against the eight imported years before shipping.
 - **`dueStatus` is the one verdict** and everything on screen reads it — the
   `accountEarnings` discipline. Check order, and every step is a decision: no
   schedule → not one of its months → **not a live grid year** → an `actual`
@@ -3155,6 +3183,27 @@ DELETED when inapplicable, never `undefined` — the Firestore rule.
   - `paid` beats `held` (a fact beats a request for quiet), and `dueFootWords`
     still says "autopay" on a paid autopay row: the verdict is about the state,
     the sentence is about the arrangement.
+- **`duePayAhead` — "the money leaves the month before" (2026-08-25).** A bill
+  due on the 3rd is one you settle a week earlier, which is in the PREVIOUS
+  month. **Nothing in the figures can tell an early payer from an on-the-day
+  one**: a rent cell in August is August's rent to one and September's to the
+  other, and both are one payment a month. So the row has to say, and a boolean
+  is the honest shape.
+  - **Getting it wrong is the worst way a reminder can fail.** Left unshifted, a
+    consistent early payer reads LATE every single month for ever, which teaches
+    you to ignore the warning.
+  - **`dueOn` is the one place the shift lives**, and that is what makes it
+    safe. Everything downstream asks that function the same question — "does
+    this row's money move in month m, and against what deadline?" — so the hide
+    rule, the estimate gate, the outstanding count and the reminder all move
+    together rather than three moving and one being forgotten.
+  - **The look-ahead SKIPS a shifted row.** It is already reported in the month
+    it pays, which is the month you are reading; letting the look-ahead have it
+    too would report the month after next.
+  - The lead counts to the DUE date, not to the paying month — so "a week before
+    the 3rd" starts warning on the 27th of the month before, which is right.
+  - Stored only when `true`: `false` and absent are one claim, and an absent key
+    leaves a row that was never asked exactly as it was.
 - **A row with no fixed day never counts down.** Its deadline is the month's
   last day — a date the app chose, not one the reader gave — so the pill reads
   "Due this month" / "Was due Apr 2026" and prints no day count. `exact: false`

@@ -248,10 +248,15 @@ Open a row and tick **It has a due date**:
   boxes for taxes twice a year; one for an annual renewal. Tick them all (or
   none) for a monthly bill.
 
-This is a **different question from the projection rule** above it in the same
-dialog. The rule says what the app should guess a future month will come to; the
-due date says when the money is owed. A quarterly bill usually wants both, and
-neither is worked out from the other.
+**Ticking the months also tells the projection rule where it may go.** A *repeat
+the last month* row only fills the months you ticked, so it's safe on a bill
+that isn't monthly; and a **cycle keeps the beat you stated** rather than
+counting from the last month you happened to type something into — which used to
+mean one bill paid late moved every future estimate along with it. A figure you
+type is never affected: it wins wherever you put it.
+
+That's the one place a due date touches a computed figure. A row with no ticked
+months behaves exactly as it always has.
 
 **A warning starts a set number of days before the date** — seven unless you
 change it in [Preferences](#preferences) — and appears as a small pill on the
@@ -264,6 +269,23 @@ means exactly that.
 **Nothing here is ever a colour on its own.** The pill carries a mark and words —
 *Due in 3 days*, *Due today*, *12 days late* — and the colour only agrees with
 them.
+
+#### When the Money Actually Leaves
+
+A bill due on the 3rd is one you settle a week earlier — which is in the
+**previous month**. Nothing in the figures can tell that apart from paying on the
+day: either way it's one payment a month. So the row has to say, and **The money
+leaves** is where you say it.
+
+Pick *the month before* and the whole row shifts: the reminder lands on the page
+you're actually on, the estimate goes in the month the money really leaves, a
+figure recorded there counts as having paid it, and the row can drop off the
+months in between. Without it, somebody who always pays early reads as **late
+every single month, for ever** — which is the fastest way to teach yourself to
+ignore a warning.
+
+The warning still counts down to the *due* date, so "a week before the 3rd"
+starts on the 27th of the month before.
 
 #### Bills Due at the Start of a Month
 
