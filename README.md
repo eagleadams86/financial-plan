@@ -164,6 +164,12 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
   list, quietly, because opening it is how a month gets filled in.
 - **The accounts**, each with what it held at the end of the month, how far that
   moved, and what it earned.
+- **The month's notes**, gathered at the foot of the page the way a year's are
+  gathered at the foot of the grid — everything you wrote on that month, on its
+  figures, on the amounts a split month is made of, and on the balances you
+  stated. Click one to open the cell it came from. A **row's own note** carries
+  no month, so it stays on the year's list rather than being repeated under all
+  twelve. A month you wrote nothing on draws no card at all.
 - **A bar per month of the year**, so the month you are reading has somewhere to
   sit. Above the zero line — which is drawn heavier than the rest of the grid,
   since it is the line that means something here — a month added to your money

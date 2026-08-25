@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 733;
+const EXPECTED = 735;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -2268,6 +2268,26 @@ t('a note knows the cell it belongs to, so it can be opened', () => {
   const imported = H.notesOfYear(notesState(), '2029')
     .find(x => x.note === 'from the old sheet');
   eq(imported.edit, undefined, 'an imported note has no cell to go back to');
+});
+
+t('a month page takes only the notes tied to that month', () => {
+  /* What monthNotes() filters on, held against the same gatherer the year card
+     reads — one collector, two lenses, so the two lists cannot disagree about
+     what a note is. A ROW note carries no month: it explains the row, not a
+     month, so it is left off rather than repeated under all twelve, and the
+     year card is where those are read. */
+  const st = notesState();
+  const forMonth = (m) => H.notesOfYear(st, '2030').filter((n) => n.m === m);
+  eq(forMonth('2030-03').map((x) => x.note), ['escrow shortage']);
+  eq(forMonth('2030-05').map((x) => x.note), ['two shops', 'weekly'],
+     'a split month brings the note on the cell AND the one on the amount, which is '
+     + 'two lines about one figure and right both times');
+  eq(forMonth('2030-01').map((x) => x.note), ['off the statement'],
+     'a note written on a stated balance is a note on that month');
+  eq(forMonth('2030-02'), [],
+     'and a month with nothing written on it draws no card at all');
+  ok(!H.notesOfYear(st, '2030').some((n) => n.note === 'renews in June' && n.m),
+     'the row note has no month on it, so no month page can claim it');
 });
 
 group('Which summary rows are money that moved');
@@ -8630,6 +8650,30 @@ t('a hovered grid row lights edge to edge, pinned columns included', () => {
      && /\.grid th\.rowtot, \.grid td\.rowtot \{[^}]*position: sticky/.test(css),
      'and both columns it exists to reach are still the sticky ones that paint '
      + 'themselves — the day either stops, this rule stops being load-bearing');
+});
+/* ── The month's notes ───────────────────────────────────────────────────────
+   Drawn at the foot of the month the way the year's are drawn at the foot of
+   the grid. Two things here are only correct in the source, so they are pinned
+   there: the card DECLARES its fold key, and a note line carries its own year. */
+t('the month page draws its own notes, and every line knows its year', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  ok(/\$\{chartCard\}\$\{monthNotes\(m, y\)\}/.test(src),
+     'the card is the last thing on the month page, under the chart');
+  ok(/data-box="month-notes"/.test(src),
+     'and it DECLARES its fold key: boxKey() builds one from the heading with the '
+     + 'digits stripped, and "Notes for August 2026" differs from September in a WORD '
+     + '— so the automatic key would move every month and the card would keep reopening');
+  ok(/data-year="\$\{esc\(y\)\}"/.test(src),
+     'a note line carries the year it was drawn for');
+  ok(/const \{ note, id, m, year \} = li\.dataset, y = year \|\| activeYearKey\(\)/.test(src),
+     'and the click reads it rather than asking activeYearKey(), which is the YEAR '
+     + 'strip’s answer — the month strip crosses year ends, so on a December note the '
+     + 'two disagree and the wrong year’s cell would open');
+  ok((src.match(/function noteLine\(/g) || []).length === 1
+     && (src.match(/noteLine\(n, y\)/g) || []).length >= 2,
+     'both lenses render a note line through the one writer, so the two lists cannot '
+     + 'drift apart in how they read');
 });
 /* ── A folded card is a SHORT card ───────────────────────────────────────────
    Cards side by side stretch to a common height, which is what makes a row of

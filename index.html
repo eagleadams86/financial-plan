@@ -7587,22 +7587,35 @@ function notesOfYear(st, y) {
   return items;
 }
 
+/* ONE writer for a note line, because both lenses draw the list now — the
+   year's gathered at the foot of the grid, and the month's at the foot of the
+   month. A second copy would be the same explanation twice over, drifting.
+
+   A note written over several lines gets its label on a line of its own, so
+   the note starts at the margin and reads as it was typed. A one-liner keeps
+   the label inline — giving every short note two lines would double the length
+   of the list to no purpose.
+
+   `data-year` is written out rather than left to the click handler to guess.
+   It used to read `activeYearKey()`, which is the YEAR strip's answer, and the
+   month strip crosses year ends — `planMonths` lists every month the plan
+   holds — so a note opened from December while the picker sat on the next year
+   would have opened the wrong year's cell. The renderer knows which year it is
+   drawing; nothing downstream should have to work it out again. */
+function noteLine(n, y) {
+  const multi = /\n/.test(n.note || '');
+  const label = n.where + (n.extra ? ` · ${n.extra}` : '');
+  return `<li class="${multi ? 'multiline' : ''}"${
+    n.edit ? ` data-note="${esc(n.edit)}" data-id="${esc(n.id)}" data-year="${esc(y)}"${
+      n.m ? ` data-m="${esc(n.m)}"` : ''} style="cursor:pointer" title="Click to open it"` : ''
+    }><span class="muted">${esc(label)}</span>${multi ? '' : ' — '
+    }<span class="note-text">${esc(n.note)}</span></li>`;
+}
+
 function yearNotes(y) {
   const items = notesOfYear(state, y);
   if (!items.length) return '';
-  /* A note written over several lines gets its label on a line of its own, so
-     the note starts at the margin and reads as it was typed. A one-liner keeps
-     the label inline — giving every short note two lines would double the
-     length of the list to no purpose. */
-  const line = (n) => {
-    const multi = /\n/.test(n.note || '');
-    const label = n.where + (n.extra ? ` · ${n.extra}` : '');
-    return `<li class="${multi ? 'multiline' : ''}"${
-      n.edit ? ` data-note="${esc(n.edit)}" data-id="${esc(n.id)}"${
-        n.m ? ` data-m="${esc(n.m)}"` : ''} style="cursor:pointer" title="Click to open it"` : ''
-      }><span class="muted">${esc(label)}</span>${multi ? '' : ' — '
-      }<span class="note-text">${esc(n.note)}</span></li>`;
-  };
+  const line = (n) => noteLine(n, y);
   /* Grouped by month, because a year of them is a wall otherwise and the month
      was being repeated on every single line to say what one heading can. The
      groups then flow into as many columns as the card is wide — a whole month
@@ -7629,6 +7642,33 @@ function yearNotes(y) {
       and the stated balances they were written on${
       viewOnly ? '' : ' — click one to open the cell it came from'}.</p>
     <div class="notegroups${headed ? '' : ' flat'}">${groups}</div></div>`;
+}
+
+/* The month lens's own notes, at the foot of the page the way the year's sit
+   at the foot of the grid. It reads `notesOfYear` and filters — the same
+   gatherer the year uses, so the two lists can never disagree about what a
+   note is or where it lives.
+
+   ONLY the notes tied to THIS month. A row's own note ("renegotiated in
+   March") belongs to the row and carries no month, so it would otherwise be
+   repeated under all twelve — the same note twelve times says less than once.
+   The year card is where those are read, and it says so in its own sub-line.
+
+   `data-box` is declared rather than left to boxKey(), which builds its key
+   from the heading with the digits stripped: "Notes for August 2026" and
+   "Notes for September 2026" differ in a WORD, not a digit, so the automatic
+   key would change every month — fold it in August and find it open in
+   September. One key for one card, whatever month it is showing. */
+function monthNotes(m, y) {
+  const items = notesOfYear(state, y).filter(n => n.m === m);
+  if (!items.length) return '';
+  return `<div class="card" data-box="month-notes">
+    <h2>Notes for ${esc(monthTitle(m))} (${items.length})</h2>
+    <p class="sub">Everything you wrote on this month — on its figures, on the
+      amounts a split month is made of, and on the balances you stated${
+      viewOnly ? '' : ' — click one to open the cell it came from'}.</p>
+    <div class="notegroups flat"><section class="notegroup"><ul class="notelist">${
+      items.map(n => noteLine(n, y)).join('')}</ul></section></div></div>`;
 }
 
 /* Whether a month has been annotated at all — which is what earns the dot on
@@ -8493,7 +8533,7 @@ function renderMonthView() {
 
   return `<div class="tipzone">${monthPickerHtml(m, all)}${head}
     <div class="monthgrid">${['income', 'expense', 'transfer'].map(sectionCard).join('')}${
-      acctCard}</div>${chartCard}</div>`;
+      acctCard}</div>${chartCard}${monthNotes(m, y)}</div>`;
 }
 
 /* The bars behind the chart above — pure, so the figures it draws are pinned by
@@ -18467,7 +18507,10 @@ function wireBudget() {
      useful. Row notes route through the ordinary #views editor listener. */
   document.querySelectorAll('.notelist li[data-note]').forEach(li => {
     li.onclick = () => {
-      const y = activeYearKey(), { note, id, m } = li.dataset;
+      /* The YEAR comes off the line, not from activeYearKey(): the month lens
+         crosses year ends, so the year showing in the picker is not always the
+         year the note belongs to. `noteLine` writes it. */
+      const { note, id, m, year } = li.dataset, y = year || activeYearKey();
       if (note === 'row') openRowEditor('category', { year: y, id }, false);
       else openCellEditor(y, note, id, m);
     };
