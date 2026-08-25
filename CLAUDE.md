@@ -161,6 +161,20 @@ family names as well as balances.
   The mark is a SHAPE and sits on the box's bottom edge, so it never competes
   with the fill that says "this is the one you are reading" — the point is the
   visit where the two differ.
+  (6) **"This year" is the month strip's button in the other lens** — since
+  2026-08-25 — and it is rendered on the same condition (`showNow`: this year is
+  IN the strip and is not the one you're reading) and in the same place, FIRST
+  in the nav, so its arrival grows leftwards into the rail instead of shoving
+  the arrows out from under the pointer. It clicks through to exactly what the
+  chip does, since it is a shortcut to a chip that may be scrolled off the rail
+  rather than a second way of choosing a year.
+  **The arrows have their own box, `#yearArrows`.** The two halves come and go
+  for unrelated reasons — the arrows on whether the rail overflows the WINDOW,
+  the button on which year you are READING — and `syncYearNav` hides the arrows
+  only, dropping the outer `.yearnav` (which owns the divider rule) just when
+  both are gone. One box passes a screenshot and fails the ordinary case: a plan
+  of a few years fits without arrows, which is precisely when the button is the
+  only thing in there.
   A keyboard move sets `yearKeyMove` so the redraw can hand focus back: picking
   a year rebuilds the view, which blurs the chip, and without it the second
   arrow key goes nowhere — the same trap the tab bar hit.

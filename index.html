@@ -397,6 +397,16 @@ select.ctl:hover { border-color: var(--text-muted); }
 .yearnav { flex: 0 0 auto; display: flex; align-items: center;
   padding-left: 6px; margin-left: 4px; border-left: 1px solid var(--border); }
 .yearnav[hidden] { display: none; }
+/* The arrows come and go with the WINDOW; "This year" comes and goes with the
+   year you're reading. Two conditions, so two boxes. */
+.yarrows { display: flex; align-items: center; }
+.yarrows[hidden] { display: none; }
+/* Sized like the month strip's "This month" — a word beside a glyph reads as
+   shouting at the arrows' own size — and given a thumb-sized box on touch,
+   which the year ARROWS deliberately don't get: this one is a control somebody
+   actually navigates with. */
+.ynav.ynow { font-size: var(--fs-xs); }
+@media (pointer: coarse) { .ynav.ynow { min-height: 40px; } }
 .ynav { background: none; border: 0; border-radius: var(--radius-sm);
   padding: 4px 8px; cursor: pointer; color: var(--text-secondary);
   font: inherit; font-size: var(--fs-base); line-height: 1.2; }
@@ -7154,15 +7164,34 @@ function yearPickerHtml(active) {
       aria-checked="${on ? 'true' : 'false'}" tabindex="${on ? 0 : -1}"
       aria-label="${esc(label)}" title="${esc(label)}">${esc(y)}</button>`;
   }).join('');
+  /* "This year", the month strip's button in the other lens, and it appears on
+     the same condition: only when this year is IN the strip and you are not
+     already reading it — a button that does nothing is worse than no button.
+     It is rendered BEFORE the arrows for the reason the month strip spells out
+     at length: `.yearnav` is content-sized at the right-hand end of a flex row,
+     so its LAST child holds the right edge and everything before it moves when
+     the width changes. Last, the button's arrival would shove both arrows left
+     by its own width, out from under the pointer that had just clicked one.
+
+     The arrows have their own wrapper because the two halves come and go for
+     UNRELATED reasons — the arrows on whether the rail overflows the window,
+     this button on which year you are reading — and the outer `.yearnav` owns
+     the divider rule that separates the nav from the rail, so it has to stay
+     out until BOTH are gone or the strip ends in a stray hairline. */
+  const showNow = yearKeys().includes(nowY) && active !== nowY;
   return `<div class="yearstrip">
     ${budgetSwitchHtml('year')}
     <div class="yearrail" id="yearRail" role="radiogroup"
       aria-label="Which year you're looking at">${chips}</div>
-    <div class="yearnav" id="yearNav" hidden>
-      <button type="button" class="ynav" id="yearPrev"
-        aria-label="Scroll to later years" title="Later years">&#8249;</button>
-      <button type="button" class="ynav" id="yearNext"
-        aria-label="Scroll to earlier years" title="Earlier years">&#8250;</button>
+    <div class="yearnav" id="yearNav"${showNow ? '' : ' hidden'}>
+      ${showNow ? `<button type="button" class="ynav ynow" id="yearNow"
+        data-year="${esc(nowY)}" title="Back to ${esc(nowY)}">This year</button>` : ''}
+      <span class="yarrows" id="yearArrows" hidden>
+        <button type="button" class="ynav" id="yearPrev"
+          aria-label="Scroll to later years" title="Later years">&#8249;</button>
+        <button type="button" class="ynav" id="yearNext"
+          aria-label="Scroll to earlier years" title="Earlier years">&#8250;</button>
+      </span>
     </div>
   </div>`;
 }
@@ -7171,10 +7200,15 @@ function yearPickerHtml(active) {
    not about the plan, so it's measured rather than stored — and re-measured
    when the window changes, since the strip itself is only rebuilt by a redraw. */
 function syncYearNav() {
-  const rail = F('yearRail'), nav = F('yearNav');
-  if (!rail || !nav || !rail.clientWidth) return;
+  const rail = F('yearRail'), nav = F('yearNav'), arrows = F('yearArrows');
+  if (!rail || !nav || !arrows || !rail.clientWidth) return;
   const over = rail.scrollWidth - rail.clientWidth;
-  nav.hidden = over <= 1;
+  arrows.hidden = over <= 1;
+  /* The nav goes only when it holds nothing at all. "This year" is rendered or
+     not by the redraw and this function must not take it away — the strip fits
+     without arrows most of the time, which is exactly when the button is the
+     only thing in here. */
+  nav.hidden = arrows.hidden && !F('yearNow');
   F('yearPrev').disabled = rail.scrollLeft <= 1;
   F('yearNext').disabled = rail.scrollLeft >= over - 1;
 }
@@ -7215,6 +7249,14 @@ function wireYearStrip() {
   };
   F('yearPrev').onclick = () => nudge(-1);
   F('yearNext').onclick = () => nudge(1);
+  /* Exactly what clicking this year's chip does — the button is a shortcut to a
+     chip that may be scrolled off the end of the rail, not a second way of
+     choosing a year. `settle()` below then brings the chip into view. */
+  const nowBtn = F('yearNow');
+  if (nowBtn) nowBtn.onclick = () => {
+    state.ui.activeYear = nowBtn.dataset.year;
+    save(); render();
+  };
   const on = chips.find(c => c.getAttribute('aria-checked') === 'true');
   /* Bring the chosen year into view, then say which arrows are live — both of
      which need the rail to have a WIDTH. The first layout after a reload can

@@ -1162,12 +1162,16 @@ year, End for the oldest).
 
 A year kept as a yearly summary is set in italics, one built before it has
 started is underlined with dots, **this year carries an underscore** wherever it
-has got to in the strip, and hovering any of them says which in words.
+has got to in the strip, and hovering any of them says which in words. A **This
+Year** button appears at the right-hand end once you have wandered off it — the
+Month lens's button, on the same terms — and takes you back in one click, from
+however far down the strip you have read.
 
 The same strip carries the Budget's **Year / Month** switch at its left end, and
 in the Month lens the years are replaced by the plan's months — the arrows there
 step from one month to the next rather than scrolling, and the current month is
-marked with an underscore wherever it has got to. On a phone the switch and the
+marked with an underscore wherever it has got to. Both lenses put their way back
+to now in the same place, and neither shows it when you are already there. On a phone the switch and the
 arrows take the line above and the strip gets the full width underneath.
 See [Year or Month](#year-or-month).
 
