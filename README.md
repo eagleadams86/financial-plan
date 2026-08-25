@@ -265,6 +265,19 @@ means exactly that.
 *Due in 3 days*, *Due today*, *12 days late* — and the colour only agrees with
 them.
 
+#### Bills Due at the Start of a Month
+
+A bill due on the 1st is one you pay **in the month before it**, so the card
+looks into the beginning of next month as well as the month you're reading.
+Standing on 25 August with a week's warning set, the August page tells you the
+1 September insurance is due in seven days — which is the point at which you can
+still do something about it.
+
+A line about next month says so, shows *next month's* figure, and opening it
+records the payment there, where the money will actually go. Only a deadline
+still to come reaches back like that: one that's already late belongs on its own
+month's page, which is a click away.
+
 #### Rows That Aren't Due This Month
 
 A row whose schedule excludes the month you're reading **drops off the list**,

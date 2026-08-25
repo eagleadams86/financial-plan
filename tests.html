@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 773;
+const EXPECTED = 777;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -3108,6 +3108,49 @@ t('monthDues splits a month three ways and reports a hold in EVERY month', () =>
     'September is not a water month, and the periods stacking up behind it are a '
     + 'fact about the ROW rather than about the month you happen to be reading');
   eq(d.quiet.map(c => c.id), ['water'], 'and it is still hideable from its section');
+});
+/* ── A bill due at the start of next month ───────────────────────────────
+   The case that makes the lead time worth having. `dueStatus` was always right
+   about it — the arithmetic is date-based — but it was only ever ASKED about
+   the month being read, so the 1 September rent was announced on the September
+   page, which nobody opens on 25 August. The card asks about next month too;
+   these pin the rule that decides what travels back. */
+t('a bill due the 1st is already inside the lead from the month before', () => {
+  const rent = { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 1 };
+  const d = H.monthDues([rent], () => ({ v: 0, kind: 'missing' }),
+    '2026-09', '2026-08-25', 7, true);
+  eq(d.dues.map(x => x.status.state), ['soon']);
+  eq(d.dues[0].status.days, 7, 'exactly a week, standing in the month before it');
+  eq(d.dues[0].status.date, '2026-09-01');
+});
+t('only a deadline still to come may travel back a page', () => {
+  /* A late bill belongs on its own month's page. Reading July in August,
+     "August's rent is 24 days late" is a fact about a page you are not on —
+     and reading a month far in the past would drag every later bill onto it.
+     A deadline that has not arrived cannot be late, so the filter is also the
+     guard: no "is this the current month" test is needed anywhere. */
+  const rent = { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 1 };
+  const at = () => ({ v: 0, kind: 'missing' });
+  eq(H.monthDues([rent], at, '2026-08', '2026-08-25', 7, true).dues[0].status.state,
+    'late', 'August’s own bill, read on the August page');
+  eq(H.monthDues([rent], at, '2026-10', '2026-08-25', 7, true).dues.length, 0,
+    'October is beyond the lead, so nothing travels back onto September');
+});
+t('a lead longer than a month still cannot reach past next month', () => {
+  /* The look-ahead is ONE month deep by construction. A sixty-day lead makes
+     more deadlines `soon`, but the card still only ever asks about `m` and the
+     month after it — which is the honest limit, since a bill two months out is
+     not one you can pay before this month turns. */
+  const rent = { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 1 };
+  const at = () => ({ v: 0, kind: 'missing' });
+  eq(H.monthDues([rent], at, '2026-10', '2026-08-25', 60, true).dues[0].status.state,
+    'soon', 'at sixty days October IS soon — but only the October page asks');
+});
+t('paying it early silences it, because an actual is an actual', () => {
+  const rent = { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 1 };
+  const d = H.monthDues([rent], () => ({ v: -1200, kind: 'actual' }),
+    '2026-09', '2026-08-25', 7, true);
+  eq(d.dues.length, 0, 'the figure is recorded, so there is nothing left to do');
 });
 t('nothing is reported in a year that is not live', () => {
   const d = H.monthDues([DUE_ROW({ dueHold: '2026-12' })],

@@ -3174,6 +3174,28 @@ DELETED when inapplicable, never `undefined` — the Firestore rule.
   and summing blanks gives $0.00, which is a figure and is wrong. The row's most
   recent real figure stands in, and `estimated` says so out loud; with no figure
   anywhere, `total` is NULL — the savingsPulse rule.
+- **THE CARD LOOKS ONE MONTH AHEAD, and only forward.** A bill due the 1st is
+  one you pay in the month BEFORE it, and a lead time exists to tell you while
+  there is still time to act — so asking only about the month being read put
+  the 1 September rent on the September page, which nobody opens on 25 August,
+  while the August page showed August's own rent 24 days late and said nothing
+  about the one worth doing something about. `dueStatus` was always right about
+  it; it was simply never asked.
+  - **Only `soon` and `due` travel back**, and that filter IS the guard — no
+    "is this the current month" test exists anywhere. A deadline that has not
+    arrived cannot be late, so a past month's page can never drag a later
+    bill onto itself; and a late bill belongs on its own month's page, which
+    is a click away.
+  - **One month deep, by construction.** A sixty-day lead makes more deadlines
+    `soon`, but the card still only asks about `m` and `monthAdd(m, 1)` — a
+    bill two months out is not one you can pay before this month turns.
+  - The line **names its month and points at that month's cell**
+    (`data-m`/`data-year`), so opening it records the payment where the money
+    will actually go, and the figure beside it is honestly next month's rather
+    than a number on an August page that looks like an arithmetic error.
+  - `lookIn(month)` is the one lookup the look-ahead and `outstandingDues`
+    share — both need a month in whatever year holds it, which is why neither
+    reaches for `C` directly.
 - **A held row is reported in EVERY month, not only its own.** What is stacking
   up behind it is a fact about the ROW. Reporting a quarterly bill only in
   January, April, July and October hides three unpaid quarters for eight months
