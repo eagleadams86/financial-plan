@@ -3016,7 +3016,10 @@ thirteen-column table to reach one cell.
   month is read DOWN. `settings.rowSort` is deliberately not consulted here.
   A row with nothing recorded sinks to the bottom rather than disappearing:
   opening one is how a month gets filled in, and on a phone this list is the
-  way in.
+  way in. **ONE EXCEPTION since due dates arrived (2026-08-25)**, and it is
+  written down here because the sentence above it used to be absolute: a row
+  whose schedule says it does not fall in this month is `hidden` — see
+  "Due dates" below for the three conditions and the reveal.
 - **The estimate kinds are the GRID's**, and the `.c-*` selectors name both
   readers (`.grid td.c-auto, .mamt.c-auto`) rather than being copied — a line
   style that drifted between the lenses would be one month claiming to be
@@ -3103,6 +3106,139 @@ thirteen-column table to reach one cell.
 - **A share link sends `ui: {}`**, so a link always opens on the grid, which is
   what somebody sending "the budget" means by it. The switch still draws in a
   shared view — choosing how to read someone's figures is reading.
+
+## Due dates (2026-08-25)
+
+**A budget row can say WHEN its money is owed** — a day of the month, and which
+months it falls in. Four flat fields on the category, the overflow row's shape:
+`duePay` (`'manual'`/`'auto'`), `dueMonths` (absent = every month), `dueDay`
+(absent = no fixed day), `dueHold` (a `YYYY-MM`, reminders paused). All four
+DELETED when inapplicable, never `undefined` — the Firestore rule.
+
+- **`duePay` is the MARKER.** A row either names how it is paid or has no
+  schedule at all, which makes "is this row scheduled?" one whitelisted-
+  vocabulary check (`DUE_PAY`, above `let state = load()` with the other
+  vocabularies — the temporal-dead-zone rule). A bad `duePay` deletes the other
+  three; a bad `dueMonths` drops on its own and leaves the schedule standing.
+  This is deliberately the discipline `cat.rule` still lacks.
+- **NOTHING HERE REACHES THE ENGINE.** `computeYear` does not know the fields
+  exist, so a corrupt or hostile schedule can make the page quieter or noisier
+  and can never move a figure. That is what makes it safe to be display-only,
+  to ride in a share link unchanged, and to need **no schema bump and no
+  migration** — the `a.buckets` precedent.
+- **It is ORTHOGONAL to `cat.rule`/`cat.every`, and must stay so.** The
+  `quarterly` RULE answers "what should this month's estimate be" and takes its
+  beat from the last stored month; `dueMonths` answers "when is the money
+  owed". A quarterly bill usually wants both and neither is derived from the
+  other — the `cat.growth`-vs-`cat.rate` lesson. They CAN disagree (type a bill
+  in off the beat and the rule re-phases while the schedule does not); the
+  editor hint says which question each answers rather than the code trying to
+  reconcile them.
+- **`dueStatus` is the one verdict** and everything on screen reads it — the
+  `accountEarnings` discipline. Check order, and every step is a decision: no
+  schedule → not one of its months → **not a live grid year** → an `actual`
+  cell → held → autopay → the calendar.
+  - **THERE IS NO "the month is entered, so it is paid" SHORT-CUT, and its
+    absence is load-bearing.** An entered month with no stored cell resolves
+    `missing`, NOT `actual` (`computeYear`'s entered branch) — so that
+    short-cut would announce the bill was paid in precisely the case the
+    feature exists for: October closed, the water bill never came, the row
+    blank. Everything the marker genuinely settles arrives as an `actual`
+    anyway, because `markMonthEntered` mints the month's estimates. It was
+    written that way first and a test pins the fix.
+  - **A non-live year returns `null`, never `'paid'`.** A pinned year states its
+    balances and every category cell in it resolves `missing`; measuring one
+    against today would put four figures of days-late on every scheduled row of
+    2021.
+  - `mixed` is **not** paid — a split month with one part still an estimate has
+    not finished happening.
+  - `paid` beats `held` (a fact beats a request for quiet), and `dueFootWords`
+    still says "autopay" on a paid autopay row: the verdict is about the state,
+    the sentence is about the arrangement.
+- **A row with no fixed day never counts down.** Its deadline is the month's
+  last day — a date the app chose, not one the reader gave — so the pill reads
+  "Due this month" / "Was due Apr 2026" and prints no day count. `exact: false`
+  carries it.
+- **`markMonthEntered` skips a HELD row**, and without that the outstanding
+  count is dead on arrival. A quarterly bill on a beat month resolves `auto`,
+  so entering the month stamps it `actual` — "paid, at the estimate" — for a
+  bill that never arrived. Entering a month happens every month, so this is the
+  default path, not an edge. The toast says how many rows it left alone.
+- **`outstandingDues` is bounded by the plan's own months.** It takes a month
+  list and an `at(month) → {cell, has}` lookup rather than reaching for `C`,
+  which is both what lets it span a year boundary (January's previous quarter
+  is in last year's computed object) and what stops it walking off the front of
+  the plan inventing unpaid periods. `has: false` for a month whose grid does
+  not carry the row — absent is not unpaid.
+  **The AMOUNT is the hard part**: a held row's past months are usually blank
+  and summing blanks gives $0.00, which is a figure and is wrong. The row's most
+  recent real figure stands in, and `estimated` says so out loud; with no figure
+  anywhere, `total` is NULL — the savingsPulse rule.
+- **A held row is reported in EVERY month, not only its own.** What is stacking
+  up behind it is a fact about the ROW. Reporting a quarterly bill only in
+  January, April, July and October hides three unpaid quarters for eight months
+  of the year and then announces them in the month you would have noticed
+  anyway.
+- **The hide rule keys on the KIND, not the value.** `rowHideable` needs all
+  three: a schedule, a month it excludes, and `kind === 'missing'` with no note
+  and no split parts. `r.v === 0` was the first version and it is wrong three
+  ways, ALL of which leave the section total untouched — so a totals test would
+  pass while a real record vanished: a split month netting to zero, a STATED
+  $0.00 (a claim somebody made), and a note on a zero cell (whose dot goes with
+  it).
+  - **The rows are RENDERED and merely `hidden`**, never omitted, so search,
+    `refocusGridCell` and a screen reader's own find still reach them.
+  - **`.mrow[hidden] { display: none }` is required.** `[hidden]` lives in the
+    BROWSER's stylesheet, where a class selector out-ranks it, so `.mrow`'s
+    `display: grid` wins and the attribute becomes a lie — `el.hidden` reads
+    true while the row is on screen. Found exactly that way.
+  - The reveal is **`ui.showNotDue`**, beside `ui.collapsed`, absent when
+    untouched. A DOM-only toggle was the first idea and it dies on the next
+    render — every cell edit ends in `save(); render()` — so catching up three
+    quarters of a bill would be reveal, tap, save, reveal, tap, save.
+- **IN A SHARED VIEW EVERY COUNTDOWN IS SILENT, and that is the price-bar rule
+  rather than a permissions decision.** "Due in 3 days" measures the SENDER's
+  frozen deadlines against the READER's clock, so six months after a link is
+  made every scheduled row announces that somebody else's bills are half a year
+  overdue. No card, no pills. The schedule itself is a fact about the plan and
+  stays in the footer. **Rows are not hidden either**: a recipient has no reveal
+  button they would think to press.
+- **`settings.dueLeadDays` is read STRICTLY through `rateOrNone`, never
+  `num()`** — and it is the one free scalar where that distinction bites.
+  `num('junk')` is 0, and 0 is INSIDE this field's range ("warn me on the day"),
+  so the ordinary clamp would mint a real-looking setting nobody chose. Clamped
+  0–60 at three places: the boundary, the Preferences save, and `leadDaysOf` at
+  the point of use — the `limitsFor` discipline, because `settings` travels in
+  full in every share link and a payload need not have been through the
+  boundary this build runs.
+- **`dueLeadDays` sits in Preferences by LAYOUT, `wide`, directly above the
+  retirement trio.** An ordinary field added to the group above the zoom shifts
+  those three by one column and strands the first of them at the end of the row
+  above — the alignment the zoom exists to protect. A wide field ends the row
+  in progress instead, so the trio still starts one, and `applyFieldSpans`
+  holds its BOX to one column while its long hint gets the width.
+- **`rolloverYear` copies a row's LIST fields, not just the row.** `{ ...cat }`
+  is shallow, so the two years shared one `dueMonths` array and editing this
+  year silently rewrote next year's. `cat.accounts`, `thresholdAccounts` and
+  `capAccounts` had the same latent bug and are copied now too — the row editor
+  was only safe because it assigns a freshly built array rather than pushing
+  into the old one, which is a property of one call site rather than of the
+  data. A test pins it.
+- **The months picker is `wide` and LAST in its block.** A wide field ends the
+  row in progress, and every field in the due block shows together — unlike the
+  dividends `accounts` picker, whose `showIf` never co-occurs with a neighbour,
+  which is why that one gets away with sitting mid-list.
+- **Deliberately out of scope**: any notification outside the Month lens (no
+  push — a notification that only fires while the page is open is not a
+  reminder, and background sync is unsupported where it would matter); a
+  separate "mark as paid" tick (paid IS `kind: 'actual'`, and a second door to
+  one fact is the drift this file exists to prevent); per-row lead times;
+  anything finer than monthly (the plan's unit is `YYYY-MM`); autopay
+  VERIFICATION (`duePay: 'auto'` describes an arrangement and claims nothing
+  about whether the payment cleared — the help says so); and letting the
+  schedule drive the estimate engine, which is a real follow-up (`dueMonths`
+  would make `carry` safe on a quarterly bill) but changes computed figures and
+  therefore sits behind the real-data cross-check.
 
 ## Folding a box up
 

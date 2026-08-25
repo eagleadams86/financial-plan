@@ -1512,8 +1512,33 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 .mrow:focus-visible { outline: 2px solid var(--focus-border); outline-offset: -2px; }
 /* A row with nothing in it this month stays on the list and goes quiet rather
    than disappearing: an empty row is how a month gets filled in, and on a phone
-   this list is the way in. */
+   this list is the way in.
+   THE ONE EXCEPTION, since due dates arrived: a row whose schedule says it does
+   not fall in this month is `hidden` — a quarterly water bill in February. It
+   is still RENDERED, so search, the focus restore after a save and a screen
+   reader's own find all still reach it, and the count is said out loud at the
+   foot of the section with a way back. `rowHideable` refuses to hide anything
+   carrying a figure, a note or split parts, so nothing that would stop the
+   visible list adding up to the total below it can go. */
 .mrow.mzero .mname { color: var(--text-secondary); }
+/* The status pill sits INSIDE `.mfoot`. `.mrow` is a two-track grid whose bar
+   and foot both span it, so a pill appended to the row would land in a new
+   implicit row under the bar rather than beside the words it qualifies. */
+.mfoot .pill { margin-right: 2px; vertical-align: baseline; }
+/* A hidden row must actually go. `[hidden] { display: none }` lives in the
+   BROWSER's stylesheet, where a class selector out-ranks it — so `.mrow`'s own
+   `display: grid` wins and the attribute becomes a lie: `el.hidden` reads true
+   while the row is on screen for everyone to see. Found exactly that way. */
+.mrow[hidden] { display: none; }
+/* The way back to the rows that aren't due. A quiet line at the foot of the
+   list, not a button that looks like one: it belongs to the list rather than to
+   the card, and pressing it changes what you are reading, not the plan. */
+.revealrows { display: block; width: 100%; margin-top: 6px; padding: 8px;
+  background: none; border: 0; border-radius: var(--radius-sm);
+  font: inherit; font-size: var(--fs-xs); color: var(--text-secondary);
+  text-align: left; cursor: pointer; }
+.revealrows:hover { background: var(--bg-card-alt); color: var(--text); }
+.revealrows:focus-visible { outline: 2px solid var(--focus-border); outline-offset: -2px; }
 .mrow.derived { cursor: default; }
 /* The note dot, exactly the grid's — same size, same token, same meaning. */
 .mrow.noted .mname::after { content: ''; display: inline-block;
@@ -2368,6 +2393,18 @@ const SNAPSHOT_ASSETS = ['liquid', 'invested', 'retirement', 'property'];
    Read by coerceShape, so it lives up here as well. */
 const TAX_JURISDICTIONS = ['federal', 'state'];
 
+/* How a budget row's bill is paid, and the MARKER that it has a due date at
+   all. A row carries `duePay` or it carries no schedule — which makes "is this
+   row on a schedule?" a single whitelisted-vocabulary check rather than four
+   fields that can half-exist. Read by coerceShape, so it lives up here with
+   the other vocabularies: a const declared further down is in its temporal
+   dead zone when `load()` runs, and load()'s catch swallows the ReferenceError
+   and brings the whole workbook up empty. */
+const DUE_PAY = ['manual', 'auto'];
+/* Days before a due date that a manually-paid bill starts warning. The
+   Preferences box edits it; absent falls back to this. */
+const DUE_LEAD_DEFAULT = 7;
+
 const STORAGE_KEY = 'fin-state';
 /* The newest schema this build of the app understands, and the version
    `blankState` stamps. `migrate` walks a plan UP to it. Reading it back out
@@ -2997,7 +3034,11 @@ function blankState() {
       /* Defaults the Roth MAGI limit and decides whose income that check
          counts. 'single' is what the old fixed $153,000 already meant, so
          existing plans must keep it or their answer changes silently. */
-      filingStatus: 'single'
+      filingStatus: 'single',
+      /* How many days before a due date a manually-paid bill starts warning.
+         A typed 0 is a real answer — "only on the day" — so the Preferences
+         box distinguishes an empty field from a zero. */
+      dueLeadDays: DUE_LEAD_DEFAULT
     },
     years: {},        // "YYYY" → grid year or summary year (see import_xlsx.py)
     goals: [],
@@ -3607,6 +3648,41 @@ function coerceShape(data) {
            can be read per person. Only ever a label; the engine sums the
            household's rows regardless. */
         if (cat.person && !peopleIds.has(cat.person)) delete cat.person;
+        /* ── When the bill is due ──────────────────────────────────────
+           Display and reminders only: the engine never reads any of this, so a
+           corrupt schedule can make the page quieter but can never move a
+           figure. `duePay` is the MARKER — a row either carries one of the two
+           words or carries no schedule at all — which is why a bad one deletes
+           the other three rather than leaving a half-schedule behind. The same
+           delete-when-inapplicable discipline the overflow block above uses,
+           and never `undefined` (the Firestore rule).
+
+           Every part is read STRICTLY. `dueDay` through a plain num() would
+           turn junk into 0 and 0 has no honest reading — the 1st? the last? —
+           and an EMPTY `dueMonths` would say "never due", which is a different
+           claim from the absent list's "due every month". Junk deletes, and
+           the field falls back to its absent meaning. */
+        if (!DUE_PAY.includes(cat.duePay)) {
+          delete cat.duePay; delete cat.dueMonths;
+          delete cat.dueDay; delete cat.dueHold;
+        } else {
+          if (Array.isArray(cat.dueMonths)) {
+            const ms = [...new Set(cat.dueMonths
+              .map(n => Math.round(num(n)))
+              .filter(n => Number.isFinite(n) && n >= 1 && n <= 12))].sort((x, y) => x - y);
+            /* All twelve IS "every month", which is what an absent list already
+               says — storing both spellings would give the same schedule two
+               shapes for a test and a share link to disagree over. */
+            if (ms.length && ms.length < 12) cat.dueMonths = ms;
+            else delete cat.dueMonths;
+          } else delete cat.dueMonths;
+          const day = Math.round(num(cat.dueDay));
+          if (Number.isFinite(day) && day >= 1 && day <= 31) cat.dueDay = day;
+          else delete cat.dueDay;
+          /* A month, guarded exactly like an account's since/until. */
+          if (typeof cat.dueHold !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.dueHold))
+            delete cat.dueHold;
+        }
         if (cat.section) continue;
         if (looksLikeTransfer) { cat.section = 'transfer'; continue; }
         let sum = 0;
@@ -4303,6 +4379,26 @@ function coerceShape(data) {
   if (typeof d.settings.currency !== 'string' || !/^[A-Za-z]{3}$/.test(d.settings.currency))
     delete d.settings.currency;
   else d.settings.currency = d.settings.currency.toUpperCase();
+  /* How early a due bill starts warning. It is a free scalar in `settings`,
+     which travels IN FULL in a share link — so it is attacker-controlled in
+     exactly the way ptoAllowance was, and gets the same treatment. It never
+     reaches the page as text (it is only ever compared against a day count),
+     and the clamp is what keeps it a number rather than a claim: a negative
+     lead would warn about bills that are already late, and a lead of a year
+     would warn about all of them for ever. DELETED when unreadable rather than
+     defaulted, so blankState's own value wins through the Object.assign merge
+     — setting the key to undefined would copy straight over the default.
+
+     Read STRICTLY through `rateOrNone`, never `num()` — and this is the one
+     free scalar where that matters. `num('junk')` is 0, and 0 is INSIDE this
+     field's range: it means "warn me on the day itself". So the usual clamp
+     would have quietly turned a corrupt or hostile value into a real-looking
+     setting nobody chose, which is exactly the trap the overflow threshold
+     already documents. */
+  const lead = rateOrNone(d.settings.dueLeadDays);
+  if (lead !== undefined)
+    d.settings.dueLeadDays = Math.min(60, Math.max(0, Math.round(lead)));
+  else delete d.settings.dueLeadDays;
   for (const k of ['midTermRateAnnual', 'retirementReturnAnnual']) {
     const v = rateOrNone(d.settings[k]);
     if (v === undefined) delete d.settings[k]; else d.settings[k] = v;
@@ -4376,6 +4472,14 @@ function coerceShape(data) {
      grow a key describing how somebody else likes to read a chart). */
   if (d.ui.flowNoTransfers === true) d.ui.flowNoTransfers = true;
   else delete d.ui.flowNoTransfers;
+  /* Whether the Month page is showing the rows that aren't due this month.
+     The same shape and the same reason: absent when untouched, so an `ui` that
+     has never been asked the question doesn't grow a key. It lives in `ui`
+     rather than in the DOM because every cell edit ends in `save(); render()`,
+     and a toggle that dies on the next render is no use to somebody catching
+     up three quarters of a bill one cell at a time. */
+  if (d.ui.showNotDue === true) d.ui.showNotDue = true;
+  else delete d.ui.showNotDue;
   /* Which lens the Budget was left on, and the month it was open at. Both
      describe how the plan is being READ, like the tab order above them, so both
      sync and ride in a backup — and both are ABSENT rather than defaulted when
@@ -5720,7 +5824,33 @@ const HELP = {
       + 'making it up. It is netted off the total above, so Money Out is what the month '
       + 'really cost you.'],
     ['A row with nothing recorded stays on the list, quietly, at the bottom. Opening one is '
-      + 'how a month gets filled in, and on a phone this list is the way in.'],
+      + 'how a month gets filled in, and on a phone this list is the way in. The one '
+      + 'exception is a row whose ', b('due date says it does not fall in this month'),
+      ' — a quarterly water bill in February — which drops off with a line at the foot of '
+      + 'the section saying how many went and offering them back. A row that carries a '
+      + 'figure, a note or split amounts never drops off, whatever its schedule says.'],
+  ] },
+  monthDue: { title: 'How Due Dates Work', body: [
+    ['A budget row can say ', b('when its money is owed'), ' — a day of the month, and which '
+      + 'months it falls in. That is a different question from the rule above it in the row '
+      + 'editor: the rule says what the app should guess a future month will come to, and the '
+      + 'due date says when you have to pay it. A quarterly bill usually wants both, and '
+      + 'neither is worked out from the other.'],
+    ['Only a row you mark ', b('paid by hand'), ' is ever warned about. One on autopay just '
+      + 'says when it goes out — that is a note about your arrangement, and the app has no way '
+      + 'to check whether the payment actually went through.'],
+    ['A warning starts a set number of days before the date (Preferences) and stops the moment '
+      + 'the month\u2019s figure is ', b('recorded as something that happened'),
+      ' rather than an estimate — which is the same thing marking the month as entered does to '
+      + 'every row at once. There is no separate "paid" tick, because that is what an actual '
+      + 'figure already means.'],
+    ['A row with ', b('no fixed day'), ' never counts down to a date. Its deadline is the end '
+      + 'of the month and it says so, because a day the app chose is not a day you gave it.'],
+    ['A bill that has not arrived is the awkward case, and ', b('Pause reminders until'),
+      ' is the answer: the warnings stop without the app forgetting. It keeps counting the '
+      + 'periods that have gone by unpaid and says roughly what they come to, using what the '
+      + 'bill last came to where a period was never billed at all. Marking a month as entered '
+      + 'leaves a paused row blank rather than stamping the estimate as paid.'],
   ] },
   monthAccounts: { title: 'The Accounts at Month End', body: [
     ['Where each account stood on the last day of the month, with how far it moved and what '
@@ -6489,15 +6619,36 @@ function sampleState() {
       { id: 'ben-pay',    name: 'Ben — paycheck',   rule: 'carry',    role: 'normal', section: 'income',
         person: 'ben', isPay: true },
       { id: 'other-income', name: 'Other income',   rule: 'none',     role: 'normal', section: 'income' },
-      { id: 'mortgage',   name: 'Mortgage',         rule: 'carry',    role: 'normal', section: 'expense' },
+      /* The everyday case, and the OTHER half of `duePay`: a big bill on
+         autopay says when it goes and is never warned about. */
+      { id: 'mortgage',   name: 'Mortgage',         rule: 'carry',    role: 'normal', section: 'expense',
+        duePay: 'auto', dueDay: 1 },
       { id: 'utilities',  name: 'Utilities',        rule: 'avg',      role: 'normal', section: 'expense' },
       { id: 'groceries',  name: 'Groceries',        rule: 'avg',      role: 'normal', section: 'expense' },
       { id: 'childcare',  name: 'Childcare',        rule: 'carry',    role: 'normal', section: 'expense',
         person: 'mia' },
       { id: 'transport',  name: 'Transport',        rule: 'avg',      role: 'normal', section: 'expense' },
-      { id: 'insurance',  name: 'Insurance',        rule: 'carry',    role: 'normal', section: 'expense' },
+      /* Hand-paid and monthly, which is the row a reminder is actually for. */
+      { id: 'insurance',  name: 'Insurance',        rule: 'carry',    role: 'normal', section: 'expense',
+        duePay: 'manual', dueDay: 12 },
       { id: 'dining',     name: 'Dining out',       rule: 'avg',      role: 'normal', section: 'expense' },
       { id: 'everything-else', name: 'Everything else', rule: 'avg',  role: 'normal', section: 'expense' },
+      /* THE DUE-DATE ROW, and it is the awkward case rather than the easy one
+         on purpose: a quarterly bill, paid by hand, that only falls in four
+         months of the year — so the demo shows the schedule, the row dropping
+         off the Month page in the eight months it isn't due, and the count of
+         what is waiting when a bill has not arrived. `dueHold` is set below,
+         after the sample's own "today" is known. */
+      { id: 'water',      name: 'Water',            rule: 'quarterly', every: 3,
+        role: 'normal', section: 'expense',
+        duePay: 'manual', dueMonths: [1, 4, 7, 10], dueDay: 20,
+        /* Waiting on the biller, which is the case this half of the feature
+           exists for. Only January was ever billed below, so from late April
+           onwards the demo shows real periods stacking up behind a paused row,
+           and the amount reads "about $92 at what it last came to" — an
+           estimate standing in for a bill that never arrived, said out loud as
+           one rather than presented as a total. */
+        dueHold: m(12) },
       /* Named for the account each one moves money to and from, matching the
          `accounts` list above word for word — the same convention the starter
          budget uses, and the reason both are −600 and −300 rather than positive.
@@ -6536,6 +6687,10 @@ function sampleState() {
       put('everything-else', i, -(380 + (i % 5) * 70));
       put('to-savings', i, -600);
       put('to-college', i, -300);
+      /* JANUARY ONLY. It falls in January, April, July and October — so the
+         eight other months demonstrate the row dropping off the Month page,
+         and April and July demonstrate a bill that was never sent. */
+      if (i === 1) put('water', i, -92);
     }
     /* A month with a note on it, so the notes gathering and the marked cell show. */
     cells[`everything-else|${m(3)}`] = { v: -1240, kind: 'actual',
@@ -7196,6 +7351,13 @@ function gridCard(y, yr) {
   const catTh = (cat) => `<th class="lbl" scope="row" data-edit="category"
     data-year="${esc(y)}" data-id="${esc(cat.id)}" style="cursor:pointer"
     title="${esc(cat.name)} — ${esc(ruleDesc(cat))}${
+    /* The whole schedule, not just this year's — the label is the one place in
+       the grid a due date appears at all, and it is here rather than on the
+       cells because the schedule is a fact about the ROW. `ruleDesc` beside it
+       answers a different question (what fills a future month) and the two
+       must stay separate: one says what the app guesses, this says when the
+       money is owed. */
+    DUE_PAY.includes(cat.duePay) ? ' · ' + esc(dueScheduleWords(cat)) : ''}${
     cat.note ? ' · ' + esc(cat.note) : ''} — click to edit this row">${esc(cat.name)}${
     /* The overflow explanation sits on the rows it is about rather than on the
        Transfers band, where it used to be: the band now carries the sign
@@ -8108,6 +8270,329 @@ function monthAhead(yr, m) {
    form ("Aug 2026") and stays that; a card's own title has the room. */
 const monthTitle = (m) => `${MONTH_FULL[+String(m).slice(5, 7) - 1]} ${String(m).slice(0, 4)}`;
 
+/* ═══════════════════════════ Due dates ════════════════════════════════════
+   A budget row says how much and which month; a real bill also has a DAY, and
+   often only falls in some months — water four times a year, school taxes
+   twice, an insurance renewal once. Four flat fields carry that, and
+   `cat.duePay` is the marker: a row either names how it is paid or has no
+   schedule at all.
+
+   NOTHING HERE REACHES THE ENGINE. `computeYear` does not know these fields
+   exist, so a corrupt or hostile schedule can make the page quieter or noisier
+   but can never move a figure — which is what makes it safe for the whole
+   thing to be display-only and for a share link to carry it unchanged.
+
+   It is also deliberately ORTHOGONAL to `cat.rule`/`cat.every`. The quarterly
+   RULE answers "what figure should this month estimate"; `dueMonths` answers
+   "when is the money owed". A quarterly bill usually wants both, and neither
+   is derived from the other — the editor says so in a hint, the code never
+   couples them, and a row can honestly have one without the other (an annual
+   renewal you type in by hand has a due date and no rule at all). */
+
+const ALL_MONTH_NUMS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+/* How long a month is, arithmetically. Every month in this file is a
+   'YYYY-MM' STRING on purpose — comparable with `<`, sortable, and never
+   subject to the timezone drift a Date object brings — and a due date must not
+   be the thing that reintroduces it. */
+function daysInMonth(y, mo) {
+  if (mo === 2) return isLeapYear(y) ? 29 : 28;
+  return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1] || 0;
+}
+
+/* Days since a fixed epoch, for 'YYYY-MM-DD' — the standard civil-to-days
+   conversion, so "how many days until this is due" is integer arithmetic on
+   two strings rather than a subtraction of two Dates that disagree about what
+   midnight means in the reader's timezone. */
+function dayNumber(iso) {
+  const y = +String(iso).slice(0, 4), m = +String(iso).slice(5, 7), d = +String(iso).slice(8, 10);
+  if (!y || !m || !d) return null;
+  const yy = y - (m <= 2 ? 1 : 0);
+  const era = Math.floor(yy / 400);
+  const yoe = yy - era * 400;
+  const doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+  const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+  return era * 146097 + doe - 719468;
+}
+const daysBetween = (from, to) => {
+  const a = dayNumber(from), b = dayNumber(to);
+  return a === null || b === null ? null : b - a;
+};
+
+/* Which calendar months this row falls in. An ABSENT list means every month —
+   which is why coerceShape deletes a list of all twelve rather than storing
+   it: one schedule must not have two spellings for a test or a share link to
+   disagree over. An empty list would mean "never", which is a different claim
+   and is exactly why the boundary refuses to store one. */
+function dueMonthsOf(cat) {
+  return Array.isArray(cat && cat.dueMonths) && cat.dueMonths.length
+    ? cat.dueMonths.slice() : ALL_MONTH_NUMS.slice();
+}
+
+/* The deadline in a given month, or null when the row has no schedule or this
+   isn't one of its months.
+   The day is CLAMPED to the month's length, so "the 31st" is the 28th in a
+   February rather than a date that does not exist — a bill due on the last day
+   is a real arrangement and typing 31 is how people say it.
+   With NO fixed day the deadline is the month's last day: one code path for
+   the arithmetic, and `exact: false` is what tells the wording to say "due this
+   month" instead of naming a date the reader never gave. */
+function dueOn(cat, m) {
+  if (!cat || !DUE_PAY.includes(cat.duePay)) return null;
+  if (typeof m !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(m)) return null;
+  const mo = +m.slice(5, 7);
+  if (!dueMonthsOf(cat).includes(mo)) return null;
+  const last = daysInMonth(+m.slice(0, 4), mo);
+  const day = Math.min(typeof cat.dueDay === 'number' ? cat.dueDay : last, last);
+  return `${m}-${String(day).padStart(2, '0')}`;
+}
+
+/* THE ONE VERDICT. Everything on screen reads this and nothing builds its own
+   answer — the `accountEarnings` discipline. Null means "this row has nothing
+   to say about this month", which covers "no schedule", "not one of its
+   months", and "not a month reminders apply to at all".
+
+   The check ORDER is the design, and each step is a decision:
+
+   1-2. no schedule, or not one of its months → silence.
+   3. A month that is not in a LIVE grid year → silence. History has no
+      reminders: a pinned year states its balances and every category cell in
+      it resolves `missing`, so measuring one against today's date would put
+      "1,700 days late" on every scheduled row of 2021.
+   4. An `actual` cell is a figure that HAPPENED, which is the app's existing
+      word for paid. `mixed` deliberately does NOT count: a split month with one
+      settled part and one estimate has not finished happening.
+   5. HELD — the bill the biller has not sent. It comes after `paid` because
+      paid is a fact and held is only a request for quiet; a held row that was
+      paid anyway should say so rather than still claiming to be waiting.
+   6. AUTOPAY never warns. It still reports, so the row can say "autopay, 1st".
+   7. Only then the calendar. A future month cannot be late — that falls out of
+      comparing the real dates rather than the months.
+
+   THERE IS NO "the month is entered, so it is paid" SHORT-CUT, and the absence
+   is load-bearing. An entered month with no stored cell resolves `missing`, not
+   `actual` (computeYear's entered branch) — so treating entered as paid would
+   announce that a bill was paid in precisely the case this feature exists for:
+   you closed October, the water bill never came, the row is blank. Everything
+   the marker genuinely settles arrives here as `actual` anyway, because
+   `markMonthEntered` mints the month's estimates into actuals; the short-cut
+   would have added nothing but the false positives.
+
+   `days` is always POSITIVE and reads with the state: 3 days until, or 3 days
+   late. A signed figure the reader has to interpret is how "-3 days late" gets
+   printed. */
+function dueStatus(cat, m, cell, todayIso, leadDays, live) {
+  const date = dueOn(cat, m);
+  if (!date) return null;
+  if (!live) return null;
+  const exact = typeof cat.dueDay === 'number';
+  const mk = (state, days) => ({ state, date, exact, pay: cat.duePay,
+    days: days === undefined ? null : days });
+  if (cell && cell.kind === 'actual') return mk('paid');
+  if (cat.dueHold && cat.dueHold >= m) return mk('held');
+  if (cat.duePay === 'auto') return mk('auto');
+  const days = daysBetween(todayIso, date);
+  if (days === null) return mk('ahead');
+  const lead = Number.isFinite(leadDays) ? leadDays : DUE_LEAD_DEFAULT;
+  if (days > lead) return mk('ahead', days);
+  if (days > 0) return mk('soon', days);
+  if (days === 0) return mk('due', 0);
+  return mk('late', -days);
+}
+
+/* The warning window, clamped where it is READ as well as where it is stored.
+   coerceShape already holds it to 0-60, but `settings` travels in full in every
+   share link, so the value reaching this function came from somewhere — the
+   limitsFor discipline: guard it at the point that uses it and the guard cannot
+   be got round by a path that skipped the boundary. */
+function leadDaysOf(st) {
+  /* Parsed here rather than through coerceShape's `num`, which is local to that
+     function — and a module-scope reader must not depend on having been through
+     the boundary at all, which is the whole point of guarding it twice. */
+  const raw = st && st.settings ? st.settings.dueLeadDays : undefined;
+  const n = typeof raw === 'number' ? raw : parseFloat(raw);
+  return Number.isFinite(n) ? Math.min(60, Math.max(0, Math.round(n))) : DUE_LEAD_DEFAULT;
+}
+
+/* WHAT IS STACKING UP BEHIND A HELD ROW. Charlie's water bill is three quarters
+   behind because the town cannot issue them: the money is genuinely owed and
+   genuinely not late, so the reminders are paused — but an app that then
+   forgets about it entirely has replaced a wrong warning with a wrong silence.
+
+   It MUST span years: January's previous quarter lives in last year's computed
+   object, so it takes a MONTH LIST and a lookup rather than reaching for `C`.
+   The caller passes `planMonths(state)`, which is what bounds it — there is no
+   walking backwards off the front of the plan inventing unpaid periods for a
+   budget that did not exist yet. `at(month)` hands back `{cell, has}`: one
+   call, both facts, because a second lookup is a second chance to disagree.
+   `has` is false for a month whose grid does not carry this row at all (an
+   imported history year has its own ids), and such a month is skipped rather
+   than counted — absent is not unpaid.
+
+   A period counts as outstanding when its deadline has PASSED and the cell is
+   not an `actual`.
+
+   THE AMOUNT IS THE HARD PART. A held row's past months are usually blank —
+   an entered month with no stored cell resolves `missing`, worth 0 — so
+   summing them gives $0.00, which is a FIGURE, and wrong. Instead the most
+   recent real figure the row has stands in for a blank period, and
+   `estimated` says so out loud, so the sentence can be "about $270, at the
+   last bill you recorded" rather than a total pretending to be counted.
+   With no figure anywhere to stand in with, `total` is NULL — a missing
+   denominator is never 0 here, the savingsPulse rule. */
+const MAX_OUTSTANDING = 36;
+function outstandingDues(cat, months, at, todayIso) {
+  const out = { count: 0, total: null, estimated: false, months: [] };
+  if (!cat || !DUE_PAY.includes(cat.duePay)) return out;
+  /* The row's last real figure, oldest-first list read from the back — the
+     stand-in for a period that was never billed. */
+  let recent = 0;
+  const list = months || [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const info = at(list[i]);
+    if (!info || !info.has) continue;
+    const v = info.cell && info.cell.v;
+    if (typeof v === 'number' && v !== 0) { recent = v; break; }
+  }
+  let sum = 0, any = false;
+  for (const m of list) {
+    if (out.count >= MAX_OUTSTANDING) break;
+    const date = dueOn(cat, m);
+    if (!date) continue;
+    const gap = daysBetween(todayIso, date);
+    if (gap === null || gap >= 0) continue;          // not yet due
+    const info = at(m);
+    if (!info || !info.has) continue;                // the row isn't in that grid
+    const cell = info.cell;
+    if (cell && cell.kind === 'actual') continue;    // it happened
+    out.count++;
+    out.months.push(m);
+    const v = (cell && cell.v) || 0;
+    if (v) { sum += v; any = true; }
+    else if (recent) { sum += recent; any = true; out.estimated = true; }
+    else out.estimated = true;
+  }
+  if (out.count && any) out.total = round2(sum);
+  return out;
+}
+
+/* Everything a month has to say about its due dates, in one pass. The live
+   ones are what the card draws; the held ones are what it says is waiting; and
+   `quiet` is the set of rows whose schedule EXCLUDES this month, which is what
+   the section lists offer to hide.
+
+   `at(catId)` hands back the resolved cell. `live` is the month's own answer
+   and is the same for every row in it, so it is a value rather than a lookup. */
+function monthDues(cats, at, m, todayIso, leadDays, live) {
+  const dues = [], held = [], quiet = [];
+  for (const cat of cats || []) {
+    if (!DUE_PAY.includes(cat.duePay)) continue;
+    const cell = at(cat.id);
+    const st = dueStatus(cat, m, cell, todayIso, leadDays, live);
+    /* A HELD ROW IS REPORTED IN EVERY MONTH, not only the ones it falls in, and
+       that is the difference between a pause that helps and one that hides.
+       Charlie's water bill is quarterly: reporting it only in January, April,
+       July and October means the three unpaid quarters stacking up behind it
+       are invisible for eight months of the year and then announce themselves
+       in the one month he would have noticed anyway. What is waiting is a fact
+       about the row, not about the month you happen to be reading. */
+    const isHeld = live && cat.duePay === 'manual' && cat.dueHold && cat.dueHold >= m;
+    if (isHeld) held.push({ cat, cell, status: st });
+    else if (st && (st.state === 'soon' || st.state === 'due' || st.state === 'late'))
+      dues.push({ cat, cell, status: st });
+    /* THE ONE ANSWER to "may this row drop off the list", so the sections
+       cannot reach a different verdict from the card. Hideable even when held:
+       a held row in a month it does not fall in still drops off Expenses, and
+       the card above names it, which is a better place for it. */
+    if (live && rowHideable(cat, cell, m)) quiet.push(cat);
+  }
+  /* Soonest deadline first, so a late bill leads the list it is late in. */
+  dues.sort((a, b) => a.status.date.localeCompare(b.status.date));
+  return { dues, held, quiet };
+}
+
+/* WHICH ROWS MAY BE HIDDEN, and this predicate is the one place the feature
+   can quietly lose money. `r.v === 0` was the first version and it is wrong
+   three ways, all of which leave the section total untouched — so the totals
+   test would pass while a real record vanished off the page:
+
+   · a SPLIT month netting to zero (+300 and -300) has `v === 0` and kind
+     `mixed`. Money moved.
+   · a STATED $0.00 (`kind: 'actual'`) is a claim somebody made — the bill came
+     and it was nothing — and this file marks a stated zero rather than hiding
+     it.
+   · a NOTE on a zero cell draws the `.noted` dot, and hiding takes the dot.
+
+   `kind: 'missing'` is the engine's own word for "nothing recorded" and
+   already implies a zero; the other two guards are belt and braces against a
+   hand-edited backup. */
+function rowHideable(cat, r, m) {
+  return !!(cat && DUE_PAY.includes(cat.duePay) && !dueOn(cat, m)
+    && r && r.kind === 'missing' && !hasNote(r) && !r.parts);
+}
+
+/* ── Saying it in words ────────────────────────────────────────────────────
+   Three sentences, and they are separate because they answer to different
+   amounts of room: the row footer has a few words, the pill has three, and the
+   grid's row label has a whole tooltip. */
+const ordinal = (n) => {
+  const t = n % 100;
+  return n + (t >= 11 && t <= 13 ? 'th'
+    : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th');
+};
+
+/* The quiet line under a row: what its schedule says about THIS month. */
+function dueFootWords(st) {
+  if (!st) return '';
+  const when = st.exact ? `the ${ordinal(+st.date.slice(8, 10))}` : 'this month';
+  /* An autopay row keeps saying so even once it has gone out. `paid` beats
+     `auto` in the verdict — a fact beats an arrangement — but the arrangement
+     is still the thing the reader wants to know about this row, and losing it
+     the moment the figure lands would make "autopay" a label that only appears
+     on months you have not reconciled yet. */
+  if (st.pay === 'auto') return `autopay, ${when}${st.state === 'paid' ? ' — gone out' : ''}`;
+  if (st.state === 'held') return 'waiting on the bill';
+  if (st.state === 'paid') return `due ${when} — paid`;
+  return `due ${when}`;
+}
+
+/* The pill, for the three states that warrant one. A GLYPH and WORDS carry the
+   meaning and the tint only agrees with them — the house pill pattern, and the
+   reason it is the pattern is that hue must never be the only signal here.
+
+   A row with NO fixed day prints no day count, ever. Its deadline is the
+   month's last day, which is a date the app chose rather than one the reader
+   gave, so "Due in 6 days" would be the app inventing a deadline and then
+   counting down to it. It says which month instead. */
+function duePillWords(st) {
+  if (!st) return null;
+  const n = (k) => `${st.days} day${st.days === 1 ? '' : 's'}`;
+  if (st.state === 'due')
+    return { cls: 'warn', glyph: '!', text: 'Due today' };
+  if (st.state === 'soon')
+    return { cls: 'warn', glyph: '!', text: st.exact ? `Due in ${n()}` : 'Due this month' };
+  if (st.state === 'late')
+    return { cls: 'bad', glyph: '✕',
+      text: st.exact ? `${n()} late` : `Was due ${monthLabelFull(st.date.slice(0, 7))}` };
+  return null;
+}
+
+/* The whole schedule, for a tooltip — every month it falls in, not just the one
+   being read. */
+function dueScheduleWords(cat) {
+  if (!cat || !DUE_PAY.includes(cat.duePay)) return '';
+  const ms = dueMonthsOf(cat);
+  const when = ms.length === 12 ? 'every month'
+    : ms.length === 1 ? `every ${MONTH_FULL[ms[0] - 1]}`
+    : andList(ms.map(n => MONTH_ABBR[n - 1]));
+  const day = typeof cat.dueDay === 'number'
+    ? `on the ${ordinal(cat.dueDay)}` : 'on no fixed day';
+  const how = cat.duePay === 'auto' ? 'on autopay' : 'paid by hand';
+  const hold = cat.dueHold
+    ? ` Reminders paused until ${monthLabelFull(cat.dueHold)}.` : '';
+  return `Due ${when} ${day}, ${how}.${hold}`;
+}
+
 /* WHAT ONE MONTH CAME TO — pure over the computed year, so the tiles, the
    section totals, the chart and the tests all read one answer rather than four.
 
@@ -8283,6 +8768,45 @@ function renderMonthView() {
   const entered = live && m <= (yr.enteredThrough || '');
   const prevM = monthAdd(m, -1);
 
+  /* ── What this month's due dates say ─────────────────────────────────────
+     Read ONCE, here, and handed down: the footer under each row, the pill on
+     it, the card at the top and the hidden-row partition are four readings of
+     one answer, and a second call would be a second chance to disagree.
+
+     IN A SHARED VIEW THIS IS ALL SILENT, and that is not a permissions
+     decision — it is the price-bar rule. "Due in 3 days" and "12 days late"
+     measure the SENDER's frozen deadlines against the READER's clock, so six
+     months after a link is made every scheduled row on it announces that
+     somebody else's bills are half a year overdue, to a reader who could not
+     pay them if they were. The schedule itself is a fact about the plan and
+     stays in the footer; only the countdown goes. Rows are not hidden either:
+     a recipient has no reveal button they would think to press, and a section
+     that silently drops rows out of a plan somebody sent them is worse than a
+     long list. */
+  const today = todayISO();
+  const lead = leadDaysOf(state);
+  const cellAt = (id) => c.cells[`${id}|${m}`] || { v: 0, kind: 'missing' };
+  const due = viewOnly ? { dues: [], held: [], quiet: [] }
+    : monthDues(yr.categories, cellAt, m, today, lead, live);
+  const dueOf = (cat) => viewOnly
+    ? dueStatus(cat, m, cellAt(cat.id), today, lead, false)
+    : dueStatus(cat, m, cellAt(cat.id), today, lead, live);
+  /* The schedule reads in a shared view; the countdown does not. `dueStatus`
+     with `live: false` returns null outright, so a shared view needs its own
+     way to say "due the 15th" — the FOOT only, built from the schedule rather
+     than from the clock. */
+  const footOf = (cat) => {
+    if (!DUE_PAY.includes(cat.duePay)) return '';
+    if (viewOnly) {
+      const d = dueOn(cat, m);
+      if (!d) return '';
+      const when = typeof cat.dueDay === 'number'
+        ? `the ${ordinal(cat.dueDay)}` : 'this month';
+      return cat.duePay === 'auto' ? `autopay, ${when}` : `due ${when}`;
+    }
+    return dueFootWords(dueOf(cat));
+  };
+
   /* A figure that isn't settled reads italic, the tile grammar the goal cards
      already use — never a colour, and the kind is named underneath in words so
      the italic isn't the only thing carrying it. */
@@ -8378,6 +8902,83 @@ function renderMonthView() {
     <div class="goalgrid">${tiles}</div>
   </div>`;
 
+  /* ── What is due, and what is waiting ────────────────────────────────────
+     A card that is USUALLY ABSENT, which is what keeps the whole feature
+     subtle: it appears when a hand-paid bill is close or late, or when a row
+     is waiting on a bill that has not arrived, and at no other time. It leads
+     the page under the summary, because it is the one thing here you might
+     have to go and DO something about.
+
+     Its rows are `.mrow`s carrying data-cat/data-m/data-year, which is the
+     entire contract — `wireMonthRows` delegates from `.tipzone` and opens the
+     grid's own cell editor, and `stripEditAffordances` closes that door in a
+     shared view by taking the attributes off. No editing code of its own.
+
+     Not drawn for a finished year (history has nothing due), nor for a year
+     that has not begun (every figure on that page is a projection and the
+     status line says so), nor in a shared view. */
+  const dueRow = ({ cat, cell, status: st }) => {
+    const pill = duePillWords(st);
+    const when = st.exact
+      ? `due ${dayLabel(st.date, true)}` : `due by the end of ${monthLabelFull(m)}`;
+    return `<div class="mrow" data-cat="${esc(cat.id)}" data-m="${esc(m)}"
+      data-year="${esc(y)}" role="button" tabindex="0"
+      data-tip="${esc(cellTip(cell))}"
+      aria-label="${esc(`${cat.name}, ${pill ? pill.text + ', ' : ''}${when}`)}">
+      <span class="mname">${esc(cat.name)}</span>
+      <span class="mamt c-${esc(cell.kind)}">${esc(fmtCell(cell.v))}</span>
+      <span class="mfoot">${pill
+        ? `<span class="pill ${pill.cls}"><span aria-hidden="true">${pill.glyph}</span> ${
+            esc(pill.text)}</span> ` : ''}${esc(when)}${
+        cell.kind === 'missing' ? ' · nothing recorded yet' : ''}</span></div>`;
+  };
+  /* The held rows, and the count behind them. `outstandingDues` walks the
+     plan's OWN months — never backwards off the front of it — and says
+     out loud when the figure is a stand-in rather than a total, because a held
+     row's past months are usually blank and summing blanks gives $0.00, which
+     is a figure and is wrong. */
+  const heldOut = (cat) => outstandingDues(cat, all, (mm) => {
+    const yy = yearOfMonth(state, mm);
+    const cc = yy && C[yy];
+    const yrr = yy && state.years[yy];
+    const has = !!(cc && yrr && yrr.kind === 'grid'
+      && (yrr.categories || []).some(x => x.id === cat.id));
+    return { has, cell: has ? cc.cells[`${cat.id}|${mm}`] : null };
+  }, today);
+  const heldLine = ({ cat, out }) => {
+    /* ONE figure, in the column, signed the way every other figure on this page
+       is — an expense is negative here. It used to be printed twice, as a
+       magnitude in the column and again inside the sentence, which is two
+       spellings of one number and the way they come to disagree. */
+    const says = !out.count
+      ? 'Nothing has gone by unpaid yet.'
+      : `${out.count} period${out.count === 1 ? '' : 's'} still unpaid${
+        out.total === null ? ' — nothing recorded yet to judge the amount by'
+        : out.estimated ? ', estimated at what it last came to' : ''}.`;
+    return `<div class="mrow derived" data-tip="${esc(dueScheduleWords(cat))}"
+      aria-label="${esc(`${cat.name}, waiting on the bill. ${says}`)}">
+      <span class="mname">${esc(cat.name)}</span>
+      <span class="mamt${out.estimated ? ' c-auto' : ''}">${
+        esc(out.total === null ? '\u00b7' : fmtMoney(out.total))}</span>
+      <span class="mfoot">Waiting on the bill · ${esc(says)} Reminders paused until ${
+        esc(monthLabelFull(cat.dueHold))}.</span></div>`;
+  };
+  /* A held row earns its line when something has actually gone by unpaid, or
+     when this is one of its own months — otherwise "nothing has gone by unpaid
+     yet" is a card appearing to say nothing happened. */
+  const heldShown = due.held
+    .map(h => ({ ...h, out: heldOut(h.cat) }))
+    .filter(h => h.out.count > 0 || dueOn(h.cat, m));
+  const dueCard = (viewOnly || !live || !started
+      || (!due.dues.length && !heldShown.length))
+    ? '' : `<div class="card" data-box="month-due">
+    <h2>Due and Waiting${helpBtn('monthDue', 'how due dates work')}</h2>
+    <p class="sub">Bills you pay by hand that are close or already late, and any you
+      are still waiting on. A row goes quiet the moment its figure is recorded as
+      something that happened.</p>
+    <div class="mrows">${due.dues.map(dueRow).join('')}${heldShown.map(heldLine).join('')}</div>
+  </div>`;
+
   /* ── One section, biggest first ───────────────────────────────────────────
      That ordering is this view's whole argument. A grid keeps the order you
      arranged (or the alphabet) because you read ACROSS it; a month is read
@@ -8393,6 +8994,39 @@ function renderMonthView() {
     const rows = cats.map(cat => ({ cat, r: c.cells[`${cat.id}|${m}`] || { v: 0, kind: 'missing' } }))
       .sort((a, b) => Math.abs(b.r.v) - Math.abs(a.r.v)
         || a.cat.name.localeCompare(b.cat.name));
+    /* ── The rows this month has no business showing ────────────────────────
+       A quarterly water bill in February, school taxes in April. They are the
+       reason the schedule is worth storing at all on a phone, where this list
+       IS the way in.
+
+       This is a deliberate EXCEPTION to the rule that a row with nothing
+       recorded stays on the list — that rule is about a row you might still
+       want to fill in, and a month a bill does not fall in is not one of
+       those. It is bought at a price and the price is paid three ways:
+       `rowHideable` refuses to hide anything that carries a figure, a note or
+       split parts, so nothing that would stop the visible list adding up to
+       the total below it can go; the rows are still RENDERED, merely `hidden`,
+       so the search, `refocusGridCell` and a screen-reader's own find all
+       still reach them; and the count is said out loud with a way back.
+
+       Never in a shared view — see the note where `due` is built. */
+    /* Read off the one pass above rather than asked again here — the sections
+       and the card must not be able to disagree about which rows went. */
+    const quiet = new Set(due.quiet.map(x => x.id));
+    const hideable = rows.filter(({ cat }) => quiet.has(cat.id)).map(x => x.cat.id);
+    const showing = !!state.ui.showNotDue;
+    const hidden = new Set(showing ? [] : hideable);
+    /* The way back, and it must SURVIVE A SAVE. A DOM-only toggle was the first
+       idea and it dies on the next render — every cell edit ends in
+       `save(); render()` — so catching up three quarters of a water bill would
+       be reveal, tap, save, reveal, tap, save. It lives in `ui` beside the set
+       of folded boxes, for the same reason that does: a deliberate arrangement
+       of the page should still be there a moment later. */
+    const revealLine = () => !hideable.length ? '' : `<button type="button"
+      class="revealrows" data-reveal="${showing ? 'off' : 'on'}">${showing
+        ? `Hide the ${hideable.length} row${hideable.length === 1 ? '' : 's'} not due this month`
+        : `${hideable.length} row${hideable.length === 1 ? " isn't" : "s aren't"} due this month — show`
+      }</button>`;
     const line = ({ cat, r }) => {
       const zero = r.v === 0;
       /* A row pointing the OTHER way from its section is a refund — cash back,
@@ -8411,15 +9045,28 @@ function renderMonthView() {
         ? `auto estimate — ${esc(ruleDesc(cat))}` : kindWord(r.kind));
       if (sec === 'transfer' && inside.has(cat.id))
         bits.push('between your own accounts');
+      /* The schedule joins the other quiet bits — "8% of expenses · your
+         estimate · due the 15th" — and stays quiet whatever it says. The PILL
+         is the only loud part, and only three states earn one. It lives INSIDE
+         `.mfoot` rather than being appended to the row: `.mrow` is a two-track
+         grid whose bar and foot both span it, so a span added at the end would
+         land in a new implicit row under the bar rather than beside anything. */
+      const dueSt = dueOf(cat);
+      const foot = footOf(cat);
+      if (foot) bits.push(esc(foot));
+      const pill = viewOnly ? null : duePillWords(dueSt);
+      const pillHtml = pill
+        ? `<span class="pill ${pill.cls}"><span aria-hidden="true">${pill.glyph}</span> ${
+            esc(pill.text)}</span> ` : '';
       return `<div class="mrow${zero ? ' mzero' : ''}${hasNote(r) ? ' noted' : ''}"
         data-cat="${esc(cat.id)}" data-m="${esc(m)}" data-year="${esc(y)}"
         role="button" tabindex="0" data-tip="${esc(cellTip(r))}"
         aria-label="${esc(`${cat.name}, ${zero ? 'nothing recorded'
-          : `${fmtMoney(r.v)}, ${KIND_LABEL[r.kind] || ''}`}`)}">
+          : `${fmtMoney(r.v)}, ${KIND_LABEL[r.kind] || ''}`}${pill ? `, ${pill.text}` : ''}`)}">
         <span class="mname">${esc(cat.name)}</span>
         <span class="mamt c-${esc(r.kind)}">${esc(fmtCell(r.v))}</span>
         ${zero ? '' : `<span class="mbar"><i style="width:${share(r.v).toFixed(1)}%"></i></span>`}
-        <span class="mfoot">${bits.join(' · ')}</span></div>`;
+        <span class="mfoot">${pillHtml}${bits.join(' · ')}</span></div>`;
     };
     /* The accounts' own earnings, as a line inside Income — the grid's derived
        row, in a list. It opens nothing: nothing here is stored and a rate is
@@ -8451,7 +9098,10 @@ function renderMonthView() {
         sec === 'transfer' ? helpBtn('transferSign', 'which way a transfer went') : ''}</h2>
       <p class="sub">${esc(monthTitle(m))}, biggest first.${
         viewOnly ? '' : ' Click a line to open the month’s figure.'}</p>
-      <div class="mrows">${rows.map(line).join('')}${earnLine}</div>
+      <div class="mrows">${rows.map(row =>
+        hidden.has(row.cat.id)
+          ? line(row).replace('<div class="mrow', '<div hidden class="mrow notdue')
+          : line(row)).join('')}${earnLine}${revealLine()}</div>
       <div class="mtot"><span>${esc(SECTION_LABEL[sec])} total</span>
         <span class="mamt c-${esc(total.kind)}">${esc(fmtMoney(total.v))}</span>${note}</div>
     </div>`;
@@ -8531,7 +9181,7 @@ function renderMonthView() {
       figure is an estimate.</p>
   </div>`;
 
-  return `<div class="tipzone">${monthPickerHtml(m, all)}${head}
+  return `<div class="tipzone">${monthPickerHtml(m, all)}${head}${dueCard}
     <div class="monthgrid">${['income', 'expense', 'transfer'].map(sectionCard).join('')}${
       acctCard}</div>${chartCard}${monthNotes(m, y)}</div>`;
 }
@@ -8720,6 +9370,16 @@ function wireMonthRows() {
     if (li.dataset.cat) openCellEditor(year, 'cat', li.dataset.cat, m);
     else if (li.dataset.bal) openCellEditor(year, 'bal', li.dataset.bal, m);
   };
+  /* The reveal sits INSIDE `.mrows` but outside any `.mrow`, so the row
+     delegate below simply finds nothing on it — this one has to come first
+     anyway, since flipping the switch re-renders the list under the pointer. */
+  zone.addEventListener('click', (e) => {
+    const rev = e.target.closest('[data-reveal]');
+    if (!rev) return;
+    if (rev.dataset.reveal === 'on') state.ui.showNotDue = true;
+    else delete state.ui.showNotDue;
+    save(); render();
+  }, true);
   zone.addEventListener('click', (e) => open(e.target.closest('.mrow[data-cat], .mrow[data-bal]')));
   zone.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -13999,7 +14659,21 @@ function rolloverYear(st, computed, fromKey) {
     kind: 'grid', model: 'live',
     startMonth: start, monthCount: 12,
     enteredThrough: monthAdd(start, -1),
-    categories: src.categories.map(cat => ({ ...cat })),
+    /* A COPY, and the LISTS on it have to be copied too. A spread is shallow,
+       so `{ ...cat }` hands the new year the SAME array object for every list
+       field a row carries — `dueMonths`, a dividends row's `accounts`, an
+       overflow row's frozen measure sets. The two years then share one list,
+       and editing this year's row would silently rewrite next year's. The row
+       editor happens to be safe on its own, because it assigns a freshly built
+       array rather than pushing into the old one — but that is a property of
+       one call site, and everything else that ever touches a row would have to
+       know it. Copied here instead, where the copy is made. */
+    categories: src.categories.map(cat => {
+      const copy = { ...cat };
+      for (const k of ['dueMonths', 'accounts', 'thresholdAccounts', 'capAccounts'])
+        if (Array.isArray(copy[k])) copy[k] = copy[k].slice();
+      return copy;
+    }),
     cells, paychecks, seeds, overrides: {}, balAdjust: {}, extraNotes: [],
   };
   return newKey;
@@ -15849,6 +16523,55 @@ const EDITORS = {
         ['pre', 'Before its monthly interest'],
         ['post', 'After its monthly interest'],
       ], showIf: (v) => v.rule !== 'overflow' && v.role === 'pass' },
+      /* ── When it's due ──────────────────────────────────────────────────
+         Deliberately the LAST block before the note, and deliberately behind
+         one tick: most rows have no due date and the dialog is already long.
+         Offered on every kind of row, income included — a paycheck lands on a
+         day too, and the same words read correctly for it.
+
+         The months picker is `wide` and therefore LAST within the block: a wide
+         field ends whatever row is in progress, so anything after it would be
+         stranded at the top of a fresh one. Every field here shows together,
+         which is why the rule bites harder than it does on the dividends
+         picker, whose `showIf` never co-occurs with a neighbour. */
+      { key: 'dueSet', label: 'It has a due date', type: 'check',
+        hint: 'A bill with a day of the month, or one that only falls in some months.' },
+      { key: 'duePay', label: 'How it gets paid', type: 'select', options: [
+        ['manual', 'I pay it by hand'],
+        ['auto', 'It is on autopay'],
+      ], showIf: (v) => v.dueSet,
+        hint: 'Only a hand-paid bill is ever warned about. Autopay just says when it goes — '
+            + 'it is a note about your arrangement, not a check that the payment went through.' },
+      { key: 'dueDay', label: 'Day of the month', type: 'number', step: 1,
+        showIf: (v) => v.dueSet,
+        hint: 'Leave it empty when the day moves about — the row then just says it is due '
+            + 'this month, and never counts down to a date you did not give. 31 means the '
+            + 'last day, whatever the month is.' },
+      /* The bill that has not arrived. Charlie's water is three quarters behind
+         because the town cannot issue them: genuinely owed, genuinely not late.
+         Pausing is not forgetting — the Month page still counts what is
+         stacking up, and marking a month entered leaves a held row blank
+         rather than stamping the estimate as paid.
+         Offered on hand-paid rows only: waiting on a bill you have set to pay
+         itself is not a thing that can happen. */
+      { key: 'dueHold', label: 'Pause reminders until', type: 'month',
+        showIf: (v) => v.dueSet && v.duePay === 'manual',
+        hint: 'For a bill the biller has not sent. It stops the warnings without losing '
+            + 'count — the Month page says how many periods are waiting and roughly what '
+            + 'they come to.' },
+      /* The whole point of the feature's second half: a row that only falls in
+         some months can drop off the Month page in the others. Wide, because
+         twelve boxes is a row of its own however you lay them out. */
+      { key: 'dueMonths', label: 'Months it falls in', type: 'checks', wide: true,
+        options: MONTH_ABBR.map((lab, i) => [String(i + 1), lab]),
+        showIf: (v) => v.dueSet,
+        hint: 'Quarterly water is Jan, Apr, Jul and Oct; taxes twice a year are two boxes. '
+            + 'Tick them all (or none) for a monthly bill. In a month it does not fall in, '
+            + 'the row drops off the Month page — but only when nothing is recorded there, '
+            + 'so a row that carries a figure or a note always stays. That means a "repeat '
+            + 'the last month" row, which fills every month with an estimate, will keep '
+            + 'showing: this says when the money is OWED, and the rule above says what the '
+            + 'app guesses it will be. Two questions.' },
       noteField,
     ],
     get(ds) {
@@ -15871,10 +16594,22 @@ const EDITORS = {
         overflowTo: cat.rule === 'overflow' ? cat.transferTo : undefined,
         capGoalId: cat.capGoalId
           || (typeof cat.capAmount === 'number' ? 'amt' : ''),
-        isPay: isPayRow(cat.name, cat.rule, cat.isPay) };
+        isPay: isPayRow(cat.name, cat.rule, cat.isPay),
+        /* The tick is derived from the marker rather than stored beside it —
+           two spellings of one fact is how they come to disagree. The picker
+           opens with EVERY month ticked when the list is absent, because that
+           is what absent means; a reader who unticks nine of them is saying
+           something new, and one who leaves it alone saves the same schedule
+           back. */
+        dueSet: DUE_PAY.includes(cat.duePay),
+        dueMonths: dueMonthsOf(cat).map(String) };
     },
     blank: () => ({ rule: 'none', role: 'normal', section: 'expense',
-                    creditTiming: 'pre' }),
+                    creditTiming: 'pre',
+                    /* The due block opens on its own defaults so ticking the
+                       box gives a sensible monthly hand-paid bill rather than
+                       twelve empty boxes that read as "no months". */
+                    duePay: 'manual', dueMonths: ALL_MONTH_NUMS.map(String) }),
     save(ds, v) {
       const yr = state.years[ds.year];
       if (!v.name) return;
@@ -15960,6 +16695,41 @@ const EDITORS = {
            too — "this is not pay" is an answer, not an absence. */
         if (section === 'income') cat.isPay = !!v.isPay;
         else delete cat.isPay;
+        /* ── The due date ────────────────────────────────────────────────
+           `duePay` is the marker, so the tick turning off deletes all four
+           rather than leaving three orphans behind — the overflow block's
+           discipline, and never `undefined` (the Firestore rule).
+
+           EVERY ARRAY IS BUILT INSIDE THIS CLOSURE, and that is not style.
+           `apply` runs once per year — this one and every year built ahead —
+           so assigning the SAME array object to each would make one row's
+           months literally the other's, and editing 2026 later would silently
+           rewrite 2027. `cat.accounts` two lines up is safe for exactly this
+           reason and for no other. */
+          if (!v.dueSet || !DUE_PAY.includes(v.duePay)) {
+            delete cat.duePay; delete cat.dueMonths;
+            delete cat.dueDay; delete cat.dueHold;
+          } else {
+            cat.duePay = v.duePay;
+            const picked = new Set((v.dueMonths || []).map(n => +n));
+            const ms = ALL_MONTH_NUMS.filter(n => picked.has(n));
+            /* All twelve, or none ticked, IS "every month" — which the absent
+               field already says. Storing it as a list would give one schedule
+               two spellings for a share link and a test to disagree over, and
+               an EMPTY list would say "due in no month", which is not a state
+               this dialog can express. (The opposite call from `accounts`
+               above, where an empty list is the reader saying "earn on
+               nothing" — worth knowing before "fixing" either to match.) */
+            if (ms.length && ms.length < 12) cat.dueMonths = ms;
+            else delete cat.dueMonths;
+            const day = v.dueDay === null || v.dueDay === undefined
+              ? null : Math.round(v.dueDay);
+            if (day !== null && day >= 1 && day <= 31) cat.dueDay = day;
+            else delete cat.dueDay;
+            if (v.duePay === 'manual' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v.dueHold || ''))
+              cat.dueHold = v.dueHold;
+            else delete cat.dueHold;
+          }
       };
       const ahead = projectionsAfter(ds.year);
       const yrs = [yr, ...ahead.map(y => state.years[y])];
@@ -16087,6 +16857,24 @@ const EDITORS = {
       { key: 'zoom', label: 'Zoom %', type: 'number', step: 1,
         hint: `Scales the whole app, ${ZOOM_MIN}–${ZOOM_MAX}%. Set to this device only — `
             + 'never synced, never in a backup. The header picker does quarter steps.' },
+      /* How early a hand-paid bill starts warning on the Month page.
+         PLACED BY LAYOUT, like the zoom directly above it, and `wide` for the
+         same reason the holding editor's readouts are: the CELL spans the row
+         so the hint gets the full width, while `applyFieldSpans` holds the BOX
+         to one column so it matches every other box in the dialog. That matters
+         here because adding an ordinary field to the group above the zoom would
+         shift the three retirement rates by one column and strand the first of
+         them at the end of the row above — the exact alignment the zoom exists
+         to protect, and which the note above says anything added must keep in
+         step. A wide field ends the row in progress instead, so the trio still
+         starts one.
+         It is a COUNT, so a typed 0 is a real answer — "only warn me on the
+         day" — and the save below distinguishes an empty box from a zero. */
+      { key: 'dueLeadDays', label: 'Warn about a due bill this many days ahead',
+        type: 'number', step: 1, wide: true,
+        hint: 'Only rows you have given a due date and marked as paid by hand are ever '
+          + 'warned about, and only until the month\u2019s figure is recorded. 0 warns on '
+          + 'the day itself. Like every preference it travels in a share link.' },
       /* The three rates the retirement projection assumes, together and in this
          order — the plan's own, then the two optional ones that are read against
          it. */
@@ -16131,6 +16919,7 @@ const EDITORS = {
                   retirementReturnLow: state.settings.retirementReturnLow,
                   retirementReturnHigh: state.settings.retirementReturnHigh,
                   zoom: savedZoom(),
+                  dueLeadDays: leadDaysOf(state),
                   priceApiKey: priceKey() }),
     save(ds, v) {
       const code = (v.currency || 'USD').trim().toUpperCase();
@@ -16160,6 +16949,13 @@ const EDITORS = {
          means "leave it alone" — the zoom rule below, for the same reason. */
       if (v.ptoAllowance !== null && v.ptoAllowance !== undefined)
         state.settings.ptoAllowance = v.ptoAllowance;
+      /* A typed 0 is "warn me on the day itself" and must stick; only an EMPTY
+         box means leave it alone. Clamped here as well as at the boundary and
+         at the read — three guards, because this one is typed, the boundary's
+         is for a restored file, and `leadDaysOf`'s is for a share link whose
+         settings never went through either. */
+      if (v.dueLeadDays !== null && v.dueLeadDays !== undefined)
+        state.settings.dueLeadDays = Math.min(60, Math.max(0, Math.round(v.dueLeadDays)));
       state.settings.rowSort = v.rowSort === 'alpha' ? 'alpha' : 'manual';
       state.settings.paycheckRule = !!v.paycheckRule;
       state.settings.givingFund = !!v.givingFund;
@@ -19272,15 +20068,28 @@ function markMonthEntered() {
   const yr = state.years[y];
   const target = monthAdd(yr.enteredThrough, 1);
   const c = C[y];
+  let waiting = 0;
   for (const cat of yr.categories) {
     const key = `${cat.id}|${target}`;
     if (yr.cells[key]) continue;
+    /* A row WAITING ON THE BILL is left blank on purpose. Minting an estimate
+       into an `actual` is the app asserting that a figure happened; a row the
+       reader has explicitly marked as still unbilled is the reader asserting
+       that it did not. Without this the held quarterly bill is stamped "paid,
+       at the estimate" the moment its month is entered — which is the default
+       path, since a month gets entered every month — and the count of what is
+       stacking up behind it reads zero while three periods are outstanding. */
+    if (cat.dueHold && DUE_PAY.includes(cat.duePay) && cat.dueHold >= target) {
+      waiting++;
+      continue;
+    }
     const r = c.cells[key];
     if (r && r.kind === 'auto') yr.cells[key] = { v: r.v, kind: 'actual' };
   }
   yr.enteredThrough = target;
   save(); render();
-  toast(`${monthLabel(target)} marked as entered`);
+  toast(`${monthLabel(target)} marked as entered${waiting
+    ? ` — ${waiting} row${waiting === 1 ? '' : 's'} left blank, still waiting on the bill` : ''}`);
 }
 
 function reopenMonth() {
@@ -21648,6 +22457,14 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
      section totals and the chart are pinned by arithmetic rather than by a
      canvas or a card. */
   planMonths, yearOfMonth, monthTitle, monthTotals, monthNetPoints,
+  /* Due dates: the arithmetic (no Date object anywhere in it), the one verdict,
+     the hide predicate and the outstanding count — all pure, all taking their
+     today and their lead time as arguments so a test can pin them without a
+     clock. `markMonthEntered` is NOT here: it writes state, and the held-row
+     skip is pinned through the state it leaves behind. */
+  DUE_PAY, DUE_LEAD_DEFAULT, daysInMonth, dayNumber, daysBetween,
+  dueMonthsOf, dueOn, dueStatus, leadDaysOf, monthDues, outstandingDues,
+  rowHideable, ordinal, dueFootWords, duePillWords, dueScheduleWords,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its
      prose over a fixture). */
