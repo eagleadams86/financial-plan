@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 735;
+const EXPECTED = 788;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -2862,6 +2862,533 @@ t('PTO dates read out of the old free-text box, once', () => {
   eq(e[2].dates, 'whenever we get round to it', 'unreadable text is left alone');
   eq(e[2].from, undefined);
   eq(e[0].dates, undefined, 'the text goes once it has become dates');
+});
+
+/* ── Due dates ──────────────────────────────────────────────────────────────
+   A budget row can say WHEN its money is owed — a day of the month, and which
+   months it falls in. None of it reaches the engine, so every test here is over
+   a pure function with its "today" and its lead time passed in; nothing reads a
+   clock and nothing reads the app's ambient state. */
+group('Due dates');
+
+const DUE_ROW = (extra) => Object.assign(
+  { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    duePay: 'manual', dueMonths: [1, 4, 7, 10], dueDay: 20 }, extra || {});
+const CELL = (kind, v) => ({ v: v === undefined ? -92 : v, kind });
+
+t('a month is as long as it really is, leap years included', () => {
+  eq(H.daysInMonth(2024, 2), 29, 'a leap February');
+  eq(H.daysInMonth(2025, 2), 28);
+  eq(H.daysInMonth(1900, 2), 28, '1900 is not a leap year — the century rule');
+  eq(H.daysInMonth(2000, 2), 29, '2000 is — the four-hundred rule');
+  eq(H.daysInMonth(2026, 4), 30);
+  eq(H.daysInMonth(2026, 12), 31);
+});
+t('the day count between two dates is arithmetic, not a Date', () => {
+  eq(H.daysBetween('2026-08-25', '2026-09-01'), 7);
+  eq(H.daysBetween('2026-02-27', '2026-03-01'), 2, 'across a non-leap February');
+  eq(H.daysBetween('2024-02-27', '2024-03-01'), 3, 'and across a leap one');
+  eq(H.daysBetween('2026-12-31', '2027-01-01'), 1, 'across a year end');
+  eq(H.daysBetween('2026-09-01', '2026-08-25'), -7, 'backwards is negative');
+});
+t('an absent month list means every month, never none', () => {
+  eq(H.dueMonthsOf({ duePay: 'manual' }).length, 12);
+  eq(H.dueMonthsOf(DUE_ROW()), [1, 4, 7, 10]);
+});
+t('the day is clamped to the month it lands in', () => {
+  const r = { duePay: 'manual', dueDay: 31 };
+  eq(H.dueOn(r, '2024-02'), '2024-02-29', 'the 31st of a leap February is the 29th');
+  eq(H.dueOn(r, '2025-02'), '2025-02-28');
+  eq(H.dueOn(r, '2026-04'), '2026-04-30');
+  eq(H.dueOn(r, '2026-05'), '2026-05-31');
+});
+t('with no fixed day the deadline is the end of the month', () => {
+  eq(H.dueOn({ duePay: 'manual' }, '2026-02'), '2026-02-28');
+  eq(H.dueOn({ duePay: 'manual' }, '2026-04'), '2026-04-30');
+});
+t('a row with no schedule, or a month it does not fall in, has no deadline', () => {
+  eq(H.dueOn({ name: 'Rent' }, '2026-04'), null, 'no duePay is no schedule');
+  eq(H.dueOn(DUE_ROW(), '2026-02'), null, 'February is not one of its months');
+  eq(H.dueOn(DUE_ROW(), '2026-04'), '2026-04-20');
+});
+
+/* ── The verdict ─────────────────────────────────────────────────────────── */
+const ST = (cat, m, cell, today, lead, live) =>
+  H.dueStatus(cat, m, cell, today, lead === undefined ? 7 : lead, live !== false);
+
+t('the four states either side of the deadline', () => {
+  const r = DUE_ROW();
+  eq(ST(r, '2026-04', null, '2026-03-01').state, 'ahead', 'well clear of it');
+  eq(ST(r, '2026-04', null, '2026-04-15').state, 'soon', 'inside the lead');
+  eq(ST(r, '2026-04', null, '2026-04-15').days, 5, 'and says how many days');
+  eq(ST(r, '2026-04', null, '2026-04-20').state, 'due', 'the day itself');
+  eq(ST(r, '2026-04', null, '2026-05-02').state, 'late');
+  eq(ST(r, '2026-04', null, '2026-05-02').days, 12, 'days late is POSITIVE');
+});
+t('a lead of zero warns on the day and not before', () => {
+  /* A typed 0 is a real answer, the ptoAllowance case — it must not be read as
+     "unset" and quietly become seven. */
+  const r = DUE_ROW();
+  eq(ST(r, '2026-04', null, '2026-04-19', 0).state, 'ahead');
+  eq(ST(r, '2026-04', null, '2026-04-20', 0).state, 'due');
+});
+t('a future month can never read late', () => {
+  const r = DUE_ROW();
+  for (const lead of [0, 7, 60])
+    eq(ST(r, '2026-10', null, '2026-04-01', lead).state, 'ahead',
+      'October is ahead of April at every lead — lead ' + lead);
+});
+t('an actual figure is the app’s word for paid, and mixed is not', () => {
+  const r = DUE_ROW();
+  eq(ST(r, '2026-04', CELL('actual'), '2026-06-01').state, 'paid',
+    'it happened, months ago or not');
+  eq(ST(r, '2026-04', CELL('mixed'), '2026-06-01').state, 'late',
+    'a split month with one part still an estimate has not finished happening');
+  eq(ST(r, '2026-04', CELL('auto'), '2026-06-01').state, 'late');
+  eq(ST(r, '2026-04', CELL('missing', 0), '2026-06-01').state, 'late');
+});
+t('AN ENTERED MONTH WITH A BLANK CELL IS STILL LATE', () => {
+  /* The regression that would gut the feature. An entered month with no stored
+     cell resolves `missing`, not `actual` — so a "the month is entered, so it
+     is paid" short-cut would announce that the bill was paid in exactly the
+     case this feature exists for: October closed, the water bill never came,
+     the row blank. Everything the marker genuinely settles arrives here as an
+     `actual` already. */
+  eq(ST(DUE_ROW(), '2026-04', { v: 0, kind: 'missing' }, '2026-08-01').state, 'late');
+});
+t('history has no reminders at all', () => {
+  /* A pinned year states its balances and every category cell in it resolves
+     `missing`; measuring one against today would put four figures of days-late
+     on every scheduled row of 2021. */
+  eq(ST(DUE_ROW(), '2021-04', { v: 0, kind: 'missing' }, '2026-08-01', 7, false), null);
+});
+t('paid beats held, and held beats autopay', () => {
+  const held = DUE_ROW({ dueHold: '2026-12' });
+  eq(ST(held, '2026-04', CELL('actual'), '2026-08-01').state, 'paid',
+    'paid is a fact; held is only a request for quiet');
+  eq(ST(held, '2026-04', null, '2026-08-01').state, 'held');
+  eq(ST(DUE_ROW({ duePay: 'auto' }), '2026-04', null, '2026-08-01').state, 'auto',
+    'an autopay row is never warned about, however late the date is');
+});
+t('a hold that has run out stops holding', () => {
+  eq(ST(DUE_ROW({ dueHold: '2026-03' }), '2026-04', null, '2026-08-01').state, 'late');
+});
+
+/* ── The words ───────────────────────────────────────────────────────────── */
+t('a row with no fixed day never counts down to a date it invented', () => {
+  /* Its deadline is the month's last day, which the app chose. Printing "due in
+     6 days" against that is the app inventing a deadline and then counting down
+     to it. */
+  const r = { duePay: 'manual' };
+  const st = ST(r, '2026-04', null, '2026-04-28');
+  eq(st.state, 'soon');
+  eq(st.exact, false);
+  eq(H.duePillWords(st).text, 'Due this month');
+  eq(H.duePillWords(ST(r, '2026-04', null, '2026-05-10')).text, 'Was due Apr 2026');
+  eq(H.dueFootWords(st), 'due this month');
+});
+t('every pill carries a glyph and a word, never a colour alone', () => {
+  const r = DUE_ROW();
+  for (const [today, cls, text] of [
+    ['2026-04-15', 'warn', 'Due in 5 days'],
+    ['2026-04-19', 'warn', 'Due in 1 day'],
+    ['2026-04-20', 'warn', 'Due today'],
+    ['2026-04-21', 'bad', '1 day late'],
+    ['2026-05-02', 'bad', '12 days late'],
+  ]) {
+    const p = H.duePillWords(ST(r, '2026-04', null, today));
+    eq(p.cls, cls, 'at ' + today);
+    eq(p.text, text, 'at ' + today);
+    ok(p.glyph && p.glyph.length, 'a pill with no glyph leans on its colour alone');
+  }
+  eq(H.duePillWords(ST(r, '2026-04', null, '2026-01-01')), null, 'ahead earns none');
+  eq(H.duePillWords(ST(r, '2026-04', CELL('actual'), '2026-05-01')), null, 'nor does paid');
+});
+t('an autopay row keeps saying so once it has gone out', () => {
+  const r = DUE_ROW({ duePay: 'auto' });
+  eq(H.dueFootWords(ST(r, '2026-04', null, '2026-04-01')), 'autopay, the 20th');
+  eq(H.dueFootWords(ST(r, '2026-04', CELL('actual'), '2026-05-01')),
+    'autopay, the 20th — gone out',
+    'paid beats auto in the verdict, but the arrangement is still the fact worth knowing');
+});
+t('the whole schedule reads as a sentence for the row label', () => {
+  eq(H.dueScheduleWords(DUE_ROW()),
+    'Due Jan, Apr, Jul and Oct on the 20th, paid by hand.');
+  eq(H.dueScheduleWords({ duePay: 'auto', dueDay: 1 }),
+    'Due every month on the 1st, on autopay.');
+  eq(H.dueScheduleWords({ duePay: 'manual', dueMonths: [6] }),
+    'Due every June on no fixed day, paid by hand.');
+  ok(H.dueScheduleWords(DUE_ROW({ dueHold: '2026-10' })).endsWith(
+    'Reminders paused until Oct 2026.'));
+  eq(H.dueScheduleWords({ name: 'Rent' }), '', 'a row with no schedule says nothing');
+});
+t('ordinals read the way English does', () => {
+  eq([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 31].map(H.ordinal).join(' '),
+    '1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd 31st');
+});
+
+/* ── What is stacking up behind a held row ───────────────────────────────── */
+const AT = (map) => (m) => ({ has: !Object.prototype.hasOwnProperty.call(map, m)
+  || map[m] !== 'absent', cell: map[m] && map[m] !== 'absent' ? map[m] : null });
+
+t('unpaid periods are counted across a year boundary', () => {
+  const months = ['2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03',
+                  '2026-04', '2026-05'];
+  const out = H.outstandingDues(DUE_ROW(), months,
+    AT({ '2025-10': CELL('actual') }), '2026-06-01');
+  eq(out.count, 2, 'January and April, both past and neither an actual');
+  eq(out.months, ['2026-01', '2026-04']);
+});
+t('a period that was never billed is estimated from what it last came to', () => {
+  const months = ['2025-10', '2026-01', '2026-04'];
+  const out = H.outstandingDues(DUE_ROW(), months,
+    AT({ '2025-10': CELL('actual', -92) }), '2026-06-01');
+  eq(out.count, 2);
+  eq(out.total, -184, 'two blanks at the last real figure');
+  eq(out.estimated, true, 'and it says the figure is a stand-in, not a total');
+});
+t('with nothing ever recorded the amount is NULL, never $0.00', () => {
+  /* A missing denominator is never zero here. Summing blank months gives 0,
+     which is a FIGURE and would be read as "nothing is owed". */
+  const out = H.outstandingDues(DUE_ROW(), ['2026-01', '2026-04'], AT({}), '2026-06-01');
+  eq(out.count, 2);
+  eq(out.total, null);
+  eq(out.estimated, true);
+});
+t('a month whose grid does not carry the row is skipped, not counted', () => {
+  /* An imported history year has its own ids. Absent is not unpaid. */
+  const out = H.outstandingDues(DUE_ROW(), ['2026-01', '2026-04'],
+    AT({ '2026-01': 'absent', '2026-04': CELL('actual') }), '2026-06-01');
+  eq(out.count, 0);
+});
+t('nothing is counted before it is due', () => {
+  const out = H.outstandingDues(DUE_ROW(), ['2026-04', '2026-07', '2026-10'],
+    AT({}), '2026-04-19');
+  eq(out.count, 0, 'the 20th has not come round yet');
+});
+t('a row with no schedule has nothing outstanding', () => {
+  eq(H.outstandingDues({ name: 'Rent' }, ['2026-01'], AT({}), '2026-06-01').count, 0);
+});
+
+/* ── Which rows may be hidden ────────────────────────────────────────────── */
+t('only a month with genuinely NOTHING recorded may be hidden', () => {
+  const r = DUE_ROW();
+  ok(H.rowHideable(r, { v: 0, kind: 'missing' }, '2026-02'),
+    'February is not one of its months and the cell is blank');
+  ok(!H.rowHideable(r, { v: 0, kind: 'missing' }, '2026-04'),
+    'April is one of its months');
+  ok(!H.rowHideable({ name: 'Rent' }, { v: 0, kind: 'missing' }, '2026-02'),
+    'a row with no schedule is never hidden');
+});
+t('a figure, a note or split parts always keep a row on the page', () => {
+  const r = DUE_ROW();
+  ok(!H.rowHideable(r, { v: -40, kind: 'actual' }, '2026-02'),
+    'money landed in a month the schedule did not expect');
+  ok(!H.rowHideable(r, { v: 0, kind: 'actual' }, '2026-02'),
+    'a STATED $0.00 is a claim somebody made, not an absence');
+  ok(!H.rowHideable(r, { v: 0, kind: 'missing', note: 'chased the town' }, '2026-02'),
+    'hiding it would take the note dot with it');
+  ok(!H.rowHideable(r, { v: 0, kind: 'mixed',
+      parts: [{ v: 300, kind: 'actual' }, { v: -300, kind: 'actual' }] }, '2026-02'),
+    'a split month netting to zero still moved money — and the total, which is '
+    + 'unchanged either way, would never have told you');
+});
+t('monthDues splits a month three ways and reports a hold in EVERY month', () => {
+  const cats = [
+    DUE_ROW({ dueHold: '2026-12' }),
+    { id: 'ins', name: 'Insurance', duePay: 'manual', dueDay: 12 },
+    { id: 'mort', name: 'Mortgage', duePay: 'auto', dueDay: 1 },
+    { id: 'food', name: 'Groceries' },
+  ];
+  const cells = { ins: { v: 0, kind: 'missing' } };
+  const d = H.monthDues(cats, (id) => cells[id] || { v: 0, kind: 'missing' },
+    '2026-09', '2026-09-08', 7, true);
+  eq(d.dues.map(x => x.cat.id), ['ins'], 'due on the 12th, four days off');
+  eq(d.held.map(x => x.cat.id), ['water'],
+    'September is not a water month, and the periods stacking up behind it are a '
+    + 'fact about the ROW rather than about the month you happen to be reading');
+  eq(d.quiet.map(c => c.id), ['water'], 'and it is still hideable from its section');
+});
+/* ── A bill due at the start of next month ───────────────────────────────
+   The case that makes the lead time worth having. `dueStatus` was always right
+   about it — the arithmetic is date-based — but it was only ever ASKED about
+   the month being read, so the 1 September rent was announced on the September
+   page, which nobody opens on 25 August. The card asks about next month too;
+   these pin the rule that decides what travels back. */
+t('a bill due the 1st is already inside the lead from the month before', () => {
+  const rent = { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 1 };
+  const d = H.monthDues([rent], () => ({ v: 0, kind: 'missing' }),
+    '2026-09', '2026-08-25', 7, true);
+  eq(d.dues.map(x => x.status.state), ['soon']);
+  eq(d.dues[0].status.days, 7, 'exactly a week, standing in the month before it');
+  eq(d.dues[0].status.date, '2026-09-01');
+});
+t('only a deadline still to come may travel back a page', () => {
+  /* A late bill belongs on its own month's page. Reading July in August,
+     "August's rent is 24 days late" is a fact about a page you are not on —
+     and reading a month far in the past would drag every later bill onto it.
+     A deadline that has not arrived cannot be late, so the filter is also the
+     guard: no "is this the current month" test is needed anywhere. */
+  const rent = { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 1 };
+  const at = () => ({ v: 0, kind: 'missing' });
+  eq(H.monthDues([rent], at, '2026-08', '2026-08-25', 7, true).dues[0].status.state,
+    'late', 'August’s own bill, read on the August page');
+  eq(H.monthDues([rent], at, '2026-10', '2026-08-25', 7, true).dues.length, 0,
+    'October is beyond the lead, so nothing travels back onto September');
+});
+t('a lead longer than a month still cannot reach past next month', () => {
+  /* The look-ahead is ONE month deep by construction. A sixty-day lead makes
+     more deadlines `soon`, but the card still only ever asks about `m` and the
+     month after it — which is the honest limit, since a bill two months out is
+     not one you can pay before this month turns. */
+  const rent = { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 1 };
+  const at = () => ({ v: 0, kind: 'missing' });
+  eq(H.monthDues([rent], at, '2026-10', '2026-08-25', 60, true).dues[0].status.state,
+    'soon', 'at sixty days October IS soon — but only the October page asks');
+});
+t('paying it early silences it, because an actual is an actual', () => {
+  const rent = { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 1 };
+  const d = H.monthDues([rent], () => ({ v: -1200, kind: 'actual' }),
+    '2026-09', '2026-08-25', 7, true);
+  eq(d.dues.length, 0, 'the figure is recorded, so there is nothing left to do');
+});
+t('nothing is reported in a year that is not live', () => {
+  const d = H.monthDues([DUE_ROW({ dueHold: '2026-12' })],
+    () => ({ v: 0, kind: 'missing' }), '2026-04', '2026-08-01', 7, false);
+  eq(d.dues.length, 0); eq(d.held.length, 0); eq(d.quiet.length, 0);
+});
+
+/* ── "I pay it the month before" ──────────────────────────────────────────
+   A bill due on the 3rd is one you settle a week earlier, which lands in the
+   PREVIOUS month. Nothing in the figures can tell an early payer from an
+   on-the-day one — a rent cell in August is one payment a month either way —
+   so the row has to say, and `dueOn` is the single place the shift lives. */
+const AHEAD = (extra) => Object.assign(
+  { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 3, duePayAhead: true }, extra || {});
+
+t('the money leaving in one month settles the NEXT month’s deadline', () => {
+  eq(H.dueOn(AHEAD(), '2026-08'), '2026-09-03',
+    'August’s money pays the bill due 3 September');
+  eq(H.dueOn({ ...AHEAD(), duePayAhead: false }, '2026-08'), '2026-08-03',
+    'and without it, August’s money pays August’s own');
+  eq(H.dueOn(AHEAD(), '2026-12'), '2027-01-03', 'across a year end');
+});
+t('a consistent early payer is never late on the page they are on', () => {
+  /* The failure this exists to prevent: with the deadline left in its own
+     month, somebody who always pays a week early has every month read late for
+     ever — the worst way a reminder can fail, because it teaches you to ignore
+     it. */
+  const st = (m, cell, today) => H.dueStatus(AHEAD(), m, cell, today, 7, true);
+  eq(st('2026-08', null, '2026-08-25').state, 'ahead',
+    'nine days out is still beyond a seven-day lead — the lead counts to the DUE date, '
+    + 'so "a week before the 3rd" is the 27th of the month before');
+  eq(st('2026-08', null, '2026-08-28').state, 'soon', 'six days out, in August');
+  eq(st('2026-08', null, '2026-08-28').days, 6);
+  eq(st('2026-08', CELL('actual', -1200), '2026-08-28').state, 'paid',
+    'recorded in August, where the money actually left');
+});
+t('a shifted row carries its own month in the words', () => {
+  /* "due the 3rd" on an August line would read as 3 August, which has been and
+     gone. */
+  ok(H.dueFootWords(H.dueStatus(AHEAD(), '2026-08', null, '2026-08-25', 7, true))
+    .includes('Sep 2026'));
+  ok(H.dueScheduleWords(AHEAD()).includes('The money leaves the month before.'));
+});
+t('the shift moves the WHOLE row, not just the reminder', () => {
+  /* One question — "does this row's money move in month m, and against what
+     deadline?" — so the hide rule, the estimate gate and the outstanding count
+     all move with it rather than three of them moving and one being forgotten. */
+  const q = AHEAD({ dueMonths: [1, 4, 7, 10] });   // due Jan/Apr/Jul/Oct, paid the month before
+  ok(H.paysIn(q, '2026-03'), 'March money pays the April bill');
+  ok(!H.paysIn(q, '2026-04'), 'April itself is not a paying month for this row');
+  ok(H.rowHideable(q, { v: 0, kind: 'missing' }, '2026-04'));
+  ok(!H.rowHideable(q, { v: 0, kind: 'missing' }, '2026-03'));
+  const out = H.outstandingDues(q, ['2026-03', '2026-04'], AT({}), '2026-06-01');
+  eq(out.months, ['2026-03'], 'the period is counted in the month the money should have left');
+});
+t('a shifted row is never announced twice', () => {
+  /* It is already reported in the month it PAYS, which is the month you are
+     reading; the look-ahead having it too would report the month AFTER next. */
+  const d = H.monthDues([AHEAD()], () => ({ v: 0, kind: 'missing' }),
+    '2026-08', '2026-08-28', 7, true);
+  eq(d.dues.length, 1);
+  eq(d.dues[0].status.date, '2026-09-03', 'once, on the August page, about September');
+});
+t('a bad shift value is not a shift', () => {
+  const c = COERCE_ROW({ id: 'r', name: 'R', section: 'expense', duePay: 'manual',
+    dueDay: 3, duePayAhead: 'yes please' });
+  ok(!('duePayAhead' in c), 'only a real true is stored — false and absent are one claim');
+});
+
+/* ── The schedule drives the estimate ─────────────────────────────────────
+   Before 2026-08-25 a cycle bill's beat was measured from the last month a
+   figure was TYPED into, so a bill due in January, April, July and October but
+   paid late in March estimated itself into March, June, September and December
+   — the row's own ticked months saying one thing and the grid another. */
+const YEAR_WITH = (cat, cells) => ({ '2026': { kind: 'grid', model: 'live',
+  startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-01',
+  categories: [cat], cells: cells || {}, paychecks: {}, seeds: {},
+  overrides: {}, balAdjust: {}, extraNotes: [] } });
+const CELLS_OF = (st, id) => {
+  const c = H.computeAll(st, TODAY_FIX)['2026'];
+  const out = {};
+  for (const m of c.months) { const r = c.cells[`${id}|${m}`]; out[m] = r ? r.kind : 'none'; }
+  return out;
+};
+
+t('an estimate only lands in a month the row says it falls in', () => {
+  const cat = { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    rule: 'carry', duePay: 'manual', dueMonths: [1, 4, 7, 10], dueDay: 20 };
+  const st = { schema: 7, settings: {}, years: YEAR_WITH(cat,
+    { 'water|2026-01': { v: -92, kind: 'actual' } }) };
+  const kinds = CELLS_OF(H.coerceShape(st), 'water');
+  eq(kinds['2026-04'], 'auto', 'April is one of its months');
+  eq(kinds['2026-07'], 'auto');
+  eq(kinds['2026-10'], 'auto');
+  eq(kinds['2026-05'], 'missing', 'and May is not — "repeat the last month" is safe now');
+  eq(kinds['2026-02'], 'missing');
+});
+t('the ticked months are the cycle, and a late payment cannot re-phase it', () => {
+  /* The whole point. The beat used to be measured from the last month with a
+     figure, so one bill paid two months late moved every future estimate with
+     it — and a bill paid late is exactly what a cycle rule is most often for. */
+  const cat = { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    rule: 'quarterly', every: 3, duePay: 'manual', dueMonths: [1, 4, 7, 10], dueDay: 20 };
+  const st = { schema: 7, settings: {}, years: YEAR_WITH(cat,
+    { 'water|2026-03': { v: -56, kind: 'actual' } }) };   // January's bill, paid in March
+  const kinds = CELLS_OF(H.coerceShape(st), 'water');
+  eq(kinds['2026-04'], 'auto', 'still April, not June');
+  eq(kinds['2026-06'], 'missing', 'the old modulo beat would have put it here');
+  eq(kinds['2026-07'], 'auto');
+  eq(kinds['2026-09'], 'missing');
+});
+t('the gate follows a shifted row into the month it pays', () => {
+  const cat = { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    rule: 'carry', duePay: 'manual', dueMonths: [1, 4, 7, 10], dueDay: 3,
+    duePayAhead: true };
+  const st = { schema: 7, settings: {}, years: YEAR_WITH(cat,
+    { 'water|2026-03': { v: -92, kind: 'actual' } }) };
+  const kinds = CELLS_OF(H.coerceShape(st), 'water');
+  eq(kinds['2026-06'], 'auto', 'June’s money pays the July bill');
+  eq(kinds['2026-07'], 'missing', 'July itself is not when the money moves');
+});
+t('A PLAN WITH NO SCHEDULES COMPUTES EXACTLY WHAT IT ALWAYS DID', () => {
+  /* The guard on the whole change. The gate fires only for a row that HAS a
+     ticked list, so every existing plan — and the real-data cross-check that
+     reads eight years of imported figures to the cent — is untouched. */
+  const cat = { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    rule: 'quarterly', every: 3 };
+  const st = { schema: 7, settings: {}, years: YEAR_WITH(cat,
+    { 'water|2026-03': { v: -56, kind: 'actual' } }) };
+  const kinds = CELLS_OF(H.coerceShape(st), 'water');
+  eq(kinds['2026-06'], 'auto', 'the modulo beat still runs untouched');
+  eq(kinds['2026-09'], 'auto');
+  eq(kinds['2026-04'], 'missing');
+  ok(H.paysIn(cat, '2026-05'), 'no list means every month, for every rule');
+  ok(H.paysIn({ name: 'Rent' }, '2026-05'));
+});
+t('a typed figure is never gated, whatever the schedule says', () => {
+  /* A bill that turned up in a month the schedule did not expect is a fact.
+     The gate is about ESTIMATES; a typed figure wins above it, the way a typed
+     figure wins everywhere in this app. */
+  const cat = { id: 'water', name: 'Water', section: 'expense', role: 'normal',
+    rule: 'carry', duePay: 'manual', dueMonths: [1, 4, 7, 10] };
+  const st = { schema: 7, settings: {}, years: YEAR_WITH(cat,
+    { 'water|2026-01': { v: -92, kind: 'actual' },
+      'water|2026-05': { v: -40, kind: 'manual' } }) };
+  const c = H.computeAll(H.coerceShape(st), TODAY_FIX)['2026'];
+  eq(c.cells['water|2026-05'].v, -40);
+  eq(c.cells['water|2026-05'].kind, 'manual');
+});
+
+/* ── The lead time, which arrives from a share link ──────────────────────── */
+t('the warning window is clamped where it is READ, not only where it is stored', () => {
+  eq(H.leadDaysOf({ settings: {} }), 7, 'absent falls back to the default');
+  eq(H.leadDaysOf({}), 7);
+  eq(H.leadDaysOf({ settings: { dueLeadDays: 0 } }), 0, 'a typed 0 is a real answer');
+  eq(H.leadDaysOf({ settings: { dueLeadDays: 9e9 } }), 60);
+  eq(H.leadDaysOf({ settings: { dueLeadDays: -5 } }), 0);
+  eq(H.leadDaysOf({ settings: { dueLeadDays: '<script>' } }), 7);
+  eq(H.leadDaysOf({ settings: { dueLeadDays: '14' } }), 14);
+});
+t('and at the boundary, where it is deleted rather than defaulted', () => {
+  /* Deleted, so blankState's own value wins through the Object.assign merge —
+     setting the key to undefined would copy straight over the default. */
+  const bad = H.coerceShape({ settings: { dueLeadDays: 'junk' } });
+  ok(!('dueLeadDays' in bad.settings), 'unreadable is ABSENT, not 0');
+  eq(H.coerceShape({ settings: { dueLeadDays: 999 } }).settings.dueLeadDays, 60);
+  eq(H.coerceShape({ settings: { dueLeadDays: 0 } }).settings.dueLeadDays, 0);
+});
+
+/* ── The boundary ────────────────────────────────────────────────────────── */
+const COERCE_ROW = (cat) => H.coerceShape({ years: { '2026': { kind: 'grid',
+  startMonth: '2026-01', monthCount: 12, categories: [cat] } } })
+  .years['2026'].categories[0];
+
+t('a schedule with no valid way of paying is not a schedule', () => {
+  const c = COERCE_ROW({ id: 'water', name: 'Water', section: 'expense',
+    duePay: 'weekly', dueMonths: [1, 4], dueDay: 20, dueHold: '2026-10' });
+  for (const k of ['duePay', 'dueMonths', 'dueDay', 'dueHold'])
+    ok(!(k in c), k + ' should have gone with the marker');
+});
+t('a junk part drops on its own without taking the schedule down', () => {
+  const c = COERCE_ROW({ id: 'water', name: 'Water', section: 'expense',
+    duePay: 'manual', dueMonths: [0, 13, 'x', 4, 4, 1], dueDay: 99, dueHold: 'nonsense' });
+  eq(c.duePay, 'manual', 'the schedule survives');
+  eq(c.dueMonths, [1, 4], 'out-of-range dropped, duplicates folded, sorted');
+  ok(!('dueDay' in c), 'a day of 99 has no honest reading, so it goes');
+  ok(!('dueHold' in c), 'and a month that is not a month');
+});
+t('all twelve months, or none, is spelled ABSENT', () => {
+  /* One schedule must not have two spellings for a share link and a test to
+     disagree over — and an EMPTY list would say "due in no month", which is a
+     different claim from "due every month". */
+  const all = COERCE_ROW({ id: 'r', name: 'R', section: 'expense', duePay: 'manual',
+    dueMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] });
+  ok(!('dueMonths' in all));
+  const none = COERCE_ROW({ id: 'r', name: 'R', section: 'expense', duePay: 'manual',
+    dueMonths: [] });
+  ok(!('dueMonths' in none));
+  eq(H.dueMonthsOf(all).length, 12);
+});
+t('the day survives a string, the way every other typed number does', () => {
+  eq(COERCE_ROW({ id: 'r', name: 'R', section: 'expense',
+    duePay: 'auto', dueDay: '15' }).dueDay, 15);
+});
+t('a plan with no due dates anywhere is byte for byte what it was', () => {
+  const plain = { id: 'rent', name: 'Rent', section: 'expense', role: 'normal', rule: 'carry' };
+  eq(JSON.stringify(COERCE_ROW({ ...plain })), JSON.stringify(plain),
+    'the block must add nothing to a row that never asked the question');
+});
+
+/* ── The sample, and the years built ahead ───────────────────────────────── */
+t('the sample exercises both halves of a due date', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = Object.keys(d.years).filter(k => d.years[k].kind === 'grid').sort().pop();
+  const cats = d.years[y].categories;
+  const scheduled = cats.filter(c => c.duePay);
+  ok(scheduled.length >= 3, 'at least three rows carry a schedule');
+  ok(scheduled.some(c => c.duePay === 'auto'), 'one on autopay, which never warns');
+  ok(scheduled.some(c => c.duePay === 'manual' && c.dueHold),
+    'and one waiting on a bill that has not arrived — the case the feature is for');
+  const water = cats.find(c => c.id === 'water');
+  eq(water.dueMonths, [1, 4, 7, 10], 'quarterly, so eight months of it can be hidden');
+  const billed = Object.keys(d.years[y].cells).filter(k => k.startsWith('water|'));
+  eq(billed.length, 1, 'only ever billed once, so periods really do stack up behind it');
+});
+t('a row copied into next year does not SHARE its months with this one', () => {
+  /* `rolloverYear` shallow-copies the categories, so an array assigned once and
+     handed to every year would make one row's schedule literally the other's —
+     and editing this year would silently rewrite next year. */
+  const st = H.migrate(H.coerceShape(H.sampleState()));
+  const y = Object.keys(st.years).filter(k => st.years[k].kind === 'grid').sort().pop();
+  const next = H.rolloverYear(st, H.computeAll(st), y);
+  ok(next, 'the year rolled over');
+  const a = st.years[y].categories.find(c => c.id === 'water');
+  const b = st.years[next].categories.find(c => c.id === 'water');
+  eq(b.dueMonths, a.dueMonths, 'the schedule came with it');
+  b.dueMonths.push(12);
+  eq(a.dueMonths.length, 4, 'and changing one must not change the other');
 });
 
 /* ── The sample plan ────────────────────────────────────────────────────────

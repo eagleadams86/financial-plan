@@ -161,7 +161,12 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
   money out is what the month really cost you, net of those. Click any line to
   open the same editor the grid opens — notes, split months, revert and the
   balance reconciliation all included. A row with nothing recorded stays on the
-  list, quietly, because opening it is how a month gets filled in.
+  list, quietly, because opening it is how a month gets filled in — unless its
+  [due date](#due-dates) says it doesn't fall in this month at all, in which
+  case it drops off with a line at the foot of the section offering it back.
+- **Anything due**, when there is anything: a card of the hand-paid bills that
+  are close or already late, and of any you are still waiting on. It isn't there
+  at all in a month with nothing to say.
 - **The accounts**, each with what it held at the end of the month, how far that
   moved, and what it earned.
 - **The month's notes**, gathered at the foot of the page the way a year's are
@@ -222,6 +227,112 @@ monthly — a renewal letter, not compound interest. Inside a year it simply
 repeats, so typing the real new rent when it lands takes over exactly as it
 does everywhere else, and the row grows from *that* from then on. No percentage
 typed means no rise; it repeats rather than inventing a figure.
+
+### Due Dates
+
+Most expenses have a day attached, and plenty of them only fall in some months.
+A row can say so, and once it has, the Month page can remind you about it and
+get out of your way in the months it isn't due.
+
+Open a row and tick **It has a due date**:
+
+- **How it gets paid** — by hand, or on autopay. **Only a hand-paid bill is ever
+  warned about.** An autopay one just says when it goes out; that's a note about
+  your arrangement, and the app has no way to check that the payment actually
+  went through.
+- **Day of the month** — leave it empty when the day moves about, and the row
+  simply says it's due this month rather than counting down to a date you never
+  gave it. **31 means the last day**, whatever the month is, so a February bill
+  lands on the 28th rather than on a date that doesn't exist.
+- **Months it falls in** — Jan, Apr, Jul and Oct for a quarterly water bill; two
+  boxes for taxes twice a year; one for an annual renewal. Tick them all (or
+  none) for a monthly bill.
+
+**Ticking the months also tells the projection rule where it may go.** A *repeat
+the last month* row only fills the months you ticked, so it's safe on a bill
+that isn't monthly; and a **cycle keeps the beat you stated** rather than
+counting from the last month you happened to type something into — which used to
+mean one bill paid late moved every future estimate along with it. A figure you
+type is never affected: it wins wherever you put it.
+
+That's the one place a due date touches a computed figure. A row with no ticked
+months behaves exactly as it always has.
+
+**A warning starts a set number of days before the date** — seven unless you
+change it in [Preferences](#preferences) — and appears as a small pill on the
+row and in a **Due and Waiting** card at the top of the month. It stops the
+moment the month's figure is recorded as *something that happened* rather than
+an estimate, which is also what marking the whole month as entered does to every
+row at once. There is no separate "paid" tick, because an actual figure already
+means exactly that.
+
+**Nothing here is ever a colour on its own.** The pill carries a mark and words —
+*Due in 3 days*, *Due today*, *12 days late* — and the colour only agrees with
+them.
+
+#### When the Money Actually Leaves
+
+A bill due on the 3rd is one you settle a week earlier — which is in the
+**previous month**. Nothing in the figures can tell that apart from paying on the
+day: either way it's one payment a month. So the row has to say, and **The money
+leaves** is where you say it.
+
+Pick *the month before* and the whole row shifts: the reminder lands on the page
+you're actually on, the estimate goes in the month the money really leaves, a
+figure recorded there counts as having paid it, and the row can drop off the
+months in between. Without it, somebody who always pays early reads as **late
+every single month, for ever** — which is the fastest way to teach yourself to
+ignore a warning.
+
+The warning still counts down to the *due* date, so "a week before the 3rd"
+starts on the 27th of the month before.
+
+#### Bills Due at the Start of a Month
+
+A bill due on the 1st is one you pay **in the month before it**, so the card
+looks into the beginning of next month as well as the month you're reading.
+Standing on 25 August with a week's warning set, the August page tells you the
+1 September insurance is due in seven days — which is the point at which you can
+still do something about it.
+
+A line about next month says so, shows *next month's* figure, and opening it
+records the payment there, where the money will actually go. Only a deadline
+still to come reaches back like that: one that's already late belongs on its own
+month's page, which is a click away.
+
+#### Rows That Aren't Due This Month
+
+A row whose schedule excludes the month you're reading **drops off the list**,
+with a quiet line at the foot of the section saying how many went and offering
+them back. Your choice sticks until you change it.
+
+It only ever drops a row that has **genuinely nothing recorded**. A figure, a
+note, or split amounts all keep it on the page, whatever the schedule says — so
+a bill that turned up in a month you weren't expecting it never disappears, and
+the rows you can see always add up to the total underneath them.
+
+That also means a row set to **repeat the last month** mostly won't drop off: it
+fills every month with an estimate, and an estimate is something recorded. The
+rows this shortens a month by are the ones that are actually blank in between.
+
+#### A Bill That Hasn't Arrived
+
+The awkward case, and the one this was built around: a quarterly bill the town
+hasn't managed to send for three quarters. The money is genuinely owed and
+genuinely **not late**, so shouting "overdue" at it is wrong — and quietly
+forgetting about it is wrong too.
+
+**Pause reminders until** is the answer. The warnings stop, and the app keeps
+counting: the Due and Waiting card names the row, says how many periods have
+gone by unpaid, and gives a figure for what they come to. Where a period was
+never billed at all it uses **what the bill last came to** and says so, rather
+than presenting an estimate as a total. If nothing has ever been recorded for
+that row there's no figure to judge it by, and it says that instead of showing
+$0.00.
+
+Marking a month as entered **leaves a paused row blank** rather than stamping its
+estimate as paid — it tells you how many rows it left alone — because that's the
+whole point of having said you're still waiting.
 
 ### Overflow Sweeps and Caps
 
@@ -1173,6 +1284,7 @@ that apply across the whole app rather than to a row:
 | **Donor-advised fund** | Whether the Giving tab shows a fund's holdings. Donations are tracked either way |
 | **PTO days a year** | What each new holiday-planner year starts with |
 | **Dividend row interest %/yr** | The rate a dividend row uses when it has none of its own |
+| **Warn about a due bill this many days ahead** | How early a hand-paid bill with a [due date](#due-dates) starts saying so on the Month page. 0 warns on the day itself |
 | **Zoom** | The exact percentage (50–200%), the quarter steps in the header being the everyday version |
 
 ---
