@@ -183,7 +183,22 @@ async function networkFirst(req, key) {
      the shell should win. Only allowlisted shell files ever reach here, so no
      real missing page is being papered over. */
   const cached = await cache.match(cacheKey);
-  const fresh = fetch(req).then((res) => {
+  /* `no-cache`, and that argument is the whole difference between network-first
+     and network-first-in-name-only. A plain `fetch(req)` inherits the cache
+     mode of the request the PAGE made — `default` for a script or a stylesheet
+     on an ordinary reload — so the browser's own HTTP cache answers it without
+     a byte leaving the machine, this handler passes that copy on as if it were
+     the network's, and `cache.put` then writes it back over the offline copy.
+     Pages sends `max-age=600` on everything, so a deploy can go unseen for ten
+     minutes and only a hard reload, which bypasses this worker entirely, shows
+     it. Found on the task dashboard on 2026-08-24, where the content changes
+     hourly and the staleness was visible; the same bare fetch was in all six
+     workers, and `topUp()` in each of them already knew to say `cache:`.
+     `no-cache` rather than `reload`: it still goes to the server every time,
+     but as a conditional request, so an unchanged file comes back a 304 and
+     costs nothing. Offline it rejects exactly as before and the cache answers,
+     which is the only time a cached copy should ever be what you see. */
+  const fresh = fetch(req, { cache: 'no-cache' }).then((res) => {
     /* Only a real, same-origin 200 is worth keeping. `basic` excludes opaque
        cross-origin replies, which we should never see here anyway. */
     if (res && res.ok && res.type === 'basic') cache.put(cacheKey, res.clone());
