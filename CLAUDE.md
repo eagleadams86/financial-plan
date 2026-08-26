@@ -1880,6 +1880,23 @@ re-testing CORS first.
   you cannot read back is a typo you cannot find), the button is `type="button"`
   so it never submits the dialog, and its accessible name is `${word} ${f.label}`
   with the visible word FIRST so voice control still matches what it can see.
+- **It also carries a clipped ACCOUNT NAME (`autocomplete="username"`), and that
+  is a bug report, not a nicety.** Charles's first real Safari save (2026-08-26)
+  filed the key under the field NEXT DOOR as its username. Preferences is one
+  `<form>`, so every text box in it was a username candidate and the manager took
+  the nearest — which would change again the day somebody reorders the dialog. A
+  password-only form has to name its own account. The field is `readonly`,
+  `tabIndex = -1`, `aria-hidden`, and carries no `name`, so it reaches no
+  submission and `readFields` (which looks up by id) never sees it.
+- **The `.sr-only` goes on a WRAPPER `<span>`, not on that input** — on the input
+  it LOSES: `.grid-fields > div > .field-row > input` is the more specific
+  selector, so the "1px" field computed to 20×40. Clipped, so it looked right on
+  screen while occupying a real 40px of the flex column. A clipped wrapper is
+  absolutely positioned, so the input inside is invisible at any size and out of
+  the flow entirely.
+- **`input[type="password"]` had to be added to the 320px `max-width` list.** That
+  figure was measured on THIS field — a 32-character key held whole — and changing
+  its type silently dropped it out of the rule that exists for it. A test pins it.
   The field stays LAST in Preferences partly for this: a password cell is a row
   taller than its neighbours, and the last row is the one place that costs
   nothing. A test pins all of it against the source — the dialog is built from a
