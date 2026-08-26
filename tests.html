@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 820;
+const EXPECTED = 826;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -10534,6 +10534,108 @@ t('a click on the label still selects, exactly as before', () => {
 });
 t('a focus with no press behind it guards nothing — a Tab has no caret to place', () => {
   eq(spinProbe(w, (box) => { spinFocusIn(w, box); }), false);
+});
+
+/* ── The grid tooltip on a phone ────────────────────────────────────────────
+   A tap on iOS raises a synthetic mousemove and THEN a click, which is how the
+   month view's tooltips came to flash and vanish: the move put the tip up and
+   the click took it straight back down. Nothing shorter than the whole sequence
+   tells the fixed behaviour from the broken one — both put the tip up, and only
+   one of them still has it a click later — so the probe replays all of it.
+
+   The box is built by hand rather than rendered: `wireGridTip` takes one for
+   exactly this, and a real month view would need a whole plan behind it to say
+   the same thing. What matters is the CONTRACT the wiring reads off the markup
+   — a `.mrow[data-cat]` opens an editor, a `.mrow.derived` opens nothing — and
+   that is two attributes, not a budget. */
+function tipProbe(appWin, html) {
+  const box = appWin.document.createElement('div');
+  box.className = 'tipzone';
+  box.innerHTML = html;
+  appWin.document.body.appendChild(box);
+  appWin.__finTestHooks.wireGridTip(box);
+  return box;
+}
+function tipTeardown(appWin, box) {
+  appWin.__finTestHooks.hideGridTip();
+  box.remove();
+}
+/* Every event a finger raises on iOS, in the order WebKit sends them. */
+function tapWithFinger(appWin, el) {
+  const r = el.getBoundingClientRect();
+  const at = { bubbles: true, cancelable: true, composed: true,
+    clientX: Math.round(r.left + 2), clientY: Math.round(r.top + 2) };
+  const touch = Object.assign({ pointerType: 'touch', pointerId: 1, isPrimary: true }, at);
+  el.dispatchEvent(new appWin.PointerEvent('pointerdown', touch));
+  el.dispatchEvent(new appWin.PointerEvent('pointerup', touch));
+  el.dispatchEvent(new appWin.MouseEvent('mousemove', at));
+  el.dispatchEvent(new appWin.MouseEvent('mousedown', at));
+  el.dispatchEvent(new appWin.MouseEvent('mouseup', at));
+  el.dispatchEvent(new appWin.MouseEvent('click', at));
+}
+const DERIVED_ROW = '<div class="mrow derived" data-tip="earned: $1.00">Interest</div>';
+const EDITOR_ROW = '<div class="mrow" data-cat="c1" data-m="2026-01" data-year="2026"'
+  + ' data-tip="$2.00 · actual">Rent</div>';
+const PLAIN_BIT = '<p class="sub">nothing to say</p>';
+
+group('The grid tooltip on a phone');
+t('a tap on a line that opens nothing leaves the tip up — the click it raised does not undo it', () => {
+  const box = tipProbe(w, DERIVED_ROW);
+  const tip = w.document.getElementById('gridTip');
+  try {
+    tapWithFinger(w, box.querySelector('.derived'));
+    eq(tip.hidden, false, 'the tip is still up after the whole tap');
+    eq(tip.textContent, 'earned: $1.00');
+  } finally { tipTeardown(w, box); }
+});
+t('a tap on a line that opens an editor shows no tip at all — the dialog is the answer', () => {
+  const box = tipProbe(w, EDITOR_ROW);
+  const tip = w.document.getElementById('gridTip');
+  try {
+    tapWithFinger(w, box.querySelector('.mrow'));
+    eq(tip.hidden, true);
+  } finally { tipTeardown(w, box); }
+});
+t('the next tap anywhere else takes a held tip down', () => {
+  const box = tipProbe(w, DERIVED_ROW + PLAIN_BIT);
+  const tip = w.document.getElementById('gridTip');
+  try {
+    tapWithFinger(w, box.querySelector('.derived'));
+    eq(tip.hidden, false, 'up, before anything else is tapped');
+    tapWithFinger(w, box.querySelector('.sub'));
+    eq(tip.hidden, true);
+  } finally { tipTeardown(w, box); }
+});
+t('a finger DRAGGING over the grid paints no tips — scrolling is not hovering', () => {
+  const box = tipProbe(w, DERIVED_ROW);
+  const tip = w.document.getElementById('gridTip');
+  try {
+    const el = box.querySelector('.derived'), r = el.getBoundingClientRect();
+    el.dispatchEvent(new w.PointerEvent('pointermove', { bubbles: true, cancelable: true,
+      composed: true, pointerType: 'touch', pointerId: 1, isPrimary: true,
+      clientX: Math.round(r.left + 2), clientY: Math.round(r.top + 2) }));
+    eq(tip.hidden, true);
+  } finally { tipTeardown(w, box); }
+});
+t('a mouse passing over still gets the tip that follows it', () => {
+  const box = tipProbe(w, DERIVED_ROW);
+  const tip = w.document.getElementById('gridTip');
+  try {
+    const el = box.querySelector('.derived'), r = el.getBoundingClientRect();
+    el.dispatchEvent(new w.PointerEvent('pointermove', { bubbles: true, cancelable: true,
+      composed: true, pointerType: 'mouse', pointerId: 2, isPrimary: true,
+      clientX: Math.round(r.left + 2), clientY: Math.round(r.top + 2) }));
+    eq(tip.hidden, false);
+    eq(tip.textContent, 'earned: $1.00');
+  } finally { tipTeardown(w, box); }
+});
+t('which lines answer a tap with an editor is read off the markup, not the class name', () => {
+  const opens = w.__finTestHooks.tipOpensEditor;
+  const box = tipProbe(w, DERIVED_ROW + EDITOR_ROW);
+  try {
+    eq(opens(box.querySelector('.derived')), false);
+    eq(opens(box.querySelector('[data-cat]')), true);
+  } finally { tipTeardown(w, box); }
 });
 
 async function run() {

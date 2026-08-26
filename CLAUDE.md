@@ -995,7 +995,7 @@ suite passed while the card was wrong.
   grid sideways under a parked cursor, or re-render after a save, and the cell
   under it was never "entered", so no bubble comes — reported as tooltips
   sometimes not showing, unreproducible on a recording because moving the mouse
-  to demonstrate heals it. The app's own tip follows mousemove (first pixel of
+  to demonstrate heals it. The app's own tip follows pointermove (first pixel of
   movement recovers it), fills through textContent (text however built), hides
   on grid/page scroll and on click (a dialog is about to open over it), and is
   positioned with the zoom rules — event/viewport in screen px, fixed styles in
@@ -1005,6 +1005,26 @@ suite passed while the card was wrong.
   reads as THREE BLOCKS separated by a blank line** (settled 2026-08-17), each
   dropped when it has nothing to say: the FIGURE, the amounts it is made of, and
   the NOTE.
+  - **A PHONE HAS NO POINTER, and it used to get one anyway** (fixed 2026-08-26).
+    A tap on iOS raises a synthetic `mousemove` and THEN a `click`, so the old
+    `mousemove` handler put the tip up and the wrap's own click listener took it
+    straight back down — reported as the month view's tooltips showing for a
+    split second. It was reported THERE rather than on the grid because a grid
+    cell answers a tap by opening the cell editor, which hides the flash behind
+    a dialog; the month view's derived lines open nothing and leave the flash on
+    its own. Touch has its own contract now: the hover path is `pointermove`
+    with `pointerType === 'touch'` returned early (a finger dragging is
+    scrolling, not hovering), and a TAP on a line that opens nothing pins the
+    tip ABOVE that line — `placeGridTipOver`, off the line's rect, because a
+    finger is already covering the thing it tapped — until the next tap or
+    scroll. `tipOpensEditor` is the rule for which lines those are
+    (`td.cell, .mrow[data-cat], .mrow[data-bal]`, and nothing at all in a shared
+    view); a line that DOES open one shows no tip, since the dialog says
+    everything the tip would have. The click that a tap raised the tip with is
+    the one click that does not hide it (`tipHeldByTouch`). `wireGridTip(box)`
+    takes an optional box so the suite can wire a probe and replay the whole iOS
+    event sequence — nothing shorter tells the fixed behaviour from the broken
+    one, since both put the tip up and only one still has it a click later.
   - The figure leads. It is what the pointer was aimed at, so it must not be
     hunted for under a list of six. That is why "Total …" sits ABOVE its amounts
     now rather than under them as a sum being built up — they read as the

@@ -503,7 +503,11 @@ Click any cell to edit it. Beyond typing a figure:
   missed shift) is one box to type in rather than a lump sum to break apart
   first. Hovering a split month reads its amounts one per line with the total
   labelled last, in the grid's own tooltip, which follows the pointer so it
-  never goes missing after a scroll or an edit.
+  never goes missing after a scroll or an edit. **On a phone**, where there is
+  no pointer to follow, tapping a line that opens nothing — a subtotal, a total,
+  the interest line — puts the same tooltip up above it and leaves it there
+  until you tap somewhere else. A line that opens an editor doesn't show one:
+  the editor it opens says all of it.
 - **A balance cell reconciles as you type.** Say what an account really holds
   and it tells you how far that is from what the plan expected, or confirms
   the two agree.

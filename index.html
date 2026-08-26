@@ -19919,25 +19919,65 @@ function wireRowDrag(grid) {
 }
 
 /* ── The grid's own tooltip (see #gridTip in the CSS for why it exists) ──────
-   One delegated mousemove on the gridwrap; the tip's text comes out of the
+   One delegated pointermove on the gridwrap; the tip's text comes out of the
    cell's data-tip through textContent, so however it was built it renders as
    text. Positioning follows the zoom rules: the event and the viewport are in
    screen pixels, a fixed element's styles are written in pre-zoom pixels, so
-   the final coordinates divide by zoomScale — the pinGridHeader lesson. */
+   the final coordinates divide by zoomScale — the pinGridHeader lesson.
+
+   A PHONE HAS NO POINTER TO FOLLOW, and it used to get one anyway: a tap on
+   iOS raises a synthetic mousemove and then a click, so the handler put the
+   tip up and the wrap's own click listener took it straight back down. That
+   is the month view's tooltips showing for a split second and vanishing —
+   reported there rather than on the grid because a grid cell answers a tap by
+   opening the cell editor, which hides the flash behind a dialog, while the
+   month view's derived lines open nothing at all and leave the flash on its
+   own. So touch has its own contract now: hovering is a pointermove that is
+   not a touch, and a TAP on a line that opens nothing pins the tip above that
+   line until the next tap or scroll. A line that DOES open an editor still
+   shows no tip — the dialog it is about to open says everything the tip would
+   have said, and says it in a box you can read without holding still. */
+let tipHeldByTouch = false;   // put up by a tap, not by a pointer passing over
 function hideGridTip() {
   const el = F('gridTip');
   if (el) el.hidden = true;
+  tipHeldByTouch = false;
 }
-function wireGridTip() {
+/* Which lines answer a tap by opening the cell editor. Everything else that
+   carries a data-tip — subtotals, totals, the derived earnings lines — opens
+   nothing, and on a phone the tip is the only answer it has. A shared view
+   opens nothing at all, so there every line is one of those. */
+const tipOpensEditor = (el) => !viewOnly
+  && !!el.closest('td.cell, .mrow[data-cat], .mrow[data-bal]');
+/* Hang a tapped tip off the LINE's rectangle rather than off the pointer: a
+   finger is already sitting on the line it just tapped, so the bubble goes
+   above it, and below only when there is no room above. */
+function placeGridTipOver(tip, rect) {
+  tip.style.left = '0px'; tip.style.top = '0px';
+  const w = tip.offsetWidth * zoomScale, h = tip.offsetHeight * zoomScale;
+  let x = rect.left, y = rect.top - h - 8;
+  if (y < 4) y = rect.bottom + 8;
+  if (x + w > window.innerWidth - 8) x = window.innerWidth - 8 - w;
+  tip.style.left = `${Math.max(4, x) / zoomScale}px`;
+  tip.style.top = `${Math.max(4, Math.min(y, window.innerHeight - h - 8)) / zoomScale}px`;
+}
+function wireGridTip(box) {
   const tip = F('gridTip');
   /* Two boxes want this tooltip now: the grid's scrollport, and the month
      view's wrapper. One selector rather than a second copy of the handler —
      everything below is delegation on `[data-tip]` and never asked what kind of
-     box it was in. */
-  const wrap = document.querySelector('.gridwrap, .tipzone');
+     box it was in. `box` is the suite's way in: the touch rules below cannot be
+     read off the source, and a probe box wired by hand is how they get tapped
+     without a whole budget rendered behind them. */
+  const wrap = box || document.querySelector('.gridwrap, .tipzone');
   if (!tip || !wrap) { hideGridTip(); return; }
   hideGridTip();
-  wrap.addEventListener('mousemove', (e) => {
+  wrap.addEventListener('pointermove', (e) => {
+    /* A touch reports no hover — it gets the pointerdown handler below. A real
+       mouse moving hands a pinned tip back to following the pointer, which is
+       the hybrid laptop with both. */
+    if (e.pointerType === 'touch') return;
+    tipHeldByTouch = false;
     const td = e.target.closest('[data-tip]');
     if (!td) { hideGridTip(); return; }
     if (tip.textContent !== td.dataset.tip) tip.textContent = td.dataset.tip;
@@ -19955,18 +19995,39 @@ function wireGridTip() {
     tip.style.left = `${Math.max(4, x) / zoomScale}px`;
     tip.style.top = `${Math.max(4, y) / zoomScale}px`;
   });
+  /* A tap on a line that opens nothing: put the tip up and LEAVE it up. The
+     tip itself is pointer-events: none, so this never fights the line under
+     it, and the guards below are what take it down again. */
+  wrap.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    const el = e.target.closest('[data-tip]');
+    if (!el || tipOpensEditor(el)) { hideGridTip(); return; }
+    if (tip.textContent !== el.dataset.tip) tip.textContent = el.dataset.tip;
+    tip.hidden = false;
+    placeGridTipOver(tip, el.getBoundingClientRect());
+    tipHeldByTouch = true;
+  });
   wrap.addEventListener('mouseleave', hideGridTip);
   /* The grid scrolling under a parked cursor is exactly the case native
      titles die on — hide, and the next real movement redraws it in the right
      place over the right cell. */
   wrap.addEventListener('scroll', hideGridTip, { passive: true });
   /* A click is about to open the cell dialog — a tip floating over a modal
-     would outrank it visually while answering yesterday's question. */
-  wrap.addEventListener('click', hideGridTip);
+     would outrank it visually while answering yesterday's question. NOT the
+     click a tap raised the tip with, though: that one lands a moment after the
+     pointerdown above and would undo it before anybody had read it. */
+  wrap.addEventListener('click', () => { if (!tipHeldByTouch) hideGridTip(); });
 }
 /* Page scroll moves the grid under the cursor the same way; once, not per
    render — the handler reads the element fresh each time. */
 window.addEventListener('scroll', hideGridTip, { passive: true });
+/* And a tap anywhere else takes a pinned tip down — including outside the grid
+   entirely, which the wrap's own listener never sees. Capture, so it runs
+   before the handler that would put a fresh one up. */
+document.addEventListener('pointerdown', (e) => {
+  if (tipHeldByTouch && e.pointerType === 'touch'
+      && !(e.target.closest && e.target.closest('[data-tip]'))) hideGridTip();
+}, true);
 
 function wireBudget() {
   pinnedShift = -1;  // fresh cells, so force a write
@@ -23241,7 +23302,11 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   trimShareYearMap, trimShareYearMaps, trimTaxYearMap, stripNotes, anonymisePeople,
   looksEmpty, sectionHasData, shareRangeNote, shareFutureNote, shareScopeNote,
   shareCarriesNote,
-  encodeShare, decodeShare };
+  encodeShare, decodeShare,
+  /* The grid tooltip's touch contract. Neither half is visible from the source:
+     which lines answer a tap by opening an editor is a rule, and whether a tip
+     survives the click that a tap raises it with is a sequence. */
+  wireGridTip, hideGridTip, tipOpensEditor };
 
 /* ── Hooks the sync module calls ──────────────────────────────────────────
    The module is a separate <script type="module"> and can't see this scope. */
