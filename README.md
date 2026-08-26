@@ -507,7 +507,9 @@ Click any cell to edit it. Beyond typing a figure:
   no pointer to follow, tapping a line that opens nothing — a subtotal, a total,
   the interest line — puts the same tooltip up above it and leaves it there
   until you tap somewhere else. A line that opens an editor doesn't show one:
-  the editor it opens says all of it.
+  the editor it opens says all of it. Nothing in the app explains itself by hover
+  alone — where a column or a figure has something to say, it says it through the
+  info dot beside it, the tooltip, or in words on the page.
 - **A balance cell reconciles as you type.** Say what an account really holds
   and it tells you how far that is from what the plan expected, or confirms
   the two agree.

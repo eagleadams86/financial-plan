@@ -1025,6 +1025,38 @@ suite passed while the card was wrong.
     takes an optional box so the suite can wire a probe and replay the whole iOS
     event sequence — nothing shorter tells the fixed behaviour from the broken
     one, since both put the tip up and only one still has it a click later.
+  - **A `title` may only ever be the SECOND way to something** (audited across
+    every tab, 2026-08-26). It is the quiet half of the same problem: a native
+    title does not flash, it simply never appears on a phone at all — so a title
+    is fine on a button whose label already says it, or on a row whose editor
+    holds the same words, and is a dead end anywhere else. The audit is a DOM
+    walk, not a grep, and worth repeating that way: render each tab and collect
+    every `[title]` with no `closest('[data-edit],[data-add],[data-note],'
+    + '[data-reveal],td.cell,.mrow[data-cat],.mrow[data-bal],button,a,select,'
+    + 'input,summary,[role=button]')`. It found six, each fixed by the route it
+    needed rather than by one rule:
+    - the year grid's derived **Interest & Dividends** row label became
+      `data-tip` — it opens no editor, and the month view's own line has
+      answered a tap since the fix above, so both lenses now explain the same
+      figure the same way. It sits inside `.gridwrap` already, which is why the
+      tip did NOT have to be widened past its two boxes to reach it.
+    - **Share**, **Interest left** and **% of salary** took the family's help
+      dot: each explains a whole COLUMN, which is the job the dot already has.
+    - the **year-total** heading had a dot AND a title saying the same thing.
+      The title went. Two explanations on one heading is what "one dot, one
+      explanation" exists to stop, and the hover copy was the half a phone could
+      never read.
+    - both "leaves out what has no exchange rate yet" titles were a second copy
+      of a sentence the card's own paragraph already prints, and only when it is
+      true. They went; the paragraph stands.
+    - "percentages of different salaries don't add up" was the only one of the
+      six that nothing on screen was carrying. It is now a clause in the Bonuses
+      card's paragraph. **A caveat on a total belongs in the open** — a total
+      that leaves something out should admit it without being asked.
+  - `tipOpensEditor` widened to `[data-edit], [data-add]` at the same time. Now
+    that a `data-tip` can sit on a row label, the rule has to cover every way a
+    row opens an editor, not just the budget grid's three: a tip pinned under a
+    modal is a tip nobody can read.
   - The figure leads. It is what the pointer was aimed at, so it must not be
     hunted for under a list of six. That is why "Total …" sits ABOVE its amounts
     now rather than under them as a sum being built up — they read as the
