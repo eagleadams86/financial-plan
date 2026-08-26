@@ -3043,8 +3043,8 @@ thirteen-column table to reach one cell.
   NOTHING RECORDED in the month is hidden, whatever the reason, and the only
   blank row left on the page is one with a bill due in that month. See "An
   empty row drops off the Month page" below — `rowHideable` is the one place
-  that decides, `hideableInSection` stops a section emptying itself, and the
-  reveal sticks.
+  that decides, `monthUntouched` keeps every row on a month you have not
+  started, and the reveal sticks.
 - **The estimate kinds are the GRID's**, and the `.c-*` selectors name both
   readers (`.grid td.c-auto, .mamt.c-auto`) rather than being copied — a line
   style that drifted between the lenses would be one month claiming to be
@@ -3444,13 +3444,23 @@ entered" is exactly that kind of rule — the reader cannot see it from the rows
   netting to zero all keep the row. That is what keeps the visible list adding
   up to the total under it, and it is the only reason a totals test would not
   have caught the first version of this predicate.
-- **`hideableInSection` — A SECTION NEVER COLLAPSES TO NOTHING.** Found by
-  loading a fresh plan: the starter budget arrives with twelve expense rows and
-  no figures in any of them, so the Month page a new reader opens was a heading,
-  a $0.00 total and a button offering to show them the budget they had just
-  made. Per section, which is also the scope of the confusion this rewrite came
-  from — a reader compares a row to the rows beside it. The Income section's
-  earnings line counts as something to read.
+- **`monthUntouched` — A MONTH YOU HAVE NOT STARTED KEEPS ALL ITS ROWS.** Found
+  by loading a fresh plan: the starter budget arrives with twelve expense rows
+  and no figures in any of them, so the Month page a new reader opened was three
+  headings, a $0.00 total apiece and a button offering to show them the budget
+  they had just made.
+  **It shipped PER SECTION and that was wrong for about an hour** — Charlie
+  spotted it on his own plan, where Transfers listed three untouched accounts in
+  a month whose Income and Expenses had hidden theirs. A per-section guard fires
+  on whichever section happens to be entirely empty while the rest of the page
+  is full, which is precisely the inconsistency the hide rule exists to remove;
+  the guard meant to protect the rewrite was reintroducing it. Asked about the
+  MONTH now, once, and handed down to all three sections.
+  **A section may therefore collapse to its heading, its total and a reveal
+  line, and that is the right answer**: $0.00 moved is a fact worth printing and
+  three rows saying "nothing recorded" underneath it are not. Only CATEGORY rows
+  are counted — account balances are computed and always there, so they can
+  never say whether you have started.
 - **`ui.showNotDue` KEEPS ITS NAME** though it now means "show the empty rows".
   Renaming it would orphan the setting in every stored plan and every backup for
   a word nobody sees. The reveal STICKS, and that is what answers the old

@@ -173,9 +173,11 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
   recorded yet, because an empty row is the whole point of a reminder. That
   last is the one blank row you'll see, and its line reads "due the 20th" or
   "autopay, the 1st" rather than "nothing recorded", so it says why it's there.
-  A section never collapses to nothing, either: if every row in it is empty
-  you're looking at a month you haven't started, and that list is the thing you
-  came for.
+  A month you haven't started keeps all its rows — if nothing anywhere in it has
+  anything in it, that list is the thing you came for. Once the month has
+  begun, a whole section can collapse to its heading, its total and the show
+  line: $0.00 moved is worth printing, three rows saying "nothing recorded"
+  under it are not.
 - **Anything due**, when there is anything: a card of the hand-paid bills that
   are close or already late, and of any you are still waiting on. It isn't there
   at all in a month with nothing to say.

@@ -8782,22 +8782,30 @@ function rowHideable(cat, r, m) {
   return !dueOn(cat, m);
 }
 
-/* A SECTION NEVER COLLAPSES TO NOTHING, and this is the guard the rule above
-   needs to survive a plan's first day. The starter budget arrives with twelve
-   expense rows and no figures in any of them, so without this the Month page a
-   new reader opens is a heading, a $0.00 total and a button offering to show
-   them the budget they have just made — when those empty rows ARE the page,
-   since filling one in is how a plan starts.
+/* A MONTH YOU HAVE NOT STARTED KEEPS ALL ITS ROWS, and this is the guard the
+   rule above needs to survive a plan's first day. The starter budget arrives
+   with twelve expense rows and no figures in any of them, so without this the
+   Month page a new reader opens is three headings, a $0.00 total apiece and a
+   button offering to show them the budget they have just made — when those
+   empty rows ARE the page, since filling one in is how a plan starts.
 
-   Per SECTION, which is also the scope of the confusion this rewrite came
-   from: a reader compares a row to the rows beside it, and within one section
-   it is now all or nothing. `extra` is a line the section has that isn't one
-   of these rows — the Income section's earnings line — and it counts, because
-   with it there is still something to read.
+   THE QUESTION IS ABOUT THE MONTH, NOT THE SECTION, and it shipped the other
+   way for about an hour (2026-08-26). Per section it fires whenever ONE
+   section happens to be entirely empty while the rest of the page is full —
+   which on Charlie's own plan meant Transfers listing three untouched accounts
+   in a month where Income and Expenses had hidden theirs. That is the very
+   inconsistency this whole rewrite was undoing, reintroduced by the guard
+   meant to protect it. A section CAN now collapse to its heading, its total
+   and a reveal line, and that is the right answer: $0.00 moved is a fact worth
+   printing, and three rows saying "nothing recorded" underneath it are not.
 
-   Pure and exported so the guard can be pinned; the renderer just asks. */
-function hideableInSection(hideable, rowCount, extra) {
-  return (hideable.length >= rowCount && !extra) ? [] : hideable;
+   Untouched means no CATEGORY row anywhere in the month has anything in it.
+   Account balances are not asked about — they are computed and always there,
+   so they can never say whether you have started. Pure and exported so the
+   guard can be pinned; the renderer asks once and hands the answer down. */
+function monthUntouched(cats, quietCount) {
+  const n = (cats || []).length;
+  return n > 0 && quietCount >= n;
 }
 
 /* ── Saying it in words ────────────────────────────────────────────────────
@@ -9310,9 +9318,13 @@ function renderMonthView() {
   /* ── One section, biggest first ───────────────────────────────────────────
      That ordering is this view's whole argument. A grid keeps the order you
      arranged (or the alphabet) because you read ACROSS it; a month is read
-     DOWN, and the question it answers is what the money actually went on. Rows
-     with nothing recorded sink to the bottom rather than disappearing. */
+     DOWN, and the question it answers is what the money actually went on. */
   const inside = internalRows(yr);
+  /* Asked ONCE, about the month, and handed to all three sections — see
+     `monthUntouched`. Per section it fired on whichever section happened to be
+     entirely empty while the rest of the page was full, which is the
+     inconsistency the hide rule exists to remove. */
+  const untouched = monthUntouched(yr.categories, due.quiet.length);
   const sectionCard = (sec) => {
     const cats = (yr.categories || []).filter(cat => (cat.section || 'expense') === sec);
     const earnHere = sec === 'income' && t.earned.v !== 0;
@@ -9344,9 +9356,8 @@ function renderMonthView() {
     /* Read off the one pass above rather than asked again here — the sections
        and the card must not be able to disagree about which rows went. */
     const quiet = new Set(due.quiet.map(x => x.id));
-    const hideable = hideableInSection(
-      rows.filter(({ cat }) => quiet.has(cat.id)).map(x => x.cat.id),
-      rows.length, earnHere);
+    const hideable = untouched ? []
+      : rows.filter(({ cat }) => quiet.has(cat.id)).map(x => x.cat.id);
     const showing = !!state.ui.showNotDue;
     const hidden = new Set(showing ? [] : hideable);
     /* The way back, and it must SURVIVE A SAVE. A DOM-only toggle was the first
@@ -22911,7 +22922,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
      skip is pinned through the state it leaves behind. */
   DUE_PAY, DUE_LEAD_DEFAULT, daysInMonth, dayNumber, daysBetween,
   dueMonthsOf, dueOn, dueStatus, leadDaysOf, monthDues, outstandingDues,
-  rowHideable, hideableInSection, paysIn, rowEnded, yearsDroppingRow, ordinal, dueFootWords, duePillWords, dueScheduleWords,
+  rowHideable, monthUntouched, paysIn, rowEnded, yearsDroppingRow, ordinal, dueFootWords, duePillWords, dueScheduleWords,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its
      prose over a fixture). */
