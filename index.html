@@ -6309,6 +6309,10 @@ const HELP = {
       + 'ever held back the automatic top-up.'],
     ['Every price stays ', b('editable by hand'), ', and typing one over a fetched price is '
       + 'fine; open a holding to see where its price came from and when.'],
+    ['The key is ', b('never synced, never in a backup and never in a share link'), ' — it is '
+      + 'the only credential here and it stays in the browser you typed it into. The box is a '
+      + 'password box, so save it to your password manager and that will carry it to your '
+      + 'other devices for you.'],
   ] },
   taxBrackets: { title: 'The Bracket Tables', body: [
     [b('Every figure here is one you typed.'), ' The app ships no bracket, no rate and no '
@@ -15889,7 +15893,23 @@ function buildRothChart() {
 
    The key deliberately does NOT live in state: state syncs to Firestore and
    rides along in every backup file, and a credential doesn't belong in either.
-   It stays in this browser, re-entered per device (Preferences).
+   It stays in this browser, entered once per device (Preferences).
+
+   Syncing it was WEIGHED and turned down on 2026-08-26. Putting it in `state`
+   would leave a plaintext copy in the Firestore doc — and because that doc is
+   one opaque JSON string, no rule could ever protect the key on its own — plus
+   a copy in every backup file, and it would sit one careless line away from
+   `settings`, which travels in every share link. Encrypting it first (a
+   passphrase through PBKDF2 into AES-GCM) closes the at-rest hole honestly
+   enough, but it trades typing a key per device for typing a passphrase per
+   device and buys a forgot-passphrase path, a ciphertext version and a
+   rotation story with it. For a free read-only quota key that is a bad trade.
+
+   What it does instead is let the BROWSER carry it: the field is `password`,
+   named and autocompleted so a password manager offers to save it, and iCloud
+   Keychain or its equivalent then syncs it end to end encrypted, on a path
+   that is already audited and that this app never touches. Nothing about the
+   key's storage here changed — this is still the only copy Money Map keeps.
 
    Prices cache for six hours, which is unchanged and still right: a mutual fund
    only strikes one NAV a day anyway, so asking more often cannot learn anything
@@ -16342,8 +16362,8 @@ async function refreshPrices(quiet, only) {
 const rowDialog = F('rowDialog');
 let rowCtx = null;   // { section, ds (the row's dataset), spec }
 
-/* Field types: text · money · number · percent (shown ×100) · date · month ·
-   check · select (options: [[value, label]]) · note (full-width textarea) */
+/* Field types: text · password · money · number · percent (shown ×100) · date ·
+   month · check · select (options: [[value, label]]) · note (full-width textarea) */
 function buildFields(fields, values, link) {
   const wrap = F('rowFields');
   wrap.innerHTML = '';
@@ -16421,8 +16441,29 @@ function buildFields(fields, values, link) {
     } else {
       input = document.createElement('input');
       input.type = { number: 'number', percent: 'number',
-                     date: 'date', month: 'month' }[f.type] || 'text';
+                     date: 'date', month: 'month',
+                     password: 'password' }[f.type] || 'text';
       if (f.type === 'money') asMoneyInput(input);
+      /* A CREDENTIAL rather than prose, and marked up as one so the browser's
+         own password manager offers to keep it. That is the entire point of
+         this type: the price key deliberately never travels with the plan
+         (see PRICE_KEY), so a password manager is the only thing that can
+         carry it from the laptop to the phone — and it carries it end to end
+         encrypted, which is more than a synced field would manage.
+         `current-password` rather than `new-password`: this is one existing
+         key re-entered on a second device, not a secret being chosen, and
+         `new-password` makes Safari offer to invent one instead of filling
+         the one you already have.
+         The last three are iOS: left alone it capitalises the first letter of
+         a 32-character key and then autocorrects what follows, and the failure
+         that arrives later is "Twelve Data rejected the API key". */
+      if (f.type === 'password') {
+        input.autocomplete = f.autocomplete || 'current-password';
+        input.name = f.name || f.key;
+        input.spellcheck = false;
+        input.setAttribute('autocapitalize', 'off');
+        input.setAttribute('autocorrect', 'off');
+      }
       /* `any`, not a tenth: a sweep account can pay 0.01%, and a step of 0.1
          makes the browser reject anything finer as invalid. */
       if (f.type === 'percent') { input.step = 'any'; input.inputMode = 'decimal'; }
@@ -16479,6 +16520,34 @@ function buildFields(fields, values, link) {
         const set = (k, n) => { F(`rf-${k}`).value = n === null ? '' : fmtMoney(round2(n)); };
         f.action.run(val, set);
         if (link) link(f.key);
+      };
+      row.appendChild(btn);
+      cell.appendChild(row);
+    } else if (f.type === 'password') {
+      /* Masking a key you cannot read back is how a typo becomes a rejected
+         key with nothing to check it against — so the box comes with the means
+         to look at what is in it. The same `.field-row` the action fields use,
+         so the button sits under its input like every other button here. */
+      const row = document.createElement('div');
+      row.className = 'field-row';
+      row.appendChild(input);
+      const btn = document.createElement('button');
+      btn.type = 'button';                    // never submits the dialog
+      btn.className = 'btn small';
+      /* The visible word says what the button will DO next, and the accessible
+         name says it about WHICH field — no aria-pressed on top of either, or
+         the state is announced twice and the two disagree. The visible text is
+         the first word of the accessible name on purpose: voice control matches
+         on what it can see, so "click Show" has to keep working. */
+      const rename = (word) => {
+        btn.textContent = word;
+        btn.setAttribute('aria-label', `${word} ${f.label}`);
+      };
+      rename('Show');
+      btn.onclick = () => {
+        const shown = input.type === 'text';
+        input.type = shown ? 'password' : 'text';
+        rename(shown ? 'Show' : 'Hide');
       };
       row.appendChild(btn);
       cell.appendChild(row);
@@ -17499,11 +17568,15 @@ const EDITORS = {
          dialog offers, `wide` included, and its hint is the only part that read
          better across the dialog. Being last still matters: a wide field ends
          the row it sits in, so if this ever goes back to `wide` it has to stay
-         at the bottom. */
-      { key: 'priceApiKey', label: 'Twelve Data key', type: 'text',
+         at the bottom. Being last earns its keep twice over now that the field
+         is masked: a `password` field carries a Show button under it, so its
+         cell is a row taller than the boxes beside it, and the last row of the
+         dialog is the one place that costs nothing. */
+      { key: 'priceApiKey', label: 'Twelve Data key', type: 'password',
         hint: 'For holding-price lookups — shares, ETFs and mutual funds. Free from '
-            + 'twelvedata.com. Stays on this device: it is the one thing here that is '
-            + 'never synced, never in a backup and never in a share link.' },
+            + 'twelvedata.com. The one thing here that is never synced, never in a '
+            + 'backup and never in a share link — save it to your password manager '
+            + 'and that will carry it to your other devices instead.' },
     ],
     get: () => ({ tagline: state.settings.tagline || '',
                   currency: state.settings.currency || 'USD',

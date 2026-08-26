@@ -1856,6 +1856,34 @@ re-testing CORS first.
 - The key lives in localStorage **`fin-pricekey`** (named for the job, not the
   supplier). The old `fin-avkey` is deleted on load: nothing can call that host
   any more, and a credential that can't be used is only a liability.
+- **Syncing the key was weighed and turned down (2026-08-26).** In `state` it
+  would leave a plaintext copy in the Firestore doc — and since that doc is one
+  opaque JSON string, no rule could ever protect the key on its own — plus a
+  copy in every backup file, one careless line from `settings` and therefore
+  from every share link. Encrypting it first (a passphrase through PBKDF2 into
+  AES-GCM) closes the at-rest hole honestly, but it swaps typing a key per
+  device for typing a passphrase per device and buys a forgot-passphrase path,
+  a ciphertext version and a rotation story with it. For a free, read-only,
+  quota-limited key that is a bad trade.
+- **What carries it between devices instead is the BROWSER.** The Preferences
+  field is `type: 'password'` — masked, `name`d, `autocomplete="current-password"`
+  — so a password manager offers to save it and iCloud Keychain (or its
+  equivalent) syncs it end to end encrypted, on a path this app never touches.
+  `current-password` and not `new-password`: this is one existing key re-entered
+  on a second device, and `new-password` makes Safari offer to invent one.
+  `spellcheck=false` + `autocapitalize=off` + `autocorrect=off` are iOS, which
+  otherwise capitalises the first letter of a 32-character key and autocorrects
+  the rest — and the only report of that arrives a day later as "Twelve Data
+  rejected the API key".
+- **`password` is a field type in `buildFields`, not a one-off.** It carries a
+  Show/Hide button in the same `.field-row` the action fields use (a masked key
+  you cannot read back is a typo you cannot find), the button is `type="button"`
+  so it never submits the dialog, and its accessible name is `${word} ${f.label}`
+  with the visible word FIRST so voice control still matches what it can see.
+  The field stays LAST in Preferences partly for this: a password cell is a row
+  taller than its neighbours, and the last row is the one place that costs
+  nothing. A test pins all of it against the source — the dialog is built from a
+  spec at open time, so none of it is reachable through the hooks.
 - **The CACHE, unlike the key, is `state.quotes` and therefore SYNCS** (asked for
   2026-08-17). The six-hour clock is a fact about the QUOTE, and the quote is the
   same on every device — left in localStorage it meant the laptop fetched a
@@ -3715,7 +3743,9 @@ payload's shape changes in a way an older build would silently misread.
   Twelve Data price key, and it cannot be**: it lives in localStorage under
   `fin-pricekey` and has never been part of `state`, so it reaches neither a
   link nor a backup nor Firestore. That is the whole reason it is kept there
-  rather than in `settings`, and it must stay there. The zoom is out for the
+  rather than in `settings`, and it must stay there — syncing it was weighed
+  and turned down on 2026-08-26, and the browser's password manager carries it
+  between devices instead (see the price-lookup section). The zoom is out for the
   same reason in a smaller key: it describes a screen, not a plan.
   **`state.quotes` is the case that shows why the whitelist matters**: the price
   cache IS state — it syncs and rides in a backup on purpose — but it is a list

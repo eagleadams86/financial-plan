@@ -835,6 +835,12 @@ device, cached six hours, and every price still editable by hand).
   fresh on the phone rather than being fetched again out of the same daily
   allowance. The key itself stays on each device — which is why you enter it
   once per device but only ever pay for a lookup once.
+- **The key box is a password box**: masked, with a **Show** button so you can
+  check what you typed. It is masked because it is a credential, and because
+  that is what makes your browser's password manager offer to remember it —
+  which is how the key reaches your other devices, since the app deliberately
+  never carries it there itself. Saved that way it is synced end to end
+  encrypted by the password manager, not by this app.
 - Open a holding and its **Price box says where that number came from**:
   fetched and when, typed over a fetched one, or never looked up. (The line
   above the tables can only report the oldest fetch across the whole table.)
