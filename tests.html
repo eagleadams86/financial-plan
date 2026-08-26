@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 814;
+const EXPECTED = 819;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -455,6 +455,27 @@ t('a junk stop month is deleted rather than believed', () => {
   eq(cats[3].until, '2030-04', 'and a real one survives');
 });
 
+t('a note with no figure survives the boundary as a note', () => {
+  /* Without `missing` on the whitelist the boundary turned every one of these
+     into a STATED $0.00 — the opposite claim — and the fix would have lasted
+     until the next reload. */
+  const s = fixtureState();
+  const cells = s.years['2030'].cells;
+  cells['internet|2030-02'] = { v: 0, kind: 'missing', note: 'bill never came' };
+  cells['internet|2030-04'] = { v: 0, kind: 'missing' };
+  cells['internet|2030-05'] = { v: 0, kind: 'missing', note: '   ' };
+  cells['cc|2030-06'] = { v: -12, kind: 'missing', note: 'x', parts: [{ v: -12 }] };
+  cells['electric|2030-02'] = { v: -9, kind: 'whatever' };
+  const d = H.coerceShape(s);
+  const out = d.years['2030'].cells;
+  eq(out['internet|2030-02'], { v: 0, kind: 'missing', note: 'bill never came' });
+  ok(!out['internet|2030-04'], 'nothing written on it is nothing at all');
+  ok(!out['internet|2030-05'], 'and neither is whitespace');
+  eq(out['cc|2030-06'].v, 0, 'a kind that claims no figure carries none');
+  ok(!out['cc|2030-06'].parts, 'nor any amounts it was split into');
+  eq(out['electric|2030-02'].kind, 'actual', 'junk still settles to a stated figure');
+});
+
 group('Formula engine — rules');
 t('paycheck rule multiplies per-check by that month count (incl. the 3.5 case)', () => {
   const c = computeFixture()['2030'];
@@ -697,6 +718,51 @@ t('a plan with no stopped rows computes byte for byte what it always did', () =>
   eq(JSON.stringify(H.computeAll(b, TODAY_FIX)),
      JSON.stringify(H.computeAll(a, TODAY_FIX)),
      'a stop at the end of the grid changes nothing inside it');
+});
+
+/* ── A note with no figure ────────────────────────────────────────────────
+   Asked for from life: Charlie wanted to write "the bill never came" on the
+   month his water bill went missing. Clearing the amount threw the note away
+   with it, so the only way to keep the words was to type a figure — and the
+   only figure that fits is 0, which says the bill DID come and was nothing.
+   That marked the month paid and silenced the very warning the note was about.
+   Stored as `kind: 'missing'`, the engine's own word for nothing recorded. */
+t('a note with no figure leaves the month blank and still unpaid', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].cells['internet|2030-02'] = { v: 0, kind: 'missing',
+                                                note: 'bill never came' };
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const r = c.cells['internet|2030-02'];
+  eq(r.kind, 'missing', 'nothing recorded, which is what happened');
+  eq(r.v, 0);
+  eq(r.note, 'bill never came', 'and the note came through');
+  ok(!H.rowHideable({ name: 'Internet' }, r, '2030-02'),
+    'so the row stays on the Month page rather than dropping off it');
+  ok(H.hasNote(r), 'and the grid draws its dot');
+});
+t('a note on a FUTURE month does not swallow its estimate', () => {
+  /* The reason this is a branch in computeYear rather than a field on the
+     cell: falling into the stored-cell block would suppress the rule, so
+     annotating next March would silently empty it. */
+  const s = H.coerceShape(fixtureState());
+  const plain = H.computeAll(s, TODAY_FIX)['2030'].cells['internet|2030-05'];
+  s.years['2030'].cells['internet|2030-05'] = { v: 0, kind: 'missing',
+                                                note: 'check this one' };
+  const noted = H.computeAll(s, TODAY_FIX)['2030'].cells['internet|2030-05'];
+  eq(noted.v, plain.v, 'the estimate is untouched');
+  eq(noted.kind, plain.kind);
+  eq(noted.note, 'check this one', 'and wears the note');
+});
+t('a noted blank is not a paid bill', () => {
+  const cat = { id: 'water', name: 'Water', duePay: 'manual',
+                dueMonths: [1, 4, 7, 10], dueDay: 3 };
+  const cell = { v: 0, kind: 'missing', note: 'bill never came' };
+  eq(H.dueStatus(cat, '2026-04', cell, '2026-08-26', 7, true).state, 'late',
+    'writing down that it never came must not mark it paid');
+  eq(H.dueStatus(cat, '2026-04', { v: 0, kind: 'actual' }, '2026-08-26', 7, true).state,
+    'paid', 'a STATED $0.00 is the other claim, and still means the bill came');
+  eq(H.outstandingDues(cat, ['2026-04'], () => ({ has: true, cell }),
+    '2026-08-26').count, 1, 'and it is still counted as owing');
 });
 
 group('Formula engine — balances');
@@ -4210,7 +4276,17 @@ t('a trip id is held to the family shape like every other id', () => {
 group('The cell tooltip');
 t('an ordinary month is one line', () => {
   eq(H.cellTip({ v: 122, kind: 'actual' }), '$122.00 · actual');
-  eq(H.cellTip({ v: 0, kind: 'missing' }), '$0.00 · nothing recorded');
+});
+t('a cell that records nothing prints no figure', () => {
+  /* "$0.00 · nothing recorded" says both halves of a contradiction, and the
+     first half reads as a STATED zero — the one thing this app keeps carefully
+     apart from an absence. It only started mattering once a note could sit on
+     a blank month, which is when anybody sees this tooltip. */
+  eq(H.cellTip({ v: 0, kind: 'missing' }), 'nothing recorded');
+  eq(H.cellTip({ v: 0, kind: 'missing', note: 'bill never came' }),
+    'nothing recorded\n\nbill never came');
+  eq(H.cellTip({ v: 0, kind: 'actual' }), '$0.00 · actual',
+    'a stated zero still prints its figure — it is a claim somebody made');
 });
 t('a note is its own line, never joined onto the figure', () => {
   /* It used to read "-$50.00 · auto estimate · guessed high", which runs the

@@ -526,6 +526,21 @@ Click any cell to edit it. Beyond typing a figure:
   earnings together. Nothing is routed to another account there — where
   interest lands is today's arrangement, not 2021's.
 
+### A Note With No Figure
+
+Sometimes what you want to record about a month is that **nothing happened** —
+the water bill never arrived, the refund never landed. Write the note and leave
+the amount empty.
+
+The month stays **blank**: nothing recorded, still unpaid, still counted as
+outstanding, still warned about. The note shows as a dot on the grid, in the
+month's notes, and in the cell's tooltip. It's the difference between "the bill
+never came" and a **stated $0.00**, which is the opposite claim — the bill came
+and it was nothing — and which does mark the month as settled.
+
+A note on a **future** month rides alongside its estimate rather than replacing
+it, so annotating next March doesn't empty it.
+
 ### Notes
 
 **Every note you've written anywhere in a year is gathered into a box of its

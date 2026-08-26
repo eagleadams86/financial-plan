@@ -2283,7 +2283,13 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
     </div>
     <div style="margin-top:12px">
       <label class="field" for="cellNote">Note</label>
-      <textarea id="cellNote" rows="2" placeholder="Why this number? (shows as a dot on the cell)"></textarea>
+      <!-- The placeholder answers both jobs the box has: explaining a figure,
+           and — since 2026-08-26 — saying that nothing happened. Leaving the
+           amount empty is the ONLY way to write the second down without
+           stating a $0.00, which means the opposite, so the box has to say so
+           where somebody about to type is looking. -->
+      <textarea id="cellNote" rows="2"
+        placeholder="Why this number? Or leave the amount empty to note that nothing came."></textarea>
     </div>
     <p class="sub muted" id="cellAutoHint" style="margin-top:10px"></p>
     <div class="row spread" style="margin-top:18px">
@@ -3558,7 +3564,23 @@ function coerceShape(data) {
         if (!cell || typeof cell !== 'object') { delete yr.cells[k]; continue; }
         const cv = num(cell.v);
         cell.v = typeof cv === 'number' ? cv : 0;
-        if (!['actual', 'manual', 'mixed'].includes(cell.kind)) cell.kind = 'actual';
+        /* `missing` joined the list 2026-08-26 — a NOTE WITH NO FIGURE. It is
+           the engine's own word for "nothing recorded", and that is exactly
+           what such a cell records: the month is still blank, still unpaid,
+           still counted as outstanding; there is simply something written on
+           it. Without it here the boundary turned every one of them into a
+           STATED $0.00, which is the opposite claim — the bill came and it was
+           nothing — and the fix would have survived until the next reload. */
+        if (!['actual', 'manual', 'mixed', 'missing'].includes(cell.kind)) cell.kind = 'actual';
+        /* One spelling of nothing. A `missing` cell exists only to carry its
+           note, so with nothing written on it there is nothing to keep, and no
+           figure and no parts can ride along under a kind that claims neither. */
+        if (cell.kind === 'missing') {
+          cell.v = 0;
+          delete cell.parts;
+          const note = typeof cell.note === 'string' ? cell.note.trim() : '';
+          if (!note) { delete yr.cells[k]; continue; }
+        }
         if (Array.isArray(cell.parts)) {
           cell.parts = cell.parts.filter(p => p && typeof p === 'object');
           for (const p of cell.parts) {
@@ -5467,13 +5489,22 @@ function computeYear(st, yearKey, prior) {
     for (const cat of yr.categories) {
       const key = `${cat.id}|${m}`;
       const stored = yr.cells[key];
-      if (stored) {
+      /* A NOTE WITH NO FIGURE ANNOTATES THE MONTH, IT DOES NOT ANSWER FOR IT
+         (2026-08-26). A stored `missing` cell is somebody writing "the bill
+         never came" on a blank month, and a blank month is what it stays: the
+         note rides along and everything else is worked out exactly as if
+         nothing were stored at all. That last part is the whole reason this is
+         a branch rather than a field on the cell — falling into the block
+         above would SUPPRESS a future month's estimate, so annotating next
+         March would silently empty it. */
+      if (stored && stored.kind !== 'missing') {
         resolved[key] = { v: stored.v, kind: stored.kind, note: stored.note,
                           parts: stored.parts };
         continue;
       }
+      const noted = stored && stored.note ? { note: stored.note } : null;
       if (!live || m <= (yr.enteredThrough || '')) {
-        resolved[key] = { v: 0, kind: 'missing' };
+        resolved[key] = { v: 0, kind: 'missing', ...noted };
         continue;
       }
       /* THE SCHEDULE DECIDES WHERE AN ESTIMATE MAY LAND (2026-08-25). Before
@@ -5488,8 +5519,8 @@ function computeYear(st, yearKey, prior) {
          figure is untouched either way — it wins above, before this line, the
          way a typed figure wins everywhere. */
       const v = paysIn(cat, m) ? RULES[cat.rule || 'none'](cat, m, ctx) : null;
-      resolved[key] = v === null ? { v: 0, kind: 'missing' }
-                                 : { v: round2(v), kind: 'auto' };
+      resolved[key] = v === null ? { v: 0, kind: 'missing', ...noted }
+                                 : { v: round2(v), kind: 'auto', ...noted };
     }
 
     /* 2 · balances (live model only — the account chain from the sheet) */
@@ -5901,6 +5932,11 @@ const HELP = {
     ['Only a row you mark ', b('paid by hand'), ' is ever warned about. One on autopay just '
       + 'says when it goes out — that is a note about your arrangement, and the app has no way '
       + 'to check whether the payment actually went through.'],
+    ['If a bill never turns up, you can say so without pretending it did: write a ',
+      b('note on that month and leave the amount empty'), '. The month stays blank \u2014 still '
+      + 'unpaid, still counted, still warned about \u2014 and the note shows as a dot on the '
+      + 'grid. Typing $0.00 instead is the opposite claim: the bill came and it was nothing, '
+      + 'which settles the month and stops the warning.'],
     ['A warning starts a set number of days before the date (Preferences) and stops the moment '
       + 'the month\u2019s figure is ', b('recorded as something that happened'),
       ' rather than an estimate — which is the same thing marking the month as entered does to '
@@ -8021,7 +8057,14 @@ const KIND_LABEL = { actual: 'actual', manual: 'your estimate',
    Shown through the grid's own tooltip (white-space: pre-line), so both the
    line breaks and the blank lines actually render. */
 function cellTip(r) {
-  const head = [fmtMoney(r.v), KIND_LABEL[r.kind]].filter(Boolean).join(' · ');
+  /* A CELL THAT RECORDS NOTHING PRINTS NO FIGURE. `missing` is worth $0
+     because nothing was recorded, and "$0.00 · nothing recorded" says both
+     halves of a contradiction — the first reads as a stated zero, which is the
+     one thing this app is careful to keep distinct from an absence. It only
+     started mattering once a note could sit on a blank month (2026-08-26),
+     which is when the tooltip on such a cell became a thing anybody sees. */
+  const head = [r.kind === 'missing' ? '' : fmtMoney(r.v),
+    KIND_LABEL[r.kind]].filter(Boolean).join(' · ');
   const partNote = (r.parts || []).some(p => p.note);
   const split = !!(r.parts && (r.parts.length > 1 || partNote));
   const blocks = [split ? `Total ${head}` : head];
@@ -20234,10 +20277,22 @@ function openCellEditor(yearKey, type, id, m) {
     const kindText = resolvedCell?.kind === 'auto'
       ? `auto estimate (${ruleDesc(cat)})`
       : KIND_LABEL[resolvedCell?.kind || 'missing'];
+    /* WHAT IS ACTUALLY RECORDED HERE, which is not the same as what the cell
+       resolves to (2026-08-26). `missing` is worth $0 because nothing was
+       recorded, and the box used to open showing that $0.00 as if it were a
+       figure — so writing a note on a blank month and saving stated that the
+       bill came and was nothing, which marked it paid and took its own warning
+       off the page. Reported exactly that way. Empty box, and the context line
+       stops claiming a figure it hasn't got either. A note-only cell reopens
+       the same way it was saved: still nothing recorded, note intact. */
+    const recorded = stored && stored.kind !== 'missing' ? stored
+      : (resolvedCell && resolvedCell.kind !== 'missing' ? resolvedCell : null);
     F('cellContext').textContent = kindText
-      + (resolvedCell ? ` · currently ${fmtMoney(resolvedCell.v)}` : '');
+      + (recorded ? ` · currently ${fmtMoney(recorded.v)}` : '');
     F('cellValue').dataset.money = 'on';
-    F('cellValue').value = showMoney(stored ? stored.v : (resolvedCell?.v ?? ''));
+    F('cellValue').value = showMoney(recorded ? recorded.v : '');
+    /* Said where the empty box is, because an empty box asks a question. */
+    if (!recorded) F('cellValue').placeholder = 'Nothing recorded';
     F('cellNote').value = stored?.note || '';
     const future = live && m > yr.enteredThrough;
     kindWrap.hidden = !future;
@@ -20460,7 +20515,19 @@ F('cellForm').onsubmit = () => {
         yr.cells[key] = cell;
       }
     }
-    else if (v === null || Number.isNaN(v)) { delete yr.cells[key]; }
+    /* A NOTE WITH NO FIGURE IS A THING YOU CAN SAVE (2026-08-26). Clearing the
+       amount used to throw the note away with it, so "the bill never came" was
+       unsayable — the only way to keep the words was to type a figure, and the
+       only figure that fits is 0, which says the bill DID come and was nothing.
+       That marks the month paid and silences the very warning the note was
+       about. Stored as `kind: 'missing'`, the engine's own word for nothing
+       recorded: the month stays blank, stays unpaid, stays counted as
+       outstanding, and carries the note. */
+    else if (v === null || Number.isNaN(v)) {
+      const note = F('cellNote').value.trim();
+      if (note) yr.cells[key] = { v: 0, kind: 'missing', note };
+      else delete yr.cells[key];
+    }
     else {
       const live = yr.model === 'live';
       const future = live && m > yr.enteredThrough;
@@ -20627,7 +20694,13 @@ function markMonthEntered() {
   let waiting = 0;
   for (const cat of yr.categories) {
     const key = `${cat.id}|${target}`;
-    if (yr.cells[key]) continue;
+    /* A NOTE WITH NO FIGURE IS NOT AN ANSWER, so the month's estimate is still
+       minted and the note comes with it. Treating it as a stored cell would
+       mean writing "check this one" on next month quietly stopped that row
+       being entered at all — a note is an annotation, never a claim about the
+       money. */
+    const noted = yr.cells[key];
+    if (noted && noted.kind !== 'missing') continue;
     /* A row WAITING ON THE BILL is left blank on purpose. Minting an estimate
        into an `actual` is the app asserting that a figure happened; a row the
        reader has explicitly marked as still unbilled is the reader asserting
@@ -20640,7 +20713,8 @@ function markMonthEntered() {
       continue;
     }
     const r = c.cells[key];
-    if (r && r.kind === 'auto') yr.cells[key] = { v: r.v, kind: 'actual' };
+    if (r && r.kind === 'auto')
+      yr.cells[key] = { v: r.v, kind: 'actual', ...(noted?.note ? { note: noted.note } : {}) };
   }
   yr.enteredThrough = target;
   save(); render();

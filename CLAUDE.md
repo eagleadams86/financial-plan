@@ -3541,6 +3541,54 @@ backwards. Anything that walks the whole plan's months has to ask each year's
 own copy what it says, not assume the row it started from speaks for all of
 them.
 
+## A note with no figure (2026-08-26)
+
+**`kind: 'missing'` is a legal STORED cell now — a note on a month where
+nothing happened.** Asked for the same afternoon the back-dues shipped: Charlie
+wanted to write "the bill never came" on the month his water bill went missing,
+and doing so silenced the warning he had just asked for. Three separate things
+conspired, and every one of them was ours:
+
+1. **The amount box opened showing `$0.00`.** `missing` is worth 0 because
+   nothing was recorded, and the prefill read `resolvedCell.v` without asking
+   what kind it was — so a blank month invited you to save a figure it had
+   invented. It opens EMPTY now (placeholder "Nothing recorded"), and the
+   context line stops appending "· currently $0.00" to the words "nothing
+   recorded", which was a contradiction printed on one line.
+2. **Clearing the amount deleted the whole cell, note included.** So the only
+   way to keep the words was to type a figure, and the only figure that fits is
+   0 — a STATED $0.00, which in this file means the bill came and was nothing.
+   `dueStatus` reads `kind === 'actual'` as paid, so the warning went out.
+3. **The boundary would have undone the fix on the next reload.** `coerceShape`
+   coerced any kind outside `['actual','manual','mixed']` to `'actual'`.
+
+- **THE DISTINCTION IS THE POINT.** A stated $0.00 and nothing recorded are two
+  different claims, and this file already treats them that way everywhere —
+  `rowHideable` refuses to hide a stated zero, `dueStatus` counts one as paid.
+  A note-only cell is the third state that was missing: *something written on a
+  month that still records nothing*.
+- **`computeYear` BRANCHES rather than treating it as a stored cell**, and that
+  is the load-bearing part. Falling into the stored branch would SUPPRESS a
+  future month's estimate, so annotating next March would silently empty it.
+  The note rides along on whatever the month would have resolved to anyway —
+  `missing` in an entered month, the rule's `auto` figure in a future one.
+- **`markMonthEntered` treats it as no cell too**, and carries the note onto
+  the actual it mints. Otherwise writing "check this one" on next month would
+  quietly stop that row being entered at all.
+- **The boundary deletes a `missing` cell with nothing written on it**, and
+  strips any `v` or `parts` off one that has: one spelling of nothing, and a
+  kind that claims no figure may not smuggle one.
+- **`cellTip` prints no figure for a `missing` cell.** "$0.00 · nothing
+  recorded" is the same contradiction as the context line, and it only started
+  being seen once a blank month could carry a note worth hovering over.
+- **Everything downstream was already right** and needed no change:
+  `notesOfYear` reads `yr.cells` for any note whatever the kind, `hasNote`
+  earns the grid dot, `rowHideable`'s note guard keeps the row on the Month
+  page, and `outstandingDues` still counts the period as owing.
+- No schema bump: no existing plan has one, and a build that predates this
+  reads a note-only cell as a stated $0.00 — the state it would have been in
+  anyway.
+
 ## Folding a box up
 
 **Every card on every tab collapses to its heading, and the renderers know
