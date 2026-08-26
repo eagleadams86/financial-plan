@@ -3704,6 +3704,16 @@ function coerceShape(data) {
           if (cat.duePayAhead === true) cat.duePayAhead = true;
           else delete cat.duePayAhead;
         }
+        /* ── The month the row stopped ─────────────────────────────────
+           `until` is the last month this row had money in it, and it is
+           deliberately the SAME key, the same shape and the same words an
+           ACCOUNT uses to say it was closed — two objects saying one thing,
+           and one vocabulary to learn. A month string or nothing: absent is
+           "still in use", and there is no second spelling of that (never
+           `false`, never `''` — the Firestore rule). Guarded exactly like
+           `dueHold` and `a.until` above it. */
+        if (typeof cat.until !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.until))
+          delete cat.until;
         if (cat.section) continue;
         if (looksLikeTransfer) { cat.section = 'transfer'; continue; }
         let sum = 0;
@@ -5865,11 +5875,18 @@ const HELP = {
       + 'making it up. It is netted off the total above, so Money Out is what the month '
       + 'really cost you.'],
     ['A row with nothing recorded stays on the list, quietly, at the bottom. Opening one is '
-      + 'how a month gets filled in, and on a phone this list is the way in. The one '
-      + 'exception is a row whose ', b('due date says it does not fall in this month'),
-      ' — a quarterly water bill in February — which drops off with a line at the foot of '
-      + 'the section saying how many went and offering them back. A row that carries a '
-      + 'figure, a note or split amounts never drops off, whatever its schedule says.'],
+      + 'how a month gets filled in, and on a phone this list is the way in \u2014 so a month '
+      + 'you have not finished with keeps every one of them.'],
+    ['Three kinds of row do drop off, and they have one thing in common: there is ',
+      b('nothing in them'), ' to lose. A row whose due date says it does not fall in this '
+      + 'month, a quarterly water bill in February. A row you have marked as ',
+      b('stopped using'), ', in any month after the one it stopped in. And once a month is '
+      + 'entered \u2014 or belongs to a year that is finished and pinned \u2014 any row that is '
+      + 'simply blank, because a month you have answered for is not one you are still '
+      + 'filling in. A line at the foot of the section says how many went and offers them '
+      + 'back. A row carrying a figure, a note or split amounts never drops off, whatever '
+      + 'else is true of it \u2014 a stated $0.00 is a claim somebody made and stays on the '
+      + 'page.'],
   ] },
   monthDue: { title: 'How Due Dates Work', body: [
     ['A budget row can say ', b('when its money is owed'), ' — a day of the month, and which '
@@ -6593,6 +6610,11 @@ function welcomeCard() {
                  holdings, so the Investments tab's reconciliation notice shows
      Mia's 529   an account with an owner
 
+     Cash back   THE ROW THAT STOPPED — `until` set to April, four months of
+                 figures and nothing after. A `carry` row on purpose: without
+                 the stop it would repeat itself into every later month, ride
+                 into next year at rollover and sit on eight Month pages saying
+                 nothing. Income, because a stopped row is not always a bill.
      Sweep row   `rule: 'overflow'` — everything Everyday holds over $6,000 goes
                  to Emergency, and `capGoalId` STOPS it the month that goal is
                  met. It fires once, in September, and then never again: the one
@@ -6678,6 +6700,18 @@ function sampleState() {
       { id: 'ben-pay',    name: 'Ben — paycheck',   rule: 'carry',    role: 'normal', section: 'income',
         person: 'ben', isPay: true },
       { id: 'other-income', name: 'Other income',   rule: 'none',     role: 'normal', section: 'income' },
+      /* THE ROW THAT STOPPED, and it is the case the feature was built for:
+         a card whose cash back was redeemed every month until the card was
+         swapped in April for one that collects points instead — money that
+         never reaches the budget, so there is nothing left to record.
+         `carry` is what makes the demo worth having: without `until` this row
+         would repeat April's $46 into every remaining month of the year, ride
+         into next year at rollover, and sit on eight Month pages with nothing
+         to say. With it, the grid stops after April and says why, the Month
+         pages from May on leave it out, and `rolloverYear` does not carry it.
+         An INCOME row on purpose — a stopped row is not always a bill. */
+      { id: 'cash-back',  name: 'Card cash back',   rule: 'carry',    role: 'normal', section: 'income',
+        until: m(4) },
       /* The everyday case, and the OTHER half of `duePay`: a big bill on
          autopay says when it goes and is never warned about. */
       { id: 'mortgage',   name: 'Mortgage',         rule: 'carry',    role: 'normal', section: 'expense',
@@ -6749,6 +6783,10 @@ function sampleState() {
       put('everything-else', i, -(380 + (i % 5) * 70));
       put('to-savings', i, -600);
       put('to-college', i, -300);
+      /* Four months and then nothing — the row's own `until` says the same
+         thing, and the two have to agree or the demo shows a stopped row with
+         figures after it stopped. */
+      if (i <= 4) put('cash-back', i, 40 + i * 2);
       /* JANUARY ONLY. It falls in January, April, July and October — so the
          eight other months demonstrate the row dropping off the Month page,
          and April and July demonstrate a bill that was never sent. */
@@ -7452,6 +7490,12 @@ function gridCard(y, yr) {
        must stay separate: one says what the app guesses, this says when the
        money is owed. */
     DUE_PAY.includes(cat.duePay) ? ' · ' + esc(dueScheduleWords(cat)) : ''}${
+    /* A STOPPED ROW SAYS SO HERE, and the grid is the right place for it: the
+       Month page answers by hiding the row, which tells you nothing about WHY
+       it went, and the year grid is where a row whose figures stop halfway
+       across looks like an oversight. Same sentence an account's own row
+       carries when it was closed. */
+    cat.until ? ' · stopped ' + esc(monthLabelFull(cat.until)) : ''}${
     cat.note ? ' · ' + esc(cat.note) : ''} — click to edit this row">${esc(cat.name)}${
     /* The overflow explanation sits on the rows it is about rather than on the
        Transfers band, where it used to be: the band now carries the sign
@@ -8364,6 +8408,43 @@ function monthAhead(yr, m) {
    form ("Aug 2026") and stays that; a card's own title has the room. */
 const monthTitle = (m) => `${MONTH_FULL[+String(m).slice(5, 7) - 1]} ${String(m).slice(0, 4)}`;
 
+/* ═══════════════════ A row that has stopped ══════════════════════════════
+   A budget row is often only true for part of the plan. Charlie changed credit
+   cards and stopped redeeming cash back every month — the points go somewhere
+   the budget never sees — so a row that was right for four months of 2026 is
+   wrong for every month after it. Left alone such a row keeps estimating
+   itself forward, keeps its place on every Month page it has nothing to say
+   about, and gets copied into next year for him to delete by hand.
+
+   `cat.until` is the LAST MONTH THE ROW HAD MONEY IN IT, and it is deliberately
+   the same key, the same 'YYYY-MM' shape and the same words an ACCOUNT already
+   uses to say it was closed (`a.until`, "Stopped using it"). Two objects
+   answering one question the same way is one vocabulary rather than two.
+   ABSENT means still in use; there is no second spelling of that.
+
+   IT IS STATED, NEVER INFERRED. Reading the end off "the last month that has a
+   figure" was the other option and it is worse in the way inference usually is:
+   the row's whole behaviour would move every time a cell was typed or cleared,
+   clearing the last figure would silently un-stop the row, and a bill that
+   simply hasn't been paid yet reads identically to one that never will be.
+
+   THIS ONE REACHES THE ENGINE, unlike the due-date block below it. A stopped
+   row that carried on estimating would never be empty, and a row that is never
+   empty can never drop off the Month page — which is the whole point of saying
+   it stopped. `paysIn` is the gate, the SAME one a ticked month list goes
+   through, so there is one answer to "does this row's money move in this
+   month" rather than two that can disagree. A TYPED FIGURE STILL WINS, the way
+   a typed figure wins everywhere here: a charge that turned up after you
+   stopped is a fact, and it keeps the row on that month's page.
+
+   No schema bump and no migration — the `dueMonths` precedent. An absent key is
+   what every existing plan already has, and it means exactly what those plans
+   currently do. */
+function rowEnded(cat, m) {
+  return !!(cat && typeof cat.until === 'string'
+    && typeof m === 'string' && m > cat.until);
+}
+
 /* ═══════════════════════════ Due dates ════════════════════════════════════
    A budget row says how much and which month; a real bill also has a DAY, and
    often only falls in some months — water four times a year, school taxes
@@ -8434,6 +8515,14 @@ function dueMonthsOf(cat) {
 function dueOn(cat, m) {
   if (!cat || !DUE_PAY.includes(cat.duePay)) return null;
   if (typeof m !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(m)) return null;
+  /* A ROW THAT HAS STOPPED HAS NO DEADLINES, and this is the one line that
+     says so to all four readers at once — the reminder, the hide rule, the
+     outstanding count and the estimate gate all come through here. Without it
+     a cancelled subscription would announce itself late, every month, for
+     ever, which is the same failure `duePayAhead` exists to prevent. The gate
+     is on `m`, the month the money MOVES, so an early payer stops on the month
+     he stopped paying rather than the month the last bill was dated. */
+  if (rowEnded(cat, m)) return null;
   /* ── "I pay it the month before" ────────────────────────────────────────
      A bill due on the 3rd is one you settle a week earlier, which is in the
      PREVIOUS month — so the money leaves in month m and the deadline it
@@ -8463,6 +8552,10 @@ function dueOn(cat, m) {
    byte for byte what it always did — which is what keeps the real-data
    cross-check honest and is worth a test of its own. */
 function paysIn(cat, m) {
+  /* Above the ticked list, because a stopped row is stopped whether or not it
+     ever had a schedule — most rows have none, and the row Charlie stopped is
+     one of them. */
+  if (rowEnded(cat, m)) return false;
   if (!cat || !Array.isArray(cat.dueMonths) || !cat.dueMonths.length) return true;
   return dueOn(cat, m) !== null;
 }
@@ -8603,11 +8696,19 @@ function outstandingDues(cat, months, at, todayIso) {
 
    `at(catId)` hands back the resolved cell. `live` is the month's own answer
    and is the same for every row in it, so it is a value rather than a lookup. */
-function monthDues(cats, at, m, todayIso, leadDays, live) {
+function monthDues(cats, at, m, todayIso, leadDays, live, finalized) {
   const dues = [], held = [], quiet = [];
   for (const cat of cats || []) {
-    if (!DUE_PAY.includes(cat.duePay)) continue;
     const cell = at(cat.id);
+    /* THE ONE ANSWER to "may this row drop off the list", so the sections
+       cannot reach a different verdict from the card. Asked of EVERY row, not
+       only the scheduled ones — a finished month hides its blanks whether or
+       not they ever had a due date, and a stopped row usually never had one.
+       Hideable even when held: a held row in a month it does not fall in still
+       drops off Expenses, and the card above names it, which is a better place
+       for it. */
+    if (rowHideable(cat, cell, m, finalized)) quiet.push(cat);
+    if (!DUE_PAY.includes(cat.duePay)) continue;
     const st = dueStatus(cat, m, cell, todayIso, leadDays, live);
     /* A HELD ROW IS REPORTED IN EVERY MONTH, not only the ones it falls in, and
        that is the difference between a pause that helps and one that hides.
@@ -8620,11 +8721,6 @@ function monthDues(cats, at, m, todayIso, leadDays, live) {
     if (isHeld) held.push({ cat, cell, status: st });
     else if (st && (st.state === 'soon' || st.state === 'due' || st.state === 'late'))
       dues.push({ cat, cell, status: st });
-    /* THE ONE ANSWER to "may this row drop off the list", so the sections
-       cannot reach a different verdict from the card. Hideable even when held:
-       a held row in a month it does not fall in still drops off Expenses, and
-       the card above names it, which is a better place for it. */
-    if (live && rowHideable(cat, cell, m)) quiet.push(cat);
   }
   /* Soonest deadline first, so a late bill leads the list it is late in. */
   dues.sort((a, b) => a.status.date.localeCompare(b.status.date));
@@ -8646,9 +8742,28 @@ function monthDues(cats, at, m, todayIso, leadDays, live) {
    `kind: 'missing'` is the engine's own word for "nothing recorded" and
    already implies a zero; the other two guards are belt and braces against a
    hand-edited backup. */
-function rowHideable(cat, r, m) {
-  return !!(cat && DUE_PAY.includes(cat.duePay) && !dueOn(cat, m)
-    && r && r.kind === 'missing' && !hasNote(r) && !r.parts);
+function rowHideable(cat, r, m, finalized) {
+  /* EMPTY FIRST, and nothing below can overrule it. Whatever reason a row has
+     for dropping off, it drops off only when there is nothing there to lose. */
+  if (!r || r.kind !== 'missing' || hasNote(r) || r.parts) return false;
+  /* A MONTH THAT IS FINISHED WITH (2026-08-26). Once a month is entered — or
+     belongs to a year that computes nothing at all — a blank row is not a row
+     you might still fill in, it is a row that had nothing to do with that
+     month, and the list is longer for it. This is the same argument the
+     schedule made, applied to the case a schedule cannot describe: the row you
+     started in May, the row you stopped in April, the row that only ever
+     happens twice. The month being finished is doing the work an explicit
+     answer does elsewhere, and it can afford to: the reveal is one tap, and
+     nothing carrying a figure, a note or split parts got past the line above.
+     A month still open keeps every blank row, because opening one is how a
+     month gets filled in and on a phone this list is the way in. */
+  if (finalized) return true;
+  /* A row that has stopped, in a month after it stopped — true in an OPEN
+     month too, which is the difference between this and the line above: next
+     March is not finished with, but a card you cancelled last May will not be
+     turning up in it. */
+  if (rowEnded(cat, m)) return true;
+  return !!(cat && DUE_PAY.includes(cat.duePay) && !dueOn(cat, m));
 }
 
 /* ── Saying it in words ────────────────────────────────────────────────────
@@ -8890,6 +9005,14 @@ function renderMonthView() {
   const live = yr.model === 'live';
   const started = yearStarted(state, y);
   const entered = live && m <= (yr.enteredThrough || '');
+  /* IS THIS MONTH FINISHED WITH? Written exactly as `computeYear` writes it
+     (`!live || m <= enteredThrough`) rather than off `entered` above, because
+     the two questions differ on a PINNED year: `entered` is about the marker
+     you moved, and this is about whether a blank cell can still become
+     something. A pinned year computes nothing and every unstated cell in it
+     resolves `missing` for good, which is as finished as a month gets. Read by
+     the hide rule and by nothing else. */
+  const finalized = !live || m <= (yr.enteredThrough || '');
   const prevM = monthAdd(m, -1);
 
   /* ── What this month's due dates say ─────────────────────────────────────
@@ -8922,7 +9045,7 @@ function renderMonthView() {
     return { y: yy, yr: yrr, c: cc };
   };
   const due = viewOnly ? { dues: [], held: [], quiet: [] }
-    : monthDues(yr.categories, cellAt, m, today, lead, live);
+    : monthDues(yr.categories, cellAt, m, today, lead, live, finalized);
 
   /* ── NEXT MONTH'S BILLS, ON THIS MONTH'S PAGE ────────────────────────────
      A bill due the 1st is one you pay in the month BEFORE it, and the whole
@@ -8947,7 +9070,8 @@ function renderMonthView() {
   const nextDues = !nextIn ? [] : monthDues(
     nextIn.yr.categories,
     (id) => nextIn.c.cells[`${id}|${nextM}`] || { v: 0, kind: 'missing' },
-    nextM, today, lead, nextIn.yr.model === 'live')
+    nextM, today, lead, nextIn.yr.model === 'live',
+    nextIn.yr.model !== 'live' || nextM <= (nextIn.yr.enteredThrough || ''))
     .dues.filter(d => (d.status.state === 'soon' || d.status.state === 'due')
       /* A row that already says it pays a month ahead is reported in the month
          it PAYS, which is this one — `dueOn` shifted it there. Letting the
@@ -9174,14 +9298,16 @@ function renderMonthView() {
       .sort((a, b) => Math.abs(b.r.v) - Math.abs(a.r.v)
         || a.cat.name.localeCompare(b.cat.name));
     /* ── The rows this month has no business showing ────────────────────────
-       A quarterly water bill in February, school taxes in April. They are the
-       reason the schedule is worth storing at all on a phone, where this list
-       IS the way in.
+       Three kinds, and `rowHideable` is the one place that decides which: a
+       quarterly water bill in February, a row you have STOPPED USING, and —
+       since 2026-08-26 — anything blank in a month that is FINISHED WITH.
 
        This is a deliberate EXCEPTION to the rule that a row with nothing
-       recorded stays on the list — that rule is about a row you might still
-       want to fill in, and a month a bill does not fall in is not one of
-       those. It is bought at a price and the price is paid three ways:
+       recorded stays on the list. That rule is about a row you might still
+       want to fill in, and none of the three is one of those: a bill does not
+       fall in that month; a stopped row will never fall in another one; and a
+       month you have entered is one you have finished answering for.
+       It is bought at a price and the price is paid three ways:
        `rowHideable` refuses to hide anything that carries a figure, a note or
        split parts, so nothing that would stop the visible list adding up to
        the total below it can go; the rows are still RENDERED, merely `hidden`,
@@ -9201,10 +9327,17 @@ function renderMonthView() {
        be reveal, tap, save, reveal, tap, save. It lives in `ui` beside the set
        of folded boxes, for the same reason that does: a deliberate arrangement
        of the page should still be there a moment later. */
+    /* THE WORDING NAMES WHAT THE THREE HAVE IN COMMON, which is that they are
+       EMPTY — `rowHideable`'s first line is what makes that true of every row
+       in the set. It said "not due this month" while a schedule was the only
+       way a row could go, and saying that over a set now mostly made of rows
+       with no schedule at all would be the button describing a FEATURE rather
+       than the rows. Each row still says its own reason once revealed: the
+       schedule is in its footer, and so is a stopped row's month. */
     const revealLine = () => !hideable.length ? '' : `<button type="button"
       class="revealrows" data-reveal="${showing ? 'off' : 'on'}">${showing
-        ? `Hide the ${hideable.length} row${hideable.length === 1 ? '' : 's'} not due this month`
-        : `${hideable.length} row${hideable.length === 1 ? " isn't" : "s aren't"} due this month — show`
+        ? `Hide the ${hideable.length} empty row${hideable.length === 1 ? '' : 's'}`
+        : `${hideable.length} row${hideable.length === 1 ? ' is' : 's are'} empty this month — show`
       }</button>`;
     const line = ({ cat, r }) => {
       const zero = r.v === 0;
@@ -9224,6 +9357,14 @@ function renderMonthView() {
         ? `auto estimate — ${esc(ruleDesc(cat))}` : kindWord(r.kind));
       if (sec === 'transfer' && inside.has(cat.id))
         bits.push('between your own accounts');
+      /* A STOPPED ROW SAYS WHEN, right here, and it is worth the words because
+         of where it is read: the row is hidden by default, so the only reason
+         you are looking at it is that you pressed Show and want to know what it
+         is doing on the page. "Nothing recorded" alone answers the wrong
+         question — every hidden row has nothing recorded. Quiet, among the
+         other bits, and it reads correctly on the months the row was still
+         running in too. */
+      if (cat.until) bits.push(`stopped ${esc(monthLabelFull(cat.until))}`);
       /* The schedule joins the other quiet bits — "8% of expenses · your
          estimate · due the 15th" — and stays quiet whatever it says. The PILL
          is the only loud part, and only three states earn one. It lives INSIDE
@@ -14817,9 +14958,22 @@ function rolloverYear(st, computed, fromKey) {
   if (st.years[newKey]) return null;
   const start = `${newKey}-01`;
   const months12 = Array.from({ length: 12 }, (_, i) => monthAdd(start, i));
+  /* A ROW THAT HAS STOPPED DOES NOT COME WITH YOU, and this is the half of the
+     feature that does the tidying. Charlie's cash-back row was true for four
+     months of 2026 and is not a row 2027 has ever had; carrying it over means
+     it sits in next year's grid until he notices and deletes it by hand, which
+     is exactly the chore `until` exists to end. Its CELLS go with it — the
+     loop below reads this list, so a hand-typed figure in a month the row no
+     longer exists in can never be minted.
+     Compared against the new year's FIRST MONTH rather than assumed: a row
+     stopped in a month the new year contains is still that year's row for as
+     long as it lasts. The old year is untouched either way — the row and every
+     figure it holds stay exactly where they happened. */
+  const carried = src.categories.filter(cat =>
+    !(typeof cat.until === 'string' && cat.until < start));
   const cells = {}, paychecks = {};
   for (const m of months12) {
-    for (const cat of src.categories) {
+    for (const cat of carried) {
       const old = src.cells[`${cat.id}|${m}`];
       /* hand-typed knowledge carries forward; a split month keeps its parts */
       if (old && (old.kind === 'manual' || old.kind === 'mixed'))
@@ -14847,7 +15001,7 @@ function rolloverYear(st, computed, fromKey) {
        array rather than pushing into the old one — but that is a property of
        one call site, and everything else that ever touches a row would have to
        know it. Copied here instead, where the copy is made. */
-    categories: src.categories.map(cat => {
+    categories: carried.map(cat => {
       const copy = { ...cat };
       for (const k of ['dueMonths', 'accounts', 'thresholdAccounts', 'capAccounts'])
         if (Array.isArray(copy[k])) copy[k] = copy[k].slice();
@@ -16487,6 +16641,32 @@ function applyToRow(yrs, id, apply, add) {
     else if (add) yr.categories.push(add());
   }
 }
+/* WHICH YEARS BUILT AHEAD A STOPPED ROW LEAVES, and it is pure and exported so
+   its two guards can be pinned — both are about not deleting something somebody
+   said.
+
+   `rolloverYear` keeps a stopped row out of a year it CREATES, which covers the
+   years that don't exist yet. The years already sitting ahead are the other
+   half, and without this the tidy-up is only half done: you say the row stopped
+   in May and it is still standing in next year's grid, which is the chore the
+   field exists to end.
+
+   A year that CONTAINS the stop month keeps the row — it was alive for part of
+   that year, and the row is that year's row for as long as it lasts. And a year
+   holding any STORED cell for it keeps it, even a blank one: a rolled-over year
+   carries the figures you typed by hand, `dropRow` takes a row's cells with it,
+   and a typed figure is the one thing here that is never the app's to throw
+   away. Nothing in the year you are editing moves either way. */
+function yearsDroppingRow(st, years, id, stop) {
+  if (!id || !/^\d{4}-(0[1-9]|1[0-2])$/.test(stop || '')) return [];
+  return (years || []).filter(y => {
+    const yr = st.years[y];
+    if (!yr || yr.kind !== 'grid') return false;
+    if (!yr.categories.some(c => c.id === id)) return false;
+    if (yearMonths(yr).some(mm => mm <= stop)) return false;
+    return !Object.keys(yr.cells || {}).some(k => k.startsWith(id + '|'));
+  });
+}
 function dropRow(yrs, id) {
   for (const yr of yrs) {
     yr.categories = yr.categories.filter(c => c.id !== id);
@@ -16770,6 +16950,22 @@ const EDITORS = {
             + 'bill is paid \u2014 and in the months it does not fall in, the row drops off '
             + 'the Month page, though only when nothing is recorded there, so a row carrying '
             + 'a figure or a note always stays.' },
+      /* ── When the row stopped ──────────────────────────────────────
+         AFTER the due block and before the note, and UNCONDITIONAL — a row
+         that stops need never have had a due date, and the one this was built
+         for had none. It reads as the last thing you say about a row because
+         it is: everything above describes how the row behaves, and this says
+         until when.
+         `dueMonths` above it is `wide`, which ends the row in progress, so an
+         ordinary-width field here starts a fresh one rather than being
+         stranded — and with the due block unticked it simply follows
+         whatever the last visible field was. */
+      { key: 'until', label: 'Stopped using it', type: 'month',
+        hint: 'The last month this row had money in it \u2014 a card you stopped using, a '
+            + 'subscription you cancelled. After it the row estimates nothing, drops off '
+            + 'the Month page, stops being reminded about, and is left out when next year '
+            + 'is started. A figure you type into a later month still stands. Leave it '
+            + 'empty for a row still in use.' },
       noteField,
     ],
     get(ds) {
@@ -16801,6 +16997,7 @@ const EDITORS = {
            back. */
         dueSet: DUE_PAY.includes(cat.duePay),
         duePayAhead: cat.duePayAhead ? 'ahead' : '',
+        until: cat.until || '',
         dueMonths: dueMonthsOf(cat).map(String) };
     },
     blank: () => ({ rule: 'none', role: 'normal', section: 'expense',
@@ -16931,22 +17128,41 @@ const EDITORS = {
             if (v.duePayAhead === 'ahead') cat.duePayAhead = true;
             else delete cat.duePayAhead;
           }
+        /* The month the row stopped. Guarded here as well as at the boundary —
+           the `limitsFor` discipline: a field that changes what the engine
+           computes is checked where it is WRITTEN, not only where a stored plan
+           is read. Deleted when empty, never `''` (the Firestore rule). */
+        if (/^\d{4}-(0[1-9]|1[0-2])$/.test(v.until || '')) cat.until = v.until;
+        else delete cat.until;
       };
       const ahead = projectionsAfter(ds.year);
       const yrs = [yr, ...ahead.map(y => state.years[y])];
+      let rowId = ds.id;
       if (ds.id) {
         applyToRow(yrs, ds.id, apply);
       } else {
         let id = slugJs(v.name), n = 2;
         while (yr.categories.some(c => c.id === id)) id = `${slugJs(v.name)}-${n++}`;
+        rowId = id;
         /* A row of that name may already be up there — added to next year
            alone, before it was added here — in which case the two are one row
            and it takes these settings rather than being duplicated. */
         applyToRow(yrs, id, apply, () => { const cat = { id }; apply(cat); return cat; });
       }
+      /* A STOPPED ROW LEAVES THE YEARS ALREADY BUILT AHEAD — see
+         `yearsDroppingRow`, which owns the two guards and is pure so they can
+         be pinned. */
+      const stop = /^\d{4}-(0[1-9]|1[0-2])$/.test(v.until || '') ? v.until : '';
+      const dropped = yearsDroppingRow(state, ahead, rowId, stop);
+      for (const y of dropped) dropRow([state.years[y]], rowId);
       /* Said out loud, because the year you can see isn't the only one that
          changed — and a row turning up in a year you weren't looking at is
-         exactly the kind of surprise a plan shouldn't spring on you. */
+         exactly the kind of surprise a plan shouldn't spring on you. Losing
+         one is a bigger surprise still, so that sentence wins where both
+         apply. */
+      if (dropped.length)
+        return `Saved — stopped after ${monthLabelFull(stop)}, and taken out of ${
+          andList(dropped)}`;
       if (ahead.length) return `Saved — ${andList(ahead)} updated to match`;
     },
     del(ds) {
@@ -22665,7 +22881,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
      skip is pinned through the state it leaves behind. */
   DUE_PAY, DUE_LEAD_DEFAULT, daysInMonth, dayNumber, daysBetween,
   dueMonthsOf, dueOn, dueStatus, leadDaysOf, monthDues, outstandingDues,
-  rowHideable, paysIn, ordinal, dueFootWords, duePillWords, dueScheduleWords,
+  rowHideable, paysIn, rowEnded, yearsDroppingRow, ordinal, dueFootWords, duePillWords, dueScheduleWords,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its
      prose over a fixture). */

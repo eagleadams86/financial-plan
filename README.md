@@ -161,9 +161,16 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
   money out is what the month really cost you, net of those. Click any line to
   open the same editor the grid opens — notes, split months, revert and the
   balance reconciliation all included. A row with nothing recorded stays on the
-  list, quietly, because opening it is how a month gets filled in — unless its
-  [due date](#due-dates) says it doesn't fall in this month at all, in which
-  case it drops off with a line at the foot of the section offering it back.
+  list, quietly, because opening it is how a month gets filled in. **Three
+  kinds do drop off**, and all three have nothing in them to lose: a row whose
+  [due date](#due-dates) says it doesn't fall in this month, a row you have
+  marked as [stopped](#a-row-that-stopped), and — once a month is
+  [entered](#entered-months-and-finished-years), or belongs to a year you have
+  finished and pinned — any row that is simply blank, because a month you have
+  answered for is not one you are still filling in. A line at the foot of the
+  section says how many went and offers them back. A row carrying a figure, a
+  note or split amounts never drops off: a stated $0.00 is something you said,
+  and it stays on the page.
 - **Anything due**, when there is anything: a card of the hand-paid bills that
   are close or already late, and of any you are still waiting on. It isn't there
   at all in a month with nothing to say.
@@ -333,6 +340,36 @@ $0.00.
 Marking a month as entered **leaves a paused row blank** rather than stamping its
 estimate as paid — it tells you how many rows it left alone — because that's the
 whole point of having said you're still waiting.
+
+### A Row That Stopped
+
+Some rows are only true for part of the plan. You change credit cards and stop
+redeeming cash back; a subscription ends; a bill you paid for eight months goes
+away. Left alone such a row keeps estimating itself forward, sits on every Month
+page with nothing to say, and gets copied into next year for you to delete by
+hand.
+
+Open the row and set **Stopped using it** to the last month it had money in it
+— the same field, and the same words, an account uses when you close it. From
+the month after:
+
+- **it estimates nothing.** A "repeat the last month" row stops repeating rather
+  than carrying its final figure across the rest of the year.
+- **it drops off the Month page**, in open months as well as finished ones — a
+  card you cancelled in May is not turning up next March. It is still there
+  behind the **show** line at the foot of the section, and it says when it
+  stopped.
+- **it is never reminded about again**, and stops counting up unpaid periods.
+- **it is left out when you build next year**, and it is taken out of any year
+  you have already built ahead — unless that year holds the month it stopped in,
+  or holds a figure you typed there, in which case it stays.
+
+**A figure you type into a later month still stands.** A charge that turned up
+after you thought you were done is a fact, and it keeps the row on that month's
+page. Nothing in the year you were using it moves, either: the row and every
+dollar it recorded stay exactly where they happened, and the grid's row label
+says "stopped Apr 2026" so a row whose figures end halfway across doesn't read
+as an oversight. Clear the field and the row is simply in use again.
 
 ### Overflow Sweeps and Caps
 
@@ -534,6 +571,10 @@ row to this year, retire one, rename it, change its rule or move it, and next
 year is changed to match, so a year you built in advance never quietly
 describes a budget you no longer have. Anything you set up in next year alone
 is left alone.
+
+**A row you have marked as [stopped](#a-row-that-stopped) doesn't come with
+you** — not into a year you build now, and not into one you built earlier,
+unless that year holds the month it stopped in or a figure you typed in it.
 
 And it doesn't become the current year — Progress and the rest carry on
 reading this one — until 1 January, or until you mark December entered.

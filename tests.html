@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 791;
+const EXPECTED = 808;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -442,6 +442,19 @@ function projectNextYear(s, categories, cells, paychecks) {
 const PAYROW = () => [{ id: 'paycheck', name: 'Paycheck', role: 'normal',
   rule: 'paycheck', perCheck: 1000 }];
 
+t('a junk stop month is deleted rather than believed', () => {
+  const s = fixtureState();
+  s.years['2030'].categories[0].until = 'whenever';
+  s.years['2030'].categories[1].until = '2030-13';
+  s.years['2030'].categories[2].until = '';
+  s.years['2030'].categories[3].until = '2030-04';
+  const d = H.coerceShape(s);
+  const cats = d.years['2030'].categories;
+  for (let i = 0; i < 3; i++)
+    ok(!('until' in cats[i]), 'never undefined and never kept \u2014 the Firestore rule');
+  eq(cats[3].until, '2030-04', 'and a real one survives');
+});
+
 group('Formula engine — rules');
 t('paycheck rule multiplies per-check by that month count (incl. the 3.5 case)', () => {
   const c = computeFixture()['2030'];
@@ -653,6 +666,37 @@ t('dividends read last month’s cash + mid balances at rate/12', () => {
     'April divs do NOT read the PINNED April cash');
   approx(c.cells['dividends|2030-04'].v, H.round2(0.03 / 12 * (13450 + 1500)),
     'they read March');
+});
+
+/* ── The engine stops where the row stopped ───────────────────────────────
+   `cat.until` is the one field below the due block that reaches computeYear,
+   and it has to: a `carry` row that kept repeating its last figure would never
+   be empty, and a row that is never empty can never drop off the Month page.
+   A TYPED figure still wins, above the gate, the way it wins everywhere here. */
+t('a stopped row estimates nothing after the month it stopped', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].categories.find(c => c.id === 'internet').until = '2030-04';
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(c.cells['internet|2030-04'].v, -50, 'April still carries January\u2019s figure');
+  eq(c.cells['internet|2030-05'].kind, 'missing', 'and May carries nothing');
+  eq(c.cells['internet|2030-05'].v, 0);
+  eq(c.cells['internet|2030-06'].kind, 'missing');
+});
+t('a figure typed after the stop still stands, and does not restart the row', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].categories.find(c => c.id === 'internet').until = '2030-04';
+  s.years['2030'].cells['internet|2030-05'] = { v: -50, kind: 'manual' };
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  eq(c.cells['internet|2030-05'].v, -50, 'a charge that turned up is a fact');
+  eq(c.cells['internet|2030-06'].kind, 'missing', 'and it is not a new beginning');
+});
+t('a plan with no stopped rows computes byte for byte what it always did', () => {
+  const a = H.coerceShape(fixtureState());
+  const b = H.coerceShape(fixtureState());
+  b.years['2030'].categories.find(c => c.id === 'internet').until = '2030-06';
+  eq(JSON.stringify(H.computeAll(b, TODAY_FIX)),
+     JSON.stringify(H.computeAll(a, TODAY_FIX)),
+     'a stop at the end of the grid changes nothing inside it');
 });
 
 group('Formula engine — balances');
@@ -871,6 +915,32 @@ t('rollover copies rules, keeps overlap manuals, seeds December balances', () =>
   approx(ny.seeds.cash, computed['2030'].balances['cash|2030-12'], 'seeded from Dec');
   eq(H.rolloverYear(s, computed, '2030'), null, 'no double rollover');
 });
+/* ── A stopped row does not come with you ─────────────────────────────────
+   The other half of `cat.until`, and the half that does the tidying: a row
+   that was true for four months of this year is not a row next year has ever
+   had. Compared against the new year's FIRST MONTH rather than assumed, so a
+   row stopping INSIDE the new year is still that year's row. */
+t('a stopped row is not carried into the year that follows it', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].monthCount = 18;                    // reaches into 2031
+  s.years['2030'].categories.find(c => c.id === 'internet').until = '2030-04';
+  s.years['2030'].cells['internet|2031-02'] = { v: -50, kind: 'manual' };
+  const before = s.years['2030'].categories.length;
+  eq(H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030'), '2031');
+  eq(s.years['2031'].categories.length, before - 1);
+  ok(!s.years['2031'].categories.some(c => c.id === 'internet'));
+  ok(!Object.keys(s.years['2031'].cells).some(k => k.startsWith('internet|')),
+    'and no orphan cell came across on its own — a figure with no row to sit in');
+  eq(s.years['2030'].categories.length, before,
+    'the old year keeps the row and every dollar it recorded');
+});
+t('a row that stops INSIDE the new year comes with it', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].categories.find(c => c.id === 'internet').until = '2031-03';
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  ok(s.years['2031'].categories.some(c => c.id === 'internet'),
+    'it is that year\u2019s row for as long as it lasts');
+});
 t('the old year is untouched by a rollover', () => {
   const s = H.coerceShape(fixtureState());
   const before = JSON.stringify(s.years['2030']);
@@ -914,6 +984,32 @@ t('a summary year ahead is never rewritten', () => {
   const s = withYearsAhead();
   s.years['2032'] = { kind: 'summary', categoryTotals: [] };
   eq(H.projectionYearsAfter(s, '2030', TODAY_FIX), ['2031']);
+});
+/* ── And a stopped row LEAVES the years already built ahead ──────────────
+   `rolloverYear` handles the years that don't exist yet; this handles the ones
+   already sitting there, which is the other half of "it doesn't carry over".
+   Both guards are about not deleting something somebody said. */
+t('a stopped row is taken out of the years built ahead of it', () => {
+  const s = withYearsAhead();
+  eq(H.yearsDroppingRow(s, ['2031', '2032'], 'internet', '2030-04'),
+    ['2031', '2032']);
+});
+t('a year the row was alive in keeps it', () => {
+  const s = withYearsAhead();
+  eq(H.yearsDroppingRow(s, ['2031', '2032'], 'internet', '2031-06'), ['2032'],
+    '2031 holds the month it stopped in, so it is 2031\u2019s row for six months');
+});
+t('a year holding a figure you typed keeps the row, whatever the stop says', () => {
+  const s = withYearsAhead();
+  s.years['2031'].cells['internet|2031-05'] = { v: -50, kind: 'manual' };
+  eq(H.yearsDroppingRow(s, ['2031', '2032'], 'internet', '2030-04'), ['2032'],
+    'dropping a row takes its cells with it, and a typed figure is never ours to lose');
+});
+t('no stop month drops nothing at all', () => {
+  const s = withYearsAhead();
+  eq(H.yearsDroppingRow(s, ['2031', '2032'], 'internet', ''), []);
+  eq(H.yearsDroppingRow(s, ['2031', '2032'], 'internet', 'whenever'), []);
+  eq(H.yearsDroppingRow(s, ['2031', '2032'], 'nosuchrow', '2030-04'), []);
 });
 t('a rule change lands ahead, and skips a year that dropped the row', () => {
   const yrs = [
@@ -3093,6 +3189,78 @@ t('a figure, a note or split parts always keep a row on the page', () => {
     'a split month netting to zero still moved money — and the total, which is '
     + 'unchanged either way, would never have told you');
 });
+/* ── A row that has stopped ──────────────────────────────────────────────
+   `cat.until` is the last month a row had money in it — the same key, shape
+   and words an ACCOUNT uses to say it was closed. It is the one row field
+   below `duePay` that REACHES THE ENGINE, and it has to: a stopped row that
+   kept estimating would never be empty, and a row that is never empty can
+   never drop off the Month page, which is the whole point of saying it
+   stopped. These pin the four places it lands — the estimate gate, the
+   deadlines, the hide rule and the rollover — and the one thing that beats it
+   everywhere, a figure somebody typed. */
+t('until is the last month the row HAD money in it, not the first without', () => {
+  const r = { id: 'cb', name: 'Card cash back', rule: 'carry', until: '2026-04' };
+  ok(!H.rowEnded(r, '2026-03'));
+  ok(!H.rowEnded(r, '2026-04'), 'the month it stopped is still one of its months');
+  ok(H.rowEnded(r, '2026-05'));
+  ok(!H.rowEnded({ id: 'cb' }, '2026-05'), 'a row still in use never ends');
+  ok(!H.rowEnded(r, undefined), 'and a month that is not a month is not after anything');
+});
+t('a stopped row places no estimate, whatever its rule says', () => {
+  const r = { id: 'cb', rule: 'carry', until: '2026-04' };
+  ok(H.paysIn(r, '2026-04'));
+  ok(!H.paysIn(r, '2026-05'), 'carry would otherwise repeat April for ever');
+  /* Above the ticked list on purpose: most rows carry no schedule at all, and
+     the row this was built for is one of them. */
+  const q = { id: 'w', duePay: 'manual', dueMonths: [1, 4, 7, 10], until: '2026-04' };
+  ok(H.paysIn(q, '2026-04'));
+  ok(!H.paysIn(q, '2026-07'), 'a month it would have fallen in, after it stopped');
+});
+t('a stopped row has no deadlines left to miss', () => {
+  const r = DUE_ROW({ until: '2026-04' });
+  eq(H.dueOn(r, '2026-04'), '2026-04-20');
+  eq(H.dueOn(r, '2026-07'), null, 'the July bill is not coming');
+  eq(H.dueStatus(r, '2026-07', null, '2026-08-01', 7, true), null,
+    'so a cancelled bill can never read late, every month, for ever');
+  eq(H.outstandingDues(r, ['2026-01', '2026-04', '2026-07', '2026-10'],
+    AT({}), '2026-12-01').count, 2,
+    'only the periods it was still running for');
+});
+t('a stopped row drops off every month after it, finished or not', () => {
+  const r = { id: 'cb', name: 'Card cash back', until: '2026-04' };
+  ok(H.rowHideable(r, { v: 0, kind: 'missing' }, '2026-05'),
+    'May is open, and still not a month this row has anything to do with');
+  ok(!H.rowHideable(r, { v: 0, kind: 'missing' }, '2026-04'));
+  ok(!H.rowHideable(r, { v: 46, kind: 'actual' }, '2026-05'),
+    'a figure that turned up after the stop is a fact and keeps the row');
+});
+/* ── And a month that is finished with ────────────────────────────────────
+   The other half, asked for in the same breath: once a month is entered — or
+   belongs to a year that computes nothing at all — a blank row is not one you
+   might still fill in. Every guard `rowHideable` had before still holds, which
+   is what keeps a finished month's visible list adding up to its own total. */
+t('a month that is finished with hides every row that is simply blank', () => {
+  const plain = { id: 'food', name: 'Groceries' };
+  ok(!H.rowHideable(plain, { v: 0, kind: 'missing' }, '2026-05'),
+    'an open month keeps its blanks — opening one is how a month gets filled in');
+  ok(H.rowHideable(plain, { v: 0, kind: 'missing' }, '2026-05', true));
+  ok(!H.rowHideable(plain, { v: 0, kind: 'actual' }, '2026-05', true),
+    'a STATED $0.00 is a claim somebody made, entered month or not');
+  ok(!H.rowHideable(plain, { v: 0, kind: 'missing', note: 'nothing came' }, '2026-05', true),
+    'and hiding it would take the note dot with it');
+  ok(!H.rowHideable(plain, { v: 0, kind: 'mixed',
+      parts: [{ v: 5, kind: 'actual' }, { v: -5, kind: 'actual' }] }, '2026-05', true),
+    'a split month netting to zero still moved money');
+});
+t('monthDues asks EVERY row whether it may be hidden, not only scheduled ones', () => {
+  const cats = [{ id: 'food', name: 'Groceries' },
+                { id: 'cb', name: 'Cash back', until: '2026-04' }];
+  const at = () => ({ v: 0, kind: 'missing' });
+  eq(H.monthDues(cats, at, '2026-05', '2026-05-10', 7, true).quiet.map(c => c.id),
+    ['cb'], 'an open month loses the stopped row and keeps the blank one');
+  eq(H.monthDues(cats, at, '2026-05', '2026-05-10', 7, true, true).quiet.map(c => c.id),
+    ['food', 'cb'], 'and a finished one loses both');
+});
 t('monthDues splits a month three ways and reports a hold in EVERY month', () => {
   const cats = [
     DUE_ROW({ dueHold: '2026-12' }),
@@ -3375,6 +3543,21 @@ t('the sample exercises both halves of a due date', () => {
   eq(water.dueMonths, [1, 4, 7, 10], 'quarterly, so eight months of it can be hidden');
   const billed = Object.keys(d.years[y].cells).filter(k => k.startsWith('water|'));
   eq(billed.length, 1, 'only ever billed once, so periods really do stack up behind it');
+});
+t('the sample carries a row that STOPPED, and stops it properly', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = Object.keys(d.years).filter(k => d.years[k].kind === 'grid').sort().pop();
+  const cb = d.years[y].categories.find(c => c.id === 'cash-back');
+  ok(cb, 'the sample has a stopped row at all');
+  eq(cb.rule, 'carry', 'and a rule that would otherwise repeat for ever');
+  eq(cb.until, `${y}-04`);
+  const billed = Object.keys(d.years[y].cells).filter(k => k.startsWith('cash-back|'));
+  eq(billed.length, 4, 'four months of figures and nothing after \u2014 the row and its '
+    + 'cells have to agree, or the demo shows a stopped row still earning');
+  const c = H.computeAll(d)[y];
+  eq(c.cells[`cash-back|${y}-05`].kind, 'missing', 'May estimates nothing');
+  ok(H.rowHideable(cb, c.cells[`cash-back|${y}-05`], `${y}-05`),
+    'so the Month page can drop it');
 });
 t('a row copied into next year does not SHARE its months with this one', () => {
   /* `rolloverYear` shallow-copies the categories, so an array assigned once and

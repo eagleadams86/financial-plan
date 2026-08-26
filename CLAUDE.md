@@ -3038,10 +3038,13 @@ thirteen-column table to reach one cell.
   month is read DOWN. `settings.rowSort` is deliberately not consulted here.
   A row with nothing recorded sinks to the bottom rather than disappearing:
   opening one is how a month gets filled in, and on a phone this list is the
-  way in. **ONE EXCEPTION since due dates arrived (2026-08-25)**, and it is
-  written down here because the sentence above it used to be absolute: a row
-  whose schedule says it does not fall in this month is `hidden` — see
-  "Due dates" below for the three conditions and the reveal.
+  way in. **THREE EXCEPTIONS now**, and they are written down here because the
+  sentence above them used to be absolute: a row whose schedule says it does
+  not fall in this month (2026-08-25), a row marked as STOPPED, and — in a
+  month that is finished with — any row that is simply blank (both
+  2026-08-26). See "Due dates", "A row that stopped" and "Empty rows in a month
+  that is finished with" below; `rowHideable` is the one place that decides,
+  and its first line is that the cell must be empty.
 - **The estimate kinds are the GRID's**, and the `.c-*` selectors name both
   readers (`.grid td.c-auto, .mamt.c-auto`) rather than being copied — a line
   style that drifted between the lenses would be one month claiming to be
@@ -3324,6 +3327,116 @@ DELETED when inapplicable, never `undefined` — the Firestore rule.
   schedule drive the estimate engine, which is a real follow-up (`dueMonths`
   would make `carry` safe on a quarterly bill) but changes computed figures and
   therefore sits behind the real-data cross-check.
+
+## A row that stopped (2026-08-26)
+
+**A budget row can say the last month it had money in it** — `cat.until`, a
+`YYYY-MM` string, absent while the row is still in use. Asked for from life:
+Charlie changed credit cards and stopped redeeming cash back every month (the
+new card collects points, which the budget never sees), so a row that was right
+for four months of 2026 is wrong for every month after it — and left alone it
+kept estimating itself forward, kept its place on every Month page, and got
+copied into next year for him to delete by hand.
+
+- **It is the SAME key, shape and words an account already uses** (`a.until`,
+  "Stopped using it"). Two objects answering one question the same way is one
+  vocabulary rather than two, and the account field's own hint was the model for
+  this one's. Guarded at the boundary exactly like `dueHold`, and deleted when
+  inapplicable — never `''`, never `undefined` (the Firestore rule).
+- **STATED, never inferred, and that was a real fork.** "The last month with a
+  figure" was the other option and it is worse in the way inference usually is:
+  the row's whole behaviour would move every time a cell was typed or cleared,
+  clearing the last figure would silently un-stop the row, and a bill that
+  simply has not been paid yet is indistinguishable from one that never will be.
+  Charlie picked the stated month.
+- **`rowEnded(cat, m)` is the one reader**, and it lands in exactly four places:
+  - **`paysIn`, ABOVE the ticked month list.** This is the one thing here that
+    reaches `computeYear`, and it has to — a `carry` row that kept repeating
+    would never be empty, and a row that is never empty can never drop off the
+    Month page, which is the whole point. Above the list because most rows have
+    no schedule at all and the row this was built for is one of them.
+  - **`dueOn`, gated on `m` (the month the money MOVES, not the deadline).**
+    One line, and it silences the reminder, the hide rule, the outstanding count
+    and the estimate gate together — the `duePayAhead` discipline. Without it a
+    cancelled bill reads late every month for ever, which is the failure that
+    teaches you to ignore the warning.
+  - **`rowHideable`**, so the row drops off the months after it in an OPEN month
+    too — next March is not finished with, but a card cancelled last May will
+    not be turning up in it.
+  - **`rolloverYear`**, which filters the categories BEFORE the cells loop reads
+    them, so no orphan cell is minted either. Compared against the new year's
+    first month rather than assumed: a row stopping inside the new year is still
+    that year's row for as long as it lasts.
+- **A TYPED FIGURE STILL WINS**, above the gate, the way it wins everywhere in
+  this file. A charge that turned up after you stopped is a fact and it keeps
+  the row on that month's page.
+- **`yearsDroppingRow` is the OTHER half of "it doesn't carry over"** — the
+  years already built ahead, which `rolloverYear` can never reach. Pure and
+  exported so its two guards can be pinned, and both guards are about not
+  deleting something somebody said: a year holding the stop month keeps the row,
+  and a year holding any stored cell for it keeps it (dropping a row takes its
+  cells with it, and a typed figure is the one thing here that is never ours to
+  throw away). Said out loud in the save toast, because losing a row from a year
+  you weren't looking at is a bigger surprise than gaining one.
+- **No schema bump and no migration** — the `dueMonths` precedent. An absent key
+  is what every existing plan already has, and it means exactly what those plans
+  currently do; a test pins that a plan with no stopped rows computes byte for
+  byte what it always did.
+- **It says so in two places on screen, and both are about a row you can see.**
+  The grid's row label ("· stopped Apr 2026", beside the schedule) is what stops
+  a row whose figures end halfway across from reading as an oversight. The Month
+  page's row footer says the same thing — worth the words there precisely
+  because the row is hidden by default, so the only reason you are reading it is
+  that you pressed Show and want to know what it is doing on the page.
+  "Nothing recorded" alone answers the wrong question: every hidden row has
+  nothing recorded.
+- **The editor field is AFTER the due block and unconditional.** A row that
+  stops need never have had a due date. `dueMonths` above it is `wide`, which
+  ends the row in progress, and `noteField` below it is wide too — so `until` is
+  alone on its row and `applyFieldSpans` stretches the CELL while holding the
+  BOX to one column, which is the existing answer to a lone field and needed
+  nothing new.
+- **The sample carries one** (`cash-back`, an INCOME row on `carry`, stopped in
+  April with four months of figures) — a stopped row is not always a bill, and a
+  `carry` rule is what makes the demo worth having: without the stop it would
+  repeat April into every remaining month, ride into next year and sit on eight
+  Month pages saying nothing.
+
+## Empty rows in a month that is finished with (2026-08-26)
+
+**Once a month is entered — or belongs to a year that computes nothing at all —
+a row with nothing recorded drops off the Month page.** Asked for in the same
+breath as `until`, and it is the general case that catches what a stated stop
+month cannot: the row you started in May, the row that only ever happens twice,
+the row somebody else's plan carries and yours does not.
+
+- **`rowHideable` grew a fourth argument, `finalized`**, and the ORDER of its
+  checks is the design: EMPTY FIRST, and nothing below can overrule it. Every
+  guard the schedule version had still holds — a stated $0.00, a note on a zero
+  cell and a split month netting to zero all keep the row — which is what keeps
+  a finished month's visible list adding up to the total above it.
+- **`finalized` is written as `computeYear` writes it** (`!live || m <=
+  enteredThrough`), NOT off the month view's own `entered`. The two differ on a
+  pinned year: `entered` is about the marker you moved, and this is about
+  whether a blank cell can still become something. A pinned year computes
+  nothing and every unstated cell in it resolves `missing` for good, which is as
+  finished as a month gets — so a pinned year hides its blanks too, where it
+  used to hide nothing at all because `quiet` was gated on `live`.
+- **A month still OPEN keeps every blank row.** That rule is not weakened, it is
+  scoped: opening a blank row is how a month gets filled in, and on a phone this
+  list is the way in.
+- **`monthDues` asks EVERY row now, not only the scheduled ones.** The
+  `continue` on a row with no `duePay` used to skip the `quiet` pass with it,
+  which is why the hide rule could only ever be about schedules.
+- **The reveal wording had to generalise**: "not due this month" over a set now
+  mostly made of rows with no schedule at all would be the button describing a
+  FEATURE rather than the rows. It says what the three kinds have in common —
+  they are EMPTY, which `rowHideable`'s first line guarantees. Each row still
+  says its own reason once revealed.
+- **Still nothing in a shared view.** `viewOnly` forces `quiet: []`, and the
+  reason is unchanged: a recipient has no reveal button they would think to
+  press, and a section that silently drops rows out of a plan somebody sent them
+  is worse than a long list.
 
 ## Folding a box up
 
