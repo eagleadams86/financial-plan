@@ -3230,7 +3230,11 @@ DELETED when inapplicable, never `undefined` — the Firestore rule.
   so entering the month stamps it `actual` — "paid, at the estimate" — for a
   bill that never arrived. Entering a month happens every month, so this is the
   default path, not an edge. The toast says how many rows it left alone.
-- **`outstandingDues` is bounded by the plan's own months.** It takes a month
+- **`outstandingDues` is bounded by the plan's own months AND, since
+  2026-08-26, by the years that actually carry the schedule** (`scheduledIn` —
+  it was only the first of those for a day, and on Charlie's real file that cost
+  36 imaginary unpaid quarters back to 2012; the measurement is in "What never
+  got paid, on the page you actually open" below). It takes a month
   list and an `at(month) → {cell, has}` lookup rather than reaching for `C`,
   which is both what lets it span a year boundary (January's previous quarter
   is in last year's computed object) and what stops it walking off the front of
@@ -3473,6 +3477,69 @@ entered" is exactly that kind of rule — the reader cannot see it from the rows
   reason is unchanged: a recipient has no reveal button they would think to
   press, and a section that silently drops rows out of a plan somebody sent them
   is worse than a long list.
+
+## What never got paid, on the page you actually open (2026-08-26)
+
+**On the CURRENT month only, the Due and Waiting card also lists what is still
+unpaid from earlier months.** Found by Charlie asking why his missing water bill
+wasn't warning him: it was. The July quarter was correctly marked 54 days late —
+on the JUNE page, because his row is `duePayAhead` and the money should have
+left in June. Two pages back from the one he opens. A warning nobody is shown
+is not a warning.
+
+- **The old rule still holds everywhere else.** "A late bill belongs on its own
+  month's page" was protecting against reading July next year and being told
+  about this April, and `m !== thisMonth()` is the whole guard: no past page and
+  no future page gains a thing. THIS month is the page you open, so it is the
+  one page where "still unpaid" is a fact about you rather than about somewhere
+  you are visiting.
+- **`outstandingDues` already worked it out.** Nothing but a held row had ever
+  asked it — the function has been right since it was written and was simply
+  wired to one caller.
+- **A HELD ROW IS SKIPPED.** It is already reported in every month, with a count
+  and a figure, by the waiting line. Two accounts of one backlog is how they
+  come to disagree.
+- **`live: true` is passed to `dueStatus` for these lines** even though the
+  month may sit in a year pinned since. That looks like the thing `dueStatus`'s
+  third check forbids and it is the opposite: that check stops a pinned year
+  measuring EVERY scheduled row against today, and these months have been
+  selected one at a time by `outFor` as genuinely outstanding. A quarter that
+  went unpaid did not stop being unpaid when the year was frozen.
+- **`dueRow` learned a second direction.** `aheadrow` and `backrow` wear the
+  SAME mark — a rule down the leading edge — because the mark says "not this
+  month" and which way is a question the sentence answers better than a border.
+  The back line says "still unpaid, from Jun 2026" and carries `data-m` for that
+  month, so opening it records the payment where the money will actually go.
+
+### The bound that made it safe: a schedule is stored PER YEAR
+
+**This is the bug the feature would have shipped on top of, and it was already
+live in the held path.** `outstandingDues` walks `planMonths(state)` — every
+month the plan holds, 2012 to 2027 on Charlie's file. Its `has` lambda asked
+whether the year CARRIES THE ROW, and that is not the same question: a schedule
+lives on the row **in each year separately**, so ticking "quarterly, the 3rd" on
+Water in 2026 leaves all fourteen earlier copies of that row with no `duePay` at
+all. His imported history types the water bill in Jan/Apr/Aug/Nov; his 2026
+schedule pays it in Mar/Jun/Sep/Dec. Every one of those older quarters read as
+an unpaid period.
+
+**Measured on his real file: 36 outstanding periods, oldest 2012-03. The true
+answer is 1.** He never saw it only because he had not set `dueHold` yet —
+pausing reminders on that row would have announced fourteen years of imaginary
+arrears.
+
+`scheduledIn(yr, id)` is the fix and both readers share it, so the count in the
+waiting line and the list of what never got paid can never disagree about which
+periods are real. **A year whose plan never said when the money was owed cannot
+be behind on it** — the `has: false` rule the function already had, asked about
+the right fact. Two tests put the old lookup and the new one side by side over
+the same months.
+
+**The general lesson**: a row field added today is stamped on THIS year's copy
+of the row (and, through `applyToRow`, on the projection years ahead) — never
+backwards. Anything that walks the whole plan's months has to ask each year's
+own copy what it says, not assume the row it started from speaks for all of
+them.
 
 ## Folding a box up
 

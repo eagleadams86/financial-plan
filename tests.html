@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 811;
+const EXPECTED = 814;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -3162,6 +3162,42 @@ t('nothing is counted before it is due', () => {
     AT({}), '2026-04-19');
   eq(out.count, 0, 'the 20th has not come round yet');
 });
+/* ── How far back an unpaid period may be counted ───────────────────────────
+   A SCHEDULE IS STORED PER YEAR, and that is the fact this turns on: ticking
+   "quarterly, the 3rd" on Water in 2026 leaves every earlier year's copy of
+   that row with no `duePay` at all, while the outstanding walk is handed every
+   month the plan holds. On Charlie's real file — imported history from 2012,
+   water typed in Jan/Apr/Aug/Nov, a 2026 schedule that pays in Mar/Jun/Sep/Dec
+   — that read as 36 unpaid quarters going back to 2012-03. There was one. */
+t('a year whose copy of the row has no schedule cannot be behind on it', () => {
+  const yr = (extra) => ({ categories: [{ id: 'water', name: 'Water', ...extra }] });
+  ok(H.scheduledIn(yr({ duePay: 'manual' }), 'water'));
+  ok(H.scheduledIn(yr({ duePay: 'auto' }), 'water'));
+  ok(!H.scheduledIn(yr({}), 'water'),
+    'the same row, in a year that never said when the money was owed');
+  ok(!H.scheduledIn(yr({ duePay: 'sometimes' }), 'water'), 'and junk is not a schedule');
+  ok(!H.scheduledIn(yr({ duePay: 'manual' }), 'gas'), 'nor is a row that is not there');
+  ok(!H.scheduledIn(null, 'water'));
+});
+t('the outstanding walk stops where the schedule stops', () => {
+  /* Two lookups over the same months, differing only in which question they
+     ask about the year — the bug and the fix, side by side. */
+  const months = ['2024-03', '2024-06', '2025-03', '2025-06', '2026-03', '2026-06'];
+  const scheduled = { id: 'water', name: 'Water', duePay: 'manual',
+                      dueMonths: [1, 4, 7, 10], dueDay: 3, duePayAhead: true };
+  const years = { '2024': { categories: [{ id: 'water', name: 'Water' }] },
+                  '2025': { categories: [{ id: 'water', name: 'Water' }] },
+                  '2026': { categories: [scheduled] } };
+  const yearOf = (mm) => years[mm.slice(0, 4)];
+  const carries = (mm) => ({ has: true, cell: null });
+  const asks = (mm) => ({ has: H.scheduledIn(yearOf(mm), 'water'), cell: null });
+  eq(H.outstandingDues(scheduled, months, carries, '2026-08-26').count, 6,
+    'every quarter back to 2024 — the row is in those grids, so the old rule '
+    + 'counted them');
+  const out = H.outstandingDues(scheduled, months, asks, '2026-08-26');
+  eq(out.months, ['2026-03', '2026-06'], 'only the year that carries the schedule');
+  eq(out.count, 2);
+});
 t('a row with no schedule has nothing outstanding', () => {
   eq(H.outstandingDues({ name: 'Rent' }, ['2026-01'], AT({}), '2026-06-01').count, 0);
 });
@@ -3582,6 +3618,26 @@ t('the sample exercises both halves of a due date', () => {
   eq(water.dueMonths, [1, 4, 7, 10], 'quarterly, so eight months of it can be hidden');
   const billed = Object.keys(d.years[y].cells).filter(k => k.startsWith('water|'));
   eq(billed.length, 1, 'only ever billed once, so periods really do stack up behind it');
+});
+t('the sample leaves ONE bill unpaid, for the current month to find', () => {
+  /* The demo for "still unpaid, from Jun" on the page you actually open. It
+     has to be a month the entered marker has passed, so the cell resolves
+     `missing` rather than an estimate, and earlier than the current one. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const y = Object.keys(d.years).filter(k => d.years[k].kind === 'grid').sort().pop();
+  const yr = d.years[y];
+  const ins = yr.categories.find(c => c.id === 'insurance');
+  eq(ins.duePay, 'manual', 'only a hand-paid bill is ever warned about');
+  ok(!ins.dueHold, 'and not a held one — the water bill demonstrates that half');
+  ok(`${y}-06` <= yr.enteredThrough, 'the marker has gone past it');
+  ok(!yr.cells[`insurance|${y}-06`], 'June was never recorded');
+  for (const i of [5, 7]) ok(yr.cells[`insurance|${y}-0${i}`], 'but its neighbours were');
+  const months = H.yearMonthsOf(yr);
+  const c = H.computeAll(d)[y];
+  const out = H.outstandingDues(ins, months,
+    (mm) => ({ has: H.scheduledIn(yr, 'insurance'), cell: c.cells[`insurance|${mm}`] }),
+    `${y}-08-26`);
+  eq(out.months, [`${y}-06`], 'exactly one period, and it is June');
 });
 t('the sample carries a row that STOPPED, and stops it properly', () => {
   const d = H.migrate(H.coerceShape(H.sampleState()));

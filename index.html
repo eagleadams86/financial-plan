@@ -1538,11 +1538,15 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
    `display: grid` wins and the attribute becomes a lie: `el.hidden` reads true
    while the row is on screen for everyone to see. Found exactly that way. */
 .mrow[hidden] { display: none; }
-/* A line about NEXT month, sitting on this month's page. Set apart by a rule
-   down its leading edge rather than by a colour or a size: it is the same kind
-   of thing as the rows above it, just about a different month, and its own
-   words already say which. */
-.mrow.aheadrow { border-left: 2px solid var(--border-strong); padding-left: 10px; }
+/* A line about ANOTHER month, sitting on this month's page — next month's bill
+   in the look-ahead, or something from an earlier month that was never paid.
+   Set apart by a rule down its leading edge rather than by a colour or a size:
+   it is the same kind of thing as the rows above it, just about a different
+   month, and its own words already say which. The two directions wear the SAME
+   mark on purpose: the mark says "not this month", and which way is a question
+   the sentence answers better than a border ever could. */
+.mrow.aheadrow, .mrow.backrow {
+  border-left: 2px solid var(--border-strong); padding-left: 10px; }
 /* The way back to the rows that aren't due. A quiet line at the foot of the
    list, not a button that looks like one: it belongs to the list rather than to
    the card, and pressing it changes what you are reading, not the plan. */
@@ -5902,6 +5906,11 @@ const HELP = {
       ' rather than an estimate — which is the same thing marking the month as entered does to '
       + 'every row at once. There is no separate "paid" tick, because that is what an actual '
       + 'figure already means.'],
+    ['On the month you are actually in, the card also gathers ', b('anything still unpaid '
+      + 'from earlier months'), ' \u2014 each line named for the month the money should have '
+      + 'left, and opening it records the payment there. Only the current month does this: '
+      + 'a bill that went unpaid belongs to the page you open, not to one you would have to '
+      + 'go looking for, and reading last June should not be told about this April.'],
     ['A bill due at the ', b('start of a month is one you pay in the month before it'),
       ', so this card looks into the beginning of next month as well as the month you are '
       + 'reading. A line about next month says so and shows next month\u2019s figure, and '
@@ -6778,7 +6787,15 @@ function sampleState() {
       put('groceries', i, -(860 + (i % 4) * 40));
       put('childcare', i, -1150);
       put('transport', i, -(310 + (i % 2) * 60));
-      put('insurance', i, -285);
+      /* JUNE IS DELIBERATELY MISSING, and it is the demo for "still unpaid,
+         from Jun" on the current month's page — a hand-paid bill due on the
+         1st that simply never got recorded. It has to be a month the marker
+         has passed (so the cell resolves `missing` rather than an estimate)
+         and it has to be earlier than the current one, which m(6) is against
+         an entered marker at m(8). No `dueHold` on this row: a held bill is
+         reported by the waiting line instead, which is the other half of the
+         card and already has the water bill demonstrating it. */
+      if (i !== 6) put('insurance', i, -285);
       put('dining', i, -(240 + (i % 3) * 55));
       put('everything-else', i, -(380 + (i % 5) * 70));
       put('to-savings', i, -600);
@@ -8782,6 +8799,19 @@ function rowHideable(cat, r, m) {
   return !dueOn(cat, m);
 }
 
+/* DOES THIS YEAR'S COPY OF THE ROW CARRY A SCHEDULE? A schedule is stored on
+   the row IN EACH YEAR SEPARATELY, so ticking "quarterly, the 3rd" on Water in
+   2026 leaves every earlier year's copy of that row with no `duePay` at all —
+   and a year whose plan never said when the money was owed cannot be behind on
+   it. Anything walking back through the plan's months has to ask this rather
+   than "does the year carry the row", which is a different question with the
+   same shape. See `outFor`, which is where getting it wrong cost 36 imaginary
+   unpaid quarters going back to 2012. */
+function scheduledIn(yr, id) {
+  const row = yr && (yr.categories || []).find(x => x.id === id);
+  return !!(row && DUE_PAY.includes(row.duePay));
+}
+
 /* A MONTH YOU HAVE NOT STARTED KEEPS ALL ITS ROWS, and this is the guard the
    rule above needs to survive a plan's first day. The starter budget arrives
    with twelve expense rows and no figures in any of them, so without this the
@@ -9243,21 +9273,30 @@ function renderMonthView() {
      status line says so), nor in a shared view. */
   const dueRow = ({ cat, cell, status: st, m: rm, y: ry }) => {
     const pill = duePillWords(st);
-    const own = (rm || m) === m;
-    /* A next-month line NAMES its month, every time. The figure beside it is
-       that month's, not this one's, and a row on a page headed August quietly
-       showing September's number is the kind of thing that gets read as an
-       error in the arithmetic. */
+    const at = rm || m;
+    const own = at === m;
+    /* A line for another month NAMES its month, every time. The figure beside
+       it is that month's, not this one's, and a row on a page headed August
+       quietly showing September's number is the kind of thing that gets read as
+       an error in the arithmetic. */
     const when = st.exact
-      ? `due ${dayLabel(st.date, true)}` : `due by the end of ${monthLabelFull(rm || m)}`;
-    /* Short, because the date beside it has already said September. All this
-       has to add is why a September bill is on an August page. */
-    const where = own ? '' : ' · next month\u2019s bill, paid before the month turns';
-    return `<div class="mrow${own ? '' : ' aheadrow'}" data-cat="${esc(cat.id)}"
-      data-m="${esc(rm || m)}" data-year="${esc(ry || y)}" role="button" tabindex="0"
+      ? `due ${dayLabel(st.date, true)}` : `due by the end of ${monthLabelFull(at)}`;
+    /* Short, because the date beside it has already said which month. All this
+       has to add is why that bill is on this page. Two directions now: the
+       look-ahead's next-month bill, and — on the current month only — something
+       from an earlier month that was never paid. The second says the MONTH THE
+       MONEY SHOULD HAVE LEFT, which is what the line opens, and that is not
+       always the month the deadline fell in: a bill paid a month ahead is
+       recorded one month before the date the pill is counting from. */
+    const where = own ? ''
+      : at > m ? ' · next month\u2019s bill, paid before the month turns'
+      : ` · still unpaid, from ${monthLabelFull(at)}`;
+    return `<div class="mrow${own ? '' : at > m ? ' aheadrow' : ' backrow'}"
+      data-cat="${esc(cat.id)}"
+      data-m="${esc(at)}" data-year="${esc(ry || y)}" role="button" tabindex="0"
       data-tip="${esc(cellTip(cell))}"
       aria-label="${esc(`${cat.name}, ${pill ? pill.text + ', ' : ''}${when}${
-        own ? '' : `, in ${monthLabelFull(rm)}`}`)}">
+        own ? '' : `, in ${monthLabelFull(at)}`}`)}">
       <span class="mname">${esc(cat.name)}</span>
       <span class="mamt c-${esc(cell.kind)}">${esc(fmtCell(cell.v))}</span>
       <span class="mfoot">${pill
@@ -9270,11 +9309,29 @@ function renderMonthView() {
      out loud when the figure is a stand-in rather than a total, because a held
      row's past months are usually blank and summing blanks gives $0.00, which
      is a figure and is wrong. */
-  const heldOut = (cat) => outstandingDues(cat, all, (mm) => {
+  /* WHICH MONTHS A SCHEDULE CAN HONESTLY SPEAK FOR, and this is the bound that
+     stops `outstandingDues` walking off into history (2026-08-26). It asked
+     whether the year CARRIES THE ROW, and that is not the same question: a
+     schedule is stored on the row in each year separately, so ticking
+     "quarterly, the 3rd" on Water in 2026 leaves the 2012–2025 copies of that
+     row with no `duePay` at all — while `planMonths` hands this every month
+     back to 2012. Charlie's imported history types the water bill in Jan, Apr,
+     Aug and Nov; his 2026 schedule pays it in Mar, Jun, Sep and Dec. Every one
+     of those older quarters therefore read as an unpaid period, and pausing
+     reminders on that row would have announced thirty-six of them going back
+     fourteen years.
+
+     A year whose copy of the row says nothing about when the money was owed
+     cannot be behind on it — the `has: false` rule the function already has,
+     applied to the right fact. Shared by both readers, so the count in the
+     "waiting on the bill" line and the list of what never got paid can never
+     disagree about which periods are real. */
+  const outFor = (cat) => outstandingDues(cat, all, (mm) => {
     const at = lookIn(mm);
-    const has = !!(at && (at.yr.categories || []).some(x => x.id === cat.id));
+    const has = !!at && scheduledIn(at.yr, cat.id);
     return { has, cell: has ? at.c.cells[`${cat.id}|${mm}`] : null };
   }, today);
+  const heldOut = outFor;
   const heldLine = ({ cat, out }) => {
     /* ONE figure, in the column, signed the way every other figure on this page
        is — an expense is negative here. It used to be printed twice, as a
@@ -9299,19 +9356,60 @@ function renderMonthView() {
   const heldShown = due.held
     .map(h => ({ ...h, out: heldOut(h.cat) }))
     .filter(h => h.out.count > 0 || dueOn(h.cat, m));
-  /* Soonest deadline first across BOTH months, so a bill already late leads and
-     the one due at the start of next month follows it, rather than the list
-     being sorted by which page each happens to belong to. */
-  const dueList = [...due.dues.map(d => ({ ...d, m, y })), ...nextDues]
+  /* ── WHAT NEVER GOT PAID, ON THE PAGE YOU ACTUALLY OPEN (2026-08-26) ──────
+     The card looked at the month being read and the one after it, and that is
+     right for a deadline still to come — but it left a bill nobody paid sitting
+     on the page for the month the money should have LEFT, which for a quarterly
+     bill paid a month ahead is two pages back. Charlie's water bill for the
+     July quarter went unpaid, was correctly marked 54 days late on the June
+     page, and could not be seen from August: a warning nobody is shown is not a
+     warning. `outstandingDues` already worked this out; nothing but a held row
+     had ever asked it.
+
+     ONLY ON THE CURRENT MONTH, and that is the whole guard. The old rule — a
+     late bill belongs on its own month's page — was protecting against reading
+     July next year and being told about August, and it still holds everywhere
+     else: no past page and no future page gains anything here. THIS month is
+     the page you open, so it is the one page where "still unpaid" is a fact
+     about you rather than about somewhere you are visiting.
+
+     A HELD ROW IS SKIPPED: it is already reported in every month, with a count
+     and a figure, by the line below. Two accounts of one backlog is how they
+     come to disagree.
+
+     `live` is passed as TRUE to `dueStatus` here even though the month may sit
+     in a year that has been pinned since. That looks like the thing the
+     function's own third check forbids, and it is the opposite: that check
+     stops a pinned year measuring EVERY scheduled row against today, and these
+     months have already been selected one at a time by `outFor` as genuinely
+     outstanding. A quarter that went unpaid did not stop being unpaid when the
+     year was frozen. */
+  const backDues = (viewOnly || !live || m !== thisMonth()) ? [] :
+    (yr.categories || []).flatMap((cat) => {
+      if (!DUE_PAY.includes(cat.duePay)) return [];
+      if (cat.dueHold) return [];
+      return outFor(cat).months.filter(mm => mm < m).map((mm) => {
+        const at = lookIn(mm);
+        const cell = (at && at.c.cells[`${cat.id}|${mm}`]) || { v: 0, kind: 'missing' };
+        return { cat, cell, m: mm, y: at ? at.y : y,
+                 status: dueStatus(cat, mm, cell, today, lead, true) };
+      }).filter(d => d.status);
+    });
+  /* Soonest deadline first across ALL the months on it, so the oldest thing
+     still unpaid leads, this month's own bills follow, and the one due at the
+     start of next month comes last — rather than the list being sorted by which
+     page each happens to belong to. */
+  const dueList = [...backDues, ...due.dues.map(d => ({ ...d, m, y })), ...nextDues]
     .sort((a, b) => a.status.date.localeCompare(b.status.date));
   const dueCard = (viewOnly || !live || !started
       || (!dueList.length && !heldShown.length))
     ? '' : `<div class="card" data-box="month-due">
     <h2>Due and Waiting${helpBtn('monthDue', 'how due dates work')}</h2>
     <p class="sub">Bills you pay by hand that are close or already late, and any you
-      are still waiting on. It looks into the start of next month too, since a bill
-      due on the 1st is one you pay before the month turns. A row goes quiet the
-      moment its figure is recorded as something that happened.</p>
+      are still waiting on. On the current month it also gathers anything still
+      unpaid from earlier months, and it looks into the start of next one, since a
+      bill due on the 1st is one you pay before the month turns. A row goes quiet
+      the moment its figure is recorded as something that happened.</p>
     <div class="mrows">${dueList.map(dueRow).join('')}${heldShown.map(heldLine).join('')}</div>
   </div>`;
 
@@ -22922,7 +23020,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
      skip is pinned through the state it leaves behind. */
   DUE_PAY, DUE_LEAD_DEFAULT, daysInMonth, dayNumber, daysBetween,
   dueMonthsOf, dueOn, dueStatus, leadDaysOf, monthDues, outstandingDues,
-  rowHideable, monthUntouched, paysIn, rowEnded, yearsDroppingRow, ordinal, dueFootWords, duePillWords, dueScheduleWords,
+  rowHideable, monthUntouched, scheduledIn, paysIn, rowEnded, yearsDroppingRow, ordinal, dueFootWords, duePillWords, dueScheduleWords,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its
      prose over a fixture). */

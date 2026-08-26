@@ -179,8 +179,12 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
   line: $0.00 moved is worth printing, three rows saying "nothing recorded"
   under it are not.
 - **Anything due**, when there is anything: a card of the hand-paid bills that
-  are close or already late, and of any you are still waiting on. It isn't there
-  at all in a month with nothing to say.
+  are close or already late, and of any you are still waiting on. On the month
+  you're actually in it also gathers **anything still unpaid from earlier
+  months** — each line named for the month the money should have left, so
+  opening it records the payment there. Only the current month does that: a bill
+  nobody paid belongs on the page you open, not on one you'd have to go looking
+  for. It isn't there at all in a month with nothing to say.
 - **The accounts**, each with what it held at the end of the month, how far that
   moved, and what it earned.
 - **The month's notes**, gathered at the foot of the page the way a year's are
