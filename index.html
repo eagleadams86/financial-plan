@@ -1520,16 +1520,14 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 .mrow[data-cat], .mrow[data-bal] { cursor: pointer; }
 .mrow[data-cat]:hover, .mrow[data-bal]:hover { background: var(--bg-card-alt); }
 .mrow:focus-visible { outline: 2px solid var(--focus-border); outline-offset: -2px; }
-/* A row with nothing in it this month stays on the list and goes quiet rather
-   than disappearing: an empty row is how a month gets filled in, and on a phone
-   this list is the way in.
-   THE ONE EXCEPTION, since due dates arrived: a row whose schedule says it does
-   not fall in this month is `hidden` — a quarterly water bill in February. It
-   is still RENDERED, so search, the focus restore after a save and a screen
+/* A row with nothing in it this month is `hidden` (2026-08-26), whatever the
+   reason — the one that stays is a bill this month says is due, which says so
+   in its own footer rather than reading "nothing recorded".
+   It is still RENDERED, so search, the focus restore after a save and a screen
    reader's own find all still reach it, and the count is said out loud at the
-   foot of the section with a way back. `rowHideable` refuses to hide anything
-   carrying a figure, a note or split parts, so nothing that would stop the
-   visible list adding up to the total below it can go. */
+   foot of the section with a way back that STICKS. `rowHideable` refuses to
+   hide anything carrying a figure, a note or split parts, so nothing that would
+   stop the visible list adding up to the total below it can go. */
 .mrow.mzero .mname { color: var(--text-secondary); }
 /* The status pill sits INSIDE `.mfoot`. `.mrow` is a two-track grid whose bar
    and foot both span it, so a pill appended to the row would land in a new
@@ -5874,19 +5872,21 @@ const HELP = {
       + 'reimbursement, a returned purchase — and it says it reduced the section rather than '
       + 'making it up. It is netted off the total above, so Money Out is what the month '
       + 'really cost you.'],
-    ['A row with nothing recorded stays on the list, quietly, at the bottom. Opening one is '
-      + 'how a month gets filled in, and on a phone this list is the way in \u2014 so a month '
-      + 'you have not finished with keeps every one of them.'],
-    ['Three kinds of row do drop off, and they have one thing in common: there is ',
-      b('nothing in them'), ' to lose. A row whose due date says it does not fall in this '
-      + 'month, a quarterly water bill in February. A row you have marked as ',
-      b('stopped using'), ', in any month after the one it stopped in. And once a month is '
-      + 'entered \u2014 or belongs to a year that is finished and pinned \u2014 any row that is '
-      + 'simply blank, because a month you have answered for is not one you are still '
-      + 'filling in. A line at the foot of the section says how many went and offers them '
-      + 'back. A row carrying a figure, a note or split amounts never drops off, whatever '
-      + 'else is true of it \u2014 a stated $0.00 is a claim somebody made and stays on the '
-      + 'page.'],
+    ['A row with ', b('nothing recorded in this month'), ' drops off the list, whatever the '
+      + 'reason \u2014 a quarterly bill in a month it does not fall in, a row you have marked '
+      + 'as stopped using, or one that simply had nothing in it. A line at the foot of the '
+      + 'section says how many went and offers them back, and it stays offered: press it '
+      + 'once and every month keeps showing them until you press it again, which is how you '
+      + 'fill a month in without tapping row by row. Each row says its own reason once it '
+      + 'is back on the page.'],
+    ['The exception is a ', b('bill this month says is due'), ' that you have not recorded '
+      + 'yet. It stays on the list \u2014 an empty row is the whole point of a reminder \u2014 '
+      + 'and it is the one blank row that tells you why it is there: its line reads "due the '
+      + '20th" or "autopay, the 1st" rather than "nothing recorded".'],
+    ['Anything with something in it stays, and that is deliberately generous: a figure, a '
+      + 'note, or the amounts a split month is made of. A ', b('stated $0.00'),
+      ' is a claim somebody made \u2014 the bill came and it was nothing \u2014 and it is marked '
+      + 'on the page rather than hidden from it.'],
   ] },
   monthDue: { title: 'How Due Dates Work', body: [
     ['A budget row can say ', b('when its money is owed'), ' — a day of the month, and which '
@@ -8696,18 +8696,17 @@ function outstandingDues(cat, months, at, todayIso) {
 
    `at(catId)` hands back the resolved cell. `live` is the month's own answer
    and is the same for every row in it, so it is a value rather than a lookup. */
-function monthDues(cats, at, m, todayIso, leadDays, live, finalized) {
+function monthDues(cats, at, m, todayIso, leadDays, live) {
   const dues = [], held = [], quiet = [];
   for (const cat of cats || []) {
     const cell = at(cat.id);
     /* THE ONE ANSWER to "may this row drop off the list", so the sections
        cannot reach a different verdict from the card. Asked of EVERY row, not
-       only the scheduled ones — a finished month hides its blanks whether or
-       not they ever had a due date, and a stopped row usually never had one.
+       only the scheduled ones, and about the CELL alone — see `rowHideable`.
        Hideable even when held: a held row in a month it does not fall in still
        drops off Expenses, and the card above names it, which is a better place
        for it. */
-    if (rowHideable(cat, cell, m, finalized)) quiet.push(cat);
+    if (rowHideable(cat, cell, m)) quiet.push(cat);
     if (!DUE_PAY.includes(cat.duePay)) continue;
     const st = dueStatus(cat, m, cell, todayIso, leadDays, live);
     /* A HELD ROW IS REPORTED IN EVERY MONTH, not only the ones it falls in, and
@@ -8728,9 +8727,34 @@ function monthDues(cats, at, m, todayIso, leadDays, live, finalized) {
 }
 
 /* WHICH ROWS MAY BE HIDDEN, and this predicate is the one place the feature
-   can quietly lose money. `r.v === 0` was the first version and it is wrong
-   three ways, all of which leave the section total untouched — so the totals
-   test would pass while a real record vanished off the page:
+   can quietly lose money.
+
+   TWO QUESTIONS, AND THE SECOND ONE IS VISIBLE ON THE PAGE (2026-08-26, second
+   pass, at Charlie's request). It has had three shapes in two days and this is
+   the shortest: it began as "the schedule says this month is not one of the
+   row's", grew "the row has stopped" and "the month is finished with" beside
+   it, and then a phone screenshot settled it — the same page was showing four
+   blank rows reading "nothing recorded" underneath a line offering to hide two
+   OTHER blank rows, with nothing on screen to tell the two groups apart. A
+   rule the page cannot explain to the person reading it is not a rule worth
+   keeping, so the month's entered marker and the row's `until` lost their say
+   here. They still do everything else they do — the estimate gate, the
+   reminders, the outstanding count — they simply no longer decide, invisibly,
+   what is on the page.
+
+   THE ONE EXCEPTION IS A BILL DUE IN THIS MONTH, and it is the exception
+   precisely because it is not invisible: such a row's footer says "due the
+   20th" or "autopay, the 1st" where a hidden row would have said "nothing
+   recorded", and three of its states wear a pill as well. So every row on the
+   page that has no figure says WHY it is still there, which is the thing the
+   screenshot was missing. Hiding them instead would have taken Charlie's water
+   bill off Expenses in the months it is actually owed — the row the whole due
+   feature exists for — on the grounds that he had not paid it yet.
+
+   WHAT COUNTS AS EMPTY is the part that can lose money, and it is unchanged.
+   `r.v === 0` was the first version and it is wrong three ways, all of which
+   leave the section total untouched — so a totals test would pass while a real
+   record vanished off the page:
 
    · a SPLIT month netting to zero (+300 and -300) has `v === 0` and kind
      `mixed`. Money moved.
@@ -8741,29 +8765,39 @@ function monthDues(cats, at, m, todayIso, leadDays, live, finalized) {
 
    `kind: 'missing'` is the engine's own word for "nothing recorded" and
    already implies a zero; the other two guards are belt and braces against a
-   hand-edited backup. */
-function rowHideable(cat, r, m, finalized) {
-  /* EMPTY FIRST, and nothing below can overrule it. Whatever reason a row has
-     for dropping off, it drops off only when there is nothing there to lose. */
+   hand-edited backup.
+
+   "Opening a blank row is how a month gets filled in" was the argument for
+   keeping them, and the reveal is the answer to it: `ui.showNotDue` STICKS, so
+   filling a month in is one tap and then an ordinary list, rather than a tap
+   per row.
+
+   `dueOn` rather than `dueStatus` is what the exception asks, and that is what
+   keeps it true in a month that is not live — a pinned year has no verdicts,
+   and a bill it says fell in March still fell in March. It is also what makes
+   a STOPPED row hide without a word about `until` here: `dueOn` is null after
+   the stop, for the reason written where the gate is. */
+function rowHideable(cat, r, m) {
   if (!r || r.kind !== 'missing' || hasNote(r) || r.parts) return false;
-  /* A MONTH THAT IS FINISHED WITH (2026-08-26). Once a month is entered — or
-     belongs to a year that computes nothing at all — a blank row is not a row
-     you might still fill in, it is a row that had nothing to do with that
-     month, and the list is longer for it. This is the same argument the
-     schedule made, applied to the case a schedule cannot describe: the row you
-     started in May, the row you stopped in April, the row that only ever
-     happens twice. The month being finished is doing the work an explicit
-     answer does elsewhere, and it can afford to: the reveal is one tap, and
-     nothing carrying a figure, a note or split parts got past the line above.
-     A month still open keeps every blank row, because opening one is how a
-     month gets filled in and on a phone this list is the way in. */
-  if (finalized) return true;
-  /* A row that has stopped, in a month after it stopped — true in an OPEN
-     month too, which is the difference between this and the line above: next
-     March is not finished with, but a card you cancelled last May will not be
-     turning up in it. */
-  if (rowEnded(cat, m)) return true;
-  return !!(cat && DUE_PAY.includes(cat.duePay) && !dueOn(cat, m));
+  return !dueOn(cat, m);
+}
+
+/* A SECTION NEVER COLLAPSES TO NOTHING, and this is the guard the rule above
+   needs to survive a plan's first day. The starter budget arrives with twelve
+   expense rows and no figures in any of them, so without this the Month page a
+   new reader opens is a heading, a $0.00 total and a button offering to show
+   them the budget they have just made — when those empty rows ARE the page,
+   since filling one in is how a plan starts.
+
+   Per SECTION, which is also the scope of the confusion this rewrite came
+   from: a reader compares a row to the rows beside it, and within one section
+   it is now all or nothing. `extra` is a line the section has that isn't one
+   of these rows — the Income section's earnings line — and it counts, because
+   with it there is still something to read.
+
+   Pure and exported so the guard can be pinned; the renderer just asks. */
+function hideableInSection(hideable, rowCount, extra) {
+  return (hideable.length >= rowCount && !extra) ? [] : hideable;
 }
 
 /* ── Saying it in words ────────────────────────────────────────────────────
@@ -9005,14 +9039,6 @@ function renderMonthView() {
   const live = yr.model === 'live';
   const started = yearStarted(state, y);
   const entered = live && m <= (yr.enteredThrough || '');
-  /* IS THIS MONTH FINISHED WITH? Written exactly as `computeYear` writes it
-     (`!live || m <= enteredThrough`) rather than off `entered` above, because
-     the two questions differ on a PINNED year: `entered` is about the marker
-     you moved, and this is about whether a blank cell can still become
-     something. A pinned year computes nothing and every unstated cell in it
-     resolves `missing` for good, which is as finished as a month gets. Read by
-     the hide rule and by nothing else. */
-  const finalized = !live || m <= (yr.enteredThrough || '');
   const prevM = monthAdd(m, -1);
 
   /* ── What this month's due dates say ─────────────────────────────────────
@@ -9045,7 +9071,7 @@ function renderMonthView() {
     return { y: yy, yr: yrr, c: cc };
   };
   const due = viewOnly ? { dues: [], held: [], quiet: [] }
-    : monthDues(yr.categories, cellAt, m, today, lead, live, finalized);
+    : monthDues(yr.categories, cellAt, m, today, lead, live);
 
   /* ── NEXT MONTH'S BILLS, ON THIS MONTH'S PAGE ────────────────────────────
      A bill due the 1st is one you pay in the month BEFORE it, and the whole
@@ -9070,8 +9096,7 @@ function renderMonthView() {
   const nextDues = !nextIn ? [] : monthDues(
     nextIn.yr.categories,
     (id) => nextIn.c.cells[`${id}|${nextM}`] || { v: 0, kind: 'missing' },
-    nextM, today, lead, nextIn.yr.model === 'live',
-    nextIn.yr.model !== 'live' || nextM <= (nextIn.yr.enteredThrough || ''))
+    nextM, today, lead, nextIn.yr.model === 'live')
     .dues.filter(d => (d.status.state === 'soon' || d.status.state === 'due')
       /* A row that already says it pays a month ahead is reported in the month
          it PAYS, which is this one — `dueOn` shifted it there. Letting the
@@ -9298,15 +9323,16 @@ function renderMonthView() {
       .sort((a, b) => Math.abs(b.r.v) - Math.abs(a.r.v)
         || a.cat.name.localeCompare(b.cat.name));
     /* ── The rows this month has no business showing ────────────────────────
-       Three kinds, and `rowHideable` is the one place that decides which: a
-       quarterly water bill in February, a row you have STOPPED USING, and —
-       since 2026-08-26 — anything blank in a month that is FINISHED WITH.
+       A row with nothing recorded in this month, whatever the reason — a
+       quarterly water bill in February, a card you have stopped using, a Zelle
+       row that simply had no Zelle in it. The one that stays is a bill this
+       month's schedule says is DUE, and it stays because it can say so: see
+       `rowHideable`, which owns the whole argument.
 
-       This is a deliberate EXCEPTION to the rule that a row with nothing
-       recorded stays on the list. That rule is about a row you might still
-       want to fill in, and none of the three is one of those: a bill does not
-       fall in that month; a stopped row will never fall in another one; and a
-       month you have entered is one you have finished answering for.
+       This REPLACES the rule that a row with nothing recorded stays on the
+       list. That rule was about a row you might still want to fill in, and the
+       reveal is the better answer to it: it sticks, so filling a month in is
+       one tap and then an ordinary list.
        It is bought at a price and the price is paid three ways:
        `rowHideable` refuses to hide anything that carries a figure, a note or
        split parts, so nothing that would stop the visible list adding up to
@@ -9318,7 +9344,9 @@ function renderMonthView() {
     /* Read off the one pass above rather than asked again here — the sections
        and the card must not be able to disagree about which rows went. */
     const quiet = new Set(due.quiet.map(x => x.id));
-    const hideable = rows.filter(({ cat }) => quiet.has(cat.id)).map(x => x.cat.id);
+    const hideable = hideableInSection(
+      rows.filter(({ cat }) => quiet.has(cat.id)).map(x => x.cat.id),
+      rows.length, earnHere);
     const showing = !!state.ui.showNotDue;
     const hidden = new Set(showing ? [] : hideable);
     /* The way back, and it must SURVIVE A SAVE. A DOM-only toggle was the first
@@ -9327,13 +9355,15 @@ function renderMonthView() {
        be reveal, tap, save, reveal, tap, save. It lives in `ui` beside the set
        of folded boxes, for the same reason that does: a deliberate arrangement
        of the page should still be there a moment later. */
-    /* THE WORDING NAMES WHAT THE THREE HAVE IN COMMON, which is that they are
-       EMPTY — `rowHideable`'s first line is what makes that true of every row
-       in the set. It said "not due this month" while a schedule was the only
-       way a row could go, and saying that over a set now mostly made of rows
-       with no schedule at all would be the button describing a FEATURE rather
-       than the rows. Each row still says its own reason once revealed: the
-       schedule is in its footer, and so is a stopped row's month. */
+    /* THE WORDING SAYS WHAT THE ROWS HAVE IN COMMON, which is that they are
+       EMPTY. It said "not due this month" while a schedule was the only way a
+       row could go, and that became the wrong sentence over a set mostly made
+       of rows that never had one. The rows still on the page with no figure
+       are the ones with a bill due, and each says so in its own footer where a
+       hidden one would have said "nothing recorded" — so the page answers "why
+       that one and not this one?" without the button having to.
+       Each hidden row also says its own reason once revealed: the schedule is
+       in its footer, and so is a stopped row's month. */
     const revealLine = () => !hideable.length ? '' : `<button type="button"
       class="revealrows" data-reveal="${showing ? 'off' : 'on'}">${showing
         ? `Hide the ${hideable.length} empty row${hideable.length === 1 ? '' : 's'}`
@@ -22881,7 +22911,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
      skip is pinned through the state it leaves behind. */
   DUE_PAY, DUE_LEAD_DEFAULT, daysInMonth, dayNumber, daysBetween,
   dueMonthsOf, dueOn, dueStatus, leadDaysOf, monthDues, outstandingDues,
-  rowHideable, paysIn, rowEnded, yearsDroppingRow, ordinal, dueFootWords, duePillWords, dueScheduleWords,
+  rowHideable, hideableInSection, paysIn, rowEnded, yearsDroppingRow, ordinal, dueFootWords, duePillWords, dueScheduleWords,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its
      prose over a fixture). */

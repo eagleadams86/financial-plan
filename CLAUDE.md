@@ -3039,12 +3039,12 @@ thirteen-column table to reach one cell.
   A row with nothing recorded sinks to the bottom rather than disappearing:
   opening one is how a month gets filled in, and on a phone this list is the
   way in. **THREE EXCEPTIONS now**, and they are written down here because the
-  sentence above them used to be absolute: a row whose schedule says it does
-  not fall in this month (2026-08-25), a row marked as STOPPED, and — in a
-  month that is finished with — any row that is simply blank (both
-  2026-08-26). See "Due dates", "A row that stopped" and "Empty rows in a month
-  that is finished with" below; `rowHideable` is the one place that decides,
-  and its first line is that the cell must be empty.
+  sentence above it is no longer true at all: since 2026-08-26 a row with
+  NOTHING RECORDED in the month is hidden, whatever the reason, and the only
+  blank row left on the page is one with a bill due in that month. See "An
+  empty row drops off the Month page" below — `rowHideable` is the one place
+  that decides, `hideableInSection` stops a section emptying itself, and the
+  reveal sticks.
 - **The estimate kinds are the GRID's**, and the `.c-*` selectors name both
   readers (`.grid td.c-auto, .mamt.c-auto`) rather than being copied — a line
   style that drifted between the lenses would be one month claiming to be
@@ -3349,7 +3349,8 @@ copied into next year for him to delete by hand.
   clearing the last figure would silently un-stop the row, and a bill that
   simply has not been paid yet is indistinguishable from one that never will be.
   Charlie picked the stated month.
-- **`rowEnded(cat, m)` is the one reader**, and it lands in exactly four places:
+- **`rowEnded(cat, m)` is the one reader**, and it lands in exactly three
+  places — `rowHideable` deliberately not among them, see below:
   - **`paysIn`, ABOVE the ticked month list.** This is the one thing here that
     reaches `computeYear`, and it has to — a `carry` row that kept repeating
     would never be empty, and a row that is never empty can never drop off the
@@ -3360,9 +3361,11 @@ copied into next year for him to delete by hand.
     and the estimate gate together — the `duePayAhead` discipline. Without it a
     cancelled bill reads late every month for ever, which is the failure that
     teaches you to ignore the warning.
-  - **`rowHideable`**, so the row drops off the months after it in an OPEN month
-    too — next March is not finished with, but a card cancelled last May will
-    not be turning up in it.
+    Between the two of them they are also what makes the row DROP OFF the Month
+    page, and they do it at ONE REMOVE rather than by the hide rule naming
+    `until`: no estimate and no deadline means an empty cell, and an empty cell
+    is what hides. That indirection is deliberate — see "An empty row drops off
+    the Month page".
   - **`rolloverYear`**, which filters the categories BEFORE the cells loop reads
     them, so no orphan cell is minted either. Compared against the new year's
     first month rather than assumed: a row stopping inside the new year is still
@@ -3402,37 +3405,60 @@ copied into next year for him to delete by hand.
   repeat April into every remaining month, ride into next year and sit on eight
   Month pages saying nothing.
 
-## Empty rows in a month that is finished with (2026-08-26)
+## An empty row drops off the Month page (2026-08-26)
 
-**Once a month is entered — or belongs to a year that computes nothing at all —
-a row with nothing recorded drops off the Month page.** Asked for in the same
-breath as `until`, and it is the general case that catches what a stated stop
-month cannot: the row you started in May, the row that only ever happens twice,
-the row somebody else's plan carries and yours does not.
+**A row with nothing recorded in the month is hidden, whatever the reason it is
+empty.** This shipped twice on the same day and the second version is the one
+that matters, so the first is written down here as the mistake it was.
 
-- **`rowHideable` grew a fourth argument, `finalized`**, and the ORDER of its
-  checks is the design: EMPTY FIRST, and nothing below can overrule it. Every
-  guard the schedule version had still holds — a stated $0.00, a note on a zero
-  cell and a split month netting to zero all keep the row — which is what keeps
-  a finished month's visible list adding up to the total above it.
-- **`finalized` is written as `computeYear` writes it** (`!live || m <=
-  enteredThrough`), NOT off the month view's own `entered`. The two differ on a
-  pinned year: `entered` is about the marker you moved, and this is about
-  whether a blank cell can still become something. A pinned year computes
-  nothing and every unstated cell in it resolves `missing` for good, which is as
-  finished as a month gets — so a pinned year hides its blanks too, where it
-  used to hide nothing at all because `quiet` was gated on `live`.
-- **A month still OPEN keeps every blank row.** That rule is not weakened, it is
-  scoped: opening a blank row is how a month gets filled in, and on a phone this
-  list is the way in.
+**What shipped first**: the schedule's months, plus a stopped row, plus "the
+month is entered or the year is pinned" — three conditions, `rowHideable` with
+a `finalized` argument, `monthDues` taking one more parameter. **What killed
+it**: a phone screenshot from Charlie. One Expenses list, four rows reading
+"nothing recorded" (ATM, Chase Zelle, Checks, M&T Zelle) sitting directly above
+a line offering to hide two OTHER blank rows — with nothing on the page to tell
+the two groups apart, because the difference was an invisible fact about the
+month. His words: "with the new wording it's confusing to see some empty rows
+hidden while others aren't." **The lesson worth keeping: a rule the page cannot
+explain to the person reading it is not a rule worth having**, and "the month is
+entered" is exactly that kind of rule — the reader cannot see it from the rows.
+
+- **`rowHideable(cat, r, m)` is two lines now.** Is the cell empty, and is a
+  bill due here. The entered marker and `until` lost their say; they still gate
+  the estimate engine, the reminders and the outstanding count, and `until` is
+  what EMPTIES the later cells in the first place — two steps, one visible
+  result, and no mention of `until` in the hide rule at all.
+- **THE ONE EXCEPTION IS A BILL DUE IN THIS MONTH, and it earns it by being
+  visible.** Such a row's footer reads "due the 20th" or "autopay, the 1st"
+  where a hidden one would read "nothing recorded", and three of its states wear
+  a pill besides — so every row left on the page with no figure says why it is
+  there, which is the thing the screenshot was missing. Hiding these instead
+  would have taken Charlie's water bill off Expenses in the months it is
+  actually owed, on the grounds that he had not paid it yet.
+- **`dueOn`, not `dueStatus`, is what the exception asks.** That keeps it true
+  in a year that is not live (a pinned year has no verdicts, and a bill it says
+  fell in March still fell in March), and it is also why a STOPPED row hides
+  with no word about `until` here — `dueOn` is null after the stop.
+- **WHAT COUNTS AS EMPTY is unchanged and is the part that can lose money**: a
+  stated $0.00 (`kind: 'actual'`), a note on a zero cell, and a split month
+  netting to zero all keep the row. That is what keeps the visible list adding
+  up to the total under it, and it is the only reason a totals test would not
+  have caught the first version of this predicate.
+- **`hideableInSection` — A SECTION NEVER COLLAPSES TO NOTHING.** Found by
+  loading a fresh plan: the starter budget arrives with twelve expense rows and
+  no figures in any of them, so the Month page a new reader opens was a heading,
+  a $0.00 total and a button offering to show them the budget they had just
+  made. Per section, which is also the scope of the confusion this rewrite came
+  from — a reader compares a row to the rows beside it. The Income section's
+  earnings line counts as something to read.
+- **`ui.showNotDue` KEEPS ITS NAME** though it now means "show the empty rows".
+  Renaming it would orphan the setting in every stored plan and every backup for
+  a word nobody sees. The reveal STICKS, and that is what answers the old
+  argument for keeping blank rows on the page ("opening one is how a month gets
+  filled in"): filling a month in is one tap and then an ordinary list.
 - **`monthDues` asks EVERY row now, not only the scheduled ones.** The
   `continue` on a row with no `duePay` used to skip the `quiet` pass with it,
   which is why the hide rule could only ever be about schedules.
-- **The reveal wording had to generalise**: "not due this month" over a set now
-  mostly made of rows with no schedule at all would be the button describing a
-  FEATURE rather than the rows. It says what the three kinds have in common —
-  they are EMPTY, which `rowHideable`'s first line guarantees. Each row still
-  says its own reason once revealed.
 - **Still nothing in a shared view.** `viewOnly` forces `quiet: []`, and the
   reason is unchanged: a recipient has no reveal button they would think to
   press, and a section that silently drops rows out of a plan somebody sent them

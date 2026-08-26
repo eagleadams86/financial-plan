@@ -160,17 +160,22 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
   reimbursement — and says it reduced the section rather than making it up;
   money out is what the month really cost you, net of those. Click any line to
   open the same editor the grid opens — notes, split months, revert and the
-  balance reconciliation all included. A row with nothing recorded stays on the
-  list, quietly, because opening it is how a month gets filled in. **Three
-  kinds do drop off**, and all three have nothing in them to lose: a row whose
-  [due date](#due-dates) says it doesn't fall in this month, a row you have
-  marked as [stopped](#a-row-that-stopped), and — once a month is
-  [entered](#entered-months-and-finished-years), or belongs to a year you have
-  finished and pinned — any row that is simply blank, because a month you have
-  answered for is not one you are still filling in. A line at the foot of the
-  section says how many went and offers them back. A row carrying a figure, a
-  note or split amounts never drops off: a stated $0.00 is something you said,
-  and it stays on the page.
+  balance reconciliation all included. **A row with nothing recorded in that
+  month drops off the list**, whatever the reason it's empty — a quarterly bill
+  in a month it doesn't fall in, a row you've marked as
+  [stopped](#a-row-that-stopped), or one that simply had nothing in it. A line
+  at the foot of the section says how many went and offers them back, and the
+  choice sticks: press it once and every month keeps showing them until you
+  press it again, which is how you fill a month in without tapping row by row.
+  Two things stay: **anything with something in it** — a figure, a note, or the
+  amounts a split month is made of, a stated $0.00 included, since that's a
+  claim you made — and **a bill this month says is due** that you haven't
+  recorded yet, because an empty row is the whole point of a reminder. That
+  last is the one blank row you'll see, and its line reads "due the 20th" or
+  "autopay, the 1st" rather than "nothing recorded", so it says why it's there.
+  A section never collapses to nothing, either: if every row in it is empty
+  you're looking at a month you haven't started, and that list is the thing you
+  came for.
 - **Anything due**, when there is anything: a card of the hand-paid bills that
   are close or already late, and of any you are still waiting on. It isn't there
   at all in a month with nothing to say.
@@ -355,8 +360,8 @@ the month after:
 
 - **it estimates nothing.** A "repeat the last month" row stops repeating rather
   than carrying its final figure across the rest of the year.
-- **it drops off the Month page**, in open months as well as finished ones — a
-  card you cancelled in May is not turning up next March. It is still there
+- **it drops off the Month page** — not because it stopped, but because it's
+  now empty, which is [what that page hides](#year-or-month). It's still there
   behind the **show** line at the foot of the section, and it says when it
   stopped.
 - **it is never reminded about again**, and stops counting up unpaid periods.

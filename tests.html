@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 808;
+const EXPECTED = 810;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -3166,28 +3166,70 @@ t('a row with no schedule has nothing outstanding', () => {
   eq(H.outstandingDues({ name: 'Rent' }, ['2026-01'], AT({}), '2026-06-01').count, 0);
 });
 
-/* ── Which rows may be hidden ────────────────────────────────────────────── */
-t('only a month with genuinely NOTHING recorded may be hidden', () => {
-  const r = DUE_ROW();
-  ok(H.rowHideable(r, { v: 0, kind: 'missing' }, '2026-02'),
-    'February is not one of its months and the cell is blank');
-  ok(!H.rowHideable(r, { v: 0, kind: 'missing' }, '2026-04'),
-    'April is one of its months');
-  ok(!H.rowHideable({ name: 'Rent' }, { v: 0, kind: 'missing' }, '2026-02'),
-    'a row with no schedule is never hidden');
+/* ── Which rows may be hidden ──────────────────────────────────────────────
+   TWO questions: is the cell empty, and is a bill due here? It had three shapes
+   in two days — the schedule's months, then the stopped row, then the finished
+   month — and a phone screenshot ended it: four blank rows reading "nothing
+   recorded" underneath a line offering to hide two OTHER blank rows, with
+   nothing on screen to tell them apart. Everything empty goes now, and the one
+   thing that stays says why in its own footer. */
+const BLANK = { v: 0, kind: 'missing' };
+t('an empty row is hidden whatever the reason it is empty', () => {
+  ok(H.rowHideable({ name: 'ATM' }, BLANK, '2026-05'),
+    'a row that never had a schedule and simply had no money in it');
+  ok(H.rowHideable({ name: 'Cash back', until: '2026-04' }, BLANK, '2026-05'),
+    'a row that has stopped');
+  ok(H.rowHideable(DUE_ROW(), BLANK, '2026-02'),
+    'a quarterly bill in a month it does not fall in');
+  ok(!H.rowHideable({ name: 'ATM' }, null, '2026-05'),
+    'no cell at all is not a cell to judge');
+});
+t('a bill this month says is DUE stays, empty or not', () => {
+  /* The one exception, and it earns it by being visible: such a row's footer
+     reads "due the 20th" where a hidden one would read "nothing recorded", so
+     the page answers "why that one and not this one?" on its own. Hiding it
+     would take the water bill off Expenses in the months it is actually owed —
+     the row the whole feature exists for — because it had not been paid. */
+  ok(!H.rowHideable(DUE_ROW(), BLANK, '2026-04'), 'April is one of its months');
+  ok(!H.rowHideable({ name: 'Rent', duePay: 'auto', dueDay: 1 }, BLANK, '2026-05'),
+    'an autopay bill that has not gone out yet');
+  ok(H.rowHideable(DUE_ROW({ until: '2026-01' }), BLANK, '2026-04'),
+    'and a STOPPED bill is due nothing, ever again — no word about `until` here, '
+    + '`dueOn` is null after the stop');
 });
 t('a figure, a note or split parts always keep a row on the page', () => {
-  const r = DUE_ROW();
-  ok(!H.rowHideable(r, { v: -40, kind: 'actual' }, '2026-02'),
-    'money landed in a month the schedule did not expect');
+  const r = { name: 'ATM' };
+  ok(!H.rowHideable(r, { v: -40, kind: 'actual' }, '2026-02'), 'money landed');
   ok(!H.rowHideable(r, { v: 0, kind: 'actual' }, '2026-02'),
     'a STATED $0.00 is a claim somebody made, not an absence');
+  ok(!H.rowHideable(r, { v: 0, kind: 'manual' }, '2026-02'),
+    'an estimate you typed is still yours');
   ok(!H.rowHideable(r, { v: 0, kind: 'missing', note: 'chased the town' }, '2026-02'),
     'hiding it would take the note dot with it');
   ok(!H.rowHideable(r, { v: 0, kind: 'mixed',
       parts: [{ v: 300, kind: 'actual' }, { v: -300, kind: 'actual' }] }, '2026-02'),
     'a split month netting to zero still moved money — and the total, which is '
     + 'unchanged either way, would never have told you');
+});
+t('a section never collapses to nothing', () => {
+  /* The starter budget arrives with twelve expense rows and no figures, so
+     without this the Month page a new reader opens is a heading, a $0.00 total
+     and a button offering to show them the budget they have just made. */
+  eq(H.hideableInSection(['a', 'b', 'c'], 3, false), [],
+    'every row in the section is empty, so none of them goes');
+  eq(H.hideableInSection(['a', 'b'], 3, false), ['a', 'b'],
+    'one row has something in it, so the other two can go');
+  eq(H.hideableInSection(['a', 'b', 'c'], 3, true), ['a', 'b', 'c'],
+    'the earnings line is something to read, so the rows may still go');
+  eq(H.hideableInSection([], 3, false), [], 'nothing to hide either way');
+});
+t('the entered marker gets no say in it any more', () => {
+  /* It used to be the whole of the second half of this feature, and it was
+     wrong the way an invisible rule is wrong: the same blank row hid in June
+     and stayed in October, with nothing on the page to say why. */
+  ok(H.rowHideable({ name: 'ATM' }, BLANK, '2026-06'));
+  ok(H.rowHideable({ name: 'ATM' }, BLANK, '2026-12'),
+    'a month still to come hides its blanks too, and the reveal sticks');
 });
 /* ── A row that has stopped ──────────────────────────────────────────────
    `cat.until` is the last month a row had money in it — the same key, shape
@@ -3226,40 +3268,28 @@ t('a stopped row has no deadlines left to miss', () => {
     AT({}), '2026-12-01').count, 2,
     'only the periods it was still running for');
 });
-t('a stopped row drops off every month after it, finished or not', () => {
-  const r = { id: 'cb', name: 'Card cash back', until: '2026-04' };
-  ok(H.rowHideable(r, { v: 0, kind: 'missing' }, '2026-05'),
-    'May is open, and still not a month this row has anything to do with');
-  ok(!H.rowHideable(r, { v: 0, kind: 'missing' }, '2026-04'));
-  ok(!H.rowHideable(r, { v: 46, kind: 'actual' }, '2026-05'),
-    'a figure that turned up after the stop is a fact and keeps the row');
-});
-/* ── And a month that is finished with ────────────────────────────────────
-   The other half, asked for in the same breath: once a month is entered — or
-   belongs to a year that computes nothing at all — a blank row is not one you
-   might still fill in. Every guard `rowHideable` had before still holds, which
-   is what keeps a finished month's visible list adding up to its own total. */
-t('a month that is finished with hides every row that is simply blank', () => {
-  const plain = { id: 'food', name: 'Groceries' };
-  ok(!H.rowHideable(plain, { v: 0, kind: 'missing' }, '2026-05'),
-    'an open month keeps its blanks — opening one is how a month gets filled in');
-  ok(H.rowHideable(plain, { v: 0, kind: 'missing' }, '2026-05', true));
-  ok(!H.rowHideable(plain, { v: 0, kind: 'actual' }, '2026-05', true),
-    'a STATED $0.00 is a claim somebody made, entered month or not');
-  ok(!H.rowHideable(plain, { v: 0, kind: 'missing', note: 'nothing came' }, '2026-05', true),
-    'and hiding it would take the note dot with it');
-  ok(!H.rowHideable(plain, { v: 0, kind: 'mixed',
-      parts: [{ v: 5, kind: 'actual' }, { v: -5, kind: 'actual' }] }, '2026-05', true),
-    'a split month netting to zero still moved money');
+t('a stopped row drops off, because the months after it hold nothing', () => {
+  /* Two steps, one visible result: the stop is what empties the cell (`paysIn`
+     puts no estimate there), and the empty cell is what hides the row. */
+  const s = H.coerceShape(fixtureState());
+  const cat = s.years['2030'].categories.find(c => c.id === 'internet');
+  cat.until = '2030-04';
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  ok(H.rowHideable(cat, c.cells['internet|2030-05'], '2030-05'), 'May is open, and empty');
+  ok(!H.rowHideable(cat, c.cells['internet|2030-04'], '2030-04'),
+    'April still carries a figure');
 });
 t('monthDues asks EVERY row whether it may be hidden, not only scheduled ones', () => {
   const cats = [{ id: 'food', name: 'Groceries' },
-                { id: 'cb', name: 'Cash back', until: '2026-04' }];
-  const at = () => ({ v: 0, kind: 'missing' });
+                { id: 'cb', name: 'Cash back', until: '2026-04' },
+                { id: 'rent', name: 'Rent', duePay: 'manual', dueDay: 1 },
+                { id: 'gas', name: 'Gas', duePay: 'manual', dueDay: 9 }];
+  const cells = { rent: { v: -1200, kind: 'actual' } };
+  const at = (id) => cells[id] || { v: 0, kind: 'missing' };
   eq(H.monthDues(cats, at, '2026-05', '2026-05-10', 7, true).quiet.map(c => c.id),
-    ['cb'], 'an open month loses the stopped row and keeps the blank one');
-  eq(H.monthDues(cats, at, '2026-05', '2026-05-10', 7, true, true).quiet.map(c => c.id),
-    ['food', 'cb'], 'and a finished one loses both');
+    ['food', 'cb'],
+    'the unscheduled blank and the stopped one go; the paid bill has a figure and '
+    + 'the unpaid one is due here, so both stay');
 });
 t('monthDues splits a month three ways and reports a hold in EVERY month', () => {
   const cats = [
@@ -3275,7 +3305,9 @@ t('monthDues splits a month three ways and reports a hold in EVERY month', () =>
   eq(d.held.map(x => x.cat.id), ['water'],
     'September is not a water month, and the periods stacking up behind it are a '
     + 'fact about the ROW rather than about the month you happen to be reading');
-  eq(d.quiet.map(c => c.id), ['water'], 'and it is still hideable from its section');
+  eq(d.quiet.map(c => c.id), ['water', 'food'],
+    'the held bill in a month it does not fall in, and the row with no schedule '
+    + 'and no money; Insurance and the Mortgage are both due in September');
 });
 /* ── A bill due at the start of next month ───────────────────────────────
    The case that makes the lead time worth having. `dueStatus` was always right
@@ -3369,8 +3401,6 @@ t('the shift moves the WHOLE row, not just the reminder', () => {
   const q = AHEAD({ dueMonths: [1, 4, 7, 10] });   // due Jan/Apr/Jul/Oct, paid the month before
   ok(H.paysIn(q, '2026-03'), 'March money pays the April bill');
   ok(!H.paysIn(q, '2026-04'), 'April itself is not a paying month for this row');
-  ok(H.rowHideable(q, { v: 0, kind: 'missing' }, '2026-04'));
-  ok(!H.rowHideable(q, { v: 0, kind: 'missing' }, '2026-03'));
   const out = H.outstandingDues(q, ['2026-03', '2026-04'], AT({}), '2026-06-01');
   eq(out.months, ['2026-03'], 'the period is counted in the month the money should have left');
 });
