@@ -531,6 +531,17 @@ Click any cell to edit it. Beyond typing a figure:
   editor says so, and "Clear this cell" empties the month's balance and its
   earnings together. Nothing is routed to another account there — where
   interest lands is today's arrangement, not 2021's.
+- **"✓ Accept the Estimates" agrees with the plan in one press.** Every figure
+  in a balance month is greyed, because typing is what states one — so saying
+  "yes, that is what the account held" meant copying three numbers back into the
+  boxes that were already showing them, where a mistyped digit looks exactly
+  like a real correction. The button writes them in for you: the balance becomes
+  a stated one, and the month holds it even when an earlier month changes. A box
+  you have already typed in is left alone — it fills the blanks, it never
+  overwrites a correction sitting in front of it — and a month that earned
+  nothing states nothing, since a stated $0.00 is a claim of its own. "↺ Back to
+  Auto Estimate" is the way back. The **paycheck count** offers the same button,
+  for the same reason: it is a placeholder too.
 
 ### A Note With No Figure
 

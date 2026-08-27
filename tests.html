@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 835;
+const EXPECTED = 841;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -5743,6 +5743,60 @@ t('nothing to compare against says nothing at all', () => {
   eq(H.reconcileNote(null, 38.11), '', 'an empty box is not a discrepancy');
   eq(H.reconcileNote(38.11, undefined), '', 'a pinned history year computes nothing');
   eq(H.reconcileNote(NaN, 38.11), '');
+});
+
+group('Accepting the figures the plan worked out');
+/* Every figure in a balance month opens as a PLACEHOLDER — typing is what makes
+   one stored — so agreeing with the plan meant reading three greyed numbers and
+   typing them back in by hand, where a slip looks exactly like a correction. */
+const acceptState = () => H.coerceShape({ settings: { accounts: [
+    { id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true },
+    { id: 'inv', name: 'Inv', rate: 0.12, creditTo: 'inv',
+      divRate: 0.06, divEvery: 3, divTo: 'cash' }] },
+  years: { '2026': { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 12,
+    enteredThrough: '2025-12', categories: [], cells: {},
+    seeds: { cash: 0, inv: 12000 } } } });
+
+t('a balance month offers the computed balance and what it earned', () => {
+  const c = H.computeYear(acceptState(), '2026', null);
+  const f = H.acceptedFigures(c, 'bal', 'inv', '2026-01');
+  eq(f.value, 12120, 'the balance the grid is already showing');
+  eq(f.interest, 120, 'and the interest behind it');
+  eq(f.dividend, null, 'a quarterly account pays nothing in January');
+});
+t('a month on the dividend beat offers the payment too', () => {
+  const c = H.computeYear(acceptState(), '2026', null);
+  const f = H.acceptedFigures(c, 'bal', 'inv', '2026-03');
+  eq(f.dividend, c.dividend['inv|2026-03'], 'March is on the quarterly beat');
+  ok(f.dividend > 0, 'and it is a real payment', f.dividend);
+});
+t('nothing earned is left unwritten — a stated $0.00 is a different claim', () => {
+  const c = H.computeYear(acceptState(), '2026', null);
+  const f = H.acceptedFigures(c, 'bal', 'cash', '2026-01');
+  eq(f.value, 0, 'a computed $0 balance is a real position, and is pinned like any other');
+  eq(f.interest, null, 'but an account with no rate has no earning to state');
+  eq(f.dividend, null, 'and an off-beat month did not pay nothing, it did not pay');
+});
+t('a month with no balance at all has nothing to accept', () => {
+  const c = H.computeYear(acceptState(), '2026', null);
+  eq(H.acceptedFigures(c, 'bal', 'ghost', '2026-01').value, null,
+     'an account this year never computed');
+  eq(H.acceptedFigures(null, 'bal', 'inv', '2026-01').value, null,
+     'and a year that was never computed offers nothing at all');
+});
+t('a paycheck count offers its estimate, and never a money figure', () => {
+  const c = H.computeYear(acceptState(), '2026', null);
+  const f = H.acceptedFigures(c, 'pay', null, '2026-01');
+  eq(f.value, c.paychecks['2026-01'] ?? 2, 'the count the month is estimated at');
+  eq(f.interest, null, 'the earnings boxes belong to a balance, not to this cell');
+  eq(f.dividend, null);
+});
+t('a category cell is offered nothing — its own box already holds the estimate', () => {
+  const c = H.computeYear(acceptState(), '2026', null);
+  const f = H.acceptedFigures(c, 'cat', 'anything', '2026-01');
+  eq(f.value, null);
+  eq(f.interest, null);
+  eq(f.dividend, null);
 });
 
 group('Why an account shows no balance');

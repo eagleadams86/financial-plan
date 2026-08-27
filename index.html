@@ -2319,6 +2319,14 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
           title="Rename this account, or change its rate, owner and where its interest is paid"><span aria-hidden="true">⚙</span> Account Settings</button>
         <button type="button" class="btn" id="cellSplitBtn" hidden
           title="Enter several amounts for this month and total them"><span aria-hidden="true">✂</span> Split into Amounts</button>
+        <!-- The opposite of "Back to Auto Estimate", and the branch that needed
+             it most is the one where the answer is already on the screen: a
+             balance month shows its three figures greyed, and agreeing with
+             them used to mean typing all three back in by hand. The label
+             changes with the branch — a paycheck count has one estimate, a
+             balance has up to three — so it is written in a span the code
+             sets, never a title the phone can't show. -->
+        <button type="button" class="btn" id="cellAcceptBtn" hidden><span aria-hidden="true">✓</span> <span id="cellAcceptLabel">Accept the Estimates</span></button>
         <button type="button" class="btn" id="cellRevertBtn" hidden><span aria-hidden="true">↺</span> Back to Auto Estimate</button>
         <button type="button" class="btn" id="cellClearBtn" hidden>Clear This Cell</button>
       </div>
@@ -20480,6 +20488,36 @@ function updateReconcile() {
   el.hidden = !msg;
 }
 
+/* WHAT THE GREYED FIGURES WOULD SAY IF THEY WERE TYPED (2026-08-27).
+   A balance month opens with all three of its numbers as PLACEHOLDERS — see the
+   long note in the `bal` branch below for why typing is what makes a figure
+   stored — so the one thing this dialog could not do was AGREE with itself.
+   Saying "yes, that is what the account held" meant reading three greyed
+   numbers and typing them back in digit for digit, and a slip in that
+   transcription is indistinguishable from a real correction. Same for the
+   paycheck count, which is a placeholder for the same reason.
+
+   Returns null for every figure that should stay UNWRITTEN rather than a zero:
+   a month that earned nothing pins nothing, because a stated $0.00 is a claim
+   ("it paid out, and it was nothing") and an empty box is not one — the same
+   distinction the amount box makes between a stated zero and nothing recorded.
+   The balance itself is not in that argument: a computed $0 is a real position
+   and gets pinned like any other figure.
+
+   Pure, so the rule is pinned by tests rather than by driving a dialog. */
+function acceptedFigures(c, type, id, m) {
+  const none = { value: null, interest: null, dividend: null };
+  if (!c) return none;
+  if (type === 'pay') return { ...none, value: c.paychecks[m] ?? 2 };
+  if (type !== 'bal') return none;
+  const bal = c.balances[`${id}|${m}`];
+  return {
+    value: bal === undefined ? null : round2(bal),
+    interest: round2(c.interest[`${id}|${m}`] || 0) || null,
+    dividend: round2(c.dividend[`${id}|${m}`] || 0) || null,
+  };
+}
+
 function openCellEditor(yearKey, type, id, m) {
   if (viewOnly) return;   // someone else's figures — nothing here is yours to change
   const yr = state.years[yearKey];
@@ -20488,6 +20526,8 @@ function openCellEditor(yearKey, type, id, m) {
   const kindWrap = F('cellKindWrap');
   F('cellAcctBtn').hidden = true;   // the dialog is reused — only a balance has one
   const revertBtn = F('cellRevertBtn');
+  const acceptBtn = F('cellAcceptBtn');
+  acceptBtn.hidden = true;          // the dialog is reused — only an estimate has one
   const clearBtn = F('cellClearBtn');
   const hint = F('cellAutoHint');
   F('cellNote').value = '';
@@ -20689,6 +20729,17 @@ function openCellEditor(yearKey, type, id, m) {
     F('cellDividend').placeholder = live ? fmtMoney(round2(paidOut || 0)) : '';
     kindWrap.hidden = true;
     revertBtn.hidden = !live || !(ov || adj.interest !== undefined || adj.dividend !== undefined);
+    /* Offered exactly where there is a plan figure to agree WITH — the same
+       condition the reconciliation note is drawn on, and for the same reason: a
+       pinned year computes nothing to accept, and a month that already carries
+       a stated balance would only be agreeing with itself. */
+    acceptBtn.hidden = !(live && cur !== undefined && !ov);
+    F('cellAcceptLabel').textContent = 'Accept the Estimates';
+    /* Said on the page rather than in a tooltip, because the consequence is the
+       whole point of the button and a hover title never shows on a phone. */
+    if (!acceptBtn.hidden)
+      hint.textContent = 'These are the plan\'s own figures. Accepting them writes them in '
+        + 'as stated, so this month holds them even when an earlier month changes.';
     /* A past year's figure is cleared, not reverted — and the button empties
        the whole month, earnings included, so a stated dividend can't outlive
        the balance it was written beside. */
@@ -20712,6 +20763,11 @@ function openCellEditor(yearKey, type, id, m) {
     kindWrap.hidden = true;
     revertBtn.hidden = true;
     clearBtn.hidden = stored === undefined;
+    /* The count is a placeholder for the same reason a balance is, so it needs
+       the same way of agreeing with it — and once it is typed there is nothing
+       left to accept. */
+    acceptBtn.hidden = stored !== undefined;
+    F('cellAcceptLabel').textContent = 'Accept the Estimate';
   }
   updateReconcile();   // a balance already typed over shows its gap on opening
   openModal(cellDialog);
@@ -20877,6 +20933,33 @@ function balRowGoneNote(yearKey, id) {
       : ' — or what it earned — to bring it back.');
 }
 
+/* Takes the greyed figures as though they had been typed, and then goes through
+   the ORDINARY save. Two reasons it writes through the form rather than into
+   `state` directly: the figures land exactly where a typed one would — one write
+   path, so the pin, the two earnings adjustments and the note can never drift
+   from what Save does — and a box the reader has already filled in is left
+   alone. Accept fills the blanks; it does not overwrite a correction that is
+   sitting in front of it. */
+F('cellAcceptBtn').onclick = () => {
+  const { yearKey, type, id, m } = editing;
+  const f = acceptedFigures(C[yearKey], type, id, m);
+  const fill = (elId, v) => {
+    const el = F(elId);
+    /* The paycheck count is the one box here that isn't money — showMoney would
+       dress a 3 as $3.00 and parseMoney would read it back as three dollars. */
+    if (el.value.trim() === '' && v !== null)
+      el.value = el.dataset.money === 'off' ? String(v) : showMoney(v);
+  };
+  fill('cellValue', f.value);
+  fill('cellInterest', f.interest);
+  fill('cellDividend', f.dividend);
+  /* requestSubmit, not a direct call: it fires the form's own submit, so the
+     dialog closes the way Save closes it and nothing here has to know how. */
+  F('cellForm').requestSubmit();
+  toast(type === 'pay'
+    ? `${monthLabel(m)} states ${f.value} paycheck${f.value === 1 ? '' : 's'}`
+    : `${monthLabel(m)} stated at the plan's figures`);
+};
 F('cellRevertBtn').onclick = () => {
   const { yearKey, type, id, m } = editing;
   const yr = state.years[yearKey];
@@ -23283,7 +23366,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
   coerceQuotes,
   fmtMoney, fmtMoneyIn, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
-  reconcileNote,
+  reconcileNote, acceptedFigures,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals

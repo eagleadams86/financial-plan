@@ -1497,6 +1497,22 @@ interest would freeze the balance at what it was a moment before, killing the
 recalculation the correction was made for, in that account and every later
 month chaining off it. A *stated* balance is a real value, because that one is
 the stored number.
+**Which left the dialog unable to AGREE with itself**, and `#cellAcceptBtn`
+("✓ Accept the Estimates", 2026-08-27) is the answer: agreeing meant reading
+three greyed figures and typing them back in, where a slip is indistinguishable
+from a real correction. `acceptedFigures(c, type, id, m)` is pure (hook +
+tests) and says what the placeholders would say if typed; the handler fills only
+the boxes the reader left EMPTY and then calls `cellForm.requestSubmit()`, so
+there is still exactly one write path and a correction already in a box is never
+overwritten. Two rules it keeps: it is offered on the same condition the
+reconciliation note is drawn on (`live && cur !== undefined && !ov` — a pinned
+year computes nothing to accept, and a stated month would be agreeing with
+itself), and **an earning of zero is left unwritten**, because a stated $0.00 is
+a claim ("it paid out, and it was nothing") and silence is not — the same
+distinction the amount box makes between a stated zero and nothing recorded. A
+computed balance of $0 is not in that argument and is pinned like any other. The
+paycheck count gets the same button on the same reasoning; a category cell does
+NOT, because its box already opens holding the estimate, so Save is that button.
 The grid is keyboard-operable via `wireGridKeys()`: roving tabindex (one tab
 stop for the whole grid), arrow keys between cells, Enter/Space to open the cell
 editor — the table keeps its own row/column header semantics, so no ARIA grid
