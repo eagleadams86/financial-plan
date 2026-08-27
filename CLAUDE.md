@@ -1644,9 +1644,22 @@ Things that go with it and will look arbitrary later:
   restated as `calc(100% - 32px)` because the base `dialog` rule's `width` is
   the thing being overridden; a phone gets the screen less its margin, as
   before. Left-aligned, unlike `.empty`, because a heading and a button anchor
-  the left edge and centring the paragraph would set it adrift of both. All 28
+  the left edge and centring the paragraph would set it adrift of both. All 42
   entries open at the same 666px — the shortest still runs several lines at this
   measure — so the window does not resize as you read your way round the app.
+  **WIDTH IS SETTLED; HEIGHT IS THE ONE STILL WORTH WATCHING.** `max-height:
+  calc(100vh - 32px)` is the other cap, and an entry long enough to hit it opens
+  a window that scrolls — which reads as one whose second half nobody gets to.
+  Measured 2026-08-27: the prose runs about 0.35px of height per character at
+  this measure, so roughly 2,600 characters is what a 950px-tall window can
+  show and about 1,900 is what a 720px laptop can. `monthDue` was 3,539 and
+  stood 1,249px tall; it is two entries now (see the due block, below).
+  `tests.html` pins a 2,600 ceiling per entry. **The fix when one reaches it is
+  a SECOND DOT beside the second heading, never a wider window** — the measure
+  would have to go to 106ch to fit an entry that size, which is a 128-character
+  line, and the measure is there precisely to stop that. `monthRows` (2,000
+  characters) still scrolls on a 720px screen and is the next candidate if it
+  grows.
   `tests.html` pins the pair, and pins the HELP table against the dots that open
   it in both directions: a key with no entry opens a sheet with no words in it
   and nothing on screen can say so, and an entry no `helpBtn` points at is a
@@ -3228,6 +3241,36 @@ thirteen-column table to reach one cell.
   answers for the heading beside it, and a five-part sheet under the first of
   five tiles was not keeping it. The three section cards share `monthRows`,
   which is where the estimate-italic convention is explained now.
+- **The due block is TWO dots, and the line between them is WHO IS ASKING**
+  (2026-08-27). `monthDue` was one 3,539-character entry answering two questions
+  that are never asked together: in the row editor you are SETTING a due date
+  (the day, the months, which month the money leaves), and on the Month page it
+  is already set and you want to know why a row is on the card and what makes it
+  go quiet. Whichever half you came for, the other was in the way — and the
+  window scrolled. `rowDue` ("Setting a Due Date") hangs off the due block's own
+  opener in the row editor, `monthDue` ("How Due Dates Work") stays on the Due
+  and Waiting card, and each points at the other in one sentence so the half you
+  did not get is still findable. Neither restates the other: the projection rule
+  is explained only where you tick the months that feed it, the warnings only on
+  the card that shows them. Pinned both ways in `tests.html`.
+- **A ROW EDITOR FIELD CAN CARRY AN INFO DOT** — `help: 'key'` in its spec
+  (plus optional `helpLabel` for the aria-label), rendered by `buildFields` into
+  the label with `helpBtn`, for a setting whose explanation has outgrown the
+  `hint` under its box. Three things are load-bearing. It goes INSIDE the
+  `<label>`, because `.grid-fields > div > label.field` sizes the label as a
+  DIRECT child and a wrapper would break that — and a `<button>` is interactive
+  content, so the label does not activate its control for a click on one, which
+  is what keeps the dot on a CHECKBOX from ticking the box it explains (verified
+  in Chrome: the accessible name stays "It has a due date", the dot is a
+  separately-named button, and clicking it leaves the box alone). It needs its
+  OWN listener on `rowDialog` — the one that routes every other dot is on
+  `#views`, and the dialog is not in it. And the help sheet opens ON TOP as a
+  second modal in the top layer; Escape closes the upper one first and the
+  editor is still there underneath with nothing lost. Golf Handicap has had the
+  same shape on its Holes played field since before this.
+  **The dot-coverage test's scan knows both call sites** (`helpBtn('key'` and
+  `help: 'key'`); a new way to ask for a dot must be added to it or the entry
+  reads as one nothing renders.
 - **`dashedBarEdge`'s `_trueBorder` may be a LIST**, one colour per bar, because
   of the above — a scalar is the old behaviour and is what the three earlier
   callers pass. The plugin must never fall through to `ds.borderColor` on a

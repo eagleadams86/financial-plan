@@ -276,6 +276,11 @@ type is never affected: it wins wherever you put it.
 That's the one place a due date touches a computed figure. A row with no ticked
 months behaves exactly as it always has.
 
+All of that is behind the **ⓘ** beside *It has a due date* in the row editor.
+What the app then *does* with a due date — the warnings, and what the Month page
+gathers up — is behind the one on the **Due and Waiting** card, where you are
+reading the result rather than setting it up. Each points at the other.
+
 **A warning starts a set number of days before the date** — seven unless you
 change it in [Preferences](#preferences) — and appears as a small pill on the
 row and in a **Due and Waiting** card at the top of the month. It stops the

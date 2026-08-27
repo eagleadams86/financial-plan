@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 841;
+const EXPECTED = 843;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -9820,8 +9820,14 @@ t('every info dot has words behind it', () => {
   /* Keys come from the source rather than the page: most dots sit on tabs this
      suite never renders, and one that is only drawn for a plan with an overflow
      row would be missed by anything that reads the DOM. */
-  const used = [...new Set([...stripComments(APP_SRC).matchAll(/helpBtn\('(\w+)'/g)]
-    .map(m => m[1]))];
+  /* TWO call sites now. Most dots are written straight into markup as
+     helpBtn('key', …); a row editor field asks for one by putting the key in
+     its spec, and buildFields calls helpBtn with the variable. A scan that
+     only knew the first shape would have reported `rowDue` as an entry nothing
+     renders — which is the failure this test exists to catch, arriving as a
+     false one. */
+  const used = [...new Set([...stripComments(APP_SRC)
+    .matchAll(/helpBtn\('(\w+)'|\bhelp: '(\w+)'/g)].map(m => m[1] || m[2]))];
   ok(used.length > 20, 'the scan found the dots at all — it matched ' + used.length + ' keys');
   eq(used.filter(k => !H.HELP[k]).join(', '), '',
     'every dot has an entry to open — a key with none opens an empty sheet');
@@ -9973,6 +9979,58 @@ t('every body is paragraphs of runs, and every run is text', () => {
      body ever starts to, this is where it is caught rather than in the DOM. */
   eq(entries.filter(([, h]) => /[<>]/.test(helpText(h))).map(([k]) => k).join(', '), '',
     'and no run reaches for a tag — this renderer would print it as characters');
+});
+t('no entry is so long the window it opens has to scroll', () => {
+  /* THE CEILING, and it was measured rather than picked (2026-08-27). At the
+     66ch measure the prose runs about 0.35px of height per character, so a
+     3,539-character entry stands 1,249px tall — which is taller than the
+     window can be on any screen under about 1,300px, and `monthDue` was
+     exactly that. The window then scrolls, and a scrolling help sheet is one
+     whose second half nobody reads.
+     2,600 is the height a 950px-tall window can show (that window gives the
+     text 914px, and `max-height: calc(100vh - 32px)` is where the number comes
+     from). It is a CEILING on one entry, not a budget for the table: the fix
+     when an entry reaches it is to split it in two and hang the second half
+     off the heading that asks for it, which is what the due block did. Making
+     the window wider is the other way out and it is the wrong one — the 66ch
+     measure would have to go to 106ch to fit that entry, which is a 128-
+     character line, and the measure exists precisely to prevent that. */
+  const entries = Object.entries(H.HELP);
+  const long = entries.map(([k, h]) => [k, helpText(h).length])
+    .filter(([, n]) => n > 2600).map(([k, n]) => k + ' (' + n + ')');
+  eq(long.join(', '), '',
+    'an entry over 2,600 characters — it will open a window that scrolls, and '
+    + 'the answer is a second dot beside the second heading, not a wider window');
+});
+t('the due block explains itself twice, to two different readers', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  /* ONE entry until 2026-08-27, and it answered two questions that are never
+     asked together: in the row editor you are SETTING a due date (the day, the
+     months, which month the money leaves), and on the Month page it is already
+     set and you want to know why a row is on the card and what makes it go
+     quiet. Whichever half you arrived for, the other half was in the way. */
+  const row = H.HELP.rowDue, card = H.HELP.monthDue;
+  ok(row && card, 'both halves exist');
+  ok(/\{ key: 'dueSet'[\s\S]{0,120}help: 'rowDue'/.test(src),
+     'the setting-up half hangs off the due block\u2019s own opener in the row editor, '
+     + 'which is the field every other due field appears under');
+  ok(/<h2>Due and Waiting\$\{helpBtn\('monthDue'/.test(src),
+     'and the behaviour half stays on the card it describes');
+  /* Each half owns its subject and does not restate the other's. The row
+     editor never had to explain a warning; the card never had to explain the
+     projection rule. */
+  ok(/projection rule/.test(helpText(row)) && !/projection rule/.test(helpText(card)),
+     'the projection rule is explained where you tick the months that feed it, and '
+     + 'only there');
+  ok(/warn/i.test(helpText(card)) && !/warn/i.test(helpText(row).split('.')[0]),
+     'and the warnings are explained on the card that shows them');
+  /* Neither half is a dead end: a reader who arrived at the wrong one is told
+     in a sentence where the other is. */
+  ok(/Due and Waiting/.test(helpText(row)),
+     'the row editor points at the card');
+  ok(/open it from the grid/.test(helpText(card)),
+     'and the card points back at the row');
 });
 t('the wall of text is broken up, and the bold is not everywhere', () => {
   /* Every entry was ONE paragraph of 200 to 1,400 characters until 2026-08-23.
