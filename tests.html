@@ -113,7 +113,7 @@ function ok(cond, note) { if (!cond) throw new Error(note || 'expected truthy');
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 834;
+const EXPECTED = 835;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -10666,6 +10666,64 @@ t('a heading with a dot beside it does not carry a title as well', () => {
     'and not a dot plus a hover copy of the same words, which is the pair "one dot, one '
     + 'explanation" exists to stop — and the half a phone could never read');
 });
+group('The sync button holds the header still');
+t('it is pinned WIDER than its own widest label', async () => {
+  /* The one control in the row whose label changes: "☁️ Sign In to Sync" becomes
+     a first name the moment Firebase reports who you are, and without a floor
+     every control to its right slides sideways on every refresh.
+
+     The floor was 125px and had QUIETLY STOPPED COVERING THE LABEL: that number
+     was taken at an older font size, and the pack moved to a 16px rem ramp on
+     2026-08-22 while it stayed put. The label measures ~130px now, so the pin
+     was five short and the header slid ~5px on a narrow screen again — the exact
+     bug it exists to prevent, back without a word. Golf Handicap carried the
+     same 125 and the same fault. A magic number cannot notice the type ramp
+     changing underneath it; this can, because it MEASURES.
+
+     IT NEEDS ITS OWN FRAME. The suite's frame is 1x1px and its sync button is
+     `display: none` — Firebase cannot run here — so every width read from it is
+     0, and `0 <= 125` passes on the very bug this is written to catch. That is
+     what the first draft of this test did. The guard below is what makes a
+     repeat impossible to miss. */
+  const f = document.createElement('iframe');
+  /* WITHOUT data-fin-tests THE APP NAVIGATES THE WHOLE PAGE AWAY. index.html
+     busts out of any frame that does not carry it — the anti-clickjacking guard
+     at the top of the file — and the first draft of this test, missing the
+     attribute, sent tests.html itself to index.html mid-run. The suite reported
+     "SUMMARY: undefined" because there was no longer a summary element to read:
+     the guard worked exactly as designed. */
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:800px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?syncpin=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const D = f.contentWindow, btn = D.document.getElementById('syncBtn');
+    ok(btn, 'the header carries a sync button');
+    btn.hidden = false;              // Firebase cannot run here; the row is still measurable
+    const pin = parseFloat(D.getComputedStyle(btn).minWidth);
+    ok(pin > 0, 'and it has a min-width floor at all', D.getComputedStyle(btn).minWidth);
+    /* The three labels the sync module actually writes. The signed-in one is a
+       FIRST name by design, so it is the short case, not the wide one. */
+    const widths = ['☁️ Sign In to Sync', '☁️ Charlie', '⚠️ Not syncing'].map((label) => {
+      btn.textContent = label;
+      return { label, px: btn.getBoundingClientRect().width };
+    });
+    ok(widths.every((x) => x.px > 40),
+      'the button was actually laid out and measured — a 0 here means nothing below '
+        + 'this line proves anything, which is how the first draft passed',
+      widths.map((x) => x.px.toFixed(1)).join(', '));
+    const widest = widths.reduce((a, b) => (b.px > a.px ? b : a));
+    ok(widest.px <= pin,
+      'the widest label this button ever paints has to fit inside the floor, or the row '
+        + 'moves when sign-in resolves — \u201c' + widest.label + '\u201d needs '
+        + widest.px.toFixed(2) + 'px against a ' + pin + 'px pin');
+  } finally { f.remove(); }
+});
+
 group('A table row has to say what it is called');
 /* An empty <th scope="row"> is not a blank cell — it is the row telling a screen
    reader that it is called nothing, and every figure beside it is then announced
