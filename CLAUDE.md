@@ -3248,9 +3248,13 @@ thirteen-column table to reach one cell.
   is already set and you want to know why a row is on the card and what makes it
   go quiet. Whichever half you came for, the other was in the way — and the
   window scrolled. `rowDue` ("Setting a Due Date") hangs off the due block's own
-  opener in the row editor, `monthDue` ("How Due Dates Work") stays on the Due
-  and Waiting card, and each points at the other in one sentence so the half you
-  did not get is still findable. Neither restates the other: the projection rule
+  opener in the row editor, `monthDue` ("Due and Waiting, Explained") stays on
+  the card of that name, and each points at the other in one sentence so the
+  half you did not get is still findable. **The window is named for the HEADING
+  it sits beside, not for half of it** — it was "How Due Dates Work", which
+  named the Due half of a card called Due and Waiting while the entry covered
+  the warnings, what the card gathers, and both ways a bill that never arrived
+  is handled. Neither restates the other: the projection rule
   is explained only where you tick the months that feed it, the warnings only on
   the card that shows them. Pinned both ways in `tests.html`.
 - **A ROW EDITOR FIELD CAN CARRY AN INFO DOT** — `help: 'key'` in its spec
