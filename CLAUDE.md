@@ -299,6 +299,26 @@ family names as well as balances.
   the button writes permanent history through it). The chart line is SOLID —
   recorded facts, and the dash grammar must stay honest. Snapshots are dated,
   so the share window trims them like trips.
+- **`tests.html` carries a render SMOKE WALK, and it is not a substitute for the tests
+  around it.** Everything else in that file calls a pure function or reads `index.html` as
+  text, which left the render layer entirely unexecuted — measured on 2026-08-27, and the
+  measurement is the point: `renderMonthView` (35KB), `gridCard` (27KB), `openCellEditor` (16KB) and 208 others sat at
+  zero, and none of the nine tabs had ever been drawn. A throw in any of them
+  would have shipped green. The walk boots a SECOND, FULL-SIZE frame (the suite's own is
+  1x1px, where a render draws into a box with no room and proves nothing), populates it,
+  visits every view and opens every window, and fails if the frame throws OR if a panel
+  comes back empty — the second half matters, because a render that threw half way leaves an
+  element that is present and with nothing in it, which no "did it throw" check would notice.
+  **It writes nothing**, and that is enforced rather than intended: `save()` and `confirm()` are top-level declarations in a classic script, so they are
+  properties of the frame's window and are replaced before anything is pressed — choosing a
+  tab calls save(), and an unstubbed walk would have written an invented household over the
+  reader's real plan on the shared origin. `fin-state` is read back at the end and compared.
+  The frame carries `data-fin-tests` or index.html busts out of it. The Budget is walked
+  through BOTH lenses and a grid cell is clicked, since the month page and the cell editor
+  are reachable no other way.
+  Verified by breaking a render on purpose and watching the suite go red where nothing else
+  did — do that again if you ever doubt it is still connected. The starter carries the same
+  walk, so a new app inherits one.
 - **CSV export is `csvCell`/`gridToCsv`/`donationsToCsv`** (pure, pinned).
   csvCell defuses the full OWASP formula-trigger set (`= + - @`, tab, CR) on
   TEXT fields only — a negative NUMBER legitimately opens with '-', which is

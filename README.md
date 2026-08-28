@@ -1737,6 +1737,18 @@ values for the live year's own months. (Months beyond that are now a
 projection the app works out from the rules, where the spreadsheet had them
 typed in, so the two are not meant to agree.)
 
+**And a smoke walk, because everything else is a pure function.** Pinning the engine and the
+tax tables leaves the largest part of the file — the render layer — never executed at all, so
+a throw inside a tab would ship green. A coverage run on 2026-08-27 measured exactly that:
+`renderMonthView` (35KB), `gridCard` (27KB), `openCellEditor` (16KB) and 208 others sat at
+zero, and none of the nine tabs had ever been drawn by anything. The walk loads the sample
+plan in a second, full-size frame, visits every tab, reads the Budget through **both lenses**
+— the year grid and the month page are two different renderers over one tab — opens a grid
+cell's editor, presses every button that isn't destructive, and fails if the frame throws or
+a view comes back empty. Verified by breaking `renderMonthView` on purpose. Nothing it does
+can write: `save()` and `confirm()` are replaced in that frame before anything is pressed,
+and the saved plan is read back at the end and compared.
+
 CI (`.github/workflows/tests.yml`) runs the same page headless on every push.
 
 **The page only runs on localhost, and enforces that itself.** GitHub Pages

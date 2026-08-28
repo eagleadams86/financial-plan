@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 844;
+const EXPECTED = 845;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -10828,6 +10828,148 @@ t('a heading with a dot beside it does not carry a title as well', () => {
     + 'explanation" exists to stop — and the half a phone could never read');
 });
 group('The sync button holds the header still');
+/* ── The render smoke walk ──────────────────────────────────────────────────
+   Everything else in this file calls a pure function or reads index.html as
+   text. That covers the engine, the tax tables and the boundaries very well and
+   leaves the LARGEST part of the app — the render layer — never executed at
+   all: a coverage run on 2026-08-27 put renderMonthView (35KB), gridCard
+   (27KB), openCellEditor (16KB), buildFields, renderGiving, renderRetirement
+   and 208 others at zero. Nine tabs, and nothing here had ever drawn one. A
+   throw in any of them would have shipped green.
+
+   So this walks the plan the way a person does: load the sample plan, visit
+   every tab, read the Budget through BOTH lenses — the year grid and the month
+   page are two different renderers over one tab, so a walk that saw only the
+   grid would leave the larger of the two undrawn — and press every button that
+   is not destructive. Anything the frame throws while that happens is recorded.
+   It cannot tell a right figure from a wrong one, which is what the eight
+   hundred tests around it are for; it is the difference between "the arithmetic
+   is right" and "the app runs".
+
+   NOTHING IT DOES CAN WRITE. `save()` and `confirm()` are top-level function
+   declarations in a classic script, so they are properties of the frame's
+   window and are replaced with a no-op and a yes before anything is pressed.
+   That matters more here than the read-only rule usually does: choosing a tab
+   calls save(), the sample plan IS a state, and an unstubbed walk would have
+   written an invented household over the reader's real one on the shared
+   origin. The backup and the comparison in the finally are the proof rather
+   than the intention.
+
+   AND IT CARRIES data-fin-tests. Without it index.html busts out of the frame —
+   the anti-clickjacking guard — and sends tests.html itself to the app. */
+t('the app actually runs — every tab drawn, both budget lenses, every window opened', async () => {
+  const before = localStorage.getItem('fin-state');
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1360px;height:1800px;border:0';
+  try {
+    await new Promise((resolve) => { f.onload = resolve; f.src = 'index.html?smoke=' + Date.now(); document.body.appendChild(f); });
+    const wf = f.contentWindow, df = wf.document;
+    ok(typeof wf.loadSample === 'function', 'the app must expose loadSample to the frame');
+
+    const errs = [];
+    wf.addEventListener('error', (e) => errs.push(String(e.message)));
+    wf.addEventListener('unhandledrejection', (e) => errs.push('unhandled rejection: ' + e.reason));
+
+    let saves = 0;
+    wf.save = () => { saves++; };            // counted, not merely silenced
+    wf.confirm = () => true;
+    wf.alert = () => {};
+    wf.loadSample();
+
+    const drawn = {};
+    const views = df.getElementById('views');
+    const lenLeft = () => (views ? views.textContent.trim().length : 0);
+
+    const tabs = [...df.querySelectorAll('.tab')].filter((t) => !t.hidden);
+    ok(tabs.length >= 8, 'the sample plan should light up the whole tab row', tabs.length);
+    tabs.forEach((tab) => {
+      /* `tab.click()` reports detail 0, which the app reads as a KEYBOARD
+         activation — the pointer path runs on pointerup, off the bar. Either
+         way it lands in selectTab. */
+      tab.click();
+      /* A view that drew NOTHING is the failure this is really looking for: a
+         render that threw half way leaves the panel present and empty, which no
+         "did it throw" check on its own would notice. */
+      drawn['tab:' + tab.dataset.view] = lenLeft();
+    });
+
+    /* Back to the Budget, then through the mode switch both ways. The two
+       lenses are two renderers over one tab — see the Year/Month note in
+       CLAUDE.md — so this is the only way the month page is ever drawn. */
+    const budget = df.getElementById('tab-budget');
+    ok(budget, 'the Budget tab is still where the walk expects it');
+    budget.click();
+    ['month', 'year'].forEach((mode) => {
+      const btn = df.querySelector('.vswitch[data-mode="' + mode + '"]');
+      if (!btn) { errs.push('no ' + mode + ' lens button in the budget strip'); return; }
+      btn.click();
+      drawn['lens:' + mode] = lenLeft();
+    });
+
+    /* One grid cell, and one row heading. The cell editor is the biggest single
+       renderer in the app after the two budget lenses and it opens from a click
+       on a `td.cell` rather than from any button, so a walk that pressed only
+       buttons never drew it — which is exactly how it sat at zero while eight
+       hundred tests passed around it. */
+    budget.click();
+    const yearLens = df.querySelector('.vswitch[data-mode="year"]');
+    if (yearLens) yearLens.click();
+    const cell = df.querySelector('td.cell[data-cat]');
+    ok(cell, 'the sample plan drew a budget grid with an editable cell in it');
+    if (cell) {
+      cell.click();
+      const ed = [...df.querySelectorAll('dialog')].find((d) => d.open);
+      drawn['window:cellEditor'] = ed ? ed.textContent.trim().length : 0;
+      if (ed) { try { ed.close(); } catch (e) { /* already shut */ } }
+    }
+
+    /* Every button the app is showing, except the ones that destroy something.
+       This is what opens the windows through their REAL openers — a dialog
+       opened by showModal alone is empty in exactly the way a broken one is. */
+    const closeAll = () => df.querySelectorAll('dialog[open]').forEach((d) => { try { d.close(); } catch (e) { /* already shut */ } });
+    /* The list is a SNAPSHOT and the app redraws as it is walked, so each button
+       is re-checked at the moment it is pressed rather than trusted from when it
+       was collected. Without that the walk presses controls the app has already
+       taken off the screen — a detached button still runs its handler — and
+       reports the resulting throw as an app bug. It did: switching to a SUMMARY
+       year correctly removes "Mark <month> entered", and the walk went on to
+       press the removed one and blamed markMonthEntered for the TypeError. */
+    const live = (b) => b.isConnected && b.offsetParent !== null && !b.disabled;
+    const buttons = [...df.querySelectorAll('button')].filter(live);
+    let opened = 0;
+    buttons.forEach((b) => {
+      if (!live(b)) return;
+      if (/delete|clear|remove|erase|reset|start again/i.test(b.textContent || '')) return;
+      b.click();
+      const dlg = [...df.querySelectorAll('dialog')].find((d) => d.open);
+      if (dlg) {
+        opened++;
+        const len = dlg.textContent.trim().length;
+        if (!drawn['window:' + dlg.id] || len > drawn['window:' + dlg.id]) drawn['window:' + dlg.id] = len;
+      }
+      closeAll();
+    });
+
+    eq(errs.length, 0, 'the frame threw during the walk: ' + errs.join(' | '));
+    Object.keys(drawn).forEach((k) => ok(drawn[k] > 0, k + ' rendered no text at all', drawn[k]));
+    ok(drawn['lens:month'] > 0 && drawn['lens:year'] > 0, 'both budget lenses drew');
+    ok(opened >= 3, 'pressing the app’s own buttons should have opened several windows', opened);
+    Object.keys(drawn).filter((k) => k.indexOf('window:') === 0).forEach((k) =>
+      ok(drawn[k] > 40, k + ' opened with nothing in it', drawn[k]));
+    ok(saves > 0, 'sanity: the walk really did reach code that would have written, '
+      + 'so the stub is doing work rather than sitting unused', saves);
+  } finally {
+    f.remove();
+    /* The proof, not the intention: read the key back and compare. A stub that
+       stopped working would show up here as a changed plan rather than as a
+       comment nobody re-checked. */
+    const after = localStorage.getItem('fin-state');
+    eq(after, before, 'the walk wrote to the reader’s own saved plan');
+  }
+});
+
 t('it is pinned WIDER than its own widest label', async () => {
   /* The one control in the row whose label changes: "☁️ Sign In to Sync" becomes
      a first name the moment Firebase reports who you are, and without a floor
