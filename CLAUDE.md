@@ -3272,6 +3272,22 @@ thirteen-column table to reach one cell.
   second modal in the top layer; Escape closes the upper one first and the
   editor is still there underneath with nothing lost. Golf Handicap has had the
   same shape on its Holes played field since before this.
+- **`summaryBalances` was the same fault, found by sweeping the family** (2026-08-27).
+  "Balances in a Summary Year" under a heading reading "Balances & Derived Rows" — and
+  unlike the due block, the BODY was half an answer too: one paragraph about balance
+  rows and not a word about a derived one. It is "Balances & Derived Rows, Explained"
+  now, and says what a derived row is (a subtotal the old sheet worked out from rows
+  already listed), why both kinds are held out of the year's flows (counting a subtotal
+  beside the rows it sums counts that money twice), and which tick moves a row between
+  the groups. **A rename over a body that still answers half the heading is the same
+  fault in a better hat** — the test checks the words, not just the title.
+  **The sweep's verdict on the rest: they are fine.** About a dozen windows describe the
+  ANSWER rather than repeating the heading (`safeRate` under What Retirement Costs,
+  `taxCheck` under What You'd Pay, `liabilities` under What You Owe). That is not this
+  fault and must not be "fixed": the heading asks a question and the title answers it,
+  which excludes nobody. The rule is narrow on purpose — it bites when a title names a
+  proper SUBSET of a compound heading, because that is what tells half the readers the
+  window is not theirs.
   **The dot-coverage test's scan knows both call sites** (`helpBtn('key'` and
   `help: 'key'`); a new way to ask for a dot must be added to it or the entry
   reads as one nothing renders.
