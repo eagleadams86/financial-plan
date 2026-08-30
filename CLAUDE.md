@@ -3868,6 +3868,37 @@ Info dots (`helpBtn(key, label)` + the `HELP` table + `#helpDialog`) explain
 arithmetic the reader can't see; clicking outside any dialog except the
 sync-choice one closes it without saving.
 
+## The chart tooltip wears the theme (2026-08-30)
+
+**`chartTooltipTheme()` — six values, and `newChart` merges them into every
+chart's `plugins.tooltip`.** Chart.js's own bubble is a hard-coded 80%-black box
+with white text: legible on Midnight, and the wrong object on Light and Sepia —
+a slab of near-black over a paper-coloured card, the one thing on the page that
+did not follow the theme picker. Flow Metrics and Sprint Predictability have
+shipped these exact values for a long time; ported here and to the Lottery
+Portfolio on 2026-08-30, property by property.
+
+- **`--surface-alt` / `--text-primary` / `--text-secondary` / `--border-strong`,
+  `borderWidth: 1`, `padding: 10`.** Sprint Predictability writes
+  `--bg-card-alt`, which `theme.css` declares as an alias of `--surface-alt` in
+  one place — the same colour under two names, not a divergence. No new colour.
+- **MERGED one level deeper than the `Object.assign` above it, and that is the
+  whole reason it is not simply another default there.** Nearly every chart in
+  this app passes its own `plugins.tooltip` with a `label` callback, and the
+  shallow assign would replace the themed object with that one. The order is the
+  assertion the suite pins: theme first, the chart's own keys over it, so a
+  `caretSize: 8` set beside a wide chart still wins.
+- Read at construction like every other `cssVar()` here — a theme change
+  re-renders, which rebuilds every chart at the new palette.
+- **Colour boxes stay on**, unlike Flow Metrics (whose charts are mostly one
+  series): half the tooltips here list several lines at once and the swatch is
+  what ties each figure to its line.
+
+The tooltip's REACHABILITY is a separate rule and predates this: a line chart
+takes `interaction: { mode: 'index', intersect: false }` so the reader can hover
+anywhere in the column, and a bar keeps the default because a bar is its own
+target. That rule is this app's, and the family was swept for it the same day.
+
 ## One chart, filling the window (2026-08-30)
 
 **Every card that draws a chart carries a ⤢ button that lifts the card into a

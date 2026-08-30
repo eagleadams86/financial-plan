@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 847;
+const EXPECTED = 848;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -11154,6 +11154,38 @@ t('a chart fills the window under a header that stays live', async () => {
     const cardOf = (id) => D.getElementById(id).closest('.card');
     const withCharts = [...D.querySelectorAll('#views .chartbox canvas')]
       .map((c) => c.closest('.card'));
+
+    /* ── The tooltip wears the theme ────────────────────────────────────────
+       Asked for on 2026-08-30, after the full-screen work: Chart.js's own
+       bubble is a hard-coded 80%-black box with white text, which is legible on
+       Midnight and is the wrong object on Light and Sepia. Checked here rather
+       than in a frame of its own, because this one already has six real charts
+       drawn in it. Flow Metrics and Sprint Predictability have shipped these
+       exact six values for a long time. */
+    /* Through chartIn(), not through `charts`: that is a top-level `let`, which
+       — unlike a function declaration — is not a property of the frame's window,
+       so the suite cannot see it. chartIn is the app's own lookup. */
+    const themed = withCharts
+      .map((card) => W.chartIn(card))
+      .filter(Boolean)
+      .map((ch) => ch.options.plugins.tooltip);
+    ok(themed.length >= 6, 'the Progress tab drew charts to read the tooltip off',
+       themed.length);
+    ok(themed.every((t) => !/rgba\(0,\s*0,\s*0/.test(String(t.backgroundColor))),
+       'not one chart is left on Chart.js\'s hard-coded black bubble',
+       String((themed.find((t) => /rgba\(0/.test(String(t.backgroundColor))) || {}).backgroundColor));
+    ok(themed.every((t) => t.borderWidth === 1 && t.padding === 10),
+       'and every one carries the family\'s border and padding');
+    const th = W.chartTooltipTheme();
+    ok(themed.every((t) => t.backgroundColor === th.backgroundColor
+                        && t.bodyColor === th.bodyColor),
+       'all six painted from the same block, so none of them can drift alone');
+    /* The merge is one level deeper than the options default above it, and this
+       is why: nearly every chart here passes its own plugins.tooltip with a
+       label callback in it, and a shallow assign would drop the theme. */
+    ok(themed.every((t) => typeof t.callbacks.label === 'function'),
+       'and every chart still has its own label callback — the theme was MERGED '
+       + 'into plugins.tooltip, not assigned over it');
     ok(withCharts.length >= 6, 'the sample plan draws the whole Progress tab', withCharts.length);
     eq(D.querySelectorAll('#views .chart-max').length, withCharts.length,
        'every card that draws a chart carries a button, and nothing else does');
@@ -11342,6 +11374,26 @@ t('a chart fills the window under a header that stays live', async () => {
     zoomSel.dispatchEvent(new W.Event('change', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 400));
 
+    /* The theme picker is in the header this overlay leaves live, so a tooltip
+       that did not follow it would be visible from up here. Light is the case
+       that matters: the old bubble was near-black on a paper-coloured card. */
+    const themeSel = D.getElementById('themeSel');
+    const wasTheme = themeSel.value;
+    themeSel.value = 'light';
+    themeSel.dispatchEvent(new W.Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 500));
+    const lightChart = W.chartIn(cardOf('eoyChart'));
+    const lightTip = lightChart && lightChart.options.plugins.tooltip;
+    ok(lightTip, 'a chart is drawn on the Light theme');
+    eq(lightTip.backgroundColor, W.chartTooltipTheme().backgroundColor,
+       'the tooltip repaints with the theme picker:');
+    ok(!/#0|rgba\(0/.test(String(lightTip.backgroundColor)),
+       'and is not a slab of near-black on a paper-coloured card',
+       String(lightTip.backgroundColor));
+    themeSel.value = wasTheme;
+    themeSel.dispatchEvent(new W.Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 500));
+
     /* The header stays live, so the case that must not be left standing is the
        chart going away underneath it. Changing tab from up there is how anybody
        would meet it. */
@@ -11415,6 +11467,24 @@ t('a chart fills the window under a header that stays live', async () => {
        Math.round(narrow.querySelector('.chartbox').getBoundingClientRect().height));
     W.closeMaxi();
   } finally { f.remove(); }
+});
+
+t('a chart’s own tooltip settings survive the theme being merged in', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  /* MERGED, and the order is the assertion: the theme is the base and the
+     chart's own object is assigned OVER it, so a `caretSize` set beside a wide
+     chart still wins and a `label` callback is never replaced. Written the other
+     way round, every chart in the app would lose its callback. */
+  ok(src.includes('plugins.tooltip = Object.assign(chartTooltipTheme(), plugins.tooltip || {})'),
+    'the theme is the base and the chart\'s own tooltip options are assigned over it');
+  ok(/function chartTooltipTheme\(\)/.test(src),
+    'and the six values live in one function, not copied per chart');
+  for (const tok of ['--surface-alt', '--text-primary', '--text-secondary', '--border-strong']) {
+    ok(src.includes(`cssVar('${tok}')`), `${tok} is read from the pack, not invented`);
+  }
+  ok(!/backgroundColor: '#|backgroundColor: 'rgba/.test(src),
+    'and no chart hard-codes a tooltip colour of its own');
 });
 
 t('the full-screen button is furniture, so it never prints', () => {

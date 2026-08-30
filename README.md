@@ -1293,6 +1293,7 @@ See [Year or Month](#year-or-month).
   exact percentage in Preferences (50–200%). It belongs to the device you set
   it on: never synced, never in a backup, so a laptop and a desk monitor can
   each have the size that suits them.
+- **A chart's hover panel wears the theme.** Hovering names what is under the pointer — on a line chart, anywhere in the month or year, because a 3px point is a target nobody should have to hit. The panel takes the theme's own card shade, text and border rather than the chart library's built-in black box, so it belongs to the page on Light and Sepia as much as on Midnight.
 - **Any chart fills the window.** Every card that draws one carries a ⤢ button
   at the far right of its heading strip; press it and that chart alone fills
   the screen under the header. **The header stays where it is and stays
