@@ -11157,7 +11157,14 @@ t('a chart fills the window under a header that stays live', async () => {
     ok(withCharts.length >= 6, 'the sample plan draws the whole Progress tab', withCharts.length);
     eq(D.querySelectorAll('#views .chart-max').length, withCharts.length,
        'every card that draws a chart carries a button, and nothing else does');
-    ok([...D.querySelectorAll('#views .chart-max')].every((b) => !b.hidden),
+    /* The COMPUTED DISPLAY, never the `hidden` property. `.chart-max` declares
+       `display: flex`, and an author rule beats the browser's own
+       `[hidden] { display: none }` whatever their specificities — so the
+       attribute read true while the button sat there on screen. That is exactly
+       how a folded card came to offer a button that did nothing (Charles,
+       2026-08-30), and an assertion on `.hidden` is deaf to it. */
+    const shown = (btn) => W.getComputedStyle(btn).display !== 'none';
+    ok([...D.querySelectorAll('#views .chart-max')].every(shown),
        'and every one of them is on offer, because every one has a chart under it');
 
     /* The button is in the heading BAND, not floating over the card's top-right
@@ -11359,11 +11366,28 @@ t('a chart fills the window under a header that stays live', async () => {
     await new Promise((r) => setTimeout(r, 200));
     ok(W.maxiCard() === null, 'folding it from up there brings the window down with it');
     ok(comp.classList.contains('boxshut'), 'and the card is folded on the page it went back to');
-    ok(comp.querySelector('.chart-max').hidden,
-       'a folded card offers no button: there is nothing under it to fill a window with');
+    ok(!shown(comp.querySelector('.chart-max')),
+       'a folded card offers no button: there is nothing under it to fill a window with, '
+       + 'and a button that does nothing is worse than no button');
+    eq(Math.round(comp.querySelector('.chart-max').getBoundingClientRect().width), 0,
+       'and it takes no room on the heading band it has gone from');
     comp.querySelector('.box-toggle').click();
     await new Promise((r) => setTimeout(r, 200));
-    ok(!comp.querySelector('.chart-max').hidden, 'and unfolding it offers the button again');
+    ok(shown(comp.querySelector('.chart-max')), 'and unfolding it offers the button again');
+
+    /* A card folded before the page was even drawn — `ui.collapsed` restores it
+       on load, and that path never goes through setBoxShut at all. */
+    comp.querySelector('.box-toggle').click();
+    await new Promise((r) => setTimeout(r, 200));
+    W.render();
+    await new Promise((r) => setTimeout(r, 300));
+    const redrawn = cardOf('compChart');
+    ok(redrawn.classList.contains('boxshut'), 'it is still folded after a re-render');
+    ok(!shown(redrawn.querySelector('.chart-max')),
+       'and its button is still gone — the rule has to hold on the drawing path too, '
+       + 'not only on the press that folded it');
+    redrawn.querySelector('.box-toggle').click();
+    await new Promise((r) => setTimeout(r, 200));
 
     /* ── On a phone the card's own paragraph is the thing in the way ─────────
        The frame is narrowed rather than a second one booted: a media query is
