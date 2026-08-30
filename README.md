@@ -1293,6 +1293,16 @@ See [Year or Month](#year-or-month).
   exact percentage in Preferences (50–200%). It belongs to the device you set
   it on: never synced, never in a backup, so a laptop and a desk monitor can
   each have the size that suits them.
+- **Any chart fills the window.** Every card that draws one carries a ⤢ button
+  at the far right of its heading strip; press it and that chart alone fills
+  the screen under the header. **The header stays where it is and stays
+  usable** — change the zoom or the theme and the chart redraws in front of
+  you, still full screen. Escape, the same button (now an arrows-in icon), or
+  a click on the margin round the card brings it back down, and the page is
+  where you left it. A card with a table under its chart shows the chart: the
+  table is one press of Escape away, and letting forty rows of spending squash
+  the bars into a strip would answer the opposite question. On a phone the
+  card's opening paragraph steps aside too, for the same reason.
 
 ### Editing, Everywhere
 

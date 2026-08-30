@@ -3868,6 +3868,58 @@ Info dots (`helpBtn(key, label)` + the `HELP` table + `#helpDialog`) explain
 arithmetic the reader can't see; clicking outside any dialog except the
 sync-choice one closes it without saving.
 
+## One chart, filling the window (2026-08-30)
+
+**Every card that draws a chart carries a ⤢ button that lifts the card into a
+fixed overlay filling the window under the header.** Flow Metrics' feature
+(2026-08-21), which the starter also carries — if the behaviour changes in one
+of the three, mirror it. It is NOT the Fullscreen API and NOT a modal
+`<dialog>`: the phrase that shaped it is "with the menu still visible", and both
+of those take the header away — `requestFullscreen()` takes the browser's chrome
+with it, and a modal dialog is promoted to the top layer, which paints over the
+header and makes it inert. `#chartMaxi` is an ordinary fixed div at z-index 15
+against the header's 20, starting at `--maxi-top` (the header's MEASURED height)
+and outside `.wrap`, which goes `inert` while it is open.
+
+**The card is MOVED, not copied.** Every chart is drawn into a canvas found by
+id and a theme or zoom change rebuilds all of them; a second canvas up there
+would leave those redraws painting the copy left on the page. A hidden
+`.chart-slot` holds the card's seat.
+
+Two things this app has to do that its two siblings do not:
+- **`render()` replaces the whole of `#views`,** so the maximised card would be
+  orphaned and its placeholder thrown away with the markup round it. `render()`
+  calls `maxiSuspend()` as its first line and `maxiResume(id)` at both of its
+  exits: the card comes down, the tab is drawn again, and the card carrying the
+  same CANVAS ID goes back up. Nothing paints in between, so there is no
+  flicker. This is the ordinary path, not an edge case — the ZOOM picker sits in
+  the header that deliberately stays live, and changing it re-renders.
+- **Cards are rebuilt every render, so their buttons are too.**
+  `syncMaxiButtons()` runs at the end of every render and adds what is missing;
+  Flow Metrics builds its buttons once at boot because its cards are static
+  markup. It also runs from `setBoxShut` — folding is the other thing that
+  changes what is drawable, and it does not re-render.
+
+Three more decisions worth keeping:
+- **The button lives in the heading BAND**, pushed to the far end with
+  `margin-left: auto`, not floating over the card's top-right corner as in the
+  siblings: here that corner IS the fold control. The far end is also what keeps
+  it clear of the ⓘ, which stays beside the words it explains. A `:has()` rule
+  cancels the band's own hover while the button is hovered — the band's hover
+  says "this folds the card", which is not what the button does.
+- **`.tablewrap` and `.addbar` are hidden in a maximised card.** Four of the
+  twelve cards carry a table under their chart; letting forty rows of spending
+  push the bars into a strip answers the opposite question to the one asked. The
+  `.sub` goes too, but ONLY at ≤640px, where it is a third of the window.
+- **`measureMaxiTop()` divides by `zoomScale`.** A rectangle is read in visual
+  pixels, which the page zoom has already scaled; `top` is written in layout
+  pixels, which it is about to scale again. Same correction as `pinGridHeader`
+  and the cell tooltip.
+
+Openable from the console for a test: `maxiCard()`, `openMaxi(card)`,
+`closeMaxi()`, `maxiReady(card)`, `chartIn(card)` are all top-level function
+declarations, so the suite drives the real thing through the frame's window.
+
 ## Read-only share links
 
 Ported from Sprint Velocity, which owns the family pattern — if a share rule
