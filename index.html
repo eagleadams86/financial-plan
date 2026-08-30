@@ -1818,6 +1818,25 @@ td.projected { font-style: italic; color: var(--text-secondary); }
   color: var(--text-secondary); cursor: pointer; }
 .chart-max:hover { color: var(--text-primary); background: var(--surface-alt);
   border-color: var(--text-secondary); }
+/* ── The icon must never be the thing that was clicked ──────────────────────
+   Reported by Charles on 2026-08-30: pressing the button FOLDED the card
+   instead of filling the window. The chain is worth writing down, because
+   nothing about it is visible and a synthetic `btn.click()` cannot reproduce it.
+
+   A real pointer lands on the `<path>` inside the icon, so that is `e.target`.
+   The handler runs, the card goes up, and dressMaxiBtn rewrites the button's
+   innerHTML to the arrows-in icon — which DETACHES the very path the click
+   landed on. The event then carries on bubbling to the heading band, whose fold
+   handler asks `e.target.closest('button')` to decide whether the click was
+   meant for a control; a detached node has no ancestors, so the answer is null,
+   the band treats it as a click on itself, and folds the card. syncMaxiButtons
+   then correctly brings the window down over a card with no chart showing.
+
+   `pointer-events: none` is the fix that removes the whole class: the button is
+   the smallest thing under the pointer, so `e.target` is the button and stays
+   attached whatever its contents do. The stopPropagation in the handler is the
+   belt — this click is the button's, and the band should never see it at all. */
+.chart-max svg { pointer-events: none; }
 /* Hovering the button must not light the band up with it. The band's hover says
    "this folds the card", and that is not what pressing this button does — a
    control whose hover state describes its neighbour is a control that lies. */
@@ -16107,8 +16126,16 @@ function syncMaxiButtons() {
       btn.className = 'chart-max';
       /* The card is looked up from the button at click time, never captured:
          this listener outlives nothing, but writing it the other way invites a
-         later copy that does. */
-      btn.onclick = () => openMaxi(btn.closest('.card'));
+         later copy that does.
+
+         AND THE CLICK STOPS HERE. The button sits inside the heading band, and
+         the band's own handler folds the card for any click that is not on a
+         control. It decides that by asking what was clicked — which is a
+         question this handler has just changed the answer to, by rewriting the
+         icon out from under it. See the pointer-events note in the CSS: that is
+         what makes the question safe to ask, and this is what means it is never
+         asked about a press that belongs to this button. */
+      btn.onclick = (e) => { e.stopPropagation(); openMaxi(btn.closest('.card')); };
       /* Appended to the HEADING, which is legal here and is not in the siblings:
          wireBoxes leaves a heading's existing buttons outside the fold toggle and
          has already run by the time this does, so nothing swallows it. The band's

@@ -11186,6 +11186,47 @@ t('a chart fills the window under a header that stays live', async () => {
        Math.round(dotted.querySelector('.chart-max').getBoundingClientRect().left
                   - dot.getBoundingClientRect().right) + 'px apart');
 
+    /* ── A REAL press, not a synthetic one ──────────────────────────────────
+       THIS is the assertion that would have caught the bug Charles found within
+       the hour on 2026-08-30: pressing the button folded the card instead of
+       filling the window. `btn.click()` is blind to it, because that makes the
+       BUTTON the event's target. A real pointer lands on the `<path>` inside
+       the icon; the handler then rewrites that icon, which DETACHES the path the
+       click landed on; the event carries on bubbling to the heading band, whose
+       fold handler asks `e.target.closest('button')` whether the press belonged
+       to a control, and a detached node has no ancestors, so the answer is null
+       and the band folds the card.
+
+       Two guards, and both are asserted, because either alone would leave the
+       other free to rot: the icon takes `pointer-events: none`, so what a
+       pointer actually hits is the button, and the handler stops the click, so
+       the band never sees a press that was not its own. The press below is
+       driven the way a browser drives one — ask what is under the middle of the
+       button, and dispatch on that. */
+    const pressTarget = (card) => {
+      const b = card.querySelector('.chart-max');
+      b.scrollIntoView({ block: 'center' });
+      const r = b.getBoundingClientRect();
+      return D.elementFromPoint(Math.round(r.left + r.width / 2),
+                                Math.round(r.top + r.height / 2));
+    };
+    const eoy = cardOf('eoyChart');
+    ok(pressTarget(eoy) === eoy.querySelector('.chart-max'),
+       'what a pointer hits in the middle of the button IS the button — the icon takes '
+       + 'pointer-events: none, so rewriting it mid-click cannot orphan the target',
+       (pressTarget(eoy) || {}).tagName);
+    /* And the worst case anyway: a click that really did start on the path. */
+    eoy.querySelector('.chart-max svg path')
+       .dispatchEvent(new W.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 200));
+    ok(W.maxiCard() === eoy, 'a press on the icon itself fills the window');
+    ok(!eoy.classList.contains('boxshut'),
+       'and does NOT fold the card — the click stops at the button, so the heading band '
+       + 'that folds it never sees a press that was not its own');
+    W.closeMaxi();
+    await new Promise((r) => setTimeout(r, 150));
+    ok(!eoy.classList.contains('boxshut'), 'and the card is still open on the page');
+
     /* Moved, not copied. A second canvas up here would leave every redraw — a
        theme change, a zoom change — painting the one nobody is looking at. */
     const home = { parent: spend.parentElement,
