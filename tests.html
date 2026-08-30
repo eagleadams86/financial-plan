@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 848;
+const EXPECTED = 849;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -11186,6 +11186,24 @@ t('a chart fills the window under a header that stays live', async () => {
     ok(themed.every((t) => typeof t.callbacks.label === 'function'),
        'and every chart still has its own label callback — the theme was MERGED '
        + 'into plugins.tooltip, not assigned over it');
+
+    /* ── Chart text is on the ramp, and in the app's own face ───────────────
+       Chart text is painted onto a canvas, so it inherits nothing: every size in
+       a Chart.js config is a raw number of pixels, which is the one thing the
+       rem ramp exists to stop the page containing. Until 2026-08-30 every chart
+       here ran at Chart.js's built-in 12px in Chart.js's built-in Helvetica —
+       off the ramp entirely, and in a typeface the page is not set in. */
+    const ramp = W.fsPx('xs');
+    ok(ramp > 0, 'the frame resolves the chrome step to pixels', ramp);
+    eq(W.Chart.defaults.font.size, ramp, 'the chart default is the ramp\'s xs step:');
+    eq(W.Chart.defaults.font.family, W.getComputedStyle(D.body).fontFamily,
+       'and the face is the one the page is set in, not Chart.js\'s Helvetica:');
+    ok(themed.every((t) => t.bodyFont.size === ramp && t.titleFont.size === ramp),
+       'and every tooltip is drawn at it — the default has to be set BEFORE the '
+       + 'chart is constructed, because Chart.js copies it in at that moment',
+       JSON.stringify(themed.map((t) => t.bodyFont.size)));
+    ok(themed.every((t) => t.bodyFont.family === W.Chart.defaults.font.family),
+       'in the same face');
     ok(withCharts.length >= 6, 'the sample plan draws the whole Progress tab', withCharts.length);
     eq(D.querySelectorAll('#views .chart-max').length, withCharts.length,
        'every card that draws a chart carries a button, and nothing else does');
@@ -11485,6 +11503,28 @@ t('a chart’s own tooltip settings survive the theme being merged in', () => {
   }
   ok(!/backgroundColor: '#|backgroundColor: 'rgba/.test(src),
     'and no chart hard-codes a tooltip colour of its own');
+});
+
+t('a reader’s own default text size reaches the charts', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  /* The point of fsPx over a hard-coded number: it resolves the step against the
+     LIVE root font size, so a reader who has set their browser's default to 20px
+     gets bigger axis ticks along with everything else. A literal would pin chart
+     text to itself while the rest of the page followed them. */
+  ok(/function fsPx\(step\)/.test(src), 'the app resolves a --fs-* step to pixels');
+  ok(src.includes("getComputedStyle(document.documentElement).fontSize"),
+    'against the live root font size, not a 16 assumed in the source');
+  ok(src.includes("Chart.defaults.font.size = fsPx('xs')"),
+    'and hands it to Chart.js as the default for every chart');
+  ok(src.includes('Chart.defaults.font.family = getComputedStyle(document.body).fontFamily'),
+    'with the face the page is set in');
+  /* THE PAGE ZOOM MUST NOT BE APPLIED HERE, and this is the assertion that says
+     so: `zoom` scales the whole document, canvas included, so a 13px label comes
+     out at 19.5 at 150% exactly as the body text beside it does. Dividing by
+     zoomScale would make chart text the one thing that refuses to zoom. */
+  ok(!/fsPx\([^)]*\)\s*[*/]\s*zoomScale/.test(src),
+    'and the page zoom is NOT applied to it — the whole document is already scaled');
 });
 
 t('the full-screen button is furniture, so it never prints', () => {

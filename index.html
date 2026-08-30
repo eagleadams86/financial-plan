@@ -16036,6 +16036,9 @@ function newChart(id, config, summary) {
      re-renders, which rebuilds every chart at the new palette. */
   const plugins = config.options.plugins = config.options.plugins || {};
   plugins.tooltip = Object.assign(chartTooltipTheme(), plugins.tooltip || {});
+  /* Before the construction, because Chart.js copies the defaults into the
+     chart at that moment and never looks at them again. */
+  applyChartTextDefaults();
   charts.push(new Chart(el.getContext('2d'), config));
 }
 
@@ -16051,6 +16054,45 @@ function chartTooltipTheme() {
     borderWidth: 1,
     padding: 10,
   };
+}
+
+/* ── Chart text, on the ramp and in the app's own face (2026-08-30) ─────────
+   Flow Metrics' helper and Sprint Predictability's four lines, ported here so
+   that a chart in one of these apps and a chart in another are the same text
+   beside each other. Until now every chart in this app ran at Chart.js's
+   built-in 12px in Chart.js's built-in Helvetica — a size off the pack's ramp
+   entirely, and a TYPEFACE that is not the one the page around it is set in.
+
+   Chart text is painted onto a canvas, so it inherits nothing: every size in a
+   Chart.js config is a raw NUMBER OF PIXELS, which is exactly what the rem ramp
+   exists to stop the page containing. fsPx resolves a --fs-* step against the
+   LIVE root font size, so a reader who has set their browser's default text to
+   20px gets bigger axis ticks with everything else.
+
+   `xs` is the chrome step — what ticks, legends and tooltips are everywhere in
+   the family. Read at BUILD time, like cssVar() beside it: a theme change
+   re-renders and rebuilds every chart, and a root-size change reloads the page.
+
+   THE PAGE ZOOM NEEDS NO CORRECTION HERE, which is worth saying because almost
+   everything else that touches a chart in this file does. `zoom` scales the
+   whole document, canvas included, so a 13px label is drawn at 13 units and
+   comes out at 19.5 on screen at 150% — exactly what happens to the body text
+   next to it. Dividing by zoomScale would make chart text the one thing on the
+   page that refuses to zoom. */
+function fsPx(step) {
+  const v = cssVar('--fs-' + step);
+  const root = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  return v.endsWith('rem') ? parseFloat(v) * root : parseFloat(v);
+}
+
+/* The four values Sprint Predictability sets, in the same order and for the same
+   reasons. Global rather than per-chart because Chart.js reads them at
+   construction and every chart here wants the same answer. */
+function applyChartTextDefaults() {
+  Chart.defaults.color = cssVar('--chart-tick');
+  Chart.defaults.borderColor = cssVar('--chart-grid');
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.font.size = fsPx('xs');
 }
 
 function chartAxes() {

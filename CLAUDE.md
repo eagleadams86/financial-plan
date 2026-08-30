@@ -3868,6 +3868,34 @@ Info dots (`helpBtn(key, label)` + the `HELP` table + `#helpDialog`) explain
 arithmetic the reader can't see; clicking outside any dialog except the
 sync-choice one closes it without saving.
 
+## Chart text is on the ramp, and in the app's face (2026-08-30)
+
+**`applyChartTextDefaults()` sets four Chart.js defaults before every
+construction: `color`, `borderColor`, `font.family` and `font.size = fsPx('xs')`.**
+Sprint Predictability's block, ported the same day the tooltip was themed, so a
+chart in one app and a chart in another are the same text beside each other.
+
+Until then every chart here ran at **Chart.js's built-in 12px in Chart.js's
+built-in Helvetica** — a size off the pack's ramp entirely, and a typeface the
+page is not set in. Chart text is painted onto a canvas, so it inherits nothing:
+every size in a Chart.js config is a raw NUMBER OF PIXELS, which is the one thing
+the rem ramp exists to stop the page containing. `fsPx(step)` resolves a `--fs-*`
+step against the **live** root font size, so a reader who has set their browser's
+default to 20px gets 16.25px axis ticks instead of a pinned 12 (measured).
+
+Three things to keep:
+- **Set BEFORE the construction.** Chart.js copies the defaults into the chart at
+  that moment and never looks at them again, which is why the call sits in
+  `newChart` immediately above `new Chart(...)` rather than once at boot.
+- **`xs` is the chrome step** — what ticks, legends and tooltips are family-wide.
+- **The page zoom is NOT applied here**, and the suite asserts it isn't. `zoom`
+  scales the whole document, canvas included, so a 13px label is drawn at 13
+  units and comes out at 19.5 on screen at 150% — exactly what happens to the
+  body text beside it. Dividing by `zoomScale` would make chart text the one
+  thing on the page that refuses to zoom. (Everything else that touches a chart
+  in this file DOES need that correction — hit-testing, sizing, the tooltip's
+  position — which is what makes this the exception worth writing down.)
+
 ## The chart tooltip wears the theme (2026-08-30)
 
 **`chartTooltipTheme()` — six values, and `newChart` merges them into every
