@@ -30,9 +30,10 @@ family names as well as balances.
   underlines; charts pair colour with dashes, point shapes or stripes).
 - The chrome (sticky header, button tabs, four-theme picker — plus Auto, which is
   the DEFAULT since 2026-08-22 and follows the reader's system; Midnight is the
-  base palette — anti-flash boot script, Back up dialog, privacy footer, Recent
-  changes box) is the family pattern from Sprint Velocity — if a chrome rule
-  changes in the family, mirror it here.
+  base palette — anti-flash boot script, Back up dialog, privacy footer) is the
+  family pattern from Sprint Velocity — if a chrome rule changes in the family,
+  mirror it here. (The Recent changes box was part of this list until it was
+  removed family-wide on 2026-08-18 — see Working rules.)
 - **Page width is the ONE deliberate divergence from the family** (`--page-w`,
   2400px, against SV / Flow Metrics' 1500px) — don't "restore" it. This app's
   main object is a spreadsheet: twelve months, a year total and forty-odd rows,
@@ -406,9 +407,13 @@ family names as well as balances.
 - localStorage keys: `fin-state`, `fin-theme`, `fin-updated`, `fin-zoom` —
   plus the price machinery's `fin-pricekey` and `fin-quote-run` and sync's
   `fin-sync-uid`, which live OUTSIDE state on purpose (documented in their own
-  sections). "Delete everything" clears those as well as state: the ticker list
-  and a working credential must not outlive "every holding in this browser is
-  gone" on a shared origin. **`fin-quotes` is GONE — the price cache is
+  sections). "Delete everything" clears the price machinery's keys as well as
+  state (`fin-pricekey`, `fin-quote-run`, and the legacy `fin-quotes`): the
+  ticker list and a working credential must not outlive "every holding in this
+  browser is gone" on a shared origin. `fin-theme` and `fin-zoom` are KEPT (the
+  dialog says so — they describe a screen, not a plan), and so are the sync
+  markers: staying signed in is what lets the emptied plan push to the cloud
+  (see the delete-all section under Sync). **`fin-quotes` is GONE — the price cache is
   `state.quotes` now (2026-08-17), and the whole point is that it syncs**; the
   removal of the old key is still attempted on delete-all, for a browser that
   has not been opened since it moved. `save()` is the
@@ -4497,9 +4502,11 @@ page out of five is not a convention.
 
 - **No privacy link in it**, unlike the app's own footer — you are standing on that page. That
   absence is asserted, not just omitted: the test checks there is no `href="privacy.html"`.
-- **The authorship line is the app's own, verbatim**, which means the two-link form is not
-  used here — this repo has no NOTICE, so *independent personal project* is plain text and
-  only *MIT licensed* is a link, exactly as the app's own footer has it.
+- **The authorship line is the app's own, verbatim.** When this was written the repo had no
+  NOTICE, so *independent personal project* was plain text; the NOTICE arrived 2026-08-23
+  (the app-ownership pattern) and both footers now use the two-link form — *independent
+  personal project* links the NOTICE, *MIT licensed* links the LICENSE, still identical to
+  the app's own footer.
 - `.foot` and `.foot a` are copied from the lottery page's stylesheet unchanged, so all five
   read identically. Muted, inheriting the link colour — provenance at the foot of a document
   rather than something to click on the way in.

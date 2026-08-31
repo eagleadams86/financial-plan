@@ -70,7 +70,7 @@ Three things worth knowing on day one:
   annotate or delete it.
 - **Undo covers this sitting.** ⌘Z / Ctrl+Z, or the ↩ Undo button in the
   header.
-- **Back up before you experiment.** The **⇩ Back up** button writes a JSON
+- **Back up before you experiment.** The **⇩ Back Up** button writes a JSON
   file you can restore later.
 
 ## Where Your Data Lives
@@ -85,7 +85,7 @@ in the app lives in your browser's localStorage.
   link's own `#fragment`, which browsers never send to a server. Creating one
   and opening one are both entirely local, and opening one leaves whatever
   the reader already had saved untouched.
-- **Sync is optional.** "Sign in to sync" (Google) mirrors your data to a
+- **Sync is optional.** "Sign In to Sync" (Google) mirrors your data to a
   private Firestore document in the `financialplan-60c6e` Firebase project.
   Security rules confine every account to its own document, sign-in goes
   through Google Identity Services (so it works on corporate networks that
@@ -142,7 +142,7 @@ the one for planning a whole year on a wide screen.
 **Month** is one month laid out as a page — the shape for a phone, and for
 fixing a single row without pinching into a thirteen-column table. It opens on
 the current month and steps back and forward with the ‹ › arrows, across a year
-end as easily as within one; a **This Month** button appears once you have
+end as easily as within one; a **This month** button appears once you have
 wandered off it, and the strip itself lists every month the plan holds — this
 month underscored wherever it has got to, and every month still to come
 underlined with dots, the same mark a year that hasn't begun wears. It draws:
@@ -1207,9 +1207,9 @@ Where comp stands, and how it got there.
 | **⌕ Find** (⌘K / Ctrl+K) | One search box over all of it |
 | **↩ Undo** (⌘Z / Ctrl+Z) | Walk back through this sitting's changes |
 | **⚙ Preferences** | Settings that apply across the whole app |
-| **⇩ Back up** | Export, restore, or start again |
+| **⇩ Back Up** | Export, restore, or start again |
 | **↗ Share** | Create a read-only link |
-| **☁️ Sign in to sync** | Optional Google sign-in |
+| **☁️ Sign In to Sync** | Optional Google sign-in |
 
 Each button wears a glyph in front of its word. They are plain text
 characters rather than an icon font or emoji, so nothing extra is fetched for
@@ -1293,6 +1293,11 @@ See [Year or Month](#year-or-month).
   exact percentage in Preferences (50–200%). It belongs to the device you set
   it on: never synced, never in a backup, so a laptop and a desk monitor can
   each have the size that suits them.
+- **Chart text is the page's own text.** Axis labels, legends and the hover
+  panel are set in the app's typeface at the same small size as the chrome
+  around them, instead of the chart library's built-in Helvetica at a fixed
+  12px — so a browser set to larger default text gets larger chart text with
+  everything else, and the page zoom scales it like any other line on the page.
 - **A chart's hover panel wears the theme.** Hovering names what is under the pointer — on a line chart, anywhere in the month or year, because a 3px point is a target nobody should have to hit. The panel takes the theme's own card shade, text and border rather than the chart library's built-in black box, so it belongs to the page on Light and Sepia as much as on Midnight.
 - **Any chart fills the window.** Every card that draws one carries a ⤢ button
   at the far right of its heading strip; press it and that chart alone fills
@@ -1338,7 +1343,7 @@ The way to a spreadsheet, and the way home again.
   Its Deductible column is the tick you put on the row, the same field the
   table on screen reads and the year's deductible total adds up — the file and
   the screen cannot say different things about one gift.
-- **⬆ Import a year's CSV**, in the Back up dialog, reads that same file back.
+- **⬆ Import a year's CSV**, in the Back Up dialog, reads that same file back.
   Work a year over in a spreadsheet and bring it home instead of retyping it a
   cell at a time.
 
@@ -1396,14 +1401,18 @@ that apply across the whole app rather than to a row:
 | **Dividend row interest %/yr** | The rate a dividend row uses when it has none of its own |
 | **Warn about a due bill this many days ahead** | How early a hand-paid bill with a [due date](#due-dates) starts saying so on the Month page. 0 warns on the day itself |
 | **Zoom** | The exact percentage (50–200%), the quarter steps in the header being the everyday version |
+| **Retirement real return %/yr** | The growth rate the [Retirement](#retirement) tab assumes, after inflation. An account can state its own and follow this only when it doesn't |
+| **If it goes worse / better %/yr** | The two rates around it that draw the cautious and optimistic lines on the same chart |
+| **Twelve Data key** | The [price-lookup](#investments) key — deliberately the last row, and the one setting that never leaves this device: it is typed here, handed to your password manager, and stays out of backups, share links and sync |
 
 ---
 
 ## Themes
 
 Four themes, shared with every other app in this family and listed
-alphabetically in the header dropdown: **Dark**, **Light**, **Midnight** (deep
-indigo/navy — the default) and **Sepia**.
+alphabetically in the header dropdown below **Auto**: **Dark**, **Light**,
+**Midnight** (deep indigo/navy — the base palette, and what Auto shows on a
+dark system) and **Sepia**.
 
 The palettes come from `theme.css`, a byte-copy of the generated file in the
 private `claude-theme-pack` repo, which is the source of truth for every app
@@ -1428,7 +1437,7 @@ four palettes.
 
 ## Backups and Starting Over
 
-**⇩ Back up** in the header opens one dialog for everything to do with the
+**⇩ Back Up** in the header opens one dialog for everything to do with the
 file on disk.
 
 - **Export** writes `financial-plan-YYYY-MM-DD.json`.
@@ -1685,7 +1694,7 @@ values the way their readers do rather than only counting entries. **The figures
 invented**, the app says so in its own header while the sample is loaded, and the tax bands are
 round numbers labelled *"not real tax brackets"* in the field the reader is shown — the app's
 promise that it ships no tax figure of its own is kept by making the demo's obviously fake. It
-saves like any other plan and is removed with Back up → Start again.
+saves like any other plan and is removed with Back Up → Start Again.
 
 **State is versioned.** The schema is `7` today, as the `SCHEMA` constant.
 Schema 7 moved what was owed off the property rows and into debts of their own,
@@ -1778,7 +1787,7 @@ Charlie's own one-time migration from the Numbers spreadsheet:
 python3 import_xlsx.py "~/Downloads/Financial Plan.xlsx"
 ```
 
-Then open the app → **⇩ Back up** → **Restore JSON…** → pick
+Then open the app → **⇩ Back Up** → **Restore JSON…** → pick
 `financial-plan-data.json`.
 
 `migrate_local_data.py` does the one thing the app deliberately won't do to
