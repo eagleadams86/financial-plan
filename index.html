@@ -2406,7 +2406,11 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
     <div id="cellBalWrap" hidden style="margin-top:12px">
       <div class="row">
         <div>
-          <label class="field" for="cellInterest">Interest this month</label>
+          <!-- The word changes with the account: an investment account's rate
+               produces GROWTH, and one box labelled "Interest" over a figure
+               that is not income is the whole confusion this pair of words
+               exists to end. Same box, same stored field — only the name. -->
+          <label class="field" for="cellInterest" id="cellInterestLbl">Interest this month</label>
           <input type="text" id="cellInterest" inputmode="decimal" autocomplete="off"
             style="width:160px">
         </div>
@@ -2583,7 +2587,7 @@ const STORAGE_KEY = 'fin-state';
    here is what lets `load` spot the opposite case — a plan from the FUTURE,
    saved by a newer build — which migrate cannot help with and must not guess
    at. Bump it in the same commit as the migration step that earns it. */
-const SCHEMA = 7;
+const SCHEMA = 8;
 
 /* The strapline beside the app's name in the header, and after it in the browser
    tab. Every other app in the family carries one — "· Charlie's Epic Sprint
@@ -3644,6 +3648,18 @@ function coerceShape(data) {
     a.id = String(a.id);            // already shaped by normalizeIds()
     a.name = String(a.name || a.id);
     a.rate = typeof a.rate === 'number' ? a.rate : 0;
+    /* What the rate above PRODUCES, which is not the same question as how big
+       it is. An investment account's 7%/yr is market appreciation: it moves
+       the balance, but it is a paper gain that has never arrived as money, and
+       counting it as income overstates what came in by thousands a year and
+       flatters the savings rate. Interest on a savings account is money. So
+       one field says which, and 'interest' is the default — every account that
+       predates this reads exactly as it did, and nothing reclassifies itself.
+       (Inferring "has a rate AND a dividend rate, so it must be a brokerage"
+       would move real figures on a guess.)
+       Pinned to the two values rather than trusted: all of `settings` travels
+       in a share link, so this arrives attacker-controlled. */
+    a.earns = a.earns === 'growth' ? 'growth' : 'interest';
     /* An account whose creditTo points at something deleted would silently
        drop its interest — fall back to itself. */
     if (!a.creditTo) a.creditTo = a.id;
@@ -3665,6 +3681,14 @@ function coerceShape(data) {
   for (const a of d.settings.accounts) {
     if (!acctIds.has(a.creditTo)) a.creditTo = a.id;
     if (!acctIds.has(a.divTo)) a.divTo = a.id;
+    /* Growth stays where it grew, and this is the rule that makes it true
+       everywhere rather than at each reader. Sweeping an unrealized gain into
+       a spendable account would be a SALE — money leaving the investment — and
+       nothing about a % rate says that happened. Forcing it here is also what
+       lets `receivedInto` stay untouched: growth has no receiving end, so no
+       account can report it as money paid in. Dividends are the opposite case
+       and keep their own destination: a brokerage really does sweep those. */
+    if (a.earns === 'growth') a.creditTo = a.id;
   }
   if (!d.settings.accounts.some(a => a.hub) && d.settings.accounts.length)
     d.settings.accounts[0].hub = true;
@@ -4339,7 +4363,14 @@ function coerceShape(data) {
       let id = slugJs(o.name || 'account'), n = 2;
       while (acctIds.has(id)) id = `${slugJs(o.name || 'account')}-${n++}`;
       acctIds.add(id);
-      d.settings.accounts.push({ id, name: o.name || id, rate: 0,
+      /* `earns` is spelled out rather than left to coerceShape's default, and
+         the reason is idempotence: an account MINTED here is minted after the
+         account loop has already been past, so a first load would leave it
+         without the field and the next one would add it — two loads producing
+         two different plans, which "converting twice changes nothing" exists
+         to catch. Interest is the right default for it either way: a balance
+         being migrated carries no rate at all. */
+      d.settings.accounts.push({ id, name: o.name || id, rate: 0, earns: 'interest',
         creditTo: id, divRate: 0, divTo: id, divEvery: 3 });
       /* Stated in the month tracking begins, not seeded. A seed is the fallback
          for every month with nothing before it, so it would put this balance in
@@ -4500,7 +4531,10 @@ function coerceShape(data) {
       const fromHistory = !liveAccountIds.has(id);
       let acct = d.settings.accounts.find(a => a.id === id);
       if (!acct) {
-        acct = { id, name: cat.name || id, rate: 0, creditTo: id,
+        /* Spelled out for the same reason as the mint above: this runs after
+           coerceShape's account loop, so leaving it to the default would make
+           a second load differ from the first. */
+        acct = { id, name: cat.name || id, rate: 0, earns: 'interest', creditTo: id,
           divRate: 0, divEvery: 3, divTo: id };
         d.settings.accounts.push(acct);
       }
@@ -4989,6 +5023,19 @@ function migrate(parsed) {
     }
     parsed.schema = 7;
   }
+  /* Schema 8 splits an account's rate into interest and growth — and, like
+     schema 4, deliberately rewrites NOTHING. `coerceShape` defaults every
+     account to 'interest', which is exactly how they all read before this, so
+     there is no figure to move and no guess to make: which accounts hold paper
+     gains is a question only the reader can answer, one account at a time.
+
+     The gate earns its bump at the other end. A plan saved once an account has
+     been marked `growth` must not be opened by a build that predates this,
+     because that build would count the growth as income again — silently, in
+     the Interest & Dividends line and the savings rate, with no error to say
+     so. That is precisely the case `load`'s from-the-FUTURE check exists for,
+     and a wrong figure nobody is told about is worse than a refusal. */
+  if ((parsed.schema || 1) < 8) parsed.schema = 8;
   return parsed;
 }
 
@@ -5612,7 +5659,23 @@ function computeYear(st, yearKey, prior) {
   const resolved = {};   // 'catId|m' -> {v, kind, note?}
   const balances = {};   // 'bid|m'   -> dollars
   const balanceKinds = {};
-  const interest = {};   // 'bid|m'   -> the growth that month, shown in the editor
+  /* THREE earnings maps, and the split between the first two is the whole
+     point of them. Interest and dividends are money: they arrive in an account
+     the way a paycheck does, and every figure that counts income counts them.
+     Growth is the same arithmetic on the same `rate` producing something that
+     is NOT money — an investment's appreciation, real enough to move a balance
+     and never once spendable.
+     They are separated HERE, where the account is in hand, rather than at each
+     of the dozen-odd readers, and the reason is which way the mistake falls. A
+     reader that should show growth and doesn't prints one line too few in a
+     tooltip: visible, harmless. A reader that should EXCLUDE growth and
+     doesn't goes on quietly calling a paper gain income — the exact bug this
+     exists to fix, invisible, in the savings rate. So `accountEarnings` and
+     `yearFlows` read interest+dividend and simply never see growth; nothing in
+     either of them had to be taught the difference.
+     An account's rate feeds exactly one of the first two maps, never both. */
+  const interest = {};   // 'bid|m'   -> cash interest that month, shown in the editor
+  const growth = {};     // 'bid|m'   -> appreciation that month — NOT income
   const dividend = {};   // 'bid|m'   -> what it paid out that month
   /* A balance is only a real one once the month it is built from has been
      ENTERED. What day it is has nothing to do with it: the current month is
@@ -5625,7 +5688,7 @@ function computeYear(st, yearKey, prior) {
 
   if (yr.kind !== 'grid')
     return { months: [], cells: {}, balances: {}, balanceKinds: {},
-             interest: {}, dividend: {}, paychecks: {} };
+             interest: {}, growth: {}, dividend: {}, paychecks: {} };
 
   const paychecks = resolvePaychecks(yr, months, prior);
   const ctx = { st, yr, months, resolved, balances, prior, paychecks };
@@ -5739,7 +5802,13 @@ function computeYear(st, yearKey, prior) {
         const adj = (yr.balAdjust || {})[`${a.id}|${m}`] || {};
         /* Two earnings, because they behave differently: growth usually stays
            in the account, dividends are usually swept somewhere spendable.
-           Either can be overridden for one month with what really arrived. */
+           Either can be overridden for one month with what really arrived.
+           `adj.interest` is the override for the rate WHATEVER the rate
+           produces — one stored field meaning "what the rate came to this
+           month", with `earns` saying what to call it. Deliberately not a
+           second `adj.growth` beside it: the figure is the same figure, and
+           two keys for it would mean a month typed in before an account was
+           marked `growth` quietly stopped counting. */
         earnedInt[a.id] = typeof adj.interest === 'number'
           ? adj.interest : base[a.id] * (a.rate || 0) / 12;
         /* Dividends land on a calendar beat rather than every month —
@@ -5751,7 +5820,11 @@ function computeYear(st, yearKey, prior) {
         const paysThisMonth = (+m.slice(5, 7)) % every === 0;
         earnedDiv[a.id] = typeof adj.dividend === 'number' ? adj.dividend
           : paysThisMonth ? base[a.id] * (a.divRate || 0) / 12 * every : 0;
-        interest[`${a.id}|${m}`] = round2(earnedInt[a.id]);
+        /* The one place the rate's product is classified. Same arithmetic, same
+           credit to the balance below — only which map it is reported in, and
+           with it whether the rest of the app calls it income. */
+        (a.earns === 'growth' ? growth : interest)[`${a.id}|${m}`]
+          = round2(earnedInt[a.id]);
         dividend[`${a.id}|${m}`] = round2(earnedDiv[a.id]);
       }
       const creditedTo = {};
@@ -5881,13 +5954,26 @@ function computeYear(st, yearKey, prior) {
          is put the money back where the rest of the app counts income —
          Interest & Dividends on the grid, money in vs money out, the savings
          rate — which for a past year read $0 however much it really earned.
+         Unless the account earns GROWTH, in which case a stated figure lands
+         in that map instead and counts as income nowhere; it still says what
+         the year made, on the Growth line, which is the whole distinction.
          Type-checked here rather than in coerceShape, which is the arrangement
          the live branch above already relies on. */
       let total = 0, any = false;
       for (const a of accountsOf(st)) {
         const adj = (yr.balAdjust || {})[`${a.id}|${m}`] || {};
+        /* Classified by the account, exactly as the live branch does — and
+           DELIBERATELY unlike `creditTo`/`divTo`, which a past year ignores on
+           the grounds that today's routing says nothing about 2021's. The two
+           are different kinds of fact. Where the money was sent is an
+           arrangement, and arrangements change; whether an account holds paper
+           gains is what the account IS, and an investment that appreciates
+           today appreciated then. Reading it forward is the honest call, and
+           the alternative — history counting as income what the live year
+           doesn't — would put the same money on both sides of the question. */
         if (typeof adj.interest === 'number')
-          interest[`${a.id}|${m}`] = round2(adj.interest);
+          (a.earns === 'growth' ? growth : interest)[`${a.id}|${m}`]
+            = round2(adj.interest);
         if (typeof adj.dividend === 'number')
           dividend[`${a.id}|${m}`] = round2(adj.dividend);
         const ov = yr.overrides[`${a.id}|${m}`];
@@ -5904,8 +5990,8 @@ function computeYear(st, yearKey, prior) {
     }
   }
 
-  return { months, cells: resolved, balances, balanceKinds, interest, dividend,
-           paychecks };
+  return { months, cells: resolved, balances, balanceKinds, interest, growth,
+           dividend, paychecks };
 }
 
 /* Every grid year, oldest first, each handed the previous one for the
@@ -6002,6 +6088,17 @@ const HELP = {
       + 'leaving them out would understate the month by however much your money made on its '
       + 'own. It is the same figure the grid adds up in its Income total, and the Interest '
       + 'and Dividends line in the Income card below is the part the accounts earned.'],
+    /* The exclusion is stated where the money would otherwise be looked for.
+       An account set to grow reports a figure every month, in a place a reader
+       has learnt means income, and the honest thing is to say why it isn't
+       here rather than let the absence be noticed as a missing number. */
+    ['An account you have set to ', b('grow rather than earn interest'), ' is not in this '
+      + 'figure. Its rate is the market moving, not money arriving: it raises the balance, '
+      + 'and it is yours only on paper until you sell. Counting it here would inflate every '
+      + 'month by a gain you cannot spend, and flatter the savings rate with it.'],
+    ['That money is not hidden — it is on the ', b('Growth line under Accounts'), ', which is '
+      + 'also the answer when your closing total climbs by more than Money In less Money Out '
+      + 'explains.'],
   ] },
   moneyOut: { title: 'What Money Out Counts', body: [
     ['Every expense row for the month, shown as a positive amount — the rows themselves are '
@@ -6042,6 +6139,10 @@ const HELP = {
       + 'Left Over on its own explains'), ': a balance you stated outright overrules the '
       + 'projection, which is the whole point of stating one. An account with nothing '
       + 'recorded is left out rather than counted as a zero.'],
+    ['The other reason is ', b('growth'), '. An account set to grow raises this total every '
+      + 'month without any of it passing through Money In, because a gain on paper is not '
+      + 'money that came in. The Growth line under Accounts is that figure, and it is what '
+      + 'closes the gap.'],
   ] },
   monthRows: { title: 'How These Lists Are Ordered', body: [
     [b('Biggest first'), ', which is the difference between reading a month and reading the '
@@ -6289,7 +6390,8 @@ const HELP = {
       + 'something that happened that month, so adding twelve of them up would be the same '
       + 'money counted twelve times. Those rows show where the year ended instead — the last '
       + 'month that states a balance — and hovering one, or tapping it on a phone, gives '
-      + 'the year\'s interest and dividends, which is what the account really made.'],
+      + 'the year\'s interest, growth and dividends, which is what the account really made. '
+      + 'The growth is named as such, because it is the part that is not income.'],
   ] },
   transferSign: { title: 'Which Way a Transfer Went', body: [
     ['A transfer row is written as ', b('what it did to the account the money moves through'),
@@ -6333,17 +6435,26 @@ const HELP = {
       + 'disagree about being real: some happened, some are still estimates. Click the cell '
       + 'and choose "Split into amounts".'],
   ] },
-  interestDest: { title: 'Where Interest Is Paid', body: [
-    ['An account grows by its own rate each month, applied to what it held ', b('after that '
-      + 'month\'s transfers'), '. That growth normally stays in the account — but a brokerage '
-      + 'often sweeps dividends into cash instead, so each account can name where its '
-      + 'interest lands.'],
-    ['Any month\'s interest can also be ', b('overridden with what really arrived'), ', by '
-      + 'clicking that month\'s balance.'],
+  interestDest: { title: 'How Account Balances Grow', body: [
+    ['An account rises by its own rate each month, applied to what it held ', b('after that '
+      + 'month\'s transfers'), '. It normally stays in the account — but a brokerage often '
+      + 'sweeps dividends into cash instead, so each account can name where its interest and '
+      + 'its dividends land.'],
+    /* The distinction, in the window the Accounts band's own dot opens — the
+       one place a reader arrives already asking what these figures are. */
+    ['Each account also says what its rate ', b('produces'), '. Interest is money you earned: '
+      + 'it counts in Money In and the savings rate. Growth is a gain on paper — an '
+      + 'investment rising — and it counts as income nowhere, because you cannot spend it '
+      + 'until you sell. Both move the balance the same way; only one is pay.'],
+    ['Growth has nowhere to be paid into, so it stays where it grew: sending it somewhere '
+      + 'spendable would mean you had sold, and a percentage does not say that. It is added '
+      + 'up on the ', b('Growth line under the accounts'), ', apart from the Income block.'],
+    ['Any month\'s figure can be ', b('overridden with what really arrived'), ', by clicking '
+      + 'that month\'s balance.'],
     ['A ', b('past year'), ' works the other way round: nothing is computed there, so '
-      + 'clicking a balance is how you state what the account earned that month. Those '
-      + 'figures count as income for the year and leave the stated balance beside them '
-      + 'alone, which already holds the money.'],
+      + 'clicking a balance is how you state what the account made that month. It leaves the '
+      + 'stated balance beside it alone, which already holds the money — and it counts as '
+      + 'income for the year, unless the account is one that grows.'],
   ] },
   /* accountSince, convertSummary and avgLastYear used to sit here unrendered —
      entries no helpBtn ever pointed at. Each is told where the reader actually
@@ -6953,8 +7064,15 @@ function sampleState() {
       { id: 'cash',      name: 'Everyday',      rate: 0,      creditTo: 'cash', hub: true },
       { id: 'mid',       name: 'Savings',       rate: 0.042,  creditTo: 'mid' },
       { id: 'emergency', name: 'Emergency fund', rate: 0.042, creditTo: 'emergency' },
-      { id: 'long',      name: 'Brokerage',     rate: 0,      creditTo: 'long',
-        divRate: 0.018, divEvery: 3, divTo: 'cash' },
+      /* The one account that demonstrates the split, and it has to be here:
+         sample data is the demo, so a feature no sample account exercises is a
+         feature nobody meets before their own figures depend on it. A
+         brokerage is the honest example too — it rises 6%/yr on paper AND pays
+         a real dividend into cash, which is exactly the pair the two settings
+         were invented to tell apart. `creditTo` is itself, as growth's always
+         is; `divTo` is the hub, as a swept dividend's usually is. */
+      { id: 'long',      name: 'Brokerage',     rate: 0.06,   creditTo: 'long',
+        earns: 'growth', divRate: 0.018, divEvery: 3, divTo: 'cash' },
       { id: 'college',   name: "Mia's 529",     rate: 0.055,  creditTo: 'college', owner: 'mia' },
     ];
 
@@ -7905,8 +8023,12 @@ function gridCard(y, yr) {
   const acctTitle = (a) => [
     a.name,
     ownerLabel(state, a.owner),
-    (a.rate || 0) ? `grows ${round2(a.rate * 100)}%/yr` : '',
-    (a.rate || 0) && a.creditTo !== a.id ? `interest paid into ${accountName(state, a.creditTo)}` : '',
+    (a.rate || 0) ? `grows ${round2(a.rate * 100)}%/yr${
+      a.earns === 'growth' ? ', which is growth rather than income' : ' in interest'}` : '',
+    /* A destination is only ever named for interest: growth stays where it
+       grew, so there is nothing to say and `creditTo` is its own id anyway. */
+    (a.rate || 0) && a.earns !== 'growth' && a.creditTo !== a.id
+      ? `interest paid into ${accountName(state, a.creditTo)}` : '',
   ].filter(Boolean).join(' — ') + ' — click for name, rate & interest destination';
   /* Whose money — a roll-up between the accounts and Total. Every account the
      year computes lands in exactly one of these rows, so they always add up to
@@ -7943,6 +8065,32 @@ function gridCard(y, yr) {
            has to say about the year. */
         {}, 'closing balance')}</tr>`;
   }).join('');
+  /* The Growth line — what the accounts appreciated by, kept out of Income and
+     said here instead. It sits under Total rather than in the Income block on
+     purpose: this is not money that came in, it is the part of the balances
+     above that grew, and the question it answers ("why did the Total climb by
+     more than the rows explain?") is asked while looking at the Total.
+     Drawn only when something actually grows, exactly like the earnings line —
+     a plan with no account marked `growth` is the plan it was before this
+     existed, down to the row count.
+     Marked `derived` like its Income counterpart, and like it, no editor and
+     no help dot: a rate is corrected on the account, and the Accounts band's
+     own dot already opens the window that explains this. */
+  const growMonths = months.map(m => accountGrowth(c, yr, [m]));
+  const growYear = accountGrowth(c, yr, ownMonths);
+  const grows = growYear.v !== 0 || growMonths.some(g => g.v !== 0);
+  const growTitle = 'What the accounts GREW — appreciation on accounts set to grow rather '
+    + 'than pay interest. It moves the balances above, and it is income nowhere: not in '
+    + 'Interest & Dividends, not in Money In, not in the savings rate. A paper gain is not '
+    + 'money until it is sold. It is also why the Total can climb by more than the month\'s '
+    + 'rows on their own explain. ' + (live
+      ? 'Worked out from each account\'s own rate, so it is corrected there rather than here.'
+      : 'A past year states it: open a month on the account row above to type what it grew.');
+  const growRow = () => `<tr class="derived"><th class="lbl" scope="row"
+      data-tip="${esc(growTitle)}">Growth</th>${
+    months.map((m, i) => `<td class="c-${growMonths[i].kind} ${m === thisM ? 'now' : ''}"
+      data-tip="${esc(growthTip(growMonths[i]))}">${fmtCell(growMonths[i].v)}</td>`).join('')
+    }${rowTotalTd(growYear.v, false, growYear.kind, growthTip(growYear))}</tr>`;
   const acctDrag = viewOnly ? '' : ' data-sec="accounts"';
   const balRows = !activeAccounts.length ? '' : secheadRow('Accounts',
       helpBtn('interestDest', 'how account balances grow'))
@@ -8000,8 +8148,10 @@ function gridCard(y, yr) {
           activeAccounts.reduce((s, a) => {
             const e = earningsOver(state, c, yr, a, ownMonths);
             return { interest: round2(s.interest + e.interest),
+              growth: round2(s.growth + e.growth),
               dividend: round2(s.dividend + e.dividend) };
-          }, { interest: 0, dividend: 0 }), 'closing total')}</tr>`
+          }, { interest: 0, growth: 0, dividend: 0 }), 'closing total')}</tr>`
+    + (grows ? growRow() : '')
     + (!usesPaychecks ? '' :
       /* The count the income row is actually multiplying by, not just the ones
          typed in: a year built ahead inherits last year's, and a row reading
@@ -8352,10 +8502,18 @@ function earningLines(st, c, yr, a, m) {
     to ? ` into ${to}` : ''}${stated ? ' · stated' : ''}`;
   const lines = [];
   const int = (c.interest || {})[key];
+  const grw = (c.growth || {})[key];
   const div = (c.dividend || {})[key];
   if (typeof int === 'number' && (int || typeof adj.interest === 'number'))
     lines.push(earned('Interest', int, typeof adj.interest === 'number',
       routed && a.creditTo && a.creditTo !== a.id ? accountName(st, a.creditTo) : ''));
+  /* Growth says what it is on the line itself, because this is the one place a
+     reader meets the figure without the Accounts block's heading over it to
+     explain — and a number sitting under a balance with nothing but a label is
+     read as money. No destination is ever named: growth stays where it grew,
+     which coerceShape guarantees rather than this hoping. */
+  if (typeof grw === 'number' && (grw || typeof adj.interest === 'number'))
+    lines.push(`${earned('Growth', grw, typeof adj.interest === 'number', '')} · not income`);
   if (typeof div === 'number' && (div || typeof adj.dividend === 'number'))
     lines.push(earned('Dividends', div, typeof adj.dividend === 'number',
       routed && (a.divTo || a.id) !== a.id ? accountName(st, a.divTo) : ''));
@@ -8418,16 +8576,41 @@ function sweepArrivals(st, yr, c, a, m) {
    the merge's whole premise, and a reader looking at a year wants one line per
    name they recognise. */
 function earningsOver(st, c, yr, a, months) {
-  let interest = 0, dividend = 0;
+  let interest = 0, growth = 0, dividend = 0;
   const from = new Map();
   for (const m of months) {
     interest += (c.interest || {})[`${a.id}|${m}`] || 0;
+    growth += (c.growth || {})[`${a.id}|${m}`] || 0;
     dividend += (c.dividend || {})[`${a.id}|${m}`] || 0;
     for (const g of receivedInto(st, c, yr, a, m))
       from.set(g.name, round2((from.get(g.name) || 0) + g.v));
   }
-  return { interest: round2(interest), dividend: round2(dividend),
+  return { interest: round2(interest), growth: round2(growth),
+    dividend: round2(dividend),
     received: [...from].filter(([, v]) => v).map(([name, v]) => ({ name, v })) };
+}
+
+/* Adding up one or more of the earnings maps over a run of months, with the
+   kind worked out the way the long note on `accountEarnings` sets out. Shared
+   so that income and growth are counted by the SAME code over DIFFERENT maps —
+   the difference between them is which money it is, and nothing else, so two
+   loops that could drift apart on how a month is marked would be two loops too
+   many. */
+function sumEarningMaps(c, yr, months, maps) {
+  const want = new Set(months);
+  const kinds = new Map();   // 'id|m' -> kind, so a figure is marked once
+  const totals = maps.map(() => 0);
+  maps.forEach((name, i) => {
+    for (const [key, v] of Object.entries((c || {})[name] || {})) {
+      const [, m] = key.split('|');
+      if (!want.has(m) || !v) continue;
+      totals[i] += v;
+      const adj = ((yr.balAdjust || {})[key]) || {};
+      kinds.set(key, typeof adj.interest === 'number' || typeof adj.dividend === 'number'
+        ? 'actual' : (c.balanceKinds || {})[`total|${m}`] || 'missing');
+    }
+  });
+  return { totals: totals.map(round2), kind: sumKind([...kinds.values()]) };
 }
 
 /* What the ACCOUNTS themselves earned over a run of months — every account's
@@ -8435,6 +8618,12 @@ function earningsOver(st, c, yr, a, months) {
    account exactly like a paycheck does, it is why total liquidity climbs faster
    than the budget rows on their own explain, and until it had a line of its own
    the only way to see it was to hover one account, one month at a time.
+
+   GROWTH is deliberately not in it, and that is the point of there being a
+   third map to leave out. An investment's appreciation moves the balance
+   without ever being money, so counting it here would put a paper gain in the
+   Income row and the savings rate. `accountGrowth` below answers for it
+   separately — same months, same marking, a different question.
 
    The ONE reader for that question, so the Income row, its year column and the
    savings rate cannot disagree about what a year earned. `yearFlows` keeps a
@@ -8466,23 +8655,23 @@ function earningsOver(st, c, yr, a, months) {
    that is a statement of fact whatever month it sits in, and it is marked the
    way a stated balance is. */
 function accountEarnings(c, yr, months) {
-  const want = new Set(months);
-  let interest = 0, dividend = 0;
-  const kinds = new Map();   // 'id|m' -> kind, so a figure is marked once
-  const take = (map, add) => {
-    for (const [key, v] of Object.entries(map || {})) {
-      const [, m] = key.split('|');
-      if (!want.has(m) || !v) continue;
-      add(v);
-      const adj = ((yr.balAdjust || {})[key]) || {};
-      kinds.set(key, typeof adj.interest === 'number' || typeof adj.dividend === 'number'
-        ? 'actual' : (c.balanceKinds || {})[`total|${m}`] || 'missing');
-    }
-  };
-  take((c || {}).interest, (v) => { interest += v; });
-  take((c || {}).dividend, (v) => { dividend += v; });
-  return { interest: round2(interest), dividend: round2(dividend),
-    v: round2(interest + dividend), kind: sumKind([...kinds.values()]) };
+  const { totals: [interest, dividend], kind }
+    = sumEarningMaps(c, yr, months, ['interest', 'dividend']);
+  return { interest, dividend, v: round2(interest + dividend), kind };
+}
+
+/* What the accounts GREW over the same run of months — appreciation, which is
+   not income and is never counted as any. It has a figure of its own because
+   leaving it out of Money In leaves a hole: the closing total climbs by more
+   than money in less money out explains, and before this there was nothing on
+   any page a reader could point at to say why. So the money is not hidden, it
+   is filed correctly — beside the balances it belongs to rather than in the
+   Income block it never belonged in.
+   Shaped like `accountEarnings` (`{v, kind}`) so the row that draws it is the
+   row that draws that one, and marked by the same rule for the same reason. */
+function accountGrowth(c, yr, months) {
+  const { totals: [v], kind } = sumEarningMaps(c, yr, months, ['growth']);
+  return { v, kind };
 }
 
 /* The earnings figure with its two halves named under it. Interest and
@@ -8495,6 +8684,15 @@ function earningsTip(e) {
   if (e.interest) lines.push(`Interest ${fmtMoney(e.interest)}`);
   if (e.dividend) lines.push(`Dividends ${fmtMoney(e.dividend)}`);
   return lines.join('\n');
+}
+
+/* The growth figure. It has no halves to name — one rate produced it — so the
+   second line is spent on the thing a reader actually needs told, every time
+   they meet the number: this is not money. Said on the figure rather than left
+   to the row heading, because a tooltip is read on its own. */
+function growthTip(g) {
+  return `${fmtMoney(g.v)} · ${KIND_LABEL[g.kind] || KIND_LABEL.missing}\n`
+    + 'Not income — it moves the balance and nothing else';
 }
 
 /* A balance row's YEAR-TOTAL cell — the closing balance, never a sum, and the
@@ -8514,6 +8712,10 @@ function balanceYearTip(e, closing, label) {
   const y = closing.m.slice(0, 4);
   const lines = [`${fmtMoney(closing.v)} · ${label}, ${monthLabel(closing.m)}`];
   if (e.interest) lines.push(`Interest ${fmtMoney(e.interest)} over ${y}`);
+  /* Named as not-income here as well as on the month, because a year figure is
+     the one somebody reads as "what this made me" — the bigger the number, the
+     more it wants the qualifier. */
+  if (e.growth) lines.push(`Growth ${fmtMoney(e.growth)} over ${y} · not income`);
   if (e.dividend) lines.push(`Dividends ${fmtMoney(e.dividend)} over ${y}`);
   for (const g of e.received || [])
     lines.push(`Paid in ${fmtMoney(g.v)} from ${g.name} over ${y}`);
@@ -9223,6 +9425,13 @@ function monthTotals(c, yr, m, prior) {
              kind: sumKind(cells.map(r => r.kind)) };
   };
   const earned = accountEarnings(c, yr, [m]);
+  /* Reported beside `earned`, and pointedly NOT added to `income`: growth is
+     the money the accounts made that never became money. It is here so the
+     page can say why `change` outruns `net` — a closing total that climbed by
+     more than income less expenses, with nothing on the page accounting for
+     the difference, is the one way this could read as a bug in the arithmetic
+     rather than the honest figure it is. */
+  const grown = accountGrowth(c, yr, [m]);
   const rows = add(inSection('income'));
   const income = { v: round2(rows.v + earned.v),
                    kind: sumKind([rows.kind, earned.kind]) };
@@ -9239,7 +9448,7 @@ function monthTotals(c, yr, m, prior) {
   const closing = balAt(m);
   const opening = balAt(monthAdd(m, -1));
   return {
-    rows, earned, income, expense, transfer, external, internal,
+    rows, earned, grown, income, expense, transfer, external, internal,
     out: { v: round2(-expense.v), kind: expense.kind },
     net: { v: round2(income.v + expense.v),
            kind: sumKind([income.kind, expense.kind]) },
@@ -9882,11 +10091,23 @@ function renderMonthView() {
         v === undefined ? '·' : esc(fmtMoney(v))}</span>
       <span class="mfoot">${bits.join(' · ')}</span></div>`;
   };
+  /* The month's growth, as a line under the accounts — the same figure the
+     grid's Growth row carries, in a list. It sits INSIDE `.mrows` above the
+     Total, exactly where the Income card's earnings line sits: a derived row
+     among the rows it is derived from. It opens nothing, for the same reason
+     that one doesn't — a rate is corrected on the account.
+     Only when something grew, so a plan with no growth account is untouched. */
+  const growLine = !t.grown.v ? '' : `<div class="mrow derived"
+    data-tip="${esc(growthTip(t.grown))}">
+    <span class="mname">Growth</span>
+    <span class="mamt c-${esc(t.grown.kind)}">${esc(fmtCell(t.grown.v))}</span>
+    <span class="mfoot">${kindWord(t.grown.kind)} · not income, so it is in neither
+      Money In nor Money Out · corrected on the account, not here</span></div>`;
   const acctCard = !shown.length ? '' : `<div class="card" data-box="month-accounts">
     <h2>Accounts${helpBtn('monthAccounts', 'these balances')}</h2>
     <p class="sub">Where every account stood at the end of ${esc(monthTitle(m))}.${
       viewOnly ? '' : ' Click one to state a balance you have read off a statement.'}</p>
-    <div class="mrows">${shown.map(acctLine).join('')}</div>
+    <div class="mrows">${shown.map(acctLine).join('')}${growLine}</div>
     <div class="mtot"><span>Total</span><span class="mamt c-${
       esc(t.closingKind || 'missing')}">${
       t.closing === undefined ? '·' : esc(fmtMoney(t.closing))}</span></div>
@@ -15465,10 +15686,23 @@ function gridToSummary(st, y) {
      only when the year states something: a plan that never typed its earnings
      in gains no row, which is the same silence the grid keeps. It goes in
      before the balances, so the flow list ends where the flow rows end. */
+  /* GROWTH is left out of this sum, and it has to be: `adj.interest` is the
+     stored field for whatever an account's rate produced, so adding it blind
+     would fold an investment account's paper gains into an income row and undo
+     the whole distinction at the moment a year is frozen — the one place it
+     would never be noticed again.
+     It is not carried across as a row of its own either, and that is a real
+     loss stated out loud rather than hidden: a summary has two kinds of row,
+     flows and balances, and growth is neither. The MONEY is not lost — the
+     balance rows below are December's closing figures and already hold every
+     dollar of it — only the note saying how much of the year's climb was
+     appreciation. `convertYearToSummary`'s confirm says so before it happens,
+     which is the promise this trades on. */
   const own = new Set(months);
+  const growthAcct = (k) => accountById(st, k.slice(0, k.indexOf('|')))?.earns === 'growth';
   const earned = round2(Object.entries(yr.balAdjust || {}).reduce((t, [k, adj]) =>
     own.has(k.slice(k.indexOf('|') + 1))
-      ? t + (typeof adj.interest === 'number' ? adj.interest : 0)
+      ? t + (typeof adj.interest === 'number' && !growthAcct(k) ? adj.interest : 0)
           + (typeof adj.dividend === 'number' ? adj.dividend : 0)
       : t, 0));
   if (earned) categoryTotals.push({ name: 'Interest & Dividends', total: earned });
@@ -15518,12 +15752,22 @@ function gridToPinned(st, computed, y) {
   const balAdjust = { ...(yr.balAdjust || {}) };
   const bal = (computed && computed.balances) || {};
   const int = (computed && computed.interest) || {};
+  /* Growth is stamped too, into the SAME `interest` field — one stored figure
+     for "what the rate came to", with the account's own `earns` deciding what
+     it is called when it is read back. The two maps are disjoint, so at most
+     one of them has anything for a given key and the pair below cannot fight.
+     Leaving growth out would freeze the year and lose it: the pinned branch
+     computes nothing, so an account's appreciation would simply stop being
+     reported the moment the year was closed — the Growth row emptying while
+     the balances it moved stayed exactly where they were. */
+  const grw = (computed && computed.growth) || {};
   const div = (computed && computed.dividend) || {};
   for (const m of yearMonths(yr))
     for (const a of accountsOf(st)) {
       const key = `${a.id}|${m}`;
       const earned = {};
       if (round2(int[key] || 0)) earned.interest = round2(int[key]);
+      else if (round2(grw[key] || 0)) earned.interest = round2(grw[key]);
       if (round2(div[key] || 0)) earned.dividend = round2(div[key]);
       if (Object.keys(earned).length && balAdjust[key] === undefined)
         balAdjust[key] = earned;
@@ -15584,10 +15828,21 @@ function convertYearToSummary(y) {
      listed everything else would read as if they didn't. */
   const earns = Object.keys(yr.balAdjust || {}).length
     ? ` What the accounts earned becomes one "Interest & Dividends" row.` : '';
+  /* The one thing a conversion genuinely drops, said before it happens rather
+     than discovered afterwards. A summary year has two kinds of row — flows
+     and balances — and growth is neither, so there is nowhere honest to put
+     it. No money goes missing: the balance rows are December's closing
+     figures and every dollar that grew is already inside them. What goes is
+     the line saying how much of the year's climb was appreciation. */
+  const grew = accountsOf(state).some(a => a.earns === 'growth'
+    && Object.keys(yr.balAdjust || {}).some(k => k.startsWith(a.id + '|')))
+    ? ` Growth is not carried across — a summary has no line for money that isn't `
+      + `income. The balances still hold it; only the figure saying how much grew `
+      + `is lost.` : '';
   if (!confirm(`Convert ${y} to a yearly summary? Its ${yearMonths(yr).length} months of `
     + `figures are replaced by one total per row (each account keeps its end-of-year `
     + `balance), and the months are gone for good — only restoring a backup brings them `
-    + `back.${earns} The Progress tab's charts carry on unchanged.${warn}`))
+    + `back.${earns}${grew} The Progress tab's charts carry on unchanged.${warn}`))
     return;
   state.years[y] = gridToSummary(state, y);
   save(); render();
@@ -18378,9 +18633,30 @@ const EDITORS = {
                   [JOINT_OWNER, 'Joint — shared']],
         hint: 'Groups the accounts into subtotals under the grid. It changes nothing the '
           + 'budget computes.' }] : []),
-      { key: 'rate', label: 'Interest / growth %/yr', type: 'percent',
+      { key: 'rate', label: 'Rate %/yr', type: 'percent',
         hint: 'Compounds monthly on the balance, in future months only. 0 for an account '
           + 'that just holds money.' },
+      /* What that rate PRODUCES — the one question the app could not previously
+         ask, and got wrong by assuming. A savings account's 4% is money you
+         earned; an investment account's 7% is the market moving, and it is not
+         money until you sell. Both raise the balance identically, so this
+         changes no arithmetic at all — only whether the figure is counted as
+         income, which is the difference between a savings rate that means
+         something and one that quietly includes paper gains.
+         Left as Interest by default, on every account that predates this: only
+         the reader knows which of their accounts hold investments, and guessing
+         would silently move real figures. */
+      { key: 'earns', label: 'That rate is', type: 'select', options: [
+        ['interest', 'Interest — money the account earned'],
+        ['growth', 'Growth — a gain on paper, not money yet'],
+      ], hint: 'Interest counts as income: it lands in Money In and the savings rate. '
+          + 'Growth counts as income nowhere — it moves the balance and shows on the '
+          + 'Growth line under Accounts. Dividends below are money either way.' },
+      /* Shown only for interest, and hidden rather than disabled because the
+         claim it makes is genuinely withdrawn: an account set to Growth has its
+         destination forced back to itself when the plan is read, so there is no
+         setting left underneath for a reader to be wrong about. The readout
+         below takes its place rather than leaving a gap. */
       /* "Itself" is a real option and has to be sayable, which on a NEW account
          it wasn't: the list is built from the accounts that exist, and the one
          being added isn't among them yet. So the default fell to the hub and the
@@ -18390,9 +18666,14 @@ const EDITORS = {
          an unrecognised destination as "itself". Offered only while adding; on
          an existing account its own name is in the list and says it better. */
       { key: 'creditTo', label: 'Interest is paid into', type: 'select',
-        options: [...(ds.bal ? [] : [['', 'Itself — growth stays here']]),
+        options: [...(ds.bal ? [] : [['', 'Itself — interest stays here']]),
                   ...accountsOf(state).map(a => [a.id, accountOption(state, a)])],
-        hint: 'Usually itself — growth that stays where it grew.' },
+        hint: 'Usually itself — interest that stays where it was earned.',
+        showIf: (v) => v.earns !== 'growth' },
+      { key: 'growthStays', label: 'Growth is paid into', type: 'readout',
+        showIf: (v) => v.earns === 'growth',
+        hint: 'There is nowhere to send it. Moving a gain into an account you can spend '
+          + 'from would be selling, and a percentage does not say you sold anything.' },
       { key: 'divRate', label: 'Dividends %/yr', type: 'percent',
         hint: 'Earned on the balance each month like interest, but paid out to wherever '
           + 'you send it below instead of compounding here. 0 for an account that pays '
@@ -18432,7 +18713,11 @@ const EDITORS = {
     get: (ds) => {
       const a = accountById(state, ds.bal) || {};
       return { name: a.name, owner: a.owner || '', rate: a.rate || 0,
+               earns: a.earns === 'growth' ? 'growth' : 'interest',
                creditTo: a.creditTo || a.id,
+               /* The readout's words. It is `readout`, so this is displayed and
+                  never read back — `readFields` skips the type entirely. */
+               growthStays: 'Itself — a gain stays where it grew',
                divRate: a.divRate || 0, divTo: a.divTo || a.id,
                divEvery: String(a.divEvery || 3), hub: !!a.hub, until: a.until || '' };
     },
@@ -18442,8 +18727,9 @@ const EDITORS = {
        compounds where it grew, a dividend is usually swept somewhere
        spendable — which is what the hint under each one already said while
        both defaulted to the hub. */
-    blank: () => ({ rate: 0, divRate: 0, divEvery: '3',
-                    creditTo: '', divTo: hubAccount(state)?.id }),
+    blank: () => ({ rate: 0, earns: 'interest', divRate: 0, divEvery: '3',
+                    creditTo: '', divTo: hubAccount(state)?.id,
+                    growthStays: 'Itself — a gain stays where it grew' }),
     save(ds, v) {
       if (!v.name) return;
       if (ds.bal) {
@@ -18455,7 +18741,13 @@ const EDITORS = {
            that never did. */
         Object.assign(a, { name: v.name, rate: v.rate ?? 0, divRate: v.divRate ?? 0,
           divEvery: +v.divEvery || 3,
-          creditTo: accountById(state, v.creditTo) ? v.creditTo : a.id,
+          earns: v.earns === 'growth' ? 'growth' : 'interest',
+          /* Growth has no destination but itself. Written here as well as
+             enforced in coerceShape so the account is right the moment it is
+             saved — a reader who switches to Growth and reopens the dialog
+             should not be shown the old destination still sitting there. */
+          creditTo: v.earns === 'growth' ? a.id
+            : accountById(state, v.creditTo) ? v.creditTo : a.id,
           divTo: accountById(state, v.divTo) ? v.divTo : a.id });
         /* Only when the field was actually on the form. An account marked
            Joint in a household that has since been emptied still says Joint —
@@ -18537,8 +18829,10 @@ const EDITORS = {
       while (accountById(state, id)) id = `${slugJs(v.name)}-${n++}`;
       state.settings.accounts.push({ id, name: v.name, rate: v.rate ?? 0,
         owner: validOwner(state, v.owner),
+        earns: v.earns === 'growth' ? 'growth' : 'interest',
         divRate: v.divRate ?? 0, divEvery: +v.divEvery || 3,
-        creditTo: accountById(state, v.creditTo) ? v.creditTo : id,
+        creditTo: v.earns === 'growth' || !accountById(state, v.creditTo)
+          ? id : v.creditTo,
         divTo: accountById(state, v.divTo) ? v.divTo : id });
       /* Stated in this month, not seeded: a seed is what every earlier month
          falls back on, which would put today's balance in January. */
@@ -21120,7 +21414,12 @@ function acceptedFigures(c, type, id, m) {
   const bal = c.balances[`${id}|${m}`];
   return {
     value: bal === undefined ? null : round2(bal),
-    interest: round2(c.interest[`${id}|${m}`] || 0) || null,
+    /* Interest OR growth: one box, one stored field, and whichever of the two
+       maps the account's rate reported into. An account set to Growth would
+       otherwise be the one place Accept the Estimates quietly offered nothing,
+       leaving the reader to type back the very figure it exists to save them
+       typing. */
+    interest: round2(c.interest[`${id}|${m}`] || (c.growth || {})[`${id}|${m}`] || 0) || null,
     dividend: round2(c.dividend[`${id}|${m}`] || 0) || null,
   };
 }
@@ -21249,8 +21548,16 @@ function openCellEditor(yearKey, type, id, m) {
     const ov = yr.overrides[`${id}|${m}`];
     const adj = (yr.balAdjust || {})[`${id}|${m}`] || {};
     const cur = C[yearKey]?.balances[`${id}|${m}`];
-    const earned = C[yearKey]?.interest[`${id}|${m}`];
+    /* Whichever map the account's rate reported into — the box below is one
+       box either way, and it is the figure it holds that the reader came to
+       correct, not which of two names the app files it under. */
+    const isGrowth = acct.earns === 'growth';
+    const earned = (isGrowth ? C[yearKey]?.growth : C[yearKey]?.interest)?.[`${id}|${m}`];
     const paidOut = C[yearKey]?.dividend[`${id}|${m}`];
+    /* The label follows the account. Everything else about the box — the
+       stored field, the override, Revert, Accept — is identical; the word is
+       the only thing that was ever wrong. */
+    F('cellInterestLbl').textContent = isGrowth ? 'Growth this month' : 'Interest this month';
     F('cellDialogTitle').textContent = `${acct.name} — ${monthLabel(m)}`;
     /* Say where the number came from before asking to change it: the rate, what
        that rate earned this month, and where the interest was paid — then, from
@@ -21264,12 +21571,25 @@ function openCellEditor(yearKey, type, id, m) {
        would be a second wrong answer, since the account may well carry one. It
        gets its own sentence instead, saying what the boxes below actually do. */
     const rateLine = !live
-      ? 'Interest and dividends are stated for a past year, the way the balance is: '
-        + 'type what the account really earned this month. It counts as income for '
-        + `${yearKey} and leaves the balance above alone, which already holds it.`
+      ? (isGrowth
+        ? 'Growth and dividends are stated for a past year, the way the balance is: '
+          + 'type what the account really made this month. The growth counts as income '
+          + `nowhere — it shows on the Growth line for ${yearKey} — and the dividends do. `
+          + 'Either way the balance above is left alone, which already holds them.'
+        : 'Interest and dividends are stated for a past year, the way the balance is: '
+          + 'type what the account really earned this month. It counts as income for '
+          + `${yearKey} and leaves the balance above alone, which already holds it.`)
       : [
-      (acct.rate || 0) ? `Grows ${round2(acct.rate * 100)}%/yr — ${fmtMoney(earned || 0)} this month${
-        acct.creditTo !== acct.id ? `, into ${accountName(state, acct.creditTo)}` : ''}.` : '',
+      /* Two sentences for one rate, because the second is the one worth having:
+         a reader looking at $88.40 beside a balance needs telling whether that
+         is money. A destination is only ever named for interest — growth has
+         none, and coerceShape makes sure of it rather than this hoping. */
+      (acct.rate || 0) ? (isGrowth
+        ? `Grows ${round2(acct.rate * 100)}%/yr — ${fmtMoney(earned || 0)} this month. `
+          + 'That is a gain on paper, so it moves this balance and counts as income '
+          + 'nowhere: not in Money In, not in the savings rate.'
+        : `Earns ${round2(acct.rate * 100)}%/yr in interest — ${fmtMoney(earned || 0)} this month${
+          acct.creditTo !== acct.id ? `, into ${accountName(state, acct.creditTo)}` : ''}.`) : '',
       (acct.divRate || 0) ? `Pays ${round2(acct.divRate * 100)}%/yr in dividends, ${
         { 1: 'every month', 3: 'quarterly', 6: 'twice a year', 12: 'once a year' }[
           acct.divEvery || 3]} — ${paidOut ? fmtMoney(paidOut) : 'nothing'} this month${
@@ -21757,6 +22077,18 @@ function gridToCsv(st, computed, y) {
       const v = computed.balances[`total|${m}`];
       return csvCell(v === undefined ? '' : v);
     }), csvCell(closing('total'))].join(','));
+  /* Growth, under Accounts and after Total — the same place the grid draws it,
+     for the same reason the earnings row rides under Income. An export missing
+     a row the screen shows is the disagreement a spreadsheet gets blamed for,
+     and this one carries the answer to "why doesn't Total match income less
+     expenses?" — the first question anybody re-adding these columns by hand
+     will ask. */
+  const grown = months.map(m => accountGrowth(computed, yr, [m]));
+  const grownYear = accountGrowth(computed, yr, own);
+  if (grownYear.v !== 0 || grown.some(g => g.v !== 0))
+    lines.push([csvCell('Accounts', true), csvCell('Growth', true),
+      ...grown.map(g => csvCell(g.kind === 'missing' ? '' : g.v)),
+      csvCell(grownYear.v)].join(','));
   return lines.join('\n');
 }
 
@@ -24002,7 +24334,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   SNAPSHOT_PARTS, SNAPSHOT_ASSETS, uniqueId, cellTip, balanceTip,
   receivedInto, earningsOver, earningLines, balanceYearTip, flowTransferNote, internalRows,
   raisesKeyboard,
-  accountEarnings, earningsTip,
+  accountEarnings, earningsTip, accountGrowth, growthTip, sumEarningMaps,
   /* The month view: which months the plan holds, which year a month is read
      from, and the one place a month is added up. Pure, so the tiles, the
      section totals and the chart are pinned by arithmetic rather than by a

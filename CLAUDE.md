@@ -2758,6 +2758,100 @@ reader two headers to fold and no way to guess which one they shut. `renderBudge
 appends `yearNotes(y)` after the grid or summary card; both fold through the one
 mechanism below.
 
+## Growth is not income (2026-08-31)
+
+**An account's rate produces one of two things, and the account says which.**
+`account.earns` is `'interest'` or `'growth'`, defaulting to interest. Interest
+is money the account earned; growth is an investment rising on paper, which
+moves the balance and is income nowhere. Asked for from life: an investment
+account carried a growth rate, all of it market appreciation, and every figure
+that counts income was counting it — Money In overstated by thousands a year,
+and a savings rate flattered by a gain nobody can spend.
+
+The app was already half-agreeing: the settings field was labelled "Interest /
+growth %/yr" and the cell editor's prose said "Grows X%/yr" while the box beside
+it said Interest and the money was counted as pay. The label and the accounting
+disagreed; this is which one was wrong.
+
+- **THE SPLIT HAPPENS IN `computeYear`, NOT AT THE READERS, AND THE REASON IS
+  WHICH WAY THE MISTAKE FALLS.** There is a third map, `growth`, keyed like the
+  other two, and an account's rate feeds `interest` OR `growth` and never both.
+  Because they are disjoint, every reader that must EXCLUDE growth needed no
+  change at all — `accountEarnings` and `yearFlows` read interest+dividend and
+  simply never see it. So a reader nobody taught prints one line too few in a
+  tooltip: visible, harmless. The alternative (one map plus a `growthIds` set on
+  the computed result) inverts that — a missed reader goes on quietly calling a
+  paper gain income, which is the exact bug, invisible, in the savings rate.
+  It also preserves `accountEarnings`'s stated contract of reading the maps
+  rather than walking `accountsOf`, so its callers still need only
+  `(computed, yr)`.
+- **`accountGrowth(c, yr, months)` is the one reader for the other question**,
+  shaped like `accountEarnings` and sharing `sumEarningMaps` with it — the
+  difference between them is which money it is and nothing else, so two loops
+  that could drift on how a month is MARKED would be two too many.
+- **The override key is still `balAdjust[key].interest`.** One stored field
+  meaning "what the rate came to this month", with `earns` saying what to call
+  it — the way `rate` has always been dual-purpose. A second `adj.growth` would
+  mean a month typed in before an account was marked `growth` quietly stopped
+  counting.
+- **`coerceShape` forces `creditTo = a.id` on a growth account.** Sweeping an
+  unrealized gain into spendable cash would be a SALE, and a percentage does not
+  say you sold. That rule is also what lets `receivedInto` stay untouched:
+  growth has no receiving end, so no account can report it as money paid in.
+  The editor HIDES the destination dropdown rather than disabling it, and that
+  is allowed here precisely because the claim is genuinely withdrawn in the data
+  — the readout beside it states the rule rather than leaving a gap.
+- **A PINNED YEAR CLASSIFIES BY THE ACCOUNT, deliberately unlike
+  `creditTo`/`divTo`.** Those are ignored in a past year on the grounds that
+  today's routing says nothing about 2021's — and the two are different kinds of
+  fact. Where money was SENT is an arrangement; whether an account holds paper
+  gains is what the account IS, and an investment that appreciates today
+  appreciated then. Reading it forward is also the only option that does not put
+  the same money on both sides of the question.
+- **`gridToPinned` stamps growth into `adj.interest` too.** Without it, freezing
+  a year silently loses the appreciation: the pinned branch computes nothing, so
+  the Growth row would empty while the balances it moved stayed put.
+- **`gridToSummary` EXCLUDES growth from the Interest & Dividends row**, and
+  that exclusion is mandatory rather than tidy — `adj.interest` is the stored
+  field for whatever the rate produced, so summing it blind folds a paper gain
+  into an income row at the one moment nobody would look again.
+  **It is not carried across as a row of its own either**, and that is a real
+  loss stated out loud: a summary has two kinds of row, flows and balances, and
+  growth is neither. The MONEY is not lost — the balance rows are December's
+  closing figures and hold every dollar of it — only the note saying how much of
+  the climb was appreciation. `convertYearToSummary`'s confirm says so first.
+  Do NOT "fix" this by giving the row `isBalance: true`: that flag's name says
+  balance and its job is exclusion, and the row would then be listed among the
+  account balances as though growth were one.
+- **The Growth line sits under Total, not in Income.** The question it answers
+  ("why did the Total climb by more than the rows explain?") is asked while
+  looking at the Total. `.derived` like its Income counterpart, no editor and no
+  help dot — a rate is corrected on the account, and the Accounts band's own dot
+  opens the window that explains it. **Do not reformat `earnRow()`** while
+  working here: `tests.html` regex-matches that markup literally.
+- **SCHEMA 8, with a migration step that rewrites NOTHING** — the schema 4
+  precedent. Every account defaults to interest, so shipping this moved no
+  figure; inferring "has a rate AND a dividend rate, so it must be a brokerage"
+  would have moved real money on a guess. The bump earns its keep at the other
+  end: a plan saved once an account is marked `growth` must not be opened by a
+  build that predates this, which would count the growth as income again,
+  silently, with no error to say so.
+- **Two account-MINTING sites spell `earns` out** rather than leaving it to the
+  default (the otherMoney migration and the history balance-row conversion).
+  Both run AFTER coerceShape's account loop, so the default would land on the
+  second load and not the first — two loads producing two different plans, which
+  is what "converting twice changes nothing" caught.
+- **The sample's Brokerage grows at 6% and pays a 1.8% dividend into cash**,
+  which is the pair the setting exists to tell apart — sample data is the demo,
+  and a feature no sample account exercises is one nobody meets before their own
+  figures depend on it.
+- Verified on screen before shipping, against the SAMPLE household: setting its
+  Brokerage to growth moved that account's balance by exactly the year's growth
+  and moved Income only by the dividend on a larger base, with the closing Total
+  climbing by the sum of the two to the cent. That three-way reconciliation is
+  the check to re-run if any of this is touched — it is the one that would catch
+  growth leaking back into income AND growth going missing from the balance.
+
 ## Tax
 
 **The principle: the app may COMPUTE tax; it may not KNOW a tax figure.** That
