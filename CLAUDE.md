@@ -2823,12 +2823,26 @@ disagreed; this is which one was wrong.
   Do NOT "fix" this by giving the row `isBalance: true`: that flag's name says
   balance and its job is exclusion, and the row would then be listed among the
   account balances as though growth were one.
-- **The Growth line sits under Total, not in Income.** The question it answers
-  ("why did the Total climb by more than the rows explain?") is asked while
-  looking at the Total. `.derived` like its Income counterpart, no editor and no
-  help dot — a rate is corrected on the account, and the Accounts band's own dot
-  opens the window that explains it. **Do not reformat `earnRow()`** while
-  working here: `tests.html` regex-matches that markup literally.
+- **The Growth line is the YEAR GRID's, sits under Total, and is not in Income.**
+  The question it answers ("why did the Total climb by more than the rows
+  explain?") is asked while looking at the Total. `.derived` like its Income
+  counterpart, no editor and no help dot — a rate is corrected on the account,
+  and the Accounts band's own dot opens the window that explains it. **Do not
+  reformat `earnRow()`** while working here: `tests.html` regex-matches that
+  markup literally.
+- **THE MONTH PAGE HAS NO SUCH LINE, and that is the decision rather than an
+  omission.** It shipped with one and lasted a few hours (2026-08-31, Charles:
+  *"i don't like growth listed as it's own account. plus it's already there on
+  the account row anyway"*). Both halves were right. `.mrows` IS the account
+  list, so a `.mrow` in it reads as an account — one called "Growth", holding
+  $88.40, under the real ones. And the account that grew already says so in its
+  own footer three lines above, from `earningLines`. **The Income card's
+  earnings line is not the precedent it looks like**: that list is CATEGORY
+  ROWS, and a derived row among rows is a different claim from a derived row
+  among accounts. `monthTotals` lost its `grown` field in the same change — an
+  unread figure on the function three cards add themselves up from is exactly
+  the second copy this file keeps warning about. The general rule: **before
+  adding a derived row, ask what the list around it is a list OF.**
 - **SCHEMA 8, with a migration step that rewrites NOTHING** — the schema 4
   precedent. Every account defaults to interest, so shipping this moved no
   figure; inferring "has a rate AND a dividend rate, so it must be a brokerage"

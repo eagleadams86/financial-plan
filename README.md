@@ -487,9 +487,11 @@ row can be **marked as pay** so the giving percentages count it.
 
 ### Growth
 
-An account set to **grow** rather than pay interest gets a **Growth** line of
-its own, under the accounts and their Total rather than in Income — because
-this is not money that came in. It is the part of your balances that rose.
+An account set to **grow** rather than pay interest gets a **Growth** line in
+the year grid, under the accounts and their Total rather than in Income —
+because this is not money that came in. It is the part of your balances that
+rose. On the month page there is no such line: the account that grew says so
+on its own row, which is where the growth happened.
 
 It is in none of the figures that count income: not Interest & Dividends, not
 Money In, not the savings rate. So once an account is set to grow, those
