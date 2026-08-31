@@ -505,11 +505,22 @@ that grew, which is the account whose balance moved.
 
 **Stating a balance does not restate that month's growth.** The month you pin
 keeps the figure the rate implied; every month after it chains from your number,
-so their growth follows. That is deliberate — the gap between what you typed and
-what the plan expected might be appreciation or might be a payment you never
-recorded, and the app has no way to tell. If you know what really grew, type it
-into the **Growth this month** box in the same dialog and it is stated, exactly
-like a balance.
+so their growth follows.
+
+But the app will **offer** you the figure. Type a balance that differs from the
+one the plan expected and a button appears saying what the month must have done
+for that balance to be right — **"Say This Month Grew $1,279.42"**, or *Fell*
+where the market went the other way. It is exact rather than a guess: every
+other figure in the month is already accounted for, so the difference has one
+candidate left. Take it and the reconciliation line changes to *"Matches the
+plan exactly"*, because you have just explained the whole gap.
+
+It only ever offers. The app will not decide on its own that a difference was
+the market — it might have been a payment you never recorded, and there is no
+way to tell from here. So the button waits to be pressed, it never fills a
+Growth box you have already written in, and it appears only on an account set
+to grow, where the residual really does have one candidate. On a savings or
+current account the reconciliation line still just states the gap and stops.
 
 A past year states its growth the same way it states its interest — click the
 month on the account's row — and freezing a live year writes it down with the

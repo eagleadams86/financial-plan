@@ -2851,39 +2851,42 @@ disagreed; this is which one was wrong.
   arithmetic is the second copy every other note here warns about;
   `accountEarnings` took its own loop back. The general rule earned twice in one
   day: **before adding a derived row, ask what the list around it is a list OF.**
-- **STATING A BALANCE DOES NOT RESTATE THAT MONTH'S GROWTH**, and the asymmetry
-  is deliberate. Growth is computed off `base` (the opening balance after
-  transfers), which an override does not touch — so the pinned month keeps the
-  figure the rate implied, while every LATER month chains from the stated number
-  and its growth follows it. Measured: pinning February at 12,000 over an
-  expected 10,201 leaves February's growth at 101 and moves March's from 102.01
-  to 120. The reason not to "fix" it is that the gap between stated and computed
-  might be appreciation or might be an unrecorded payment, and the app cannot
-  tell which — attributing the lot to growth would invent a fact. The reader who
-  knows says so in the Growth box, which is exactly what stating is for. Same
-  behaviour interest has always had.
-- **SCHEMA 8, with a migration step that rewrites NOTHING** — the schema 4
-  precedent. Every account defaults to interest, so shipping this moved no
-  figure; inferring "has a rate AND a dividend rate, so it must be a brokerage"
-  would have moved real money on a guess. The bump earns its keep at the other
-  end: a plan saved once an account is marked `growth` must not be opened by a
-  build that predates this, which would count the growth as income again,
-  silently, with no error to say so.
-- **Two account-MINTING sites spell `earns` out** rather than leaving it to the
-  default (the otherMoney migration and the history balance-row conversion).
-  Both run AFTER coerceShape's account loop, so the default would land on the
-  second load and not the first — two loads producing two different plans, which
-  is what "converting twice changes nothing" caught.
-- **The sample's Brokerage grows at 6% and pays a 1.8% dividend into cash**,
-  which is the pair the setting exists to tell apart — sample data is the demo,
-  and a feature no sample account exercises is one nobody meets before their own
-  figures depend on it.
-- Verified on screen before shipping, against the SAMPLE household: setting its
-  Brokerage to growth moved that account's balance by exactly the year's growth
-  and moved Income only by the dividend on a larger base, with the closing Total
-  climbing by the sum of the two to the cent. That three-way reconciliation is
-  the check to re-run if any of this is touched — it is the one that would catch
-  growth leaking back into income AND growth going missing from the balance.
+- **STATING A BALANCE DOES NOT RESTATE THAT MONTH'S GROWTH — BUT THE DIALOG
+  OFFERS THE FIGURE** (2026-08-31). Growth is computed off `base` (the opening
+  balance after transfers), which an override does not touch, so the pinned
+  month keeps the figure the rate implied while every LATER month chains from
+  the stated number. Measured: pinning February at 12,000 over an expected
+  10,201 leaves February's growth at 101 and moves March's from 102.01 to 120.
+  - **`impliedGrowth(typed, computed, growthNow)` = `growthNow + (typed −
+    computed)`**, and it is EXACT rather than a guess at the shape of the
+    answer: everything else the month did to that balance is already inside
+    `computed`, so the residual is precisely what growth would have had to be.
+    It is also INVARIANT to whatever is in the Growth box — measured against
+    what the plan computed, not against what is typed over it — which is what
+    stops the offer chasing its own tail as the reader edits.
+  - **THIS IS THE ONE EXCEPTION TO `reconcileNote`'s "state the gap and stop",
+    and it does not generalise.** That rule exists because the app cannot know
+    what a missing sum was. On a GROWTH account it nearly can: every other
+    figure in the month is known, and the one candidate left is the one thing
+    nobody can read off a statement line by line. So it is **offered on a growth
+    account only** — on a cash account the likelier explanation is an unrecorded
+    transaction, and a button there would teach people to bury one in "growth".
+  - **It only ever OFFERS.** No auto-fill: `link`-style filling would decide
+    that the difference was the market. It is hidden when the month already
+    agrees, and hidden when the Growth box already holds a figure — filling a
+    box the reader has written in is the one thing an offer must never do.
+  - **`updateReconcile` re-reads the note against a typed growth figure**, so
+    taking the offer flips the line to "Matches the plan exactly" instead of
+    going on quoting a gap just explained. Safe ONLY because a growth account's
+    `creditTo` is forced to itself, so its earnings move its own balance one for
+    one; do not extend that arithmetic to interest accounts, whose earnings may
+    be paid somewhere else entirely.
+  - **`growthOfferLabel` puts the DIRECTION in the verb** — "Say This Month Fell
+    $6,330.00", never "Grew -$6,330.00", which puts the minus sign where the
+    word should be. A fall is half of what the feature is for. Zero reads "Grew
+    Nothing", which is a claim rather than a blank.
+  - Both are pure and pinned, and the button fills the box and nothing else —
+    nothing commits until Save, exactly like `link` and Accept the Estimates.
 
 ## Tax
 

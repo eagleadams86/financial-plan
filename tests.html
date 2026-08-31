@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 863;
+const EXPECTED = 866;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -5614,6 +5614,43 @@ t('NEITHER lens gives growth a row of its own', () => {
   const line = H.earningLines(g.st, g.c, g.yr, g.st.settings.accounts[1], '2026-01')[0];
   ok(/^Growth .* · not income$/.test(line),
     'the account is where it is said — got: ' + line);
+});
+
+t('a stated balance offers what the month must have grown', () => {
+  /* The plan expected 10,201 having grown 101; the statement says 12,000. The
+     residual has one candidate on an account whose every other figure is
+     already in the computed balance, so the offer is exact rather than a guess
+     at the shape of the answer: 10,100 opening + 1,900 = 12,000. */
+  eq(H.impliedGrowth(12000, 10201, 101), 1900, 'the growth that lands on the statement');
+  eq(H.impliedGrowth(10201, 10201, 101), null, 'a month that agrees offers nothing');
+  eq(H.impliedGrowth(NaN, 10201, 101), null, 'nor an empty box');
+  eq(H.impliedGrowth(12000, NaN, 101), null, 'nor a month with nothing computed');
+  /* A market that fell is a real month, and the engine has always taken a
+     negative figure here — so it is offered rather than clamped away. */
+  eq(H.impliedGrowth(9000, 10201, 101), -1100, 'a fall is offered like a rise');
+  eq(H.impliedGrowth(10100, 10201, 101), 0,
+    'and "it grew nothing" is a claim the reader can make');
+});
+
+t('the offer says which way the market went, in words', () => {
+  /* "Grew -$6,330.00" puts the minus sign where the verb should be, and a fall
+     is half of what this feature is for. */
+  eq(H.growthOfferLabel(1279.42), 'Say This Month Grew $1,279.42');
+  eq(H.growthOfferLabel(-6330), 'Say This Month Fell $6,330.00', 'the word carries it');
+  eq(H.growthOfferLabel(0), 'Say This Month Grew Nothing', 'which is a claim, not a blank');
+  eq(H.growthOfferLabel(null), '', 'and nothing offered says nothing');
+});
+
+t('taking the offer closes the gap exactly, whatever was in the box', () => {
+  /* The figure is INVARIANT to the growth box: it is measured against what the
+     plan computed, not against what is typed over it. So the offer cannot
+     chase its own tail as the reader edits, and putting it in reconciles. */
+  const [typed, computed, grown] = [12000, 10201, 101];
+  const implied = H.impliedGrowth(typed, computed, grown);
+  const afterwards = H.round2(computed + (implied - grown));
+  eq(afterwards, typed, 'the computed balance moves onto the stated one');
+  ok(/^Matches the plan exactly/.test(H.reconcileNote(typed, afterwards)),
+    'so the note stops quoting a gap the reader has just explained');
 });
 
 t('the export mirrors the screen, so it carries no growth row either', () => {

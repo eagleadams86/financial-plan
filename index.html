@@ -2390,6 +2390,16 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
          plan worked out. Only ever on a balance, and only while there is a
          computed figure to disagree with. -->
     <p class="field-hint" id="cellReconcile" hidden></p>
+    <!-- The offer that goes with it, on a growth account only: the plan cannot
+         know a difference was the market, but on an account whose every other
+         figure is already accounted for it is the one candidate left — so the
+         app works it out, names it, and waits to be asked. The figure is IN the
+         label rather than behind it, because a button that says only "use the
+         difference" is asking to be pressed to find out what it does. -->
+    <div class="row" id="cellGrowthOffer" style="margin-top:6px">
+      <button type="button" class="btn small" id="cellGrowthBtn" hidden><span
+        aria-hidden="true">↗</span> <span id="cellGrowthBtnLabel"></span></button>
+    </div>
     <!-- Split a month into several amounts: three groceries trips, an
          estimated bill next to a paid one. Each part is actual or estimate on
          its own, and the cell shows their sum. -->
@@ -21331,7 +21341,14 @@ addEventListener('resize', pinGridHeader);
    correcting row: the app cannot know what the missing money was, and a row
    labelled "adjustment" is a worse record than an honest re-anchoring. Pure, so
    the wording is pinned by tests, and colourless — the size of the gap is the
-   signal, and nothing in this app lets hue carry a meaning. */
+   signal, and nothing in this app lets hue carry a meaning.
+
+   `impliedGrowth` below is the ONE exception to "states the gap and stops", and
+   it is allowed for a reason that does not generalise: on an account that
+   GROWS, every other figure in the month is already known — the transfers, the
+   flows, the sweeps, the dividends — so the residual has exactly one candidate
+   left, and it is the one thing about that account nobody can read off a
+   statement line by line. It still only ever OFFERS. */
 function reconcileNote(typed, computed) {
   if (!Number.isFinite(typed) || !Number.isFinite(computed)) return '';
   const gap = round2(typed - computed);
@@ -21340,14 +21357,78 @@ function reconcileNote(typed, computed) {
     + `(${fmtMoney(round2(computed))}). Saving corrects it, and later months chain `
     + 'from your figure.';
 }
+/* WHAT THIS MONTH GREW, IF THE WHOLE GAP WAS THE MARKET (2026-08-31).
+   A stated balance does not restate the month's growth: growth is worked out
+   from the OPENING balance, which an override never touches, so pinning August
+   leaves August reading the figure the rate implied and only later months chain
+   from the number you typed. That asymmetry is right — the app must not decide
+   that a difference was appreciation — but it left the reader holding the one
+   fact the plan could not work out and no way to say it except arithmetic on
+   paper.
+
+   `growthNow + (typed - computed)` is that arithmetic, and it is exact rather
+   than a guess at the shape of the answer: everything else the month did to
+   this balance is already in `computed`, so the residual is whatever the growth
+   figure would have had to be for the plan to land on the balance you read off
+   the statement. Note it is INVARIANT to whatever is currently in the Growth
+   box — put the answer in, and the gap closes to nothing rather than moving.
+
+   Null when there is nothing to offer: no figures, or a month that already
+   agrees. A NEGATIVE answer is returned and offered like any other — a market
+   that fell is a real month, and the engine has always taken a negative here.
+   Pure, so the offer and its wording are pinned by tests. */
+function impliedGrowth(typed, computed, growthNow) {
+  if (!Number.isFinite(typed) || !Number.isFinite(computed)) return null;
+  const gap = round2(typed - computed);
+  if (!gap) return null;
+  return round2((growthNow || 0) + gap);
+}
+
+/* How the offer reads. A market that falls is the case this exists for as much
+   as one that rises, and "Grew -$6,330.00" is not something anybody says about
+   it — the minus sign is doing work the verb should do. So the WORD carries the
+   direction and the figure is always written plain, which also keeps the label
+   in the Title Case every other button here uses. Nothing depends on colour,
+   as nothing in this app does. Pure, so the words are pinned by tests. */
+function growthOfferLabel(implied) {
+  if (implied === null || implied === undefined) return '';
+  if (!implied) return 'Say This Month Grew Nothing';
+  return implied > 0
+    ? `Say This Month Grew ${fmtMoney(implied)}`
+    : `Say This Month Fell ${fmtMoney(Math.abs(implied))}`;
+}
+
 /* Re-read on every keystroke. `editing.computed` is set only on a live balance,
-   so a category cell and a paycheck count never reach the note at all. */
+   so a category cell and a paycheck count never reach the note at all.
+   A typed GROWTH figure moves the computed balance one for one, and only on a
+   growth account can that be relied on: its `creditTo` is forced to itself, so
+   the money it makes lands nowhere else. That is what lets the note answer
+   "matches the plan exactly" the moment the offer below is taken, instead of
+   going on quoting a gap the reader has just explained. */
 function updateReconcile() {
   const el = F('cellReconcile');
-  const msg = (editing && editing.type === 'bal')
-    ? reconcileNote(parseMoney(F('cellValue').value), editing.computed) : '';
-  el.textContent = msg;
-  el.hidden = !msg;
+  const btn = F('cellGrowthBtn');
+  const bal = editing && editing.type === 'bal';
+  const typed = bal ? parseMoney(F('cellValue').value) : NaN;
+  const base = bal ? editing.computed : undefined;
+  const grown = bal && editing.isGrowth ? (editing.growth || 0) : 0;
+  const said = bal && editing.isGrowth ? parseMoney(F('cellInterest').value) : NaN;
+  const computed = Number.isFinite(base) && Number.isFinite(said)
+    ? round2(base + (said - grown)) : base;
+  el.textContent = bal ? reconcileNote(typed, computed) : '';
+  el.hidden = !el.textContent;
+  /* Offered only where the residual has one candidate: a live growth account
+     with a computed balance to disagree with, a figure typed over it, and no
+     answer already in the box — filling a box the reader has written in is the
+     one thing an offer must never do. */
+  const implied = bal && editing.isGrowth && !Number.isFinite(said)
+    ? impliedGrowth(typed, base, grown) : null;
+  editing.impliedGrowth = implied;
+  if (btn) {
+    btn.hidden = implied === null;
+    if (implied !== null)
+      F('cellGrowthBtnLabel').textContent = growthOfferLabel(implied);
+  }
 }
 
 /* WHAT THE GREYED FIGURES WOULD SAY IF THEY WERE TYPED (2026-08-27).
@@ -21604,6 +21685,12 @@ function openCellEditor(yearKey, type, id, m) {
        adrift from everything feeding it — agreement with yourself is not a
        check. Reconciliation belongs to a month the plan actually worked out. */
     if (live && cur !== undefined && !ov) editing.computed = round2(cur || 0);
+    /* What the offer needs: whether this account's rate makes growth, and what
+       the plan already had it growing by. Both go on `editing` rather than
+       being re-derived in `updateReconcile`, which runs on every keystroke and
+       has no business reaching back into the state for a fact settled here. */
+    editing.isGrowth = isGrowth;
+    editing.growth = round2(earned || 0);
     F('cellNote').value = ov?.note || '';
     /* Shown on BOTH models, and the difference is the placeholder. A live year
        computes a figure, so the box shows it greyed and typing takes over. A
@@ -21661,6 +21748,18 @@ function openCellEditor(yearKey, type, id, m) {
   openModal(cellDialog);
 }
 F('cellValue').addEventListener('input', updateReconcile);
+/* The Growth box moves the note too — take the offer, or type a figure of your
+   own, and the gap re-reads against it rather than against the rate. */
+F('cellInterest').addEventListener('input', updateReconcile);
+/* Fills the box and nothing else: it is a keystroke you did not have to make,
+   not a save. Nothing is committed until Save, exactly like `link` and Accept
+   the Estimates, so the figure can still be edited or cleared before then. */
+F('cellGrowthBtn').onclick = () => {
+  if (editing?.impliedGrowth === null || editing?.impliedGrowth === undefined) return;
+  F('cellInterest').value = fmtMoney(editing.impliedGrowth);
+  updateReconcile();
+  F('cellInterest').focus();
+};
 
 F('cellForm').onsubmit = () => {
   const { yearKey, type, id, m } = editing;
@@ -24259,7 +24358,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
   coerceQuotes,
   fmtMoney, fmtMoneyIn, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
-  reconcileNote, acceptedFigures,
+  reconcileNote, impliedGrowth, growthOfferLabel, acceptedFigures,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals
