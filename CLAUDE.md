@@ -2823,26 +2823,45 @@ disagreed; this is which one was wrong.
   Do NOT "fix" this by giving the row `isBalance: true`: that flag's name says
   balance and its job is exclusion, and the row would then be listed among the
   account balances as though growth were one.
-- **The Growth line is the YEAR GRID's, sits under Total, and is not in Income.**
-  The question it answers ("why did the Total climb by more than the rows
-  explain?") is asked while looking at the Total. `.derived` like its Income
-  counterpart, no editor and no help dot — a rate is corrected on the account,
-  and the Accounts band's own dot opens the window that explains it. **Do not
-  reformat `earnRow()`** while working here: `tests.html` regex-matches that
-  markup literally.
-- **THE MONTH PAGE HAS NO SUCH LINE, and that is the decision rather than an
-  omission.** It shipped with one and lasted a few hours (2026-08-31, Charles:
-  *"i don't like growth listed as it's own account. plus it's already there on
-  the account row anyway"*). Both halves were right. `.mrows` IS the account
-  list, so a `.mrow` in it reads as an account — one called "Growth", holding
-  $88.40, under the real ones. And the account that grew already says so in its
-  own footer three lines above, from `earningLines`. **The Income card's
-  earnings line is not the precedent it looks like**: that list is CATEGORY
-  ROWS, and a derived row among rows is a different claim from a derived row
-  among accounts. `monthTotals` lost its `grown` field in the same change — an
-  unread figure on the function three cards add themselves up from is exactly
-  the second copy this file keeps warning about. The general rule: **before
-  adding a derived row, ask what the list around it is a list OF.**
+- **NEITHER LENS GIVES GROWTH A ROW, and that is the decision.** Both had one
+  for a few hours on 2026-08-31 and both came straight back out, on Charles's
+  reading, which was right twice:
+  - The MONTH page's sat in `.mrows` — *"i don't like growth listed as it's own
+    account. plus it's already there on the account row anyway."* `.mrows` IS
+    the account list, so a row in it reads as an account called Growth holding
+    $88.40; and `earningLines` already said it on the account three lines above.
+  - The YEAR grid's sat under Total, and fails the same way one level up: the
+    Accounts block is a stack of BALANCES (Total is a balance, Paychecks a
+    count), so twelve monthly growth figures in it read as tiny balances under
+    a large one.
+  **The real shape of the problem: growth is a FLOW that is not income, and the
+  grid has no block for one** — Income is the wrong claim outright and Accounts
+  is the wrong kind of figure. Rather than invent a third block for one line, it
+  is said where it happened: `earningLines` per month under the balance it
+  moved, `earningsOver` → `balanceYearTip` for the year on the account's
+  year-total cell. One answer, on the account that made it.
+  **The Income earnings row is not the precedent it looks like** — that list is
+  CATEGORY ROWS, and interest and dividends have no other home on the grid,
+  where growth has a perfectly good one.
+  **The CSV mirrors the screen and carries no Growth row either**: the rule cuts
+  both ways, and a line the file invents that the screen never drew is the same
+  disagreement as one it drops.
+  **`accountGrowth`, `growthTip` and the `sumEarningMaps` split all went with
+  the rows.** They had no reader left, and an unread figure on this file's
+  arithmetic is the second copy every other note here warns about;
+  `accountEarnings` took its own loop back. The general rule earned twice in one
+  day: **before adding a derived row, ask what the list around it is a list OF.**
+- **STATING A BALANCE DOES NOT RESTATE THAT MONTH'S GROWTH**, and the asymmetry
+  is deliberate. Growth is computed off `base` (the opening balance after
+  transfers), which an override does not touch — so the pinned month keeps the
+  figure the rate implied, while every LATER month chains from the stated number
+  and its growth follows it. Measured: pinning February at 12,000 over an
+  expected 10,201 leaves February's growth at 101 and moves March's from 102.01
+  to 120. The reason not to "fix" it is that the gap between stated and computed
+  might be appreciation or might be an unrecorded payment, and the app cannot
+  tell which — attributing the lot to growth would invent a fact. The reader who
+  knows says so in the Growth box, which is exactly what stating is for. Same
+  behaviour interest has always had.
 - **SCHEMA 8, with a migration step that rewrites NOTHING** — the schema 4
   precedent. Every account defaults to interest, so shipping this moved no
   figure; inferring "has a rate AND a dividend rate, so it must be a brokerage"

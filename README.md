@@ -487,11 +487,11 @@ row can be **marked as pay** so the giving percentages count it.
 
 ### Growth
 
-An account set to **grow** rather than pay interest gets a **Growth** line in
-the year grid, under the accounts and their Total rather than in Income —
-because this is not money that came in. It is the part of your balances that
-rose. On the month page there is no such line: the account that grew says so
-on its own row, which is where the growth happened.
+An account set to **grow** rather than pay interest reports its growth **on the
+account itself**, and nowhere else. Hover or tap a balance and it reads
+"Growth $88.40 · not income" under the figure; the account's year-total column
+gives the year's. There is no Growth row in either lens — growth is a flow, and
+a flow among the account balances reads as an account, which is what it is not.
 
 It is in none of the figures that count income: not Interest & Dividends, not
 Money In, not the savings rate. So once an account is set to grow, those
@@ -500,8 +500,16 @@ honest number, and the reason to set it.
 
 The consequence worth knowing is that **Money In less Money Out no longer
 explains the change in your closing total**, and it should not: the balances
-climbed by more than any money that arrived. The Growth line is exactly that
-difference, which is why it sits beside the Total it accounts for.
+climbed by more than any money that arrived. The difference is on the account
+that grew, which is the account whose balance moved.
+
+**Stating a balance does not restate that month's growth.** The month you pin
+keeps the figure the rate implied; every month after it chains from your number,
+so their growth follows. That is deliberate — the gap between what you typed and
+what the plan expected might be appreciation or might be a payment you never
+recorded, and the app has no way to tell. If you know what really grew, type it
+into the **Growth this month** box in the same dialog and it is stated, exactly
+like a balance.
 
 A past year states its growth the same way it states its interest — click the
 month on the account's row — and freezing a live year writes it down with the

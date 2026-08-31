@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 862;
+const EXPECTED = 863;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -5584,33 +5584,44 @@ t('growth is in no figure that counts income', () => {
   eq(H.monthTotals(g.c, g.yr, '2026-01', null).income.v, 0, 'nor in the month\'s income');
 });
 
-t('it is reported instead as growth, over the same months', () => {
+t('it is reported instead on the account, over the same months', () => {
   const g = growthYear('growth');
   const own = ['2026-01', '2026-02', '2026-03'];
-  const grown = H.accountGrowth(g.c, g.yr, own);
-  eq(grown.v, H.round2(g.c.growth['inv|2026-01'] + g.c.growth['inv|2026-02']
+  const inv = g.st.settings.accounts[1];
+  const e = H.earningsOver(g.st, g.c, g.yr, inv, own);
+  eq(e.growth, H.round2(g.c.growth['inv|2026-01'] + g.c.growth['inv|2026-02']
     + g.c.growth['inv|2026-03']), 'every month of the run, added up');
-  ok(grown.v > 0, 'and it is a real figure, not a rounded-away nothing');
-  eq(H.accountGrowth(growthYear('interest').c, g.yr, own).v, 0,
+  ok(e.growth > 0, 'and it is a real figure, not a rounded-away nothing');
+  eq(e.interest, 0, 'never doubled into the interest half');
+  const i = growthYear('interest');
+  eq(H.earningsOver(i.st, i.c, i.yr, i.st.settings.accounts[1], own).growth, 0,
     'an interest account grows nothing');
-  eq(H.accountGrowth(g.c, g.yr, ['2026-01']).v, g.c.growth['inv|2026-01'],
-    'and one month of the run is that month');
 });
 
-t('the month page reports growth on the ACCOUNT, not as a line of its own', () => {
-  /* It drew a "Growth" row at the foot of the month's account list for a few
-     hours on 2026-08-31. `.mrows` is the account list, so the row read as an
-     account holding $88.40 — and the account that actually grew already said
-     so in its own footer three lines above it. `monthTotals` lost the figure
-     with the row: an unread field on the function three cards add themselves
-     up from is a second copy waiting to drift. */
+t('NEITHER lens gives growth a row of its own', () => {
+  /* Both drew one on 2026-08-31 and both came out the same day. The month
+     page's sat in `.mrows`, which IS the account list, so it read as an
+     account holding $88.40; the year grid's sat under Total, in a block whose
+     every other line is a balance or a count, so twelve monthly flows read as
+     tiny balances. Growth is said on the account that made it and nowhere
+     else. The aggregate helpers went with the rows — an unread figure is the
+     second copy this suite exists to prevent. */
   const g = growthYear('growth');
-  const t0 = H.monthTotals(g.c, g.yr, '2026-01', null);
-  eq(t0.grown, undefined, 'the month is not added up with a growth figure on it');
-  eq(t0.income.v, 0, 'and income still refuses it');
+  eq(H.monthTotals(g.c, g.yr, '2026-01', null).grown, undefined,
+    'the month is not added up with a growth figure on it');
+  eq(H.accountGrowth, undefined, 'and no plan-wide growth total survives');
+  eq(H.growthTip, undefined, 'nor a tip for a row that no longer exists');
   const line = H.earningLines(g.st, g.c, g.yr, g.st.settings.accounts[1], '2026-01')[0];
   ok(/^Growth .* · not income$/.test(line),
-    'the account row is where the month says it — got: ' + line);
+    'the account is where it is said — got: ' + line);
+});
+
+t('the export mirrors the screen, so it carries no growth row either', () => {
+  const g = growthYear('growth');
+  const csv = H.gridToCsv(g.st, g.c, '2026');
+  ok(!/(^|\n)Accounts,Growth/.test(csv), 'no Growth line in the CSV');
+  ok(/(^|\n)Accounts,Investments,/.test(csv), 'while the account that grew is in it');
+  ok(/(^|\n)Accounts,Total,/.test(csv), 'and so is the Total its growth moved');
 });
 
 t('a growth account keeps its earnings — they are paid nowhere else', () => {
@@ -5659,7 +5670,8 @@ t('a past year states its growth, and states it as growth', () => {
   eq(c.dividend['inv|2021-01'], 30, 'a dividend is money whatever the rate produces');
   const yr = st.years['2021'];
   eq(H.accountEarnings(c, yr, ['2021-01']).v, 30, 'only the dividend counts as income');
-  eq(H.accountGrowth(c, yr, ['2021-01']).v, 400);
+  eq(H.earningsOver(st, c, yr, st.settings.accounts[0], ['2021-01']).growth, 400,
+    'the growth is on the account that made it');
   eq(c.balances['inv|2021-01'], 5000, 'and the stated balance is left exactly alone');
 });
 

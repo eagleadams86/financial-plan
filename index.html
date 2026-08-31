@@ -8065,32 +8065,20 @@ function gridCard(y, yr) {
            has to say about the year. */
         {}, 'closing balance')}</tr>`;
   }).join('');
-  /* The Growth line — what the accounts appreciated by, kept out of Income and
-     said here instead. It sits under Total rather than in the Income block on
-     purpose: this is not money that came in, it is the part of the balances
-     above that grew, and the question it answers ("why did the Total climb by
-     more than the rows explain?") is asked while looking at the Total.
-     Drawn only when something actually grows, exactly like the earnings line —
-     a plan with no account marked `growth` is the plan it was before this
-     existed, down to the row count.
-     Marked `derived` like its Income counterpart, and like it, no editor and
-     no help dot: a rate is corrected on the account, and the Accounts band's
-     own dot already opens the window that explains this. */
-  const growMonths = months.map(m => accountGrowth(c, yr, [m]));
-  const growYear = accountGrowth(c, yr, ownMonths);
-  const grows = growYear.v !== 0 || growMonths.some(g => g.v !== 0);
-  const growTitle = 'What the accounts GREW — appreciation on accounts set to grow rather '
-    + 'than pay interest. It moves the balances above, and it is income nowhere: not in '
-    + 'Interest & Dividends, not in Money In, not in the savings rate. A paper gain is not '
-    + 'money until it is sold. It is also why the Total can climb by more than the month\'s '
-    + 'rows on their own explain. ' + (live
-      ? 'Worked out from each account\'s own rate, so it is corrected there rather than here.'
-      : 'A past year states it: open a month on the account row above to type what it grew.');
-  const growRow = () => `<tr class="derived"><th class="lbl" scope="row"
-      data-tip="${esc(growTitle)}">Growth</th>${
-    months.map((m, i) => `<td class="c-${growMonths[i].kind} ${m === thisM ? 'now' : ''}"
-      data-tip="${esc(growthTip(growMonths[i]))}">${fmtCell(growMonths[i].v)}</td>`).join('')
-    }${rowTotalTd(growYear.v, false, growYear.kind, growthTip(growYear))}</tr>`;
+  /* NO GROWTH ROW HERE, and its absence is the decision (2026-08-31). It drew
+     one under Total for a few hours and came out for the reason the month
+     page's did, one level up: the Accounts block is a stack of BALANCES —
+     Total is a balance, Paychecks is a count — so twelve monthly growth
+     figures in it read as tiny balances under a large one. Growth is a FLOW,
+     and the grid has no block for a flow that is not income: Income is the
+     wrong claim outright, and Accounts is the wrong kind of figure.
+     So it is said where it happened and nowhere else — `earningLines` puts
+     "Growth $88.40 · not income" under the balance it moved, and the account's
+     year-total cell carries the year's figure through `balanceYearTip`. That
+     keeps one answer to the question instead of two, which is the whole reason
+     the earnings row is allowed to exist and this one is not: interest and
+     dividends have no other home on the grid, and growth has a perfectly good
+     one on the account that made it. */
   const acctDrag = viewOnly ? '' : ' data-sec="accounts"';
   const balRows = !activeAccounts.length ? '' : secheadRow('Accounts',
       helpBtn('interestDest', 'how account balances grow'))
@@ -8151,7 +8139,6 @@ function gridCard(y, yr) {
               growth: round2(s.growth + e.growth),
               dividend: round2(s.dividend + e.dividend) };
           }, { interest: 0, growth: 0, dividend: 0 }), 'closing total')}</tr>`
-    + (grows ? growRow() : '')
     + (!usesPaychecks ? '' :
       /* The count the income row is actually multiplying by, not just the ones
          typed in: a year built ahead inherits last year's, and a row reading
@@ -8590,29 +8577,6 @@ function earningsOver(st, c, yr, a, months) {
     received: [...from].filter(([, v]) => v).map(([name, v]) => ({ name, v })) };
 }
 
-/* Adding up one or more of the earnings maps over a run of months, with the
-   kind worked out the way the long note on `accountEarnings` sets out. Shared
-   so that income and growth are counted by the SAME code over DIFFERENT maps —
-   the difference between them is which money it is, and nothing else, so two
-   loops that could drift apart on how a month is marked would be two loops too
-   many. */
-function sumEarningMaps(c, yr, months, maps) {
-  const want = new Set(months);
-  const kinds = new Map();   // 'id|m' -> kind, so a figure is marked once
-  const totals = maps.map(() => 0);
-  maps.forEach((name, i) => {
-    for (const [key, v] of Object.entries((c || {})[name] || {})) {
-      const [, m] = key.split('|');
-      if (!want.has(m) || !v) continue;
-      totals[i] += v;
-      const adj = ((yr.balAdjust || {})[key]) || {};
-      kinds.set(key, typeof adj.interest === 'number' || typeof adj.dividend === 'number'
-        ? 'actual' : (c.balanceKinds || {})[`total|${m}`] || 'missing');
-    }
-  });
-  return { totals: totals.map(round2), kind: sumKind([...kinds.values()]) };
-}
-
 /* What the ACCOUNTS themselves earned over a run of months — every account's
    interest and dividends added together. This is income: it arrives in an
    account exactly like a paycheck does, it is why total liquidity climbs faster
@@ -8622,8 +8586,10 @@ function sumEarningMaps(c, yr, months, maps) {
    GROWTH is deliberately not in it, and that is the point of there being a
    third map to leave out. An investment's appreciation moves the balance
    without ever being money, so counting it here would put a paper gain in the
-   Income row and the savings rate. `accountGrowth` below answers for it
-   separately — same months, same marking, a different question.
+   Income row and the savings rate. Nothing answers for it in aggregate, on
+   purpose: growth is reported on the ACCOUNT that made it — `earningLines` per
+   month, `earningsOver` over a year — and a second, plan-wide total would be a
+   figure with nowhere honest to be drawn.
 
    The ONE reader for that question, so the Income row, its year column and the
    savings rate cannot disagree about what a year earned. `yearFlows` keeps a
@@ -8655,23 +8621,27 @@ function sumEarningMaps(c, yr, months, maps) {
    that is a statement of fact whatever month it sits in, and it is marked the
    way a stated balance is. */
 function accountEarnings(c, yr, months) {
-  const { totals: [interest, dividend], kind }
-    = sumEarningMaps(c, yr, months, ['interest', 'dividend']);
-  return { interest, dividend, v: round2(interest + dividend), kind };
-}
-
-/* What the accounts GREW over the same run of months — appreciation, which is
-   not income and is never counted as any. It has a figure of its own because
-   leaving it out of Money In leaves a hole: the closing total climbs by more
-   than money in less money out explains, and before this there was nothing on
-   any page a reader could point at to say why. So the money is not hidden, it
-   is filed correctly — beside the balances it belongs to rather than in the
-   Income block it never belonged in.
-   Shaped like `accountEarnings` (`{v, kind}`) so the row that draws it is the
-   row that draws that one, and marked by the same rule for the same reason. */
-function accountGrowth(c, yr, months) {
-  const { totals: [v], kind } = sumEarningMaps(c, yr, months, ['growth']);
-  return { v, kind };
+  const want = new Set(months);
+  let interest = 0, dividend = 0;
+  const kinds = new Map();   // 'id|m' -> kind, so a figure is marked once
+  const take = (map, add) => {
+    for (const [key, v] of Object.entries(map || {})) {
+      const [, m] = key.split('|');
+      if (!want.has(m) || !v) continue;
+      add(v);
+      const adj = ((yr.balAdjust || {})[key]) || {};
+      kinds.set(key, typeof adj.interest === 'number' || typeof adj.dividend === 'number'
+        ? 'actual' : (c.balanceKinds || {})[`total|${m}`] || 'missing');
+    }
+  };
+  take((c || {}).interest, (v) => { interest += v; });
+  take((c || {}).dividend, (v) => { dividend += v; });
+  /* `c.growth` is DELIBERATELY not a third `take`. That map is the whole
+     mechanism: an account set to grow reports into it instead of `interest`,
+     so this function excludes appreciation by never looking at it rather than
+     by remembering to subtract it. */
+  return { interest: round2(interest), dividend: round2(dividend),
+    v: round2(interest + dividend), kind: sumKind([...kinds.values()]) };
 }
 
 /* The earnings figure with its two halves named under it. Interest and
@@ -8684,15 +8654,6 @@ function earningsTip(e) {
   if (e.interest) lines.push(`Interest ${fmtMoney(e.interest)}`);
   if (e.dividend) lines.push(`Dividends ${fmtMoney(e.dividend)}`);
   return lines.join('\n');
-}
-
-/* The growth figure. It has no halves to name — one rate produced it — so the
-   second line is spent on the thing a reader actually needs told, every time
-   they meet the number: this is not money. Said on the figure rather than left
-   to the row heading, because a tooltip is read on its own. */
-function growthTip(g) {
-  return `${fmtMoney(g.v)} · ${KIND_LABEL[g.kind] || KIND_LABEL.missing}\n`
-    + 'Not income — it moves the balance and nothing else';
 }
 
 /* A balance row's YEAR-TOTAL cell — the closing balance, never a sum, and the
@@ -9428,9 +9389,8 @@ function monthTotals(c, yr, m, prior) {
   /* NO `grown` here. It was reported beside `earned` for as long as the month
      page drew a Growth line, and went when that line did — an unread figure on
      the one function three cards add themselves up from is the second copy
-     this file keeps warning about. `accountGrowth` is still the answer to the
-     question; the month page simply asks it of the ACCOUNT, through
-     `earningLines`, rather than of the month. */
+     this file keeps warning about. The month page asks the question of the
+     ACCOUNT instead, through `earningLines`. */
   const rows = add(inSection('income'));
   const income = { v: round2(rows.v + earned.v),
                    kind: sumKind([rows.kind, earned.kind]) };
@@ -22078,18 +22038,11 @@ function gridToCsv(st, computed, y) {
       const v = computed.balances[`total|${m}`];
       return csvCell(v === undefined ? '' : v);
     }), csvCell(closing('total'))].join(','));
-  /* Growth, under Accounts and after Total — the same place the grid draws it,
-     for the same reason the earnings row rides under Income. An export missing
-     a row the screen shows is the disagreement a spreadsheet gets blamed for,
-     and this one carries the answer to "why doesn't Total match income less
-     expenses?" — the first question anybody re-adding these columns by hand
-     will ask. */
-  const grown = months.map(m => accountGrowth(computed, yr, [m]));
-  const grownYear = accountGrowth(computed, yr, own);
-  if (grownYear.v !== 0 || grown.some(g => g.v !== 0))
-    lines.push([csvCell('Accounts', true), csvCell('Growth', true),
-      ...grown.map(g => csvCell(g.kind === 'missing' ? '' : g.v)),
-      csvCell(grownYear.v)].join(','));
+  /* NO GROWTH ROW, because the grid has none. This export is "the year as the
+     app understands it", and the rule cuts both ways: a row the screen shows
+     and the file omits is the disagreement a spreadsheet gets blamed for, and
+     so is a row the file invents that the screen never drew. Growth is on the
+     account that made it, and the account's balances are already here. */
   return lines.join('\n');
 }
 
@@ -24335,7 +24288,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   SNAPSHOT_PARTS, SNAPSHOT_ASSETS, uniqueId, cellTip, balanceTip,
   receivedInto, earningsOver, earningLines, balanceYearTip, flowTransferNote, internalRows,
   raisesKeyboard,
-  accountEarnings, earningsTip, accountGrowth, growthTip, sumEarningMaps,
+  accountEarnings, earningsTip,
   /* The month view: which months the plan holds, which year a month is read
      from, and the one place a month is added up. Pure, so the tiles, the
      section totals and the chart are pinned by arithmetic rather than by a
