@@ -431,10 +431,19 @@ on a budget row.
   transfers and pass-throughs are both described against it. Open an account
   to nominate a different one if your banking moves; only one can hold it, so
   ticking the box moves it.
+- **Each account says what its rate produces** — interest, or growth. Interest
+  is money the account earned and counts as income. Growth is an investment
+  rising on paper: it moves the balance and counts as income nowhere, because
+  you cannot spend it until you sell. Both compound the same way; the setting
+  only decides whether the figure is treated as pay. Every account starts on
+  interest, so nothing changes until you say otherwise.
 - **Interest starts where it grows.** A new account pays its interest into
   itself, which is what an account holding money does; its dividends default to
   the main account instead, since a brokerage usually sweeps those somewhere
   spendable. Both are a dropdown, and either can be pointed anywhere.
+  **Growth has nowhere to go** and the dropdown is replaced by a line saying
+  so: moving a paper gain into an account you can spend from would be selling,
+  and a percentage does not say you sold anything.
 - **An account you stop using can be closed**, from the month it last held
   anything, so it drops out of Total instead of carrying its final balance
   forward for ever. If other accounts were paying their interest or dividends
@@ -475,6 +484,30 @@ figures into — shows no such row at all.
 
 A row that earns interest **names the accounts it earns on**, and any income
 row can be **marked as pay** so the giving percentages count it.
+
+### Growth
+
+An account set to **grow** rather than pay interest gets a **Growth** line of
+its own, under the accounts and their Total rather than in Income — because
+this is not money that came in. It is the part of your balances that rose.
+
+It is in none of the figures that count income: not Interest & Dividends, not
+Money In, not the savings rate. So once an account is set to grow, those
+figures fall by however much of them was really appreciation — which is the
+honest number, and the reason to set it.
+
+The consequence worth knowing is that **Money In less Money Out no longer
+explains the change in your closing total**, and it should not: the balances
+climbed by more than any money that arrived. The Growth line is exactly that
+difference, which is why it sits beside the Total it accounts for.
+
+A past year states its growth the same way it states its interest — click the
+month on the account's row — and freezing a live year writes it down with the
+balances. Converting a year to a **summary** is the one place it is not
+carried across: a summary holds flows and balances, and growth is neither. No
+money is lost (the balance rows already hold every dollar of it), only the
+line saying how much of the year's climb was appreciation, and the confirm
+says so before it happens.
 
 ### Reading a Year
 
