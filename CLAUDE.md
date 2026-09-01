@@ -289,6 +289,44 @@ family names as well as balances.
   quota problem and a stale-copy problem. Undone state still passes
   coerceShape/migrate on the way back in. ⌘Z is gated off inputs and open
   dialogs (the browser's own undo owns a text box).
+- **The Net Worth card is read AT A MONTH, and the reader picks which**
+  (2026-09-01). `worthAsOf(st, liveKey, cur)` is the one answer — pure, pinned —
+  and the card, the tiles' estimate mark and the Record button all read it, so a
+  snapshot still states EXACTLY the figures that were on screen. Four decisions
+  that will look arbitrary later:
+  - **The settled month is the year's ENTERED marker, never last calendar
+    month.** Marking a month entered is how this app says a month is settled;
+    the calendar says nothing about whether the figures in it are facts, and
+    offering an unentered August would write the plan's own estimates into
+    permanent history — which is the complaint this answers. `monthAhead` is
+    asked whether there is a choice at all, rather than `enteredThrough` being
+    compared a second time here.
+  - **It must be a month the year HOLDS**, and that guard is load-bearing rather
+    than defensive: `coerceShape` guarantees a live year an `enteredThrough`,
+    backfilling the month BEFORE it starts where nothing has been entered — so
+    "nothing is settled" arrives as a real-looking `2025-12` on a 2026 grid, and
+    unguarded the switch offered it and the card came back with Liquid $0.00 and
+    a total missing every dollar of it. Found on screen against the sample; a
+    round-numbered fixture would never have shown it.
+  - **`ui.worthAsOf` is a MODE (`'settled'`), never a month.** A stored
+    `'2026-08'` is a stale answer by October; "the last month you marked
+    entered" stays true for ever. Absent when off, the `flowNoTransfers` rule.
+  - **The snapshot's date is the month's last day CAPPED AT TODAY** — one
+    expression that reads as today for the month in progress and as the 31st for
+    a closed August, which is where a figure stated for August belongs on the
+    line. **No seventh snapshot key**: the date already says which month it is.
+  Only `liquid` and the debts vary by month at all — holdings, retirement and
+  property are stated values with no month to them — so an end-of-month net
+  worth is that month's balances beside TODAY's prices. The card says so out
+  loud rather than implying a time machine, and that sentence is the reason
+  there is no picker over every month in the plan.
+  The tiles finally carry the estimate mark the rest of the app has always had
+  (`.goal.est`, italic), on Total and Liquid ALONE — no month makes an estimate
+  of a figure the reader typed, and marking those would say they had guessed.
+  The switch is its own `.asofrow`/`.asofswitch` under the card's opening
+  sentence, NOT in the heading band (which already carries the fold chevron, the
+  info dot and the ⤢ button) and NOT `.viewswitch` reused — `wireBudgetSwitch`
+  querySelectors the first `.viewswitch` on the page.
 - **`side.snapshots` is stated net worth history** — {date, total, parts…},
   written ONLY by a deliberate act (the Record button, or a hand-typed row
   from an old statement): the pinned-balance principle, not a breach of
@@ -296,6 +334,12 @@ family names as well as balances.
   the card and the button share, so a snapshot states exactly what the screen
   showed. A record needs a DATE and at least one figure or coerceShape drops
   it; a stated `total` wins, absent it the parts sum (`snapshotPoints`, pure).
+  **The editor's `save` REBUILDS the row, so it must loop over `SNAPSHOT_PARTS`
+  itself** — it carried a retyped list of five keys with `debts` missing, so
+  opening a recorded snapshot to fix a typo silently threw away what it said was
+  owed. That constant's own comment warns four things have to agree about the
+  list; the dialog was the fifth copy, and driving both of its loops off the
+  constant is what stops a sixth part being forgotten here (2026-09-01).
   A second Record the same day RESTATES (`upsertSnapshot`, pure and pinned —
   the button writes permanent history through it). The chart line is SOLID —
   recorded facts, and the dash grammar must stay honest. Snapshots are dated,

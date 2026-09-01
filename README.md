@@ -725,11 +725,26 @@ ahead.
 ### Net Worth
 
 A **net worth strip** under the goals adds up everything the plan knows about:
-this month's liquid total, the Investments tab's holdings, the retirement
+the liquid total, the Investments tab's holdings, the retirement
 accounts, the Household tab's property at your stated values, and everything
 you owe. The giving fund is deliberately left out — that money is
 already given — and a part with nothing recorded shows no tile rather than a
 $0.00.
+
+**Which month it is read at is yours to choose**, once the two answers differ.
+The month in progress is not settled — every figure in it is the plan's own
+estimate until you mark it entered — so Liquid and Total are drawn in *italics*
+there, the same mark the grid puts on a figure it worked out. An **As of**
+switch offers the **last month you marked entered** instead, whose balances are
+what the accounts really ended that month holding. Where the current month is
+itself entered there is one answer and no switch.
+
+What you hold and what you own are **today's figures either way**: a holding is
+worth its price now, a property what you last said it would fetch, and neither
+has a month. So an end-of-August net worth is August's balances beside today's
+prices — right the morning after you settle a month and refresh your quotes, and
+less so the further back you look. That is why there is no picker over every
+month in the plan.
 
 Debt appears in one of two places and comes off the total either way. A debt
 **secured on a property** is inside that property's figure, which is the
@@ -746,17 +761,22 @@ pane's ✎ Edit dialog, which lets it name the budget account(s) its holdings
 are. The total then subtracts that overlap, keeping the pot at what the
 holdings are worth.
 
-**Record today's figures** turns the strip into history. Each press states the
-card's exact figures as a dated snapshot — a deliberate act, like pinning a
-balance; the app never records one on its own — and two or more draw the
-net-worth-over-time line, with the parts in the hover.
+**Record** turns the strip into history. Each press states the card's exact
+figures as a dated snapshot — a deliberate act, like pinning a balance; the app
+never records one on its own — and two or more draw the net-worth-over-time
+line, with the parts in the hover.
 
+- **It records whatever you are reading**, and its label says which: today's
+  figures on the month in progress, or "Record Aug 2026's Figures" on a settled
+  one. A settled month is dated its **last day** — the end of August is recorded
+  as the 31st, where it belongs on the line, not as the day you pressed the
+  button.
 - The table under it lists each snapshot's parts beside its total, in the same
   order as the tiles above; a part a snapshot never stated shows a dash rather
   than a $0.00.
-- A second press the same day restates rather than duplicating.
+- A second press for the same day restates rather than duplicating.
 - Old statements can be typed in by hand to backfill the line.
-- Every snapshot is clickable to correct or delete.
+- Every snapshot is clickable to correct or delete, **Owed included**.
 
 ### Savings Rate and Runway
 

@@ -1458,6 +1458,15 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 .viewswitch { flex: 0 0 auto; display: flex; align-items: center; gap: 2px;
   margin-right: 10px; padding: 2px; border: 1px solid var(--border-control);
   border-radius: var(--radius-pill); }
+/* The Net Worth card's "as of" pair — the same segmented control, on its own
+   line under the card's opening sentence rather than in a strip, so it needs
+   the frame and none of the row's margins. Its own class and not `.viewswitch`:
+   `wireBudgetSwitch` querySelectors the first `.viewswitch` on the page. */
+.asofrow { display: flex; align-items: center; gap: 8px; margin: 0 0 12px;
+  flex-wrap: wrap; }
+.asofswitch { display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px; border: 1px solid var(--border-control);
+  border-radius: var(--radius-pill); }
 .vswitch { background: none; border: 0; border-radius: var(--radius-pill);
   padding: 4px 12px; cursor: pointer; color: var(--text-secondary); font: inherit;
   font-weight: var(--fw-medium); white-space: nowrap;
@@ -1929,7 +1938,7 @@ body.maxi-open { overflow: hidden; }
 @media print {
   /* This app's own ways in. The header's controls and the tab bar are the
      pack's; these are the buttons the app draws inside its cards. */
-  .addbar, .gridactions-wrap, .tile-help, .yearnav, .viewswitch,
+  .addbar, .gridactions-wrap, .tile-help, .yearnav, .viewswitch, .asofswitch,
   #shareBar, .checkline,
   /* Named by id as well as by the wrap, because the month lens puts these two
      on its status LINE rather than in the grid's button strip — inside
@@ -4755,6 +4764,13 @@ function coerceShape(data) {
      away. */
   if (d.ui.budgetView === 'month') d.ui.budgetView = 'month';
   else delete d.ui.budgetView;
+  /* Which month the Net Worth card is being read at — a MODE, never a month.
+     "The last month you marked entered" stays true for ever, where a stored
+     '2026-08' is a stale answer by October and would silently re-date a card
+     the reader had long since stopped thinking about. Absent when off, like
+     every other switch in here. */
+  if (d.ui.worthAsOf === 'settled') d.ui.worthAsOf = 'settled';
+  else delete d.ui.worthAsOf;
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(d.ui.activeMonth || '')))
     delete d.ui.activeMonth;
   d.quotes = coerceQuotes(d.quotes);
@@ -6304,6 +6320,25 @@ const HELP = {
       + 'account\'s money (its ✎ Edit dialog). The Liquid and Invested tiles still match '
       + 'their tabs, but the Total counts that pot once — at what the holdings are worth, '
       + 'since a priced figure is the better answer to what something is worth today.'],
+  ] },
+  worthAsOf: { title: 'Which Month This Is Read At', body: [
+    ['The month in progress is ', b('not settled'), ' — every figure in it is the plan\'s '
+      + 'own estimate until you mark it entered, so on the first of a month the headline is '
+      + 'a projection. Where that is what you are looking at, Liquid and Total are drawn in '
+      + 'italics, the app\'s mark for a figure it worked out rather than one that happened.'],
+    ['The switch offers the ', b('last month you marked entered'), ' instead. Its balances '
+      + 'are what the accounts actually ended that month holding, which is the figure worth '
+      + 'recording once a month is closed. The months on offer are the two worth reading — '
+      + 'there is no picker, because most months could not be read honestly (see below).'],
+    [b('What you hold and what you own are today\'s figures either way.'), ' A holding is '
+      + 'worth its price now, and a property is worth what you last said it would fetch — '
+      + 'neither has a month. So an end-of-August net worth is August\'s balances beside '
+      + 'today\'s prices, which is exactly right the morning after you settle a month and '
+      + 'refresh your quotes, and increasingly wrong the further back you go.'],
+    ['Recording follows the switch, so a snapshot states exactly the figures the card was '
+      + 'showing. A settled month is dated its ', b('last day'), ' — the end of August is '
+      + 'recorded as the 31st, where it belongs on the line, not as the day you pressed the '
+      + 'button. Read at the month in progress, the button records today, as it always has.'],
   ] },
   currencies: { title: 'How a Rate Is Used', body: [
     [b('You state the rate; the app never looks one up.'), ' That is the same rule the tax '
@@ -8981,6 +9016,15 @@ function daysInMonth(y, mo) {
   return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1] || 0;
 }
 
+/* The last day of a month, as a 'YYYY-MM-DD' string — where a figure stated
+   FOR a month belongs on a timeline. Built by string arithmetic off the table
+   above, never by a Date: `new Date('2026-08-01')` is UTC midnight, which is
+   July west of Greenwich, and this file has one rule about that. */
+function monthEndISO(m) {
+  const y = +String(m).slice(0, 4), mo = +String(m).slice(5, 7);
+  return `${m}-${String(daysInMonth(y, mo)).padStart(2, '0')}`;
+}
+
 /* Days since a fixed epoch, for 'YYYY-MM-DD' — the standard civil-to-days
    conversion, so "how many days until this is due" is integer arithmetic on
    two strings rather than a subtraction of two Dates that disagree about what
@@ -10599,6 +10643,41 @@ function netWorthParts(st, month) {
 /* The card's arithmetic, shared with the Record button so a snapshot states
    EXACTLY the figures the card was showing — two computations of one number
    is how a recorded fact drifts from the screen it came off. */
+/* WHICH MONTH the Net Worth card is read at, and whether there is a choice to
+   offer at all. Pure, so the switch, the tiles and the Record button cannot
+   come to disagree about the answer.
+
+   The settled month is the year's ENTERED marker, never "last calendar month".
+   Marking a month entered is how this app says a month is settled; the calendar
+   says nothing about whether the figures in it are facts, and offering an
+   unentered August would record the plan's own estimates as permanent history —
+   which is the whole complaint this exists to answer.
+
+   `monthAhead` is THE ONE READER for "is this month still a projection", so the
+   choice is asked of it rather than re-derived from `enteredThrough` here: a
+   current month that is itself entered has one month, it is settled, and there
+   is nothing to choose between. */
+function worthAsOf(st, liveKey, cur) {
+  const yr = (st.years || {})[liveKey];
+  const settled = enteredThroughOf(st, liveKey);
+  /* The settled month has to be a month this year HOLDS, and that guard is not
+     belt and braces: coerceShape guarantees a live year an `enteredThrough`,
+     backfilling the month BEFORE it starts where the reader has entered
+     nothing. So "nothing is settled yet" arrives here as a real-looking
+     '2025-12' on a 2026 grid — a month the year has no balance for, which
+     offered a switch that read Liquid $0.00 and a total missing it entirely.
+     Found on screen, not in a fixture. */
+  const holds = !!settled
+    && (yr && yr.kind === 'grid' ? yearMonths(yr) : []).includes(settled);
+  const canChoose = holds && monthAhead(yr, cur);
+  const chosen = canChoose && ((st.ui || {}).worthAsOf === 'settled');
+  return { asOf: chosen ? settled : cur, settled, now: cur, canChoose, chosen,
+    /* The tiles that are month-derived wear the estimate mark when the month
+       being read is still a projection. Asked once, here, so the mark and the
+       sentence under the heading are the same claim. */
+    est: monthAhead(yr, chosen ? settled : cur) };
+}
+
 function netWorthTotals(st, liquid, c, cur) {
   const nw = netWorthParts(st, cur);
   /* Money a pane has claimed as its holdings (pf.accounts) is in the Liquid
@@ -10641,14 +10720,19 @@ function upsertSnapshot(list, snap) {
   return false;
 }
 
-function netWorthCard(liquid, cur, c) {
+function netWorthCard(liquid, cur, c, choice) {
   /* Nothing typed beyond the budget means nothing to add up — the Savings
      Goals card above already carries total liquidity, and a one-tile "net
      worth" equal to it would be the same figure wearing a grander name. */
   const probe = netWorthParts(state, cur);
   if (!probe.hasInvested && !probe.hasRetirement && !probe.hasProperty
       && !probe.hasDebts) return '';
-  const tile = (label, value, foot) => `<div class="goal">
+  /* A tile takes a KIND, like every other tile in the app that can be showing
+     an estimate. Only the two figures a MONTH decides wear it — the liquid
+     balance and the total that adds it up. Holdings, retirement and property
+     are stated values: no month makes an estimate of them, and marking them
+     would say the reader had guessed at figures they typed. */
+  const tile = (label, value, foot, est) => `<div class="goal${est ? ' est' : ''}">
     <div class="label">${label}</div>
     <div class="value">${fmtMoney(value)}</div>
     ${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
@@ -10658,12 +10742,35 @@ function netWorthCard(liquid, cur, c) {
   return `<div class="card">
     <h2>Net Worth${helpBtn('netWorth', 'what counts toward net worth')}</h2>
     <p class="sub">Everything the plan knows about, added up as of ${esc(monthLabelFull(cur))}.${
+      choice.est ? ` <strong>${esc(monthLabelFull(cur))} is not settled yet</strong>, so
+      Liquid and Total are the plan's own estimate — every figure in that month is one
+      until you mark it entered.` : choice.chosen ? ` That is the last month you marked
+      entered, so its balances are what happened. What you hold and what you own are
+      today's figures either way — a holding is only ever worth what it is worth now.`
+      : ''}${
       overlap ? ` ${esc(andList(linkedNames))} ${linkedNames.length === 1 ? 'is' : 'are'}
       the same money as ${linkedNames.length === 1 ? 'an' : 'their'} Investments pane${
       linkedNames.length === 1 ? '' : 's'}, so the total counts that pot once — at what
       the holdings are worth.` : ''}${
       nw.hasDaf ? ` The giving fund's ${fmtMoney(nw.daf)} is not counted — that money is
       already given, and it is waiting on the Giving tab.` : ''}</p>
+    ${/* The "as of" switch — the two months worth reading this card at, drawn
+          only when they differ. Under the sub rather than in the heading band,
+          which already carries the fold chevron, the info dot and the ⤢ button.
+          A radiogroup, the year strip's arrangement: these two words redraw the
+          card the heading already names rather than revealing one of their
+          own. */''}
+    ${choice.canChoose ? `<div class="asofrow"><div class="asofswitch" role="radiogroup"
+      aria-label="Which month to read net worth at">
+      <button type="button" class="vswitch" data-asof="settled" role="radio"
+        aria-checked="${choice.chosen}" tabindex="${choice.chosen ? 0 : -1}"
+        title="Read this card at the last month you marked entered">${
+        esc(monthLabelFull(choice.settled))} · settled</button>
+      <button type="button" class="vswitch" data-asof="now" role="radio"
+        aria-checked="${!choice.chosen}" tabindex="${choice.chosen ? -1 : 0}"
+        title="Read this card at the month in progress, estimates and all">${
+        esc(monthLabelFull(choice.now))} · this month</button>
+    </div>${helpBtn('worthAsOf', 'which month this card is read at')}</div>` : ''}
     ${nw.unconverted.length ? `<p class="warn">${esc(andList(nw.unconverted))} ${
       nw.unconverted.length === 1 ? 'is' : 'are'} left out: ${
       nw.unconverted.length === 1 ? 'its currency has' : 'their currencies have'} no rate
@@ -10673,8 +10780,10 @@ function netWorthCard(liquid, cur, c) {
     <div class="goalgrid">
       ${tile('Total', total, overlap
         ? `Everything below, with ${fmtMoney(overlap)} of overlap counted once`
-        : 'Everything below, added up')}
-      ${tile('Liquid', liquid, 'The budget grid’s accounts this month')}
+        : 'Everything below, added up', choice.est)}
+      ${tile('Liquid', liquid, choice.est
+        ? 'The budget grid’s accounts, as this month is projected to end'
+        : 'The budget grid’s accounts at the end of that month', choice.est)}
       ${nw.hasInvested ? tile('Invested', nw.invested, 'The Investments tab’s holdings') : ''}
       ${nw.hasRetirement ? tile('Retirement', nw.retirement, 'Traditional and Roth together') : ''}
       ${nw.hasProperty ? tile('Property', nw.property, nw.propertyOwed
@@ -10722,12 +10831,48 @@ function netWorthCard(liquid, cur, c) {
       })() : ''}
       <div class="addbar">
         <button class="btn small" id="recordWorthBtn"
-          title="State today's figures — exactly what this card shows — as a dated snapshot">＋ Record Today's Figures</button>
+          title="State exactly what this card is showing as a dated snapshot${
+            choice.chosen ? `, dated the last day of ${esc(monthLabelFull(cur))}` : ''}">＋ Record ${
+            choice.chosen ? `${esc(monthLabelFull(cur))}’s` : 'Today’s'} Figures</button>
         <button class="btn small" data-add="snapshot"
           title="Type a snapshot from an old statement, to backfill the line">＋ Add a Snapshot</button>
       </div>`;
     })()}
   </div>`;
+}
+
+/* The Net Worth card's "as of" switch. Modelled on `wireBudgetSwitch` above,
+   which is the same control asking a different question — click, and arrow keys
+   because it is a radiogroup. Its own class rather than `.viewswitch` reused:
+   that function reaches for the FIRST `.viewswitch` on the page, and two
+   segmented pairs answering to one selector is a cross-wire waiting for the day
+   somebody puts a lens switch on this tab. */
+function wireWorthSwitch() {
+  const box = document.querySelector('.asofswitch');
+  if (!box) return;
+  const set = (mode) => {
+    if (!mode) return;
+    const now = (state.ui || {}).worthAsOf === 'settled' ? 'settled' : 'now';
+    if (mode === now) return;
+    state.ui = state.ui || {};
+    /* Absent, not 'now', when it is off — coerceShape's rule applied at the
+       point of writing, so a plan that has never touched the switch keeps the
+       `ui` it has always had. */
+    if (mode === 'settled') state.ui.worthAsOf = 'settled';
+    else delete state.ui.worthAsOf;
+    save(); render();
+    /* Back onto the same word in the freshly drawn switch: the redraw destroys
+       the button that was pressed, and without this a keyboard reader is
+       dropped at the top of the page — the trap the tab bar, the year strip and
+       every row editor already answer. */
+    document.querySelector(`.vswitch[data-asof="${mode}"]`)?.focus({ preventScroll: true });
+  };
+  box.onclick = (e) => set(e.target.closest('.vswitch')?.dataset.asof);
+  box.onkeydown = (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    set(e.key === 'ArrowLeft' || e.key === 'Home' ? 'settled' : 'now');
+  };
 }
 
 /* The snapshots' line — recorded facts, so a SOLID line and round points:
@@ -10778,7 +10923,13 @@ function renderGoals() {
   const totalNow = c.balances[`total|${cur}`] || 0;
   const totalTarget = state.goals.reduce((s, g) => s + (g.target || 0), 0);
   const totalPct = totalTarget ? Math.min(1, totalNow / totalTarget) : 0;
-  const netWorthHtml = netWorthCard(totalNow, cur, c);
+  /* The Net Worth card reads at a month of its own — the one the reader chose
+     with its switch. Everything else on this tab keeps reading `cur`: this is
+     that card's question, and silently re-dating the goals and the savings
+     pulse beside it would be answering one somebody else asked. */
+  const worth = worthAsOf(state, liveKey, cur);
+  const netWorthHtml = netWorthCard(c.balances[`total|${worth.asOf}`] || 0,
+    worth.asOf, c, worth);
 
   /* Savings rate and runway — this year's flow beside the stocks above it.
      Skipped entirely on a year with nothing in it: two em-dash tiles would be
@@ -16075,18 +16226,29 @@ function wireView(view) {
       if (!liveKey) return;
       const c = C[liveKey];
       const cur = currentMonthOf(state.years[liveKey], todayISO());
-      const liquid = c.balances[`total|${cur}`] || 0;
-      const { nw, total } = netWorthTotals(state, liquid, c, cur);
-      const snap = { date: todayISO(), total, liquid };
+      /* The same month the card is being read at, so a snapshot states EXACTLY
+         the figures that were on screen — two computations of one number is how
+         a recorded fact drifts from the screen it came off. */
+      const { asOf } = worthAsOf(state, liveKey, cur);
+      const liquid = c.balances[`total|${asOf}`] || 0;
+      const { nw, total } = netWorthTotals(state, liquid, c, asOf);
+      /* The last day of the month being stated, capped at today — one rule that
+         reads as "today" for the month in progress and as the month's final day
+         for one already closed, which is where a figure stated FOR August
+         belongs on the line. */
+      const end = monthEndISO(asOf), iso = todayISO();
+      const snap = { date: end < iso ? end : iso, total, liquid };
       if (nw.hasInvested) snap.invested = nw.invested;
       if (nw.hasRetirement) snap.retirement = nw.retirement;
       if (nw.hasProperty) snap.property = nw.property;
       if (nw.hasDebts) snap.debts = nw.debts;
       const replaced = upsertSnapshot(state.side.snapshots, snap);
       save(); render();
-      toast(replaced ? `Restated today's snapshot — ${fmtMoney(total)}`
-        : `Recorded ${fmtMoney(total)} as of today`);
+      const when = asOf === cur ? 'today' : `the end of ${monthLabelFull(asOf)}`;
+      toast(replaced ? `Restated the snapshot for ${when} — ${fmtMoney(total)}`
+        : `Recorded ${fmtMoney(total)} as of ${when}`);
     };
+    wireWorthSwitch();
     /* The flow chart's own switch. It re-renders rather than rebuilding just
        that chart, because the card's opening sentence and the note under the
        box both change with it — redrawing the bars alone would leave the prose
@@ -18973,6 +19135,13 @@ const EDITORS = {
       { key: 'invested', label: 'Invested', type: 'money' },
       { key: 'retirement', label: 'Retirement', type: 'money' },
       { key: 'property', label: 'Property equity', type: 'money' },
+      /* Owed was missing here while the Record button wrote it and the table
+         below drew a column for it, and `save` rebuilds the row rather than
+         merging — so opening a recorded snapshot to fix a typo silently threw
+         its debts away. SNAPSHOT_PARTS' own comment warns that four things have
+         to agree about that list; this dialog was the fifth copy. */
+      { key: 'debts', label: 'Owed', type: 'money',
+        hint: 'Comes OFF the total — the one part that subtracts.' },
     ],
     get: (ds) => ({ ...state.side.snapshots[+ds.idx] }),
     blank: () => ({ date: todayISO() }),
@@ -18982,10 +19151,9 @@ const EDITORS = {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(v.date || ''))
         return 'A snapshot needs its date — nothing was changed';
       const row = { date: v.date };
-      for (const k of ['total', 'liquid', 'invested', 'retirement', 'property'])
+      for (const k of SNAPSHOT_PARTS)
         if (typeof v[k] === 'number') row[k] = v[k];
-      if (!['total', 'liquid', 'invested', 'retirement', 'property']
-          .some(k => typeof row[k] === 'number'))
+      if (!SNAPSHOT_PARTS.some(k => typeof row[k] === 'number'))
         return 'A snapshot needs at least one figure — nothing was changed';
       if (ds.idx !== undefined) state.side.snapshots[+ds.idx] = row;
       else state.side.snapshots.push(row);
@@ -24506,7 +24674,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   KIND_LABEL,
   allHoldings, gainText, classRollup, yearIncome, savingsPulse, pushSnapshot,
   categorySpend, spendingMix,
-  coreOf, undoBankable, upsertSnapshot, netWorthTotals, esc,
+  coreOf, undoBankable, upsertSnapshot, netWorthTotals, worthAsOf, monthEndISO, esc,
   csvCell, gridToCsv, donationsToCsv, csvRows, readGridCsv, applyGridCsv,
   planHeadlines, comparePlans, COMPARE_ROWS, searchPlan, SEARCH_CAP, snapshotPoints,
   drawdownFrom, drawdownYears, drawdownOutlook, drawdownMarkers, incomeIn,

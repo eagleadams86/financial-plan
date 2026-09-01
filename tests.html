@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 873;
+const EXPECTED = 880;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -4678,6 +4678,84 @@ t('a second record the same day restates, a new day appends', () => {
   eq(list, [{ date: '2026-08-01', total: 150 }], 'one row, the second figures');
   eq(H.upsertSnapshot(list, { date: '2026-08-02', total: 160 }), false, 'appended');
   eq(list.length, 2);
+});
+t('the as-of switch is offered only where the two months differ', () => {
+  /* The settled month is the year's ENTERED marker, never last calendar month:
+     marking a month entered is how this app says a month is settled, and
+     offering an unentered August would record the plan's own estimates as
+     permanent history — the whole thing this exists to prevent. */
+  const live = { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 12,
+    enteredThrough: '2026-08' };
+  const st = { years: { 2026: live }, ui: {} };
+  const off = H.worthAsOf(st, '2026', '2026-09');
+  eq(off.canChoose, true, 'August is settled and September is not — there is a choice');
+  eq(off.settled, '2026-08');
+  eq(off.asOf, '2026-09', 'and the card opens on the month in progress, as it always has');
+  eq(off.est, true, 'which is an estimate, and says so');
+  const on = H.worthAsOf({ years: { 2026: live }, ui: { worthAsOf: 'settled' } },
+    '2026', '2026-09');
+  eq(on.asOf, '2026-08', 'chosen, it reads at the settled month');
+  eq(on.est, false, 'where nothing is an estimate');
+  eq(on.now, '2026-09', 'and it still knows which month is the current one, for the label');
+});
+t('a month that is itself settled has nothing to choose between', () => {
+  /* One month, and it is settled — a switch offering the same month twice is a
+     control that cannot do anything. `monthAhead` is the one reader for that
+     question, so this cannot drift from the chart's dashed bars. */
+  const entered = { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 12,
+    enteredThrough: '2026-09' };
+  const both = H.worthAsOf({ years: { 2026: entered }, ui: { worthAsOf: 'settled' } },
+    '2026', '2026-09');
+  eq(both.canChoose, false);
+  eq(both.asOf, '2026-09', 'a stale choice cannot re-date a card that has no choice');
+  eq(both.est, false);
+  /* Nothing entered at all is the other end: there is no settled month to
+     offer, so no switch — and the estimate mark plus the card's own sentence
+     are what say why the figure is a projection. */
+  const fresh = H.worthAsOf({ years: { 2026: { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12 } }, ui: { worthAsOf: 'settled' } }, '2026', '2026-09');
+  eq(fresh.canChoose, false);
+  eq(fresh.asOf, '2026-09');
+  eq(fresh.est, true, 'and every figure in it is still an estimate');
+});
+t('the settled month has to be one the year actually holds', () => {
+  /* "Nothing entered yet" does NOT arrive here as an empty string. coerceShape
+     guarantees a live year an `enteredThrough`, backfilling the month BEFORE it
+     starts — so a 2026 grid reads '2025-12', which is a real-looking month this
+     year has no balance for. Unguarded, the switch offered it and the card came
+     back with Liquid $0.00 and a total missing every dollar of it. Found on
+     screen against the sample, which is where an off-the-end month lookup shows
+     up and a round-numbered fixture does not. */
+  const st = H.coerceShape({ years: { 2026: { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, cells: {}, categories: [] } },
+    ui: { worthAsOf: 'settled' } });
+  eq(st.years['2026'].enteredThrough, '2025-12',
+    'the backfill is real — this test is worthless if that ever stops happening');
+  const w = H.worthAsOf(st, '2026', '2026-09');
+  eq(w.canChoose, false, 'a month the year does not hold is not a month to offer');
+  eq(w.asOf, '2026-09', 'so the card stays on the month in progress');
+  eq(w.est, true);
+});
+t('a snapshot for a closed month is dated the last day of it', () => {
+  /* Where a figure stated FOR August belongs on the line — not the day the
+     button happened to be pressed. Built by string arithmetic off daysInMonth,
+     never a Date: a bare ISO day parses as UTC midnight and renders as the day
+     before west of Greenwich. */
+  eq(H.monthEndISO('2026-08'), '2026-08-31');
+  eq(H.monthEndISO('2026-09'), '2026-09-30', 'a thirty-day month');
+  eq(H.monthEndISO('2026-02'), '2026-02-28');
+  eq(H.monthEndISO('2028-02'), '2028-02-29', 'and a leap February');
+});
+t('the as-of choice is a mode, and it is absent when it is off', () => {
+  /* A stored '2026-08' would be a stale answer by October and would silently
+     re-date a card the reader had stopped thinking about; "the last month you
+     marked entered" stays true for ever. */
+  eq(H.coerceShape({ ui: { worthAsOf: 'settled' } }).ui.worthAsOf, 'settled');
+  eq('worthAsOf' in H.coerceShape({ ui: { worthAsOf: '2026-08' } }).ui, false,
+    'a month is not a mode');
+  eq('worthAsOf' in H.coerceShape({ ui: { worthAsOf: false } }).ui, false);
+  eq('worthAsOf' in H.coerceShape({ ui: {} }).ui, false,
+    'and an untouched plan keeps the ui it has always had');
 });
 t('the total counts a linked pot once, at what the holdings are worth', () => {
   /* netWorthTotals is the ONE arithmetic the card and the Record button
@@ -10425,6 +10503,35 @@ t('the due block explains itself twice, to two different readers', () => {
      + 'beside');
   ok(/Pause reminders until/.test(helpText(card)),
      'and the waiting half is really in there, which is what the name now claims');
+});
+t('the Record button reads the same month the card was showing', () => {
+  /* Two computations of one number is how a recorded fact drifts from the
+     screen it came off — the rule the comment above netWorthTotals exists to
+     protect, now that the card can be read at more than one month. */
+  const src = stripComments(APP_SRC);
+  ok(/const \{ asOf \} = worthAsOf\(state, liveKey, cur\);/.test(src),
+     'the handler resolves through the same pure function the card does');
+  ok(/const end = monthEndISO\(asOf\), iso = todayISO\(\);[\s\S]{0,80}date: end < iso \? end : iso/
+     .test(src),
+     'and dates it the month end capped at today — which is today for the month in progress');
+  ok(/netWorthCard\(c\.balances\[`total\|\$\{worth\.asOf\}`\] \|\| 0,/.test(src),
+     'and the card is handed the balance for that same month');
+});
+t('correcting a snapshot cannot drop what it says is owed', () => {
+  /* `save` REBUILDS the row rather than merging, so a key missing from its list
+     is a key thrown away by a Save that changed nothing else. Owed was missing
+     while the Record button wrote it — SNAPSHOT_PARTS' own comment warns that
+     four things have to agree about that list, and this dialog was the fifth
+     copy. Both halves are driven off the constant now, so a sixth part cannot
+     be forgotten here. */
+  const src = stripComments(APP_SRC);
+  const dlg = src.slice(src.indexOf('snapshot: {'), src.indexOf('property: {'));
+  ok(/\{ key: 'debts', label: 'Owed', type: 'money'/.test(dlg),
+     'the dialog has a box for it');
+  ok(/for \(const k of SNAPSHOT_PARTS\)/.test(dlg),
+     'and writes every part the constant names, rather than a list retyped beside it');
+  ok(!/'total', 'liquid', 'invested', 'retirement', 'property'\]/.test(dlg),
+     'with no hand-written copy of the list left to drift');
 });
 t('the wall of text is broken up, and the bold is not everywhere', () => {
   /* Every entry was ONE paragraph of 200 to 1,400 characters until 2026-08-23.
