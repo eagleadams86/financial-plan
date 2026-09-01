@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 880;
+const EXPECTED = 881;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -11563,6 +11563,95 @@ t('a tip on a line that opens ANY editor still shows nothing on a tap', () => {
 });
 
 /* ────────────────────────────────────────────────────────── */
+group('How a chart answers a hover');
+
+/* The family rule is that a LINE hovers by column and a bar is its own target.
+   It was written here per chart TYPE — "bar charts keep intersect" — and that
+   answers the wrong question for a chart that draws both. Two did. On Giving,
+   the amount and the two percentages could never be read together: the bar gave
+   the dollars and whichever percentage was nearer, and the empty space in the
+   column gave nothing. On Spending the average line is drawn with
+   `pointRadius: 0`, so there was no mark anywhere on it to intersect and its
+   tooltip could not be summoned at all.
+
+   So the rule is restated as a question about the COLUMN rather than the chart:
+   if a line is drawn in it, the column answers. Swept over every chart the app
+   draws rather than pinned to those two, because the next combo chart is the
+   one nobody will re-check. Resolved options, not source: Chart.js fills in its
+   own defaults before anyone can read them, and what the reader gets is what it
+   resolved. (A scatter would need its own answer — a dot IS its own target, the
+   way Flow Metrics has it — and there are none here; add one and this fails,
+   which is the moment to decide.) */
+t('a chart that draws a line answers by column; one that does not keeps the default',
+  async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?hover=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+
+    /* Every tab, because a chart is only built once its tab has been shown. */
+    const TABS = ['tab-budget', 'tab-goals', 'tab-vacations', 'tab-giving',
+                  'tab-investments', 'tab-retirement', 'tab-household',
+                  'tab-comp', 'tab-tax'];
+    const seen = new Map();
+    for (const id of TABS) {
+      const tab = D.getElementById(id);
+      ok(tab, 'the app still has ' + id + ' — this list is what makes the sweep complete');
+      tab.click();
+      await new Promise((r) => setTimeout(r, 250));
+      D.querySelectorAll('canvas').forEach((cv) => {
+        const c = W.Chart.getChart(cv);
+        if (!c) return;
+        const o = c.options.interaction || {};
+        seen.set(cv.id, {
+          kinds: c.data.datasets.map((d) => d.type || c.config.type),
+          mode: o.mode, intersect: o.intersect });
+      });
+    }
+    ok(seen.size >= 10, 'the sweep has to actually FIND the charts, or every '
+      + 'assertion below passes over an empty list', seen.size);
+
+    const wrong = [];
+    for (const [id, c] of seen) {
+      const drawsLine = c.kinds.includes('line');
+      const byColumn = c.mode === 'index' && c.intersect === false;
+      /* Undefined is what a chart that says nothing resolves to for `mode`
+         until Chart.js is asked — read from the instance it is 'nearest'. */
+      const isDefault = (c.mode === undefined || c.mode === 'nearest')
+        && c.intersect !== false;
+      if (drawsLine && !byColumn) {
+        wrong.push(id + ' draws a line (' + c.kinds.join('+') + ') but hovers '
+          + c.mode + '/intersect:' + c.intersect);
+      } else if (!drawsLine && !isDefault) {
+        wrong.push(id + ' draws no line (' + c.kinds.join('+') + ') but hovers '
+          + c.mode + '/intersect:' + c.intersect);
+      }
+    }
+    eq(wrong, [], 'these charts answer a hover the wrong way');
+
+    /* The two that were wrong, named, so the reason this test exists survives
+       a future sweep that finds nothing. */
+    const giving = seen.get('givingChart'), spend = seen.get('spendChart');
+    ok(giving, 'the Giving tab still draws givingChart');
+    eq([giving.mode, giving.intersect], ['index', false],
+      'Giving: the amount and both percentages are one year read together');
+    ok(spend, 'the Progress tab still draws spendChart');
+    eq([spend.mode, spend.intersect], ['index', false],
+      'Spending: the average line has no points to hit, so the column has to answer');
+  } finally { f.remove(); }
+});
+
 group('One chart, filling the window');
 
 /* Charles asked for this on 2026-08-30: a button on every chart that fills the
