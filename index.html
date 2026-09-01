@@ -1919,6 +1919,11 @@ body.maxi-open { overflow: hidden; }
      pack's; these are the buttons the app draws inside its cards. */
   .addbar, .gridactions-wrap, .tile-help, .yearnav, .viewswitch,
   #shareBar, .checkline,
+  /* Named by id as well as by the wrap, because the month lens puts these two
+     on its status LINE rather than in the grid's button strip — inside
+     `.gridactions-wrap` they were already covered, on a `<p class="sub">` they
+     are not, and a printed month would carry a "Mark Aug 26 entered" button. */
+  #closeMonthBtn, #reopenMonthBtn,
   /* A full-screen chart is a thing you do to a SCREEN. On paper the page is
      the window, and the card prints where it sits. */
   .chart-max, #chartMaxi { display: none !important; }
@@ -8759,6 +8764,32 @@ function ruleDesc(cat, st = state) {
 }
 
 const SECTION_LABEL = { income: 'Income', expense: 'Expenses', transfer: 'Transfers' };
+/* What the month page's per-section Add button calls the thing it adds. Written
+   out rather than built off SECTION_LABEL, whose values are PLURAL and give
+   "Add Expenses Row"; a button adds one row, so it has to say so. */
+const ADD_ROW_WORD = { income: 'an Income Row', expense: 'an Expense Row',
+                       transfer: 'a Transfer Row' };
+
+/* WHICH OF THE TWO MONTH-SCOPED ACTIONS BELONG TO THE MONTH ON SCREEN. Pure,
+   because this gating is the whole difference between the two lenses and the
+   one part of it a rendered page cannot easily be asked about.
+   The grid shows twelve months at once, so its "Mark Aug 26 entered" is
+   unambiguous wherever it sits. A MONTH page is about one month, and a button
+   there naming another would be the page acting somewhere else — so each
+   action appears on exactly the month it would act on, and a month further
+   ahead offers neither. That is not a restriction, it is the truth: months are
+   entered in ORDER (`markMonthEntered` always takes `enteredThrough + 1`), so
+   October genuinely cannot be entered before August.
+   `reopen` asks `enteredThrough === m` rather than "is this month entered",
+   which is true of every month at or before the marker — only the LAST one can
+   go back, which is all `reopenMonth` does. A pinned or unstarted year offers
+   neither: one computes nothing to freeze, the other has not begun. */
+function monthActionsFor(yr, m, started) {
+  if (!yr || yr.model !== 'live' || !started) return { close: false, reopen: false };
+  const toEnter = monthAdd(yr.enteredThrough, 1);
+  const roomLeft = monthDiff(yr.startMonth, toEnter) < yr.monthCount;
+  return { close: roomLeft && toEnter === m, reopen: yr.enteredThrough === m };
+}
 
 /* ═══════════════════════════ The month view ═══════════════════════════════
 
@@ -9701,9 +9732,41 @@ function renderMonthView() {
      choose between. Half of what it says is already printed under each heading
      anyway ("biggest first", "click a line to open the month's figure"), so
      the three dots were mostly repeating the line directly beneath them. */
+  /* CLOSING THE MONTH, ON THE MONTH'S OWN STATUS LINE (2026-08-31). This lens
+     could read the plan and change nothing about it, which mattered because it
+     is the PHONE lens: marking a month entered meant switching to a
+     twelve-column spreadsheet to press a button about one of its columns.
+     It is deliberately NOT the grid's button strip imported. That bar carries
+     eleven buttons, most of them about the YEAR — freezing it, building the
+     next one, deleting it — and a page showing one month is the wrong place to
+     be offered any of them. Here the two month-scoped ones ride the sentence
+     that already describes the month's state, which is the whole trick: on the
+     grid, "Mark Aug 26 entered" is unambiguous because twelve columns are in
+     view, but on a page about ONE month a button naming another would be the
+     page acting somewhere else. Attached to this month's own status, it can
+     only mean this month — no rule to explain, and the sentence and the button
+     explain each other ("Still to come" → mark it entered; "Entered" → re-open).
+     Months are entered in ORDER (`markMonthEntered` always takes
+     `enteredThrough + 1`), so each button belongs to exactly one month and a
+     month further ahead offers neither, which is the truth: October cannot be
+     entered before August.
+     `entered` is true of EVERY month at or before the marker, so Re-open asks
+     `enteredThrough === m` instead — only the last entered month can go back.
+     The ids are the grid's, and that is what makes this free: `wireBudget`
+     already wires both behind `if (btn)` guards and already runs for this lens,
+     and `stripEditAffordances` already removes both by id in a shared view. */
+  const acts = monthActionsFor(yr, m, started);
+  const monthActs = viewOnly ? '' : [
+    acts.close ? `<button class="btn small" id="closeMonthBtn"
+      title="Freeze ${esc(monthLabel(m))}'s estimates as entered numbers — like overtyping the formulas in Numbers">
+      <span aria-hidden="true">✓</span> Mark ${esc(monthLabel(m))} entered</button>` : '',
+    acts.reopen ? `<button class="btn small" id="reopenMonthBtn"
+      title="Move the entered-through marker back a month (your numbers stay put)">
+      <span aria-hidden="true">↩</span> Re-open ${esc(monthLabel(m))}</button>` : '',
+  ].filter(Boolean).join('');
   const head = `<div class="card" data-box="month-summary">
     <h2>${esc(monthTitle(m))}${helpBtn('monthRows', 'how these lists are ordered')}</h2>
-    <p class="sub">${status}</p>
+    <p class="sub">${status}${monthActs ? ` ${monthActs}` : ''}</p>
     <div class="goalgrid">${tiles}</div>
   </div>`;
 
@@ -10014,6 +10077,15 @@ function renderMonthView() {
           : line(row)).join('')}${earnLine}${revealLine()}</div>
       <div class="mtot"><span>${esc(SECTION_LABEL[sec])} total</span>
         <span class="mamt c-${esc(total.kind)}">${esc(fmtMoney(total.v))}</span>${note}</div>
+      ${/* One per section, and it says WHICH — three buttons reading "Add Row"
+           on one page would each do something different. The word is in the
+           LABEL and not a title, because this is the phone lens and a title
+           never shows on a phone. `data-sec` is what the editor opens on, so
+           adding from the Expenses card lands in Expenses rather than making
+           you pick it again on a page that already knew. */''}
+      ${viewOnly ? '' : `<div class="addbar"><button class="btn small"
+        data-add="category" data-year="${esc(y)}" data-sec="${esc(sec)}">＋ Add ${
+        esc(ADD_ROW_WORD[sec])}</button></div>`}
     </div>`;
   };
 
@@ -10082,6 +10154,12 @@ function renderMonthView() {
     <div class="mtot"><span>Total</span><span class="mamt c-${
       esc(t.closingKind || 'missing')}">${
       t.closing === undefined ? '·' : esc(fmtMoney(t.closing))}</span></div>
+    ${/* Adding an account belongs to the list of accounts, which is here — the
+         Household tab's own line, verbatim. `data-add` is delegated on #views,
+         so there is nothing to wire, and `.addbar` is already stripped in a
+         shared view and hidden in print. */''}
+    ${viewOnly ? '' : `<div class="addbar"><button class="btn small"
+      data-add="account">＋ Add Account</button></div>`}
   </div>`;
 
   /* ── A bar per month, so the one you are on has somewhere to sit ──────────
@@ -18188,7 +18266,14 @@ const EDITORS = {
         until: cat.until || '',
         dueMonths: dueMonthsOf(cat).map(String) };
     },
-    blank: () => ({ rule: 'none', role: 'normal', section: 'expense',
+    /* `blank` has always been CALLED with the dataset; it simply never read it.
+       The month page's per-section Add button carries `data-sec`, so the editor
+       opens on the section you added from rather than making you pick it again
+       on a page that already knew. Checked against the vocabulary rather than
+       trusted: a dataset is markup, and the grid's own Add Row carries no
+       `data-sec` at all, which is what keeps its default exactly `expense`. */
+    blank: (ds) => ({ rule: 'none', role: 'normal',
+                    section: SECTION_LABEL[ds && ds.sec] ? ds.sec : 'expense',
                     creditTiming: 'pre',
                     /* The due block opens on its own defaults so ticking the
                        box gives a sensible monthly hand-paid bill rather than
@@ -24359,6 +24444,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   coerceQuotes,
   fmtMoney, fmtMoneyIn, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
   reconcileNote, impliedGrowth, growthOfferLabel, acceptedFigures,
+  monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals

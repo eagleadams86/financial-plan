@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 866;
+const EXPECTED = 873;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -3752,6 +3752,62 @@ t('a row copied into next year does not SHARE its months with this one', () => {
    that are load-bearing — if a figure below is "tidied", one of these says which
    feature just went dark. They run against sampleState() itself, the same object
    the button loads. */
+/* ── The month view can act, not just read ─────────────────────────────────
+   The month lens is the PHONE lens, and until 2026-08-31 it was the one place
+   you could read the plan and change nothing about it. The grid's eleven-button
+   strip was deliberately NOT imported: most of it is about the YEAR, and a page
+   showing one month is the wrong place to be offered "Delete 2026". Each action
+   sits where it belongs instead, and the gating below is what makes the two
+   month-scoped ones unambiguous on a page about one month. */
+group('Acting from the month view');
+
+const actYear = (entered, opts) => ({ kind: 'grid', model: 'live',
+  enteredThrough: entered, startMonth: '2030-01', monthCount: 12,
+  categories: [], cells: {}, overrides: {}, seeds: {}, balAdjust: {}, ...(opts || {}) });
+
+t('each action belongs to exactly one month', () => {
+  const yr = actYear('2030-02');   // entered through February
+  eq(H.monthActionsFor(yr, '2030-03', true),
+    { close: true, reopen: false }, 'March is the next un-entered month');
+  eq(H.monthActionsFor(yr, '2030-02', true),
+    { close: false, reopen: true }, 'February is the one that can go back');
+  eq(H.monthActionsFor(yr, '2030-04', true),
+    { close: false, reopen: false }, 'April offers neither — March comes first');
+  /* The trap the rule exists to avoid: "is this month entered" is true of
+     EVERY month at or before the marker, and re-opening January is not a thing
+     `reopenMonth` can do — it only ever moves the marker back one. */
+  eq(H.monthActionsFor(yr, '2030-01', true),
+    { close: false, reopen: false }, 'and an earlier entered month cannot re-open');
+});
+
+t('a year with nothing left to enter offers no close', () => {
+  const yr = actYear('2030-12');
+  eq(H.monthActionsFor(yr, '2031-01', true).close, false,
+    'December was the last month this year has');
+  eq(H.monthActionsFor(yr, '2030-12', true).reopen, true, 'but it can still go back');
+});
+
+t('a year that computes nothing, or has not begun, offers neither', () => {
+  eq(H.monthActionsFor(actYear('2030-02', { model: 'pinned' }), '2030-03', true),
+    { close: false, reopen: false }, 'a pinned year has no estimates to freeze');
+  eq(H.monthActionsFor(actYear('2030-02'), '2030-03', false),
+    { close: false, reopen: false }, 'and a year that has not begun has nothing to enter');
+  eq(H.monthActionsFor(null, '2030-03', true), { close: false, reopen: false },
+    'no year at all is not an exception to handle at the call site');
+});
+
+t('the button says which row it adds, in the label', () => {
+  /* A title never shows on a phone, and this is the phone lens — so three
+     buttons reading "Add Row" would be three identical labels doing three
+     different things. SECTION_LABEL is plural ("Expenses") and cannot be
+     reused: a button adds one row. */
+  eq(H.ADD_ROW_WORD.income, 'an Income Row');
+  eq(H.ADD_ROW_WORD.expense, 'an Expense Row');
+  eq(H.ADD_ROW_WORD.transfer, 'a Transfer Row');
+  for (const sec of Object.keys(H.ADD_ROW_WORD))
+    ok(!/s Row$/.test(H.ADD_ROW_WORD[sec]), `${sec} names ONE row, not a plural`);
+});
+
 group('Sample data');
 t('it survives the boundary intact — every collection still there', () => {
   const d = H.migrate(H.coerceShape(H.sampleState()));
@@ -10064,6 +10120,46 @@ t('the app block keeps only what the pack cannot know', () => {
     ok(block.includes(sel), `${sel} is this app's own furniture, so this app hides it`);
   ok(!block.includes('.headbar') && !block.includes('[role="tablist"]'),
     'while the family chrome is not repeated here — one owner per rule');
+});
+
+t('adding a row from a section opens the editor on that section', () => {
+  ok(APP_SRC, 'index.html was not read \u2014 the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  /* The button carries the section and `blank` reads it. Both halves are
+     checked, because either alone is a feature that silently does nothing. */
+  ok(/data-add="category" data-year="\$\{esc\(y\)\}" data-sec="\$\{esc\(sec\)\}"/.test(src),
+    'the per-section button says which section it adds to');
+  ok(/blank: \(ds\) => \(\{[\s\S]{0,120}section: SECTION_LABEL\[ds && ds\.sec\] \? ds\.sec : 'expense'/.test(src),
+    'and the editor opens on it, falling back to expense');
+  /* The vocabulary check is the guard: a dataset is markup, and `data-sec` in
+     a hand-edited share payload must not mint a section that does not exist. */
+  ok(!/section: ds\.sec \|\| 'expense'/.test(src),
+    'the section is checked against the vocabulary, never trusted');
+});
+
+t('the month lens hides its own buttons in print', () => {
+  ok(APP_SRC, 'index.html was not read \u2014 the fetch test above must run first');
+  const at = APP_SRC.indexOf('@media print');
+  const block = APP_SRC.slice(at, APP_SRC.indexOf('</style>', at));
+  /* On the grid these two live inside `.gridactions-wrap`, which is already
+     hidden; on the month page they sit on a `<p class="sub">`, so a printed
+     month carried a "Mark Aug 26 entered" button until they were named. */
+  for (const id of ['#closeMonthBtn', '#reopenMonthBtn'])
+    ok(block.includes(id), `${id} is on a status line here, so it needs naming`);
+});
+
+t('a shared view is offered none of it', () => {
+  ok(APP_SRC, 'index.html was not read \u2014 the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  /* Two doors, and both are shut. The render skips them outright, AND
+     stripEditAffordances takes them off whatever was drawn — the same belt and
+     braces every other edit affordance here gets. */
+  ok(/const monthActs = viewOnly \? '' :/.test(src), 'the month buttons are not drawn');
+  ok(/viewOnly \? '' : `<div class="addbar"><button class="btn small"\s*\n?\s*data-add="account"/.test(src)
+     || /viewOnly \? '' : `<div class="addbar">[\s\S]{0,80}data-add="account"/.test(src),
+    'nor the Add Account bar');
+  for (const sel of ['#closeMonthBtn', '#reopenMonthBtn', '.addbar', '[data-add]'])
+    ok(src.includes(sel), `${sel} is also removed by stripEditAffordances`);
 });
 
 /* ── The info dots ───────────────────────────────────────────────────────────

@@ -186,7 +186,7 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
   nobody paid belongs on the page you open, not on one you'd have to go looking
   for. It isn't there at all in a month with nothing to say.
 - **The accounts**, each with what it held at the end of the month, how far that
-  moved, and what it earned.
+  moved, and what it earned. **＋ Add Account** sits at the foot of that card.
 - **The month's notes**, gathered at the foot of the page the way a year's are
   gathered at the foot of the grid — everything you wrote on that month, on its
   figures, on the amounts a split month is made of, and on the balances you
@@ -203,6 +203,27 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
 
 Every figure and every heading on the page carries its own **i**, and each opens
 a window about that one thing rather than about the page.
+
+**You can act on the month from here, not only read it** — which matters because
+this is the phone lens. The actions sit where the thing they act on is, rather
+than in a strip of buttons at the top:
+
+- **＋ Add an Income Row / an Expense Row / a Transfer Row** at the foot of each
+  section, and the editor opens on that section already — you added from
+  Expenses, so it doesn't ask again.
+- **＋ Add Account** at the foot of the Accounts card.
+- **✓ Mark ⟨month⟩ entered** on the month's own status line, right after the
+  sentence that says the month is still to come. Once it is entered that
+  sentence changes and the button becomes **↩ Re-open ⟨month⟩** in the same
+  place, so the way back is where the way forward was.
+
+Each of those two appears on **exactly the month it acts on** and nowhere else:
+months are entered in order, so the next un-entered one offers "Mark entered",
+the last entered one offers "Re-open", and a month further ahead offers neither
+— October cannot be entered before September. The rest of the grid's buttons
+stay on the grid, because they act on the whole year: freezing it, building the
+next one, the CSV, and deleting it are not things to be offered while you are
+reading one month.
 
 Nothing is worked out twice — every figure on the month page comes out of the
 same engine the grid draws from, so the two lenses cannot disagree about a

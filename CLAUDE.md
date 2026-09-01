@@ -3920,6 +3920,76 @@ conspired, and every one of them was ours:
   reads a note-only cell as a stated $0.00 — the state it would have been in
   anyway.
 
+## The month view can act, not just read (2026-08-31)
+
+**The month lens is the PHONE lens, and it was the one place you could read the
+plan and change nothing about it.** Marking a month entered, or adding a row,
+meant switching to a twelve-column spreadsheet to press a button about one of
+its columns.
+
+**THE GRID'S BUTTON STRIP WAS DELIBERATELY NOT IMPORTED, and that was the whole
+design question.** The first attempt extracted `gridCard`'s bar into a shared
+`budgetActionsHtml(y, month)` and drew a trimmed version here. That reasoning
+was about not duplicating code and never asked whether a button strip belongs
+on this page at all. It does not: the month view is a page of CARDS, the grid's
+bar is a spreadsheet's chrome, and eleven of its buttons are about the YEAR —
+being offered "Delete 2026" while reading one month is a scope mismatch and a
+footgun. **`gridCard` is untouched by this change; nothing is shared.**
+
+Each action sits where the thing it acts on is:
+
+- **`＋ Add an Income Row` / `an Expense Row` / `a Transfer Row`** — an `.addbar`
+  at the foot of each section card, carrying `data-sec`. `EDITORS.category.blank`
+  was already CALLED as `ed.blank(ds)` and simply never read it; it now opens on
+  the section you added from. The section is checked against `SECTION_LABEL`
+  rather than trusted — a dataset is markup, and a hand-edited share payload must
+  not mint a section that does not exist. The grid's own Add Row passes no
+  `data-sec`, which is what keeps its default exactly `expense`.
+  **The word is in the LABEL, never a `title`** — this is the phone lens, and a
+  title never shows on a phone, so three buttons reading "Add Row" would be
+  three identical labels doing three different things. `ADD_ROW_WORD` is written
+  out rather than built from `SECTION_LABEL`, whose values are PLURAL and give
+  "Add Expenses Row"; a button adds one row.
+- **`＋ Add Account`** — the Household tab's own `.addbar` line, verbatim, at the
+  foot of the Accounts card.
+- **`✓ Mark ⟨month⟩ entered` / `↩ Re-open ⟨month⟩`** — on the month's own STATUS
+  LINE, not in a bar. That placement is what makes them unambiguous: the grid
+  shows twelve columns, so its button naming one month is fine, but on a page
+  about ONE month a button naming another would be the page acting somewhere
+  else. Attached to this month's status it can only mean this month, the
+  sentence and the button explain each other ("Still to come" → mark it;
+  "Entered" → re-open), and there is no rule left to explain.
+
+- **`monthActionsFor(yr, m, started)` is the gating, and it is PURE** because it
+  is the one part of this a rendered page cannot easily be asked about. Months
+  are entered in ORDER (`markMonthEntered` always takes `enteredThrough + 1`),
+  so each action belongs to exactly one month and a month further ahead offers
+  neither — not a restriction, the truth. **`reopen` asks
+  `enteredThrough === m`, NOT "is this month entered"**, which is true of every
+  month at or before the marker; only the last one can go back, which is all
+  `reopenMonth` does.
+- **NO NEW WIRING, and that is why the ids are the grid's.** `wireBudget`
+  already wires `closeMonthBtn`/`reopenMonthBtn` behind `if (btn)` guards and
+  already runs for this lens; `data-add` is delegated on `#views`. Both handlers
+  key off `activeYearKey()`, which `pickMonth` keeps in step with the month on
+  screen.
+- **`toEnter`, never `nextM`.** `renderMonthView` already has a `nextM` meaning
+  something else — the month AFTER the one on screen, which the due card looks
+  ahead into. Two different "next"s in one scope is how they come to be read as
+  the same thing; the collision was caught by `node --check`, not by a test.
+- **PRINT NEEDED THE TWO IDS NAMED.** On the grid they sit inside
+  `.gridactions-wrap`, which the print block already hides; here they are on a
+  `<p class="sub">`, so a printed month carried a "Mark Aug 26 entered" button
+  until `#closeMonthBtn, #reopenMonthBtn` joined that list.
+- **Read-only needed nothing**: `stripEditAffordances` already removes `.addbar`,
+  `[data-add]` and both ids. Verified by running it over a clone of the drawn
+  page — four affordances before, none after.
+- **Accepted limitation:** `sectionCard` returns `''` for a section with no rows
+  and no earnings, so a plan with zero transfer rows shows no Transfers card and
+  no way to add one *from here*. The grid's general Add Row still covers it, and
+  drawing an otherwise-empty card just to hold a button would contradict the
+  rule that a section with nothing in it is not drawn.
+
 ## Folding a box up
 
 **Every card on every tab collapses to its heading, and the renderers know
