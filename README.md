@@ -1350,6 +1350,18 @@ already fits. Click a year to open it; from the keyboard, one Tab lands on the
 strip and the left and right arrow keys walk along it (Home for the newest
 year, End for the oldest).
 
+The tabs above the strip, and the strip itself, can be **pinned** to the top of
+the page: press the pin at the right-hand end of the tab row and both stay put
+while a long grid scrolls under them, the way the header already does. Press it
+again to let them go. The setting belongs to the device you set it on — a
+desk monitor has room to spend on chrome and a phone does not — so it is never
+synced, never in a backup and never carried in a share link. It is in
+[Preferences](#preferences) too, for anyone who would rather find it in words.
+
+On a phone the pin holds the **tab row only**. Three bands of chrome is most of
+a small screen, so the year strip is let go there and only the tabs stay — the
+one that buys you changing tab without scrolling back to the top.
+
 A year kept as a yearly summary is set in italics, one built before it has
 started is underlined with dots, **this year carries an underscore** wherever it
 has got to in the strip, and hovering any of them says which in words. A **This
@@ -1495,6 +1507,7 @@ that apply across the whole app rather than to a row:
 | **PTO days a year** | What each new holiday-planner year starts with |
 | **Dividend row interest %/yr** | The rate a dividend row uses when it has none of its own |
 | **Warn about a due bill this many days ahead** | How early a hand-paid bill with a [due date](#due-dates) starts saying so on the Month page. 0 warns on the day itself |
+| **Keep the tabs on screen while scrolling** | Pins the view tabs — and the Budget's year or month strip — to the top of the page. The pin button at the right-hand end of the tab row is the same switch. Set to this device only: never synced, never in a backup, never in a share link |
 | **Zoom** | The exact percentage (50–200%), the quarter steps in the header being the everyday version |
 | **Retirement real return %/yr** | The growth rate the [Retirement](#retirement) tab assumes, after inflation. An account can state its own and follow this only when it doesn't |
 | **If it goes worse / better %/yr** | The two rates around it that draw the cautious and optimistic lines on the same chart |

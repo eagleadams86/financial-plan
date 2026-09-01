@@ -94,6 +94,11 @@
        borrow zoomPct(); keep the bounds in step with it. */
     var z = Math.round(Number(localStorage.getItem('fin-zoom')));
     if (z >= 50 && z <= 200 && z !== 100) document.documentElement.style.zoom = z + '%';
+    /* And the pin, for the same reason again: the two toolbars either are stuck
+       to the top or they are not, and settling that a frame late is a page that
+       visibly jumps as it opens. Only the attribute goes on here — the offsets
+       it reads are measured once there is a layout to measure. */
+    if (localStorage.getItem('fin-pin') === '1') document.documentElement.dataset.pin = 'on';
   } catch (e) {}
   /* Frame-buster. GitHub Pages can't send frame-ancestors (a meta CSP ignores
      it), so any origin could iframe this page and redress the reader's own
@@ -315,7 +320,23 @@ select.ctl:hover { border-color: var(--text-muted); }
 #syncBtn { min-width: 134px; }
 
 /* ── Tabs ───────────────────────────────────────────────────────────────── */
-.tabs { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+/* The row carries the tablist AND the pin button beside it. The button cannot
+   go INSIDE the tablist — a non-tab child there is a lie about what the thing
+   is — and it must not scroll away with the tabs on a phone, where the bar
+   becomes a sideways scroller. The 20px that was the tablist's own bottom
+   margin belongs to the row now: pinned, that margin is the band the page
+   scrolls through, and only the element carrying it can paint it. */
+.tabrow { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+/* An author `display` beats the browser's own `[hidden]` whatever their
+   specificities — the trap already written up against `.chart-max[hidden]`
+   below, and against `.mrow[hidden]` in Money Map. render() hides this row,
+   not the tablist inside it, so this is the rule that has to exist. */
+.tabrow[hidden] { display: none; }
+/* `flex: 1 1 auto` with `min-width: 0`, because a flex item will not shrink
+   below its content without it — and the phone rule below needs this bar to be
+   narrower than its tabs before `overflow-x` has anything to scroll. Taking the
+   free space is also what puts the pin button at the far end of the row. */
+.tabs { display: flex; gap: 12px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
 .tabs[hidden] { display: none; }
 .tab {
   background: var(--bg-card-alt); border: 1px solid var(--border-control);
@@ -345,6 +366,94 @@ select.ctl:hover { border-color: var(--text-muted); }
   /* The quarter-step zoom picker earns no room on a phone — pinch does its
      job there, and the exact figure still lives in Preferences. */
   #zoomSel { display: none; }
+}
+
+/* ── Pinning the two toolbars ──────────────────────────────────────
+   The tab row and the Budget's year/month strip, held at the top of the window
+   while the page scrolls under them. OFF by default and toggled by the pin
+   button at the end of the tab row: pinned chrome is bought with vertical
+   space, and that is a trade only the reader can make.
+
+   THE OFFSETS ARE MEASURED, NEVER WRITTEN DOWN. The app header above these
+   wraps to two or three rows on a phone, and the tab row rewraps whenever the
+   tabs are reordered or the window narrows — so `top` reads a custom property
+   that measurePinTops() writes from real rectangles, the same way `--maxi-top`
+   is written for the full-screen chart. A literal here is wrong on the first
+   phone that opens the page.
+
+   THE MARGIN BECOMES PADDING. A margin is transparent, so pinned, the page
+   scrolled through a 20px window between the two bars. Same 20px, same total
+   height — so toggling causes no reflow — but owned now by the bar that has to
+   paint it. The strip's hairline moves down with its own 18 for the same
+   reason, to the bottom of the lid, which is where the seam between chrome and
+   content belongs anyway.
+
+   `--bg` AND NOT `--bg-card`. The header is a band deliberately lifted OFF the
+   page and wears the card colour to say so. These two rows sit ON the page and
+   show `--bg` through today; `--bg` is the one value that makes pinning change
+   nothing except "content no longer shows through". The card colour would make
+   the bar change colour the moment it was pinned, which is a second thing
+   happening that nobody asked for. No colour is invented here — every one is
+   a pack token the page already wears.
+
+   THE Z-INDEXES ARE PENNED IN ON BOTH SIDES. Above `.grid thead th.lbl`'s 4,
+   or the budget grid's own heading row paints over these: `.gridwrap` is
+   `position: relative` with NO z-index, so it is not a stacking context and
+   those numbers compete out here in the root. Below `#chartMaxi`'s 15, because
+   a maximised chart covers the page and `.wrap` is inert underneath it — chrome
+   showing through would look live and answer nothing. */
+.pinbtn {
+  flex: 0 0 auto; align-self: center;
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-control); background: transparent;
+  color: var(--text-secondary); cursor: pointer;
+}
+.pinbtn:hover { color: var(--text-primary); background: var(--surface-alt);
+  border-color: var(--text-secondary); }
+.pinbtn:focus-visible { outline: 2px solid var(--focus-border); outline-offset: 2px; }
+/* Pinned, the button wears the accent — but the ICON changes with it, so the
+   state is never resting on a hue. */
+html[data-pin] .pinbtn { color: var(--accent); border-color: var(--accent); }
+/* The icon must never be the thing that was clicked. This button rewrites its
+   own contents on press, which DETACHES the <path> a real pointer landed on,
+   and a detached node has no ancestors for anything upstream to ask about. The
+   whole class of bug is written up against `.chart-max svg` below, where it
+   cost a folded card. Same one-line answer, and a synthetic `.click()` cannot
+   reproduce what it prevents. */
+.pinbtn svg { pointer-events: none; }
+@media (pointer: coarse) { .pinbtn { width: 40px; height: 40px; } }
+
+html[data-pin] .tabrow {
+  position: sticky; top: var(--tabs-top, 0px); z-index: 12;
+  background: var(--bg);
+  margin-bottom: 0; padding-bottom: 20px;
+}
+html[data-pin] .yearstrip {
+  position: sticky; top: var(--strip-top, 0px); z-index: 11;
+  background: var(--bg);
+  margin-bottom: 0; padding-bottom: 24px;   /* its own 6, plus the 18 that was a margin */
+}
+/* Nothing in the app scrolls the page to an element — every focus() it makes
+   passes `preventScroll`, and the only scrolls are to the very top. The
+   BROWSER's own Tab-key scrolling does, though, and it knows nothing about a
+   pinned bar. `--pin-clear` is the height of everything actually stuck, so a
+   cell tabbed into lands below the chrome rather than behind it. */
+html[data-pin] #views :is(button, a[href], input, select, textarea, [tabindex]) {
+  scroll-margin-top: var(--pin-clear, 0px);
+}
+/* A PHONE PINS THE TAB ROW AND NOTHING ELSE. Measured on an 812pt screen: the
+   header wraps to two or three rows (96–140px), the tab row is about 44, and
+   the year strip becomes two stacked lines at about 84 — 224 to 268px of
+   chrome, a third of the screen, before a figure appears. The tab row alone
+   costs 44 and buys the thing a phone reader actually wants, which is changing
+   tab without scrolling back up. The cost is real and worth saying plainly: on
+   the Budget you still scroll to the top to change year. The grid's own pinned
+   month headings cover part of that, which is the grid's orientation problem
+   rather than this one. */
+@media (max-width: 700px) {
+  html[data-pin] .tabrow { padding-bottom: 10px; }
+  html[data-pin] .yearstrip { position: static; margin-bottom: 18px; padding-bottom: 6px; }
 }
 
 /* ── Year strip ─────────────────────────────────────────────────────────────
@@ -1953,6 +2062,12 @@ body.maxi-open { overflow: hidden; }
      the same reason — the pack sets the margins, this sets the shape. */
   .gridwrap, .tablewrap, .triprow, .yearrail { overflow: visible !important; }
   @page { size: landscape; }
+  /* A pinned bar prints ONCE, over the top of whatever the first page happens
+     to start with. The pack un-sticks `header` for every app in the family and
+     hides `[role="tablist"]`, which takes the tabs — but the year strip is this
+     app's own and genuinely prints, so the pack cannot reach it. Both are named
+     here, because `.tabrow` outlives the tablist the pack hides. */
+  .tabrow, .yearstrip { position: static !important; }
   /* A card is the unit a reader thinks in, so it should not be torn in half
      where that can be helped. `auto` on the tall ones, because a grid taller
      than a page cannot avoid a break and `avoid` on it would push a whole empty
@@ -2104,6 +2219,12 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
   <!-- Filled once when a share link is opened; empty and invisible otherwise. -->
   <div id="shareBar"></div>
 
+  <!-- The pin button is a SIBLING of the tablist, never a child: a
+       `role="tablist"` whose children are not all tabs is a lie about what the
+       thing is. It sits outside the bar for a second reason too — under 700px
+       the bar becomes a sideways scroller, and a control inside it would slide
+       off the end of the thing it controls. -->
+  <div class="tabrow">
   <div class="tabs" role="tablist" aria-label="Views">
     <!-- "Progress" is the GOALS view wearing a fuller name: it carries the
          goal cards AND the long-run charts that used to be a History tab. The
@@ -2118,6 +2239,12 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
     <button class="tab" role="tab" id="tab-household"  aria-controls="views" data-view="household"  aria-selected="false" tabindex="-1">Household</button>
     <button class="tab" role="tab" id="tab-comp"       aria-controls="views" data-view="comp"       aria-selected="false" tabindex="-1">Compensation</button>
     <button class="tab" role="tab" id="tab-tax"        aria-controls="views" data-view="tax"        aria-selected="false" tabindex="-1">Tax</button>
+  </div>
+    <!-- Dressed by dressPinBtn() — icon, accessible name and title all change
+         together, and there is no aria-pressed on top of them: the state would
+         then be announced twice and the two would have to agree. `no-print` is
+         the pack's own handle for app furniture. -->
+    <button type="button" class="pinbtn no-print" id="pinBtn"></button>
   </div>
 
   <!-- The tabpanel role goes on an inner div, not on <main> itself: putting it on
@@ -2649,6 +2776,14 @@ const THEME_KEY   = 'fin-theme';
    monitor want different answers, so it must NOT sync or ride along in a backup
    — restoring last week's file should not resize the app you are looking at. */
 const ZOOM_KEY    = 'fin-zoom';
+/* Whether this device holds the two toolbars at the top of the window. Local
+   for the ZOOM_KEY reason word for word — it describes a SCREEN, not a plan.
+   A desk monitor has room to spend on chrome and a phone does not, so the
+   answer cannot be one the plan carries between them. It is kept out of
+   `state.settings` for a second reason too: settings travel IN FULL in a share
+   link, and a recipient inheriting the sender's pinning is a preference
+   arriving uninvited. */
+const PIN_KEY     = 'fin-pin';
 /* ── Which boxes you left folded up ─────────────────────────────────────────
    Every card on every tab collapses to its heading, and the set of folded ones
    lives in `state.ui.collapsed` — IN the state, beside `ui.tabOrder`, so it
@@ -6867,7 +7002,9 @@ function render() {
      and `hasData` asks about years, which a link carrying only Investments does
      not have. `renderShareError` hides the bar for its own reasons. */
   const noTabsYet = !hasData() && !viewOnly;
-  bar.hidden = noTabsYet;
+  /* The ROW, not the tablist inside it — the pin button is the row's other
+     child, and a pin for tabs that aren't there is a control over nothing. */
+  bar.closest('.tabrow').hidden = noTabsYet;
   const want = allowed;
   const have = [...bar.querySelectorAll('.tab')].map(t => t.dataset.view);
   if (want.join() !== have.join())
@@ -6911,7 +7048,12 @@ function render() {
   /* The welcome card is about setting YOUR plan up, so it must never stand in
      for a borrowed tab: a link can hold Investments and no budget year at all,
      and that tab draws perfectly well without one. */
-  if (!hasData() && !viewOnly) { target.innerHTML = welcomeCard(); maxiResume(wasMaxi); return; }
+  /* Measured on BOTH exits, and this is the one that matters most: it is the
+     path that HIDES the tab row, which is exactly the thing the second offset
+     is measured from. */
+  if (!hasData() && !viewOnly) {
+    target.innerHTML = welcomeCard(); maxiResume(wasMaxi); measurePinTops(); return;
+  }
   C = computeAll(state, todayISO());
   const fn = {
     budget: renderBudget, goals: renderGoals, household: renderHousehold,
@@ -6926,6 +7068,9 @@ function render() {
   /* After wireView, because that is where the charts are built and a card with
      no chart under it offers no button. */
   maxiResume(wasMaxi);
+  /* #views has just been rewritten, so the year strip may have appeared,
+     vanished, or changed lens under a pinned tab row. */
+  measurePinTops();
 }
 
 /* Everything that opens an editor is reached one of three ways: a `data-add`
@@ -18773,6 +18918,22 @@ const EDITORS = {
         hint: 'Only rows you have given a due date and marked as paid by hand are ever '
           + 'warned about, and only until the month\u2019s figure is recorded. 0 warns on '
           + 'the day itself. Like every preference it travels in a share link.' },
+      /* The pin, so it is findable by somebody who never notices the button on
+         the tab row — and so its "this device only" can actually be said, which
+         a 26px icon cannot say.
+         `wide` and placed HERE for the layout reason the zoom and the lead days
+         above are: an ordinary field added to this stretch shifts the three
+         retirement rates by one column and strands the first of them at the end
+         of the row above, away from the two it is meant to be read against. A
+         wide field ends the row in progress instead. Anything added later needs
+         the same care. */
+      { key: 'pinBars', label: 'Keep the tabs on screen while scrolling',
+        type: 'check', wide: true,
+        hint: 'Holds the view tabs — and the Budget\u2019s year or month strip — at the top '
+          + 'of the page instead of letting them scroll away. Set to this device only: '
+          + 'never synced, never in a backup, never in a share link. A phone keeps the '
+          + 'tabs and lets the strip go, because three bands of chrome is most of a small '
+          + 'screen. The pin button at the end of the tab row does the same thing.' },
       /* The three rates the retirement projection assumes, together and in this
          order — the plan's own, then the two optional ones that are read against
          it. */
@@ -18821,6 +18982,7 @@ const EDITORS = {
                   retirementReturnLow: state.settings.retirementReturnLow,
                   retirementReturnHigh: state.settings.retirementReturnHigh,
                   zoom: savedZoom(),
+                  pinBars: savedPin(),
                   dueLeadDays: leadDaysOf(state),
                   priceApiKey: priceKey() }),
     save(ds, v) {
@@ -18875,6 +19037,9 @@ const EDITORS = {
          An empty box means "leave it alone" rather than "shrink to 50": a
          cleared number field is a blank, not a request. */
       if (v.zoom !== null && v.zoom !== undefined) applyZoom(v.zoom);
+      /* Same device-only story as the zoom, and applied the same way. A check
+         is never null, so it needs no guard of its own. */
+      applyPin(!!v.pinBars);
     },
   },
 
@@ -21598,9 +21763,12 @@ function pinGridHeader() {
   const table = wrap && wrap.querySelector('table.grid');
   const cells = table && table.querySelectorAll('thead th');
   if (!cells || !cells.length) return;
-  /* bottom, not height: it's where the app header actually ends on screen,
-     so the two edges meet with no seam for a row to peek through. */
-  const stop = document.querySelector('header').getBoundingClientRect().bottom;
+  /* Where the chrome above actually ENDS on screen — bottom, not height, so the
+     two edges meet with no seam for a row to peek through. The header is not on
+     its own up there any more: with the toolbars pinned the month headings have
+     to stop below the LOWEST of them, or they slide under the year strip and
+     the one row telling you which column is which is the row that disappears. */
+  const stop = pinnedBottom();
   const box = table.getBoundingClientRect();
   const headH = cells[0].getBoundingClientRect().height;
   /* Two coordinate spaces, and they are not the same one under zoom.
@@ -21625,6 +21793,136 @@ function pinGridHeader() {
 }
 addEventListener('scroll', pinGridHeader, { passive: true });
 addEventListener('resize', pinGridHeader);
+
+/* ── Pinning the two toolbars ───────────────────────────────────────────────
+   The CSS is up in "Pinning the two toolbars"; this is the arithmetic it reads
+   and the button that turns it on.
+
+   ONE ATTRIBUTE, TWO MEASURED OFFSETS. `data-pin` on <html> is the whole state
+   — the head script sets it before first paint so the page doesn't jump — and
+   `--tabs-top` / `--strip-top` / `--pin-clear` are where the sticky rows are
+   told to stop. They are MEASURED because there is no number to write down:
+   the app header wraps to two or three rows on a phone, the tab row rewraps
+   when the tabs are reordered, and the year strip is one line or two depending
+   on the window. Same division by the zoom that measureMaxiTop and
+   pinGridHeader make, and for the same reason spelled out there: a rectangle
+   is read in VISUAL pixels, which the zoom has already scaled, and these are
+   written back as layout pixels, which it is about to scale again. */
+
+/* Inline SVG for the reason MAXI_ICON gives — a glyph is a different size in
+   every platform's font, and an <img> is a fetch. Named by what PRESSING does,
+   because that is what the button's accessible name says too. */
+const PIN_ICON = {
+  pin:   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"'
+       + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"'
+       + ' focusable="false"><path d="M7 4h10"/><path d="M9 4v6l-3 3v2h12v-2l-3-3V4"/>'
+       + '<path d="M12 17v5"/></svg>',
+  unpin: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"'
+       + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"'
+       + ' focusable="false"><path d="M7 4h10"/><path d="M9 4v6l-3 3v2h12v-2l-3-3V4"/>'
+       + '<path d="M12 17v5"/><path d="M3 3l18 18"/></svg>'
+};
+
+/* The rows that are actually stuck right now, rebuilt by measurePinTops. Empty
+   when nothing is pinned, which is what collapses pinnedBottom() back to the
+   header-only line it replaced. */
+let pinnedRows = [];
+
+/* Whether an element is genuinely stuck, asked of the CASCADE rather than of a
+   breakpoint copied into JS. It answers for all three ways a row can fail to
+   be pinned — the pin is off, the phone rule sent the strip back to `static`,
+   or the row isn't on the page at all — and it cannot drift out of step with
+   the media query the way a hard-coded 700 would. */
+const isStuck = (el) => !!el && getComputedStyle(el).position === 'sticky';
+
+function measurePinTops() {
+  const root = document.documentElement, z = zoomScale || 1;
+  const px = (n) => `${Math.round(n / z)}px`;
+  const head = document.querySelector('header');
+  const bar = document.querySelector('.tabrow');
+  const strip = document.querySelector('.yearstrip');
+  const h = head ? head.getBoundingClientRect().height : 0;
+  /* Zero for a row that isn't stuck, which is what makes a hidden tab bar, an
+     unpinned page and the phone's one-row rule all fall out with no branch of
+     their own — the strip is simply told to stop where the header does. */
+  const t = isStuck(bar) ? bar.getBoundingClientRect().height : 0;
+  const s = isStuck(strip) ? strip.getBoundingClientRect().height : 0;
+  root.style.setProperty('--tabs-top', px(h));
+  root.style.setProperty('--strip-top', px(h + t));
+  /* Plus a little, so a cell tabbed into isn't flush against the bar above it. */
+  root.style.setProperty('--pin-clear', px(h + t + s + 8));
+  pinnedRows = [bar, strip].filter(isStuck);
+}
+
+/* The bottom edge of everything pinned at the top, in the SCREEN pixels
+   getBoundingClientRect() reports. With nothing pinned this is the header's own
+   bottom — exactly the line pinGridHeader used to work out for itself. */
+function pinnedBottom() {
+  let b = document.querySelector('header').getBoundingClientRect().bottom;
+  for (const el of pinnedRows)
+    if (el.isConnected) b = Math.max(b, el.getBoundingClientRect().bottom);
+  return b;
+}
+
+/* Both boxes change height for reasons that are not a window resize: a longer
+   subtitle, a reordered tab, a web font landing, the bar being hidden when the
+   plan empties. An observer catches every one of those without a list of call
+   sites to keep in step. Connected only while something is pinned. */
+const pinWatch = ('ResizeObserver' in window)
+  ? new ResizeObserver(() => { measurePinTops(); pinnedShift = -1; pinGridHeader(); })
+  : null;
+
+function savedPin() {
+  try { return localStorage.getItem(PIN_KEY) === '1'; }
+  catch (e) { return false; }   // private mode: the app draws, just unpinned
+}
+
+/* The visible icon and the accessible name say the same thing — what pressing
+   this will DO next — and there is no aria-pressed on top of them: the state
+   would then be announced twice and the two would have to be kept in agreement.
+   The same rule the Show/Hide button in the row editor follows. */
+function dressPinBtn() {
+  const btn = F('pinBtn');
+  if (!btn) return;
+  const on = !!document.documentElement.dataset.pin;
+  btn.innerHTML = on ? PIN_ICON.unpin : PIN_ICON.pin;
+  btn.setAttribute('aria-label', on
+    ? 'Unpin the tabs — let them scroll with the page'
+    : 'Pin the tabs to the top of the page');
+  btn.title = on ? 'Unpin the tabs' : 'Pin the tabs to the top';
+}
+
+function applyPin(on) {
+  try { localStorage.setItem(PIN_KEY, on ? '1' : '0'); } catch (e) {}
+  if (on) document.documentElement.dataset.pin = 'on';
+  else delete document.documentElement.dataset.pin;
+  measurePinTops();
+  /* The grid's heading caches its last shift, and that figure was worked out
+     against the OLD stop — force a recompute and re-pin at once, so the row
+     isn't sitting wrong until the reader happens to scroll. applyZoom does the
+     same pair for the same reason. */
+  pinnedShift = -1;
+  pinGridHeader();
+  dressPinBtn();
+  if (pinWatch) {
+    pinWatch.disconnect();
+    if (on) {
+      pinWatch.observe(document.querySelector('header'));
+      pinWatch.observe(document.querySelector('.tabrow'));
+    }
+  }
+  /* NO render(). Nothing about the markup changes — this is paint and position
+     and nothing else — so the toggle keeps the reader's scroll place and their
+     focus. That is the one line where this deliberately differs from applyZoom,
+     which has to rebuild every chart at the new scale. */
+}
+
+if (F('pinBtn')) F('pinBtn').onclick = () => applyPin(!document.documentElement.dataset.pin);
+/* The header and the bars re-wrap on a resize whether or not the observer is
+   connected, and the offsets are read on every paint. */
+addEventListener('resize', measurePinTops);
+/* A web font arriving after first paint changes every one of these heights. */
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(measurePinTops);
 
 /* ── Reconciling a balance ──────────────────────────────────────────────────
    The gap between the balance you are typing and the one the plan worked out.
@@ -23349,6 +23647,9 @@ function applyZoom(z) {
   /* Anything sized against the VIEWPORT has to be told, because viewport units
      ignore the zoom entirely — see the dialog's max-height. */
   document.documentElement.style.setProperty('--zoom', String(zoomScale));
+  /* Every offset written for the pinned toolbars was divided by the OLD scale,
+     which was reassigned two lines up. Nothing has moved, and both are wrong. */
+  measurePinTops();
   /* The pinned header caches its last shift to avoid pointless writes, and that
      figure is in the OLD scale — force it to recompute, then re-pin at once so
      the header doesn't sit wrong until the next scroll. */
@@ -24265,7 +24566,7 @@ async function openSharedView() {
 }
 
 function renderShareError(e) {
-  document.querySelector('.tabs').hidden = true;
+  document.querySelector('.tabrow').hidden = true;
   /* Two different truths need two different sentences: a link cut in half by a
      mail app, and a link that arrived perfectly intact from a NEWER build of
      the app (decodeShare marks that one). Telling the second reader their link
@@ -24629,6 +24930,9 @@ if (viewOnly) {
   render();
 }
 booted = true;
+/* After the first render, because the offsets are measured off a real layout —
+   the head script has already put the attribute on, so nothing moves here. */
+applyPin(savedPin());
 
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */

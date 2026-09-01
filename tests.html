@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 881;
+const EXPECTED = 890;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -9871,15 +9871,25 @@ t('the tab bar waits until there is something behind it', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   ok(/const noTabsYet = !hasData\(\) && !viewOnly;/.test(APP_SRC),
     'the bar is hidden on a plan with no years, and never in a shared view');
-  ok(/bar\.hidden = noTabsYet;/.test(APP_SRC), 'and it is the whole bar, Budget included');
+  /* The ROW, not the tablist inside it — since 2026-09-01 the pin button is the
+     row's other child, and a pin for tabs that aren't there is a control over
+     nothing. */
+  ok(/bar\.closest\('\.tabrow'\)\.hidden = noTabsYet;/.test(APP_SRC),
+    'and it is the whole bar, Budget and the pin button included');
   ok(/if \(noTabsYet\) \{[\s\S]{0,200}removeAttribute\('aria-labelledby'\)/.test(APP_SRC),
     'with the panel renamed, since naming it after a tab nobody can see would '
     + 'read out a word that is not on the screen');
   /* The shared-view half matters most: a link carrying only Investments has no
      years at all, so hasData() is false and the guard is the only thing keeping
      the reader's own tab on screen. */
-  ok(/\.tabs\[hidden\] \{ display: none; \}/.test(APP_SRC),
-    'and the CSS actually hides it — .tabs is display:flex, which beats the '
+  /* BOTH rules, because both elements are `display: flex` and an author display
+     beats the browser's own [hidden] whatever their specificities. `.tabrow` is
+     the load-bearing one now — it is what render() hides — and `.tabs` keeps its
+     rule because renderShareError and the share path still reason about the bar
+     itself. The same trap is written up against `.chart-max[hidden]`. */
+  ok(/\.tabs\[hidden\] \{ display: none; \}/.test(APP_SRC)
+    && /\.tabrow\[hidden\] \{ display: none; \}/.test(APP_SRC),
+    'and the CSS actually hides it — both are display:flex, which beats the '
     + "browser's own [hidden] rule");
 });
 t('the app print stylesheet sets no colour of its own', () => {
@@ -10190,7 +10200,12 @@ t('theme.css carries the print rule the app is trusting it for', async () => {
 });
 t('the app block keeps only what the pack cannot know', () => {
   const at = APP_SRC.indexOf('@media print');
-  const block = APP_SRC.slice(at, APP_SRC.indexOf('</style>', at));
+  /* COMMENTS OUT FIRST. This asks who OWNS a rule, and a rule is a selector —
+     but the notes in here explain themselves by naming the very selectors the
+     assertion looks for, so an accurate comment about what the pack already
+     hides read as this app hiding it twice. Exactly the trap the note beside
+     stripHtmlComments records, one language over. */
+  const block = stripComments(APP_SRC.slice(at, APP_SRC.indexOf('</style>', at)));
   ok(/\.gridwrap[\s\S]{0,160}overflow: visible/.test(block),
     'a budget year is twelve months wide and printing one means printing the twelve');
   ok(/@page[\s\S]{0,60}landscape/.test(block), 'and it asks for landscape, for the same reason');
@@ -11652,6 +11667,271 @@ t('a chart that draws a line answers by column; one that does not keeps the defa
   } finally { f.remove(); }
 });
 
+group('Keeping the toolbars on screen');
+
+/* Charles asked for this on 2026-09-01: a way to pin and unpin the two rows of
+   chrome — the nine view tabs, and the Budget's year/month strip — so they stay
+   at the top while a long grid scrolls under them. The app header above them
+   was already sticky; these two were not.
+
+   Four decisions are pinned here because each of them is a thing a later tidy-up
+   would undo without knowing it was a decision: the offsets are MEASURED and
+   never written down, the rows are painted so nothing scrolls through them, they
+   are layered between the grid's own sticky heading and the full-screen chart,
+   and a phone pins ONE row rather than two. */
+
+t('the two bars pin one under the other, each told where by a measured number', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const css = stripComments(APP_SRC);
+  const rule = (sel) => {
+    const m = css.match(new RegExp(sel.replace(/[.[\]]/g, '\\$&') + '\\s*\\{([^}]*)\\}'));
+    return m ? m[1] : '';
+  };
+  const row = rule('html[data-pin] .tabrow'), strip = rule('html[data-pin] .yearstrip');
+  ok(/position: sticky/.test(row), 'the tab row sticks when the pin is on', row);
+  ok(/position: sticky/.test(strip), 'and so does the year strip', strip);
+  /* The whole point. The app header wraps to two or three rows on a phone and
+     the tab row rewraps whenever the tabs are reordered, so there is no number
+     to write down — a literal here is wrong on the first phone that opens the
+     page. */
+  ok(/top: var\(--tabs-top/.test(row) && /top: var\(--strip-top/.test(strip),
+     'both read their offset from a property measurePinTops writes, so neither '
+     + 'can be wrong when the header wraps');
+  ok(!/top:\s*\d+px/.test(row) && !/top:\s*\d+px/.test(strip),
+     'and neither hard-codes a height it cannot know');
+});
+
+t('a pinned bar is painted UNDER the chart overlay and OVER the grid heading', () => {
+  const css = stripComments(APP_SRC);
+  const z = (sel) => {
+    const m = css.match(new RegExp(sel.replace(/[.#[\]]/g, '\\$&') + '\\s*\\{([^}]*)\\}'));
+    const n = m && m[1].match(/z-index:\s*(\d+)/);
+    return n ? +n[1] : null;
+  };
+  const row = z('html[data-pin] .tabrow'), strip = z('html[data-pin] .yearstrip');
+  const overlay = z('#chartMaxi'), head = z('header'), gridHead = z('.grid thead th.lbl');
+  /* Every figure is READ OUT of the app, so renumbering any one of them fails
+     here rather than quietly re-ordering the page. */
+  ok(row && strip && overlay && head && gridHead,
+     'all five layers still declare a z-index', JSON.stringify({ row, strip, overlay, head, gridHead }));
+  /* .gridwrap is `position: relative` with NO z-index, so it is not a stacking
+     context: the grid's own sticky heading competes with these out in the root.
+     Below it and the heading row paints straight over the pinned chrome. */
+  ok(row > gridHead && strip > gridHead,
+     'the pinned bars paint over the grid’s own sticky heading, which is not in a '
+     + 'stacking context of its own', `${row}/${strip} vs ${gridHead}`);
+  /* A maximised chart covers the page and .wrap is inert underneath it. Chrome
+     showing through would look live and answer nothing. */
+  ok(row < overlay && strip < overlay,
+     'and under the full-screen chart, which covers a page nobody can click',
+     `${row}/${strip} vs ${overlay}`);
+  ok(overlay < head, 'the header still sits above the overlay, which is that feature’s '
+     + 'whole point — "with the menu still visible"');
+});
+
+t('a pinned bar paints, in a pack colour, over the band it used to leak through', () => {
+  const css = stripComments(APP_SRC);
+  const rule = (sel) => {
+    const m = css.match(new RegExp(sel.replace(/[.[\]]/g, '\\$&') + '\\s*\\{([^}]*)\\}'));
+    return m ? m[1] : '';
+  };
+  const row = rule('html[data-pin] .tabrow'), strip = rule('html[data-pin] .yearstrip');
+  /* .yearstrip has no background of its own at all, so unpainted the grid
+     scrolled straight through it. --bg and not --bg-card: these rows sit ON the
+     page and show --bg through already, so pinning changes nothing except that
+     content stops showing through. */
+  ok(/background: var\(--bg\)/.test(row) && /background: var\(--bg\)/.test(strip),
+     'both bars are opaque in the page’s own colour');
+  /* A margin is transparent, so between two pinned bars the page scrolled
+     through a 20px window. Same height, owned by the bar that has to paint it. */
+  ok(/margin-bottom: 0/.test(row) && /padding-bottom: \d+px/.test(row),
+     'the tab row’s bottom margin became padding, so the band between the two bars '
+     + 'belongs to something that paints it', row);
+  ok(/margin-bottom: 0/.test(strip) && /padding-bottom: \d+px/.test(strip),
+     'and the strip’s did too');
+  /* Bounded by two SELECTORS, not by the section banner: the comments are
+     already gone by here, so a banner is not there to slice at and the section
+     silently ran to the end of the file. */
+  const from = css.indexOf('.pinbtn {'), to = css.indexOf('.yearstrip { display: flex');
+  const section = from >= 0 && to > from ? css.slice(from, to) : '';
+  ok(section.length > 200 && section.length < 4000,
+     'the pinned-toolbar section was found, and only it', section.length);
+  ok(!/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(section),
+     'and it mints no colour of its own — every one is a pack token');
+});
+
+t('nothing between the year strip and the window clips it', () => {
+  const css = stripComments(APP_SRC);
+  /* `position: sticky` is INERT if any ancestor scrolls or paints into a box of
+     its own, and the strip is drawn into #views in the year lens and one level
+     deeper into .tipzone in the month lens. Today none of these four declares
+     anything that would break it — and .tipzone works only because nobody has
+     ever written a rule for it. This is the test that keeps it that way. */
+  const hazard = /(^|[\s;])(overflow|overflow-x|overflow-y|contain|transform|filter|perspective)\s*:/;
+  for (const sel of ['.wrap', 'main', '#views', '.tipzone']) {
+    const re = new RegExp('(^|\\})\\s*' + sel.replace(/[.#]/g, '\\$&') + '\\s*\\{([^}]*)\\}', 'm');
+    const m = css.match(re);
+    const body = m ? m[2] : '';
+    ok(!hazard.test(body),
+       sel + ' must not clip or paint into a box of its own, or the pinned strip '
+       + 'silently stops sticking', body.trim());
+  }
+});
+
+t('a phone pins one bar, not two', () => {
+  const css = stripComments(APP_SRC);
+  /* Measured on an 812pt screen: the header wraps to two or three rows, the tab
+     row is about 44 and the strip becomes two stacked lines at about 84 — a
+     third of the screen gone to chrome before a figure appears. The tab row
+     alone buys the thing a phone reader wants, which is changing tab without
+     scrolling back up. */
+  const blocks = [...css.matchAll(/@media \(max-width: 700px\) \{([\s\S]*?)\n\}/g)].map(m => m[1]);
+  const b = blocks.find(x => x.includes('html[data-pin]'));
+  ok(b, 'the phone has a rule of its own for the pinned bars');
+  ok(/html\[data-pin\] \.yearstrip \{[^}]*position: static/.test(b),
+     'and it sends the year strip back to `static`, so only the tab row is held',
+     (b || '').trim());
+  ok(!/\.tabrow \{[^}]*position: static/.test(b),
+     'the tab row stays pinned there — it is the one that earns its 44px');
+});
+
+t('paper is never pinned', () => {
+  const css = stripComments(APP_SRC);
+  const print = css.slice(css.indexOf('@media print'));
+  /* theme.css un-sticks `header` for every app in the family and hides
+     [role="tablist"], which takes the tabs with it — but the year strip is this
+     app's own and genuinely prints, so the pack cannot reach it. A pinned bar
+     prints ONCE, over whatever the first page starts with. */
+  ok(/\.tabrow, \.yearstrip \{ position: static !important; \}/.test(print),
+     'both bars are un-stuck on paper, because the pack can only reach the header');
+  ok(/class="pinbtn no-print"/.test(APP_SRC),
+     'and the pin button wears the pack’s own handle for app furniture');
+});
+
+t('the measurer divides by the zoom, and is re-run wherever the boxes can move', () => {
+  const js = stripComments(APP_SRC);
+  const fn = (name) => {
+    const i = js.indexOf('function ' + name + '(');
+    if (i < 0) return '';
+    let d = 0, started = false;
+    for (let k = i; k < js.length; k++) {
+      if (js[k] === '{') { d++; started = true; }
+      else if (js[k] === '}') { d--; if (started && d === 0) return js.slice(i, k + 1); }
+    }
+    return '';
+  };
+  const m = fn('measurePinTops');
+  ok(m, 'measurePinTops is still a function declaration the suite can slice out');
+  /* A rectangle is read in VISUAL pixels, which the zoom has already scaled;
+     `top` is written in layout pixels, which it is about to scale again. The
+     same correction the grid header and the maximised chart make. */
+  ok(/zoomScale \|\| 1/.test(m), 'it divides every offset by the page zoom', m.slice(0, 200));
+  ok(/getComputedStyle\(el\)\.position === 'sticky'/.test(js),
+     'and it asks the CASCADE which rows are actually stuck, rather than copying '
+     + 'the 700px breakpoint into script where the two could drift apart');
+  /* render() has TWO exits, and the early one is the path that HIDES the tab
+     row — which is exactly the box the second offset is measured from. */
+  const r = fn('render');
+  const calls = (r.match(/measurePinTops\(\)/g) || []).length;
+  ok(calls >= 2, 'render() measures on BOTH its exits, the welcome-card return included',
+     calls + ' call(s)');
+  ok(/measurePinTops\(\)/.test(fn('applyZoom')),
+     'applyZoom re-measures: the divisor changed even though no box moved');
+  ok(/addEventListener\('resize', measurePinTops\)/.test(js), 'a resize re-measures');
+  ok(/new ResizeObserver\(\(\) => \{ measurePinTops\(\)/.test(js),
+     'and an observer catches the header and the tab row re-wrapping for reasons '
+     + 'that are not a window resize — a reordered tab, a font arriving');
+});
+
+t('the pin is this device’s answer, and never travels', () => {
+  const js = stripComments(APP_SRC);
+  ok(/const PIN_KEY\s*=\s*'fin-pin'/.test(js), 'it lives in a localStorage key of its own');
+  /* state.settings travels IN FULL in a share link, so a preference kept there
+     would arrive uninvited on somebody else's screen. It describes a SCREEN,
+     not a plan — the argument ZOOM_KEY already makes. */
+  const payload = js.slice(js.indexOf('function buildSharePayload'));
+  ok(!/pinBars|PIN_KEY/.test(payload.slice(0, 2000)),
+     'and never in a share link, which carries every one of state.settings');
+  ok(!/settings\.pinBars/.test(js), 'it is not in the state at all, so no backup can carry it');
+});
+
+/* IT NEEDS ITS OWN FRAME, and a real one — the suite's shared frame is 1x1px,
+   so every rectangle read from it is zero and `0 >= 0` passes on a page that was
+   never laid out. That is the trap this test exists to avoid, because the thing
+   it checks is a COLLISION between two pieces of geometry: pinGridHeader() used
+   to stop the grid's month headings at the bottom of the HEADER, and with the
+   toolbars pinned they have to stop at the bottom of the lowest pinned bar or
+   they slide underneath it — the one row telling you which column is which is
+   the row that disappears. A CSS string cannot see that. */
+t('the grid heading parks under the LOWEST pinned bar, not under the header', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?pin=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    ok(typeof W.loadSample === 'function', 'the app must expose loadSample to the frame');
+    W.loadSample();
+
+    const box = (sel) => D.querySelector(sel).getBoundingClientRect();
+    const settle = () => { void D.body.offsetHeight; W.pinnedShift = -1; W.pinGridHeader(); };
+
+    /* Unpinned first, so the figures below are read against the behaviour this
+       replaces rather than against nothing. */
+    W.applyPin(false);
+    D.documentElement.scrollTop = 700;
+    settle();
+    const loose = { head: box('header').bottom, th: box('.grid thead th').top };
+    ok(loose.head > 0, 'the frame really laid out — a 1x1 frame reads every rectangle as 0',
+       loose.head);
+    ok(Math.abs(loose.th - loose.head) <= 1,
+       'unpinned, the headings still park at the app header exactly as they always did',
+       `${loose.th} vs ${loose.head}`);
+
+    W.applyPin(true);
+    D.documentElement.scrollTop = 700;
+    settle();
+    const head = box('header'), row = box('.tabrow'), strip = box('.yearstrip');
+    const th = box('.grid thead th');
+    /* The bars are genuinely stuck, and stacked in the right order. */
+    eq(W.getComputedStyle(D.querySelector('.tabrow')).position, 'sticky',
+       'the tab row is stuck');
+    ok(Math.abs(row.top - head.bottom) <= 1,
+       'the tab row sits exactly at the bottom of the header, with no seam',
+       `${row.top} vs ${head.bottom}`);
+    ok(Math.abs(strip.top - row.bottom) <= 1,
+       'and the strip exactly at the bottom of the tab row',
+       `${strip.top} vs ${row.bottom}`);
+    /* THE COLLISION. Against the old header-only stop this lands at head.bottom
+       and the headings sit behind the year chips. */
+    ok(Math.abs(th.top - strip.bottom) <= 1,
+       'the month headings stop at the bottom of the pinned STRIP — under the old '
+       + 'header-only stop they parked on the header and hid behind the year chips',
+       `${th.top} vs ${strip.bottom}`);
+    ok(th.top > head.bottom + 1,
+       'and emphatically not at the header, which is where they used to land',
+       `${th.top} vs ${head.bottom}`);
+
+    /* Pinning is paint and position, nothing else: no render(), so the reader
+       keeps their scroll place and their focus. A copy of applyZoom would
+       regress exactly this. */
+    const before = D.getElementById('views').innerHTML;
+    const y = D.documentElement.scrollTop;
+    W.applyPin(false); W.applyPin(true);
+    eq(D.getElementById('views').innerHTML === before, true,
+       'toggling the pin redraws nothing — it never calls render()');
+    eq(D.documentElement.scrollTop, y, 'and leaves the reader where they were');
+  } finally { f.remove(); }
+});
+
 group('One chart, filling the window');
 
 /* Charles asked for this on 2026-08-30: a button on every chart that fills the
@@ -11661,6 +11941,12 @@ group('One chart, filling the window');
    than the Fullscreen API or a modal <dialog>, both of which take the header
    away. The first assertions here are what stop a later tidy-up from quietly
    turning it into one of those.
+
+   Since 2026-09-01 the header is not the only sticky thing up there: the tab row
+   and the year strip pin too, when the reader asks for it. They are deliberately
+   layered BELOW this overlay — .wrap is inert while a chart is up, so chrome
+   showing through would look live and answer nothing — and the group "Keeping
+   the toolbars on screen" above owns that assertion.
 
    IT NEEDS ITS OWN FRAME, and a real one. The suite's shared frame is 1x1px, so
    every rectangle read from it is zero and "the chart got taller" passes on a
