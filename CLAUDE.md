@@ -3141,6 +3141,30 @@ padding sits between them. Measuring the `.triprow` box instead of the CARDS
 inside it is what made three attempts at this land on three different numbers.
 Measure card border to card border.
 
+### The add bars are 16px, all of them (2026-08-31)
+
+**`.addbar { margin-top: 16px }` and no overrides.** It was 10px, and the 10px
+was only ever true under a TABLE: measured across all 38 bars in the app, 25 sat
+at 10px, 7 at 16px, one at 12px and one at 18px. **Two of those four were nobody's
+decision** — a bar following a paragraph collapses to `.sub`'s 16px bottom
+margin, and one following a card collapses to the card's 18px. The gap was a
+property of whatever happened to sit above the button.
+
+- **16 rather than 10** because it is the interval the page already reads by: it
+  is `.sub`'s own bottom margin, so a card whose add bar follows a total or a
+  paragraph now **opens and closes on the same gap**, and it was already the real
+  figure in seven places rather than a new number.
+- **Both overrides were deleted**, not kept: `.monthgrid .addbar` (added hours
+  earlier for the month cards, and made redundant by the rule) and
+  `.note .addbar`'s 12px. One value means one rule.
+- **The one surviving 18px is correct and must not be "fixed"** — that bar
+  follows a whole `.card`, so it is a seam between two BLOCKS, and 18px is this
+  app's block rhythm (see "One vertical gap: 18px" above). It is the collapse
+  agreeing with the house rule rather than defying it.
+- The measurement is worth repeating rather than trusting the CSS, because
+  **margin collapse means the declared value is not the gap**. Walk every tab,
+  find each `.addbar`, and measure `bar.top - previousElementSibling.bottom`.
+
 ## Card order: the thing you DO leads (2026-08-23)
 
 A tab's first card is the one it is for, not the one that summarises it. Four
