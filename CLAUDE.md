@@ -562,7 +562,8 @@ family names as well as balances.
   late**), `avg` (Credit Card, Venmo — mean of stored months
   before the estimate), `avglastyear` (mean of the prior calendar year's
   STORED months — never autos, so an estimate can't feed itself),
-  `samemonth` (Electric, ROUND, reaches into the prior year's grid),
+  `samemonth` (Electric, ROUND, reaches into the prior year's grid — **the
+  rounding is per-row since 2026-09-02, see below**),
   `dividends` (per-row `cat.rate`, falling back to
   `settings.midTermRateAnnual` — rate/12 × prior cash+mid), `paycheck`
   (perCheck × count, incl. fractional counts; hidden entirely unless
@@ -3299,6 +3300,45 @@ goes looking for the thing that should have been there.
   pair a projection with the figure it projects (see the Giving section); re-
   flowing them by count would pair each tile with the wrong partner. A test
   walks the rules and fails if any of them forgets the `:not(.pairs)`.
+
+## Keeping the cents on a same-month row (2026-09-02)
+
+`samemonth` is the ONE rule that rounds, and until now nothing on screen said
+so. It was found the way an undocumented behaviour always is: a Taxes row that
+read −$1,741.72 in 2026 came back as −$1,742.00 in the year built ahead, and the
+only way to learn why was to read the source. The rounding itself is right — it
+came from the sheet's `ROUND()`, and an electric bill estimated to the dollar
+reads as an estimate, which is what it is. It is wrong on a row where the cents
+ARE the figure, where the same rounding reads as a number somebody got wrong by
+28 cents. So the answer is per-row, not per-app.
+
+- **`cat.keepCents`, a boolean, stored only when TRUE and only while the row is
+  a `samemonth` one.** `duePayAhead`'s discipline exactly: `false` and absent
+  are one claim, junk deletes, and a row moved off the rule leaves the answer
+  behind rather than carrying it into a rule that never asked.
+- **No schema bump and no migration** — the `dueMonths` precedent, and here it
+  is load-bearing rather than merely convenient. An absent key has to keep
+  meaning "round", because that is what every plan written before the tick
+  already does; a migration that wrote `keepCents: true` onto existing rows
+  would be the same behaviour spelled a second way, and a migration that wrote
+  `false` would silently move figures in a plan nobody had touched.
+- **The tick is worded for what it DOES, not for the key's sense** — "Keep the
+  cents", ticked meaning don't round. A box labelled "Round to whole dollars"
+  would have to store the inverse of what it shows, and the inversion is exactly
+  the kind of thing that survives one edit and not the next.
+- **`ruleDesc` says which way the row rounds on BOTH answers.** A sentence that
+  appeared only on the exception would leave the rounding rows — the ones whose
+  figures surprise you — as silent as they were. `RULE_LABEL.samemonth` is now
+  unreachable and says so in a comment; the table keeps the entry so it still
+  lists every rule.
+- **Nothing else rounds**, and adding a second rounding rule would make this a
+  row-level setting shared by two rules with one name — think about whether
+  `keepCents` should widen or whether the new rule should just not round.
+- **Known and deliberately left alone: `Math.round` is asymmetric on negatives.**
+  An expense of exactly −$100.50 rounds to −$100 while an income of $100.50
+  rounds to $101. Half-dollar figures are rare enough that fixing it would move
+  more real figures than it would correct, and the tick is now the way out for
+  any row where that matters.
 
 ## The month view (2026-08-24)
 

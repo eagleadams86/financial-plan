@@ -4005,6 +4005,14 @@ function coerceShape(data) {
           const g = rateOrNone(cat.growth);
           if (g !== undefined) cat.growth = g; else delete cat.growth;
         } else delete cat.growth;
+        /* Whether the same-month rule keeps the cents instead of rounding to
+           the nearest dollar. Stored only when TRUE and only while the row is
+           a same-month one — `duePayAhead`'s discipline, and never `undefined`
+           (the Firestore rule). `false` and absent are one claim, so a plan
+           written before this field existed is byte for byte what it was: no
+           schema bump, no migration, the `dueMonths` precedent. */
+        if (cat.rule === 'samemonth' && cat.keepCents === true) cat.keepCents = true;
+        else delete cat.keepCents;
         if (cat.rule === 'overflow') {
           if (!acctIds.has(cat.overflowFrom)) delete cat.overflowFrom;
           if (!acctIds.has(cat.transferTo)) delete cat.transferTo;
@@ -5690,8 +5698,14 @@ const RULES = {
     return n ? sum / n : null;
   },
 
-  /* Electric: same month a year earlier, rounded to whole dollars — from
-     this grid when it reaches back 12 months, else from the prior year. */
+  /* Electric: same month a year earlier — from this grid when it reaches back
+     12 months, else from the prior year. Rounded to whole dollars unless the
+     row says otherwise: the sheet wrapped this lookback in ROUND(), and every
+     plan written before `keepCents` existed means exactly that, so the absent
+     key keeps rounding. It is the ONE rule that rounds, which is why the tick
+     belongs to the row rather than to the app — an electric bill estimated to
+     the dollar reads as an estimate, and a tax figure to the dollar reads as a
+     figure somebody got wrong by 28 cents. */
   samemonth(cat, m, ctx) {
     const prev = monthAdd(m, -12);
     const idx = monthDiff(ctx.yr.startMonth, prev);
@@ -5700,7 +5714,7 @@ const RULES = {
     /* an estimate may chain off an earlier estimate (the sheet does), but a
        month with nothing recorded must stay blank, not become a $0 estimate */
     if (!cell || cell.kind === 'missing') return null;
-    return Math.round(cell.v);
+    return cat.keepCents ? cell.v : Math.round(cell.v);
   },
 
   /* Dividends: monthly interest on last month's balances in the accounts the
@@ -8928,6 +8942,9 @@ const RULE_LABEL = {
   quarterly: 'repeats on a cycle (every few months)',
   avg: 'average of the months so far',
   avglastyear: 'average of last year',
+  /* Unreachable: `ruleDesc` answers for this rule before the fallback, so it
+     can say which way the row rounds. Kept so the table still lists every
+     rule — a gap here would read as a rule somebody forgot. */
   samemonth: 'same month last year',
   dividends: 'interest on the chosen account balances',
   overflow: 'sweeps what an account ends the month above a threshold',
@@ -8948,6 +8965,14 @@ function ruleDesc(cat, st = state) {
     return cat.growth
       ? `repeats, rising ${round2(cat.growth * 100)}% each January`
       : 'repeats — say what % a year it rises in Row settings';
+  /* Which way this row rounds, always — not only when it is the unusual one.
+     A tooltip that mentioned the cents only where they are kept would leave
+     the rounding rows saying exactly what they said before, and the rounding
+     rows are the ones whose figures surprise you. */
+  if (r === 'samemonth')
+    return cat.keepCents
+      ? 'same month last year, to the cent'
+      : 'same month last year, to the nearest dollar';
   if (r === 'dividends') {
     const on = dividendAccounts(cat).map(id => accountName(st, id));
     return `${round2(((cat.rate ?? st.settings.midTermRateAnnual) || 0) * 100)}%/yr interest on ${
@@ -18434,6 +18459,16 @@ const EDITORS = {
             + 'Type the real figure when it lands and the row grows from that instead.' },
       { key: 'rate', label: 'Interest %/yr', type: 'percent',
         showIf: (v) => v.rule === 'dividends' },
+      /* The same-month rule rounds to the nearest dollar, and until this tick
+         existed nothing on screen said so — the only way to find out was to
+         notice that last November's $1,741.72 came back as $1,742.00 a year
+         later. Worded for what it DOES rather than for the stored key's sense,
+         so the box and the field agree: ticked keeps the cents. */
+      { key: 'keepCents', label: 'Keep the cents', type: 'check',
+        showIf: (v) => v.rule === 'samemonth',
+        hint: 'This rule rounds to the nearest whole dollar, the way the spreadsheet did. '
+            + 'Tick this to copy last year\u2019s figure exactly \u2014 worth it on a row where the '
+            + 'cents are the point, and not worth it on a bill you are only estimating.' },
       /* Which rows count as pay, for the Giving tab's share-of-take-home. It
          guessed from the row's NAME against an English word list, so "Income"
          or "Stipend" got a dash and the only cure was renaming your budget to
@@ -18636,6 +18671,7 @@ const EDITORS = {
         capGoalId: cat.capGoalId
           || (typeof cat.capAmount === 'number' ? 'amt' : ''),
         isPay: isPayRow(cat.name, cat.rule, cat.isPay),
+        keepCents: !!cat.keepCents,
         /* The tick is derived from the marker rather than stored beside it —
            two spellings of one fact is how they come to disagree. The picker
            opens with EVERY month ticked when the list is absent, because that
@@ -18734,6 +18770,12 @@ const EDITORS = {
         if (v.rule === 'grow' && v.growth !== null && v.growth !== undefined)
           cat.growth = v.growth;
         else delete cat.growth;
+        /* Stored only when the box was on the form AND ticked — `duePayAhead`'s
+           rule, not `isPay`'s: an unticked box here means "round", which is
+           what an absent key already says, and two spellings of one state is a
+           thing for a share link and a test to disagree over. */
+        if (v.rule === 'samemonth' && v.keepCents) cat.keepCents = true;
+        else delete cat.keepCents;
         /* Kept only while it is a dividends row, and stored even when empty:
            an empty list is the reader saying "earn on nothing", which reads
            differently from never having been asked — coerceShape backfills the

@@ -260,6 +260,14 @@ paychecks · overflow sweep.
 **A number you type into a month always beats the rule**, and moves the same
 way.
 
+**Same month last year rounds to the nearest whole dollar** — the spreadsheet
+wrapped that lookback in `ROUND()`, and on a bill nobody is pretending to know
+to the penny it reads as what it is: an estimate. It is the only rule that
+rounds, so on a row where the cents *are* the figure it reads instead as a
+number that is 28 cents wrong. Tick **Keep the cents** in the row's settings and
+that row copies last year's figure exactly; every other same-month row goes on
+rounding. Either way the row's tooltip says which one it is doing.
+
 **A rising row** is "repeat the last month" with a clock on it: the figure
 steps up by the percentage you give it once each **calendar year**, never
 monthly — a renewal letter, not compound interest. Inside a year it simply

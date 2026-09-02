@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 899;
+const EXPECTED = 901;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -575,6 +575,11 @@ t('a corrupt growth rate is dropped, never read as 0%', () => {
 t('the rule describes itself with its own figure in it', () => {
   eq(H.ruleDesc({ rule: 'grow', growth: 0.035 }), 'repeats, rising 3.5% each January');
   ok(/say what/.test(H.ruleDesc({ rule: 'grow' })), 'and asks for one when it has none');
+  /* Said on BOTH, because the rounding row is the one whose figures surprise
+     the reader — a sentence that only appeared on the exception would leave
+     the default exactly as silent as it was. */
+  eq(H.ruleDesc({ rule: 'samemonth' }), 'same month last year, to the nearest dollar');
+  eq(H.ruleDesc({ rule: 'samemonth', keepCents: true }), 'same month last year, to the cent');
 });
 t('average so far falls back to last year while the new year has no months', () => {
   const c = projectNextYear(fixtureState(), [
@@ -678,6 +683,31 @@ t('same-month-last-year reaches into the prior year and rounds', () => {
   eq(c.cells['electric|2030-10'].kind, 'auto');
   approx(c.cells['electric|2030-10'].v, -80, 'ROUND(-80.4, 0)');
   eq(c.cells['electric|2030-05'].kind, 'missing', 'no May 2029 to copy — stays blank');
+});
+/* THE ROW DECIDES WHETHER IT ROUNDS. The rounding is the spreadsheet's, and it
+   is right for a bill nobody is pretending to know to the penny; on a row where
+   the cents ARE the figure it reads as an error of 28 cents. An absent key is
+   what every plan written before the tick has, and it must keep meaning what
+   those plans currently do — so the pinned pair here is "absent rounds, ticked
+   does not", not one or the other. */
+t('the same-month row can keep its cents', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].monthCount = 12;
+  s.years['2030'].categories.find(c => c.id === 'electric').keepCents = true;
+  const c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2030'];
+  approx(c.cells['electric|2030-10'].v, -80.4, 'the prior year’s figure, untouched');
+  eq(c.cells['electric|2030-05'].kind, 'missing', 'and a blank month is still blank');
+});
+t('keeping the cents is a same-month row’s question and nobody else’s', () => {
+  const kept = COERCE_ROW({ id: 'e', name: 'E', section: 'expense',
+    rule: 'samemonth', keepCents: true });
+  eq(kept.keepCents, true, 'stored on the row the rule belongs to');
+  const junk = COERCE_ROW({ id: 'e', name: 'E', section: 'expense',
+    rule: 'samemonth', keepCents: 'yes please' });
+  ok(!('keepCents' in junk), 'only a real true is stored — false and absent are one claim');
+  const moved = COERCE_ROW({ id: 'e', name: 'E', section: 'expense',
+    rule: 'carry', keepCents: true });
+  ok(!('keepCents' in moved), 'a row moved off the rule leaves the answer behind');
 });
 t('a blank month inside the entered range counts as zero and is flagged', () => {
   const c = computeFixture()['2030'];
