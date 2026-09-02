@@ -4922,3 +4922,11 @@ cover. Each has a test now, proven to fail first by reverting the fix.
   pressing it re-applied the same state with "Put back the way it was". One line: `undoCore =
   coreOf(state)`. Pinned as source, like the halt ordering beside it — the live finAdopt
   writes this browser's fin-state.
+
+- **A dropped Firestore listener is re-opened (fix 6).** On listener error the module set `unsub = null` and nothing re-subscribed until the next
+  auth change; the next successful `pushNow` then called `clearSyncError()` → "Syncing again"
+  while incoming changes were lost until reload. The listener is `listen()` now: re-opened by
+  a successful push (`if (!unsub) listen()` after `clearSyncError()`) and by a `RELISTEN_MS`
+  (60 s) timer while it is down; sign-out cancels the timer; `listen()` refuses with nobody
+  signed in. Module-scoped, so pinned over the source. The same pattern exists in Golf
+  Handicap and PAPTrack and is NOT fixed there — worth a pass if either shows the symptom.

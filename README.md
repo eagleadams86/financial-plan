@@ -1722,7 +1722,11 @@ gives the cause and the fix. Nothing is lost when it happens — this browser is
 still the source of truth.
 
 There is no retry button on purpose: Google retries the transient causes
-itself, and the state clears the moment a save gets through.
+itself, and the state clears the moment a save gets through. If Google had
+also dropped the listener that brings other devices' changes in, it is
+re-opened when the next save gets through, and on a timer in the meantime —
+until 2026-09-01 the button said *Syncing again* while incoming changes were
+quietly lost until a reload.
 
 ---
 

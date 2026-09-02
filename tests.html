@@ -12519,6 +12519,33 @@ t('finAdopt resets the undo baseline through coreOf, the comparison save() makes
   ok(core.includes('quotes: null'), 'coreOf still nulls quotes — the field the hand-rolled copy missed');
 });
 
+group('A dropped sync listener is re-opened (2026-09-01 audit)');
+t('the listener error path schedules a retry, and a successful push re-opens it', () => {
+  /* The sync module is module-scoped and needs a signed-in Google account to
+     exercise, so the shape is pinned over the source, the way the sibling
+     apps pin their sync UI. */
+  /* The real tag sits at the start of a line; two comments name it in prose. */
+  const start = APP_SRC.indexOf('\n<script type="module">');
+  ok(start > -1, 'the sync module tag has moved — recheck this test');
+  /* Spelled in two halves: the literal closing tag would end THIS page's script. */
+  const mod = APP_SRC.slice(start, APP_SRC.indexOf('</scr' + 'ipt>', start));
+  const listenAt = mod.indexOf('function listen()');
+  ok(listenAt > -1, 'the listener lives in its own function so it can be re-opened');
+  const errAt = mod.indexOf('setSyncError(e);\n    unsub = null;');
+  ok(errAt > listenAt, 'the error callback still clears unsub');
+  ok(mod.slice(errAt, errAt + 400).includes('relistenTimer = setTimeout('),
+     'and schedules the retry — it used to leave the listener dead until the next sign-in');
+  ok(mod.slice(errAt, errAt + 400).includes('if (user && !unsub) listen()'),
+     'which only fires while signed in and only while the listener is down');
+  const pushAt = mod.indexOf('async function pushNow()');
+  const pushBody = mod.slice(pushAt, mod.indexOf('window.cloudPush ='));
+  ok(pushBody.indexOf('clearSyncError();') < pushBody.indexOf('if (!unsub) listen();'),
+     'a push that got through re-opens a dropped listener — so "Syncing again" is true both ways');
+  ok(mod.includes("if (unsub) { unsub(); unsub = null; }\n    clearTimeout(relistenTimer); relistenTimer = null;"),
+     'and signing out cancels the retry along with the listener');
+  ok(mod.includes('if (!user || !Fs) return;'), 'listen() refuses to open with nobody signed in');
+});
+
 async function run() {
   w = document.getElementById('app').contentWindow;
   /* A frame that never got the app is a SETUP problem — the folder isn't being

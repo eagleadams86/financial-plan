@@ -25292,6 +25292,7 @@ if (FIREBASE_CONFIG && !window.finViewOnly && !inTestHarness) {
 }
 
 let A, Fs, auth, db, user = null, unsub = null, pushTimer = null, tokenClient = null;
+let relistenTimer = null;   // the retry after Firestore drops the listener
 
 /* The classic script above can't see `user` (this is a module), and the
    delete-all dialog has to tell the truth about whether deleting reaches the
@@ -25359,6 +25360,7 @@ async function init() {
        and cost the one thing the button is for. */
     updateUI();
     if (unsub) { unsub(); unsub = null; }
+    clearTimeout(relistenTimer); relistenTimer = null;
     if (u) startSync().catch((e) => setSyncError(e));
   });
   /* Built once, reused for every sign-in. requestAccessToken() must be called
@@ -25594,7 +25596,23 @@ async function startSync() {
     await pushNow();
   }
   localStorage.setItem('fin-sync-uid', user.uid);
+  listen();
+}
 
+/* The live listener, on its own so it can be RE-OPENED. Firestore drops a
+   listener that errors and never fires it again; until 2026-09-01 the error
+   callback below set `unsub = null` and nothing ever subscribed again until the
+   next sign-in — while the next save that got through cleared the error and
+   toasted "Syncing again". Outgoing changes did sync; another device's changes
+   were quietly lost until a reload. Now a dropped listener is re-opened by the
+   next successful push, and on a timer in the meantime (once a minute, only
+   while signed in and only while it is down — a listener that errors again
+   just schedules the next try, and setSyncError toasts only the first time). */
+const RELISTEN_MS = 60000;
+function listen() {
+  if (!user || !Fs) return;
+  if (unsub) { unsub(); unsub = null; }
+  clearTimeout(relistenTimer); relistenTimer = null;
   unsub = Fs.onSnapshot(docRef(), (s) => {
     if (s.metadata.hasPendingWrites || !s.exists()) return;
     const r = s.data();
@@ -25617,9 +25635,12 @@ async function startSync() {
     window.toast('Synced from another device ☁️');
   }, (e) => {
     /* A listener that errors is dropped by Firestore and never fires again —
-       without this callback, another device's updates would just stop. */
+       without this callback, another device's updates would just stop. And
+       without the retry, they still would: see listen(). */
     setSyncError(e);
     unsub = null;
+    clearTimeout(relistenTimer);
+    relistenTimer = setTimeout(() => { relistenTimer = null; if (user && !unsub) listen(); }, RELISTEN_MS);
   });
 }
 
@@ -25628,6 +25649,10 @@ async function pushNow() {
   await Fs.setDoc(docRef(), { json: JSON.stringify(window.finGet()),
                               updatedAt: localTs() || Date.now() });
   clearSyncError();
+  /* "Syncing again" has to be true in BOTH directions: a push that got through
+     proves the connection, so a listener that was dropped is re-opened here
+     rather than left for the timer. */
+  if (!unsub) listen();
 }
 
 /* Called by save() on every local change; debounced so rapid edits batch up. */
