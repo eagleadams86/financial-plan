@@ -1667,6 +1667,60 @@ Things that go with it and will look arbitrary later:
   **The one thing `cols: 2` also does is NARROW the window** (`dialog.twoup`,
   700px), which is why the two long windows below had to leave it.
 
+## Where a figure came from, said out loud (2026-09-02)
+
+Three findings from an audit for the same fault as the `samemonth` rounding: the
+app doing something reasonable and the screen not saying so. All three fixed the
+same day; the audit's other three are open and listed at the end.
+
+- **THE PAYCHECK COUNT NAMES ITS OWN SOURCE, and this one was a false sentence
+  rather than a silence.** `resolvePaychecks` has three answers — the month's
+  own figure, the same month a year ago, else two — and the grid's hover tested
+  only the first, so every month without a figure of its own said "Estimated
+  from the same month last year", including the ones that fell through to the
+  default. In the app's own sample plan that is eleven months of twelve. It is
+  the count a `paycheck` row MULTIPLIES BY, so two a month is 24 a year against
+  a fortnightly 26.
+  - It now returns `{ counts, source }`, and `computeYear` carries
+    `paycheckSource` beside `paychecks` the way `balanceKinds` sits beside
+    `balances`. **The renderer must READ that map**, never re-derive the branch:
+    the same three-way test written twice is one that drifts, and the copy that
+    drifts is the one on screen.
+  - **The source travels down the year chain.** The prior year's RESOLVED counts
+    are what get read, so last year's own default arrives as an ordinary figure;
+    without carrying the source with it, a plan where nobody ever typed a count
+    said "from the same month last year" in every year after the first, about a
+    chain resting on nothing. A count somebody really typed still reads as
+    `lastyear` a year later — the middle branch is not flattened into the last.
+  - `PAYCHECKS_DEFAULT` — the number was typed out in the engine, the cell
+    editor's value and its placeholder. `PAYCHECK_SOURCE_TIP` holds the three
+    sentences; the assumed one NAMES the figure (a fortnightly reader can only
+    know the claim is wrong if they can see it) and says the cell takes an
+    answer.
+- **BOTH AVERAGES NOW SAY WHICH MONTHS THEY ARE OVER.** `avg` said "the months
+  so far", which in a year built ahead is NO months — it falls back to
+  `priorYearRun`, so a fresh 2027 reads last year's average under a label
+  describing an empty set. `avglastyear` said "last year" and skips any month of
+  it that was itself an estimate, so on a plan entered through August it is an
+  average of eight. `ruleDesc` answers for both now, which makes three of
+  `RULE_LABEL`'s entries unreachable (these two and `samemonth`) — the table
+  keeps them so it still lists every rule, and says so in a comment.
+  - **Neither can be phrased conditionally**: `ruleDesc` is pure over the ROW and
+    knows nothing about which year is on screen, so each says both halves.
+  - **No em-dash inside either sentence** — the row label frames it as
+    `Utilities — <desc> — click to edit this row`, and a third dash was
+    unreadable.
+- **STILL OPEN from the same audit**, and each is a decision rather than a bug:
+  percent fields silently round to 2dp on save (`roundTo(n, f.dp ?? 2)`);
+  `parseMoney` strips parentheses, so a pasted `(500)` is `+500` in an app where
+  the sign carries the meaning; and the Giving tab's take-home denominator is
+  partly guessed from row NAMES (`PAY_SLUGS`) with nothing on that tab saying
+  which rows it counted.
+- **`avg`'s fallback reads the prior year's COMPUTED cells**, estimates included,
+  which is the opposite discipline from `avglastyear` ("so an estimate never
+  feeds itself"). Only DESCRIBED, not changed — changing it would move figures
+  in every projected year, which is the reader's call, not a fix.
+
 ## The two long windows are laid out in SECTIONS (2026-09-02)
 
 `category` (Budget Row) and `account` (Account Settings) were `cols: 2` and

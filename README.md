@@ -260,6 +260,13 @@ paychecks · overflow sweep.
 **A number you type into a month always beats the rule**, and moves the same
 way.
 
+**Both averages say which months they're over**, because neither is quite what
+its name suggests. *Average of the months so far* falls back to **last year's**
+average while this year has no months of its own — which is every month of a
+year you've built ahead. *Average of last year* counts only the months actually
+recorded in it, so on a plan entered through August it's an average of eight
+months, not twelve. Hover a row's name to see which.
+
 **Same month last year rounds to the nearest whole dollar** — the spreadsheet
 wrapped that lookback in `ROUND()`, and on a bill nobody is pretending to know
 to the penny it reads as what it is: an estimate. It is the only rule that
@@ -711,6 +718,13 @@ the year before rather than a blank page:
   lose you a fortnight's pay
 
 Each hands over as soon as you type a real month in.
+
+**Every paycheck count says where it came from.** Hover one and it tells you
+whether it's a figure you entered, one taken from the same month a year ago, or
+— where there's nothing to go on anywhere — **two a month assumed**, which it
+names outright and invites you to correct. An assumption inherited from last
+year still reads as an assumption, however many years along, rather than being
+laundered into "from last year".
 
 **It keeps tracking the current year as that changes — rows included.** Add a
 row to this year, retire one, rename it, change its rule or move it, and next

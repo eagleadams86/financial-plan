@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 903;
+const EXPECTED = 909;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -12574,6 +12574,100 @@ t('the listener error path schedules a retry, and a successful push re-opens it'
   ok(mod.includes("if (unsub) { unsub(); unsub = null; }\n    clearTimeout(relistenTimer); relistenTimer = null;"),
      'and signing out cancels the retry along with the listener');
   ok(mod.includes('if (!user || !Fs) return;'), 'listen() refuses to open with nobody signed in');
+});
+
+group('What the grid says about where a figure came from (2026-09-02)');
+/* ── The paycheck count names its own source ────────────────────────────────
+   `resolvePaychecks` has always had three answers — the month's own figure, the
+   same month a year ago, else two — and the grid's hover tested only the first,
+   so every month without a figure of its own said "Estimated from the same
+   month last year". Including the ones where last year had none either and it
+   fell through to two: in the app's own sample plan that is eleven months of
+   twelve, each showing a 2 that nothing supplied but a default, under a
+   sentence naming a source that does not exist.
+   It is the count a `paycheck` row MULTIPLIES BY, so this is not decoration —
+   two a month is 24 a year against a fortnightly 26. The three-way answer and
+   the three sentences are pinned together here, because the failure was
+   precisely that one knew something the other did not. */
+t('the paycheck count says which of the three answers it is', () => {
+  const yr = { paychecks: { '2030-02': 3 } };
+  const prior = { paychecks: { '2029-03': 2.5 } };
+  const out = H.resolvePaychecks(yr, ['2030-01', '2030-02', '2030-03'], prior);
+  eq(out.counts['2030-02'], 3, 'its own figure wins');
+  eq(out.source['2030-02'], 'entered');
+  eq(out.counts['2030-03'], 2.5, 'else the same month a year ago');
+  eq(out.source['2030-03'], 'lastyear');
+  eq(out.counts['2030-01'], H.PAYCHECKS_DEFAULT, 'else the default');
+  eq(out.source['2030-01'], 'assumed', 'and it says so — this is the one that used to '
+    + 'claim it came from last year');
+});
+t('a year with no history at all is assumed, never attributed', () => {
+  /* The first year of a plan has no prior, which is the commonest way to meet
+     the third branch — and the one where the old sentence was furthest from
+     true, since there was no last year to have estimated from. */
+  const out = H.resolvePaychecks({ paychecks: {} }, ['2030-01', '2030-02'], undefined);
+  eq(Object.values(out.source), ['assumed', 'assumed']);
+  eq(Object.values(out.counts), [H.PAYCHECKS_DEFAULT, H.PAYCHECKS_DEFAULT]);
+});
+t('an inherited assumption is still an assumption, however many years along', () => {
+  /* The tail of the same fault, and it only shows up in the SECOND year built
+     ahead: the prior year's RESOLVED counts are what get read, so last year's
+     own default arrives here as a perfectly ordinary figure. Without the source
+     travelling with it, a plan where nobody has ever typed a count would say
+     "from the same month last year" in every year after the first, about a
+     chain that rests on nothing. */
+  const first = H.resolvePaychecks({ paychecks: {} }, ['2030-01'], undefined);
+  const second = H.resolvePaychecks({ paychecks: {} }, ['2031-01'],
+    { paychecks: first.counts, paycheckSource: first.source });
+  eq(second.counts['2031-01'], H.PAYCHECKS_DEFAULT, 'the figure does come from last year');
+  eq(second.source['2031-01'], 'assumed', 'but last year was guessing too, and saying '
+    + '"from last year" would launder a default into a source');
+  /* A REAL count still propagates as one, so the fix does not flatten the
+     middle answer into the last: this is the case the middle branch exists for. */
+  const real = H.resolvePaychecks({ paychecks: { '2030-01': 3 } }, ['2030-01'], undefined);
+  const after = H.resolvePaychecks({ paychecks: {} }, ['2031-01'],
+    { paychecks: real.counts, paycheckSource: real.source });
+  eq(after.counts['2031-01'], 3);
+  eq(after.source['2031-01'], 'lastyear', 'a figure somebody typed still reads as one a '
+    + 'year later');
+});
+t('each answer has words, and the assumed one names the figure', () => {
+  const tips = H.PAYCHECK_SOURCE_TIP;
+  for (const k of ['entered', 'lastyear', 'assumed'])
+    ok(tips[k], k + ' has something to say on hover');
+  ok(tips.assumed.includes(String(H.PAYCHECKS_DEFAULT)),
+     'the assumed one says WHAT was assumed — a reader paid fortnightly can only know '
+     + 'the claim is wrong if they can see it');
+  ok(/click/i.test(tips.assumed), 'and that the cell takes an answer');
+  ok(!/last year/i.test(tips.assumed),
+     'and does not attribute it to a year that supplied nothing');
+});
+t('the grid reads the source rather than re-deriving it', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  ok(/PAYCHECK_SOURCE_TIP\[\(c\.paycheckSource \|\| \{\}\)\[m\]\]/.test(src),
+     'the hover comes from the map the engine filled in — recomputing the branch at the '
+     + 'call site is the same three-way test written twice, and the copy that drifts is '
+     + 'always the one on screen');
+  eq((src.match(/paychecks\[m\] \?\? 2\b/g) || []).length, 0,
+     'and the default is not typed out anywhere: it decides a year of income, and it had '
+     + 'three separate copies');
+});
+/* ── An average says which months it is over ────────────────────────────────
+   Both rules were one plain phrase and both left something out. `avg` said "the
+   months so far", which in a year built ahead is NO months — it falls back to
+   the year before, so a fresh 2027 reads last year's average under a label
+   describing an empty set. `avglastyear` said "last year" and skips any month
+   of it that was itself an estimate. */
+t('both averages say which months they are over', () => {
+  const avg = H.ruleDesc({ rule: 'avg' });
+  ok(/so far/.test(avg), 'it still says what it does in the ordinary case');
+  ok(/last year/.test(avg), 'and that it reaches back when this year has no months of its '
+    + 'own — which is every month of a year built ahead');
+  const last = H.ruleDesc({ rule: 'avglastyear' });
+  ok(/recorded/.test(last), 'the other counts only recorded months');
+  ok(/estimate/.test(last), 'and says outright that an estimated month is not one');
+  ok(avg !== last, 'and the two no longer read as the same claim about the same months');
 });
 
 group('The two long windows are laid out in sections (2026-09-02)');
