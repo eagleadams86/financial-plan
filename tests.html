@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 918;
+const EXPECTED = 920;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -5022,6 +5022,39 @@ t('a file may write its negatives either way, and both are negative', () => {
     'Section,Row,2026-01,2026-02\nExpenses,Utilities,−120.00,(130.00)'), '2026-03-01');
   eq(st.years['2026'].cells['util|2026-01'].v, -120, 'U+2212, as a statement writes it');
   eq(st.years['2026'].cells['util|2026-02'].v, -130, 'and the accounting brackets');
+});
+/* ── A row of words is not a row the plan is missing ────────────────────────
+   The guard for this was written as `values[m] !== null && Number.isNaN(...)`,
+   which parseMoney can never satisfy — so it never fired, and a line of prose
+   in a file (a header repeated mid-export, a column the reader added) was
+   ADDED to the budget as a row of its own and counted as a row gained. */
+t('a row whose every column is words is skipped, not added', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-12',
+    categories: [{ id: 'rent', name: 'Rent', section: 'expense' }], cells: {} } } });
+  const out = H.applyGridCsv(st, H.readGridCsv(['Section,Row,2026-01,2026-02',
+    'Expenses,Rent,-50,-60',
+    'Expenses,Notes for the reader,see attached,n/a'].join('\n')), '2026-03-01');
+  eq(out.added, 0, 'the prose row minted no budget row');
+  eq(out.skipped, 1, 'and is reported as skipped rather than gained');
+  eq(st.years['2026'].categories.length, 1, 'the plan still has the one row it had');
+});
+t('a row of EMPTY columns still clears them — it is not a row of words', () => {
+  /* The half the guard must not swallow: an export with a month blanked is a
+     round trip deleting what it names, and refusing that would silently ignore
+     a deletion. Empty and unreadable arrive spelled the same in `values`, which
+     is why the reader tracks them apart. */
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-12',
+    categories: [{ id: 'rent', name: 'Rent', section: 'expense' }],
+    cells: { 'rent|2026-01': { v: -50, kind: 'actual' },
+             'rent|2026-02': { v: -60, kind: 'actual' } } } } });
+  const out = H.applyGridCsv(st,
+    H.readGridCsv('Section,Row,2026-01,2026-02\nExpenses,Rent,,'), '2026-03-01');
+  eq(out.skipped, 0, 'the row is read, not skipped');
+  eq(out.cleared, 2);
+  eq(st.years['2026'].cells['rent|2026-01'], undefined);
+  eq(st.years['2026'].cells['rent|2026-02'], undefined);
 });
 t('a row the plan does not have is added, not dropped', () => {
   const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',

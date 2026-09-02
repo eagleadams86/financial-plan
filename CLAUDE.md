@@ -4935,7 +4935,21 @@ have to re-derive, and the traps that are already paid for.
 
 - **CSV comes back in.** `csvRows` is a real parser (quotes, doubled quotes,
   CRLF, and it strips the BOM the export itself writes). `readGridCsv` refuses
-  WHOLE and names what is wrong — the tax-paste rule. It skips the Accounts
+  WHOLE and names what is wrong — the tax-paste rule.
+  - **THE "ROW OF WORDS" GUARD TRACKS TWO FLAGS, and cannot be written as a
+    test over `values` (2026-09-02).** It asks whether every month of a row held
+    words rather than a figure, and `values` cannot answer: `parseMoney` returns
+    a number or NULL, and null is also what an EMPTY column stores — the two
+    states the guard exists to separate arrive spelled the same. It shipped as
+    `values[m] !== null && Number.isNaN(values[m])`, which parseMoney can never
+    satisfy, so the guard **never fired once**: a line of prose (a header
+    repeated mid-export, a column the reader added) reached `applyGridCsv`,
+    matched no category, and was ADDED to the budget as a row of its own —
+    reported in the confirmation as a row gained rather than one skipped.
+    `parsedAny`/`wordsOnly` are set as each cell is read. **`wordsOnly` is the
+    half that must not be dropped**: a row of empty columns is a round trip
+    CLEARING every month it names, and skipping it would silently refuse a
+    deletion. Both halves have a test. It skips the Accounts
   block and the Interest & Dividends line because both are computed, and counts
   them as skipped rather than ignoring them silently. `applyGridCsv` decides the
   cell kind exactly as the cell editor does, which is the point: this is typing,

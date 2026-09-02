@@ -23345,16 +23345,33 @@ function readGridCsv(text) {
     if (!name) continue;
     if (!wanted[section] || name === 'Interest & Dividends') { skipped++; continue; }
     const values = {};
+    /* WHY TWO FLAGS AND NOT A TEST OVER `values` (2026-09-02). The guard below
+       asks "did every month hold words rather than a figure?", and `values`
+       cannot answer it: `parseMoney` returns a number or NULL, and null is also
+       what an EMPTY column stores — so the two states the guard has to tell
+       apart arrive spelled the same. It was written as
+       `values[m] !== null && Number.isNaN(values[m])`, which is unsatisfiable
+       (parseMoney never returns NaN), so the guard never fired once: a row of
+       prose reached applyGridCsv, matched no category, and was ADDED to the
+       budget as a row of its own — counted in the confirmation as a row gained
+       rather than a row skipped. */
+    let parsedAny = false, wordsOnly = false;
     for (const m of months) {
       const raw = (r[colOf[m]] ?? '').trim();
       /* An empty column is a real answer — "nothing typed here" — and it is
          what the export writes for a month the plan merely worked out. Kept as
          null rather than skipped, so a round trip clears what it should. */
-      values[m] = raw === '' ? null : parseMoney(raw);
+      const v = raw === '' ? null : parseMoney(raw);
+      if (v !== null) parsedAny = true;
+      else if (raw !== '') wordsOnly = true;
+      values[m] = v;
     }
     /* A row where every month failed to parse is a row of words, not figures —
-       most likely a header repeated mid-file, or a column the reader added. */
-    if (months.every(m => values[m] !== null && Number.isNaN(values[m]))) { skipped++; continue; }
+       most likely a header repeated mid-file, or a column the reader added.
+       `wordsOnly` is what keeps a row of EMPTY columns out of this: that is a
+       round trip clearing every month it names, which is the line above's whole
+       point, and skipping it would silently refuse a deletion. */
+    if (!parsedAny && wordsOnly) { skipped++; continue; }
     out.push({ section: wanted[section], name, values });
   }
   if (!out.length)

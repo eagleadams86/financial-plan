@@ -1538,6 +1538,11 @@ What the import reads, and what it deliberately doesn't:
 - **An empty column empties that month**, which is what a round trip means, and
   only for the months the file has columns for. A month the file says nothing
   about is left alone.
+- **A line of words is skipped, not added.** A heading repeated halfway down a
+  file, or a column of notes you added while working, is counted among the
+  skipped rows rather than becoming a budget row of its own. A row whose columns
+  are simply EMPTY is a different thing and still read — that is a round trip
+  clearing the months it names.
 - **A row the plan doesn't have is added**, since a row that appeared in the
   spreadsheet is usually one you meant to add. Rows are matched by name within
   their own section, however they are cased.
