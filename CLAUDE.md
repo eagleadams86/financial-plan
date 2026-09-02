@@ -4894,3 +4894,8 @@ cover. Each has a test now, proven to fail first by reverting the fix.
   auto estimate). `priorYearLast`/`priorYearRun` had it right; `isFigure(cell)` names their
   rule and every rule reading `yr.cells` for a figure goes through it. The question for any
   new rule: does it read `yr.cells`? Then it asks `isFigure`.
+
+- **The overflow sweep asks `isFigure` too (fix 2).** The sweep step's `if (yr.cells[key])` took the stored branch on a note-only cell — moved
+  `-resolved.v` = $0 and `continue`d past the estimate — so "remember to do this" written on
+  January's sweep cancelled the $4,000 move and every later month inherited the error. Same
+  fix as the rules: `isFigure(yr.cells[key])`.
