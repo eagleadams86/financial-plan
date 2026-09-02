@@ -636,7 +636,12 @@ never came" and a **stated $0.00**, which is the opposite claim — the bill cam
 and it was nothing — and which does mark the month as settled.
 
 A note on a **future** month rides alongside its estimate rather than replacing
-it, so annotating next March doesn't empty it.
+it, so annotating next March doesn't empty it. And a note on a **past** blank
+month is not a figure for later months to carry: a row that repeats its last
+figure, grows it, averages it or bills on a cycle looks past the note to the
+last real amount. (Until 2026-09-01 those four rules read a note-only month as
+a real $0.00 — April's estimate went to nothing, the average dropped, the
+quarterly bill re-phased onto the note month, and every balance after it moved.)
 
 ### Notes
 

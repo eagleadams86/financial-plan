@@ -5543,6 +5543,19 @@ function priorYearRun(cat, m, ctx) {
   }
   return out;
 }
+/* A STORED cell that actually holds a figure. A note with no figure is stored
+   as `kind: 'missing'` (2026-08-26) and is worth nothing: it annotates the
+   month, it does not answer for it. Every rule that reads back along
+   `yr.cells` for "the last figure" has to ask this rather than `if (cell)` —
+   the four that didn't (carry, grow, quarterly, avg) read a note-only March as
+   a real $0 and carried it forward: April's estimate went to $0.00 "auto",
+   the average dropped by a third, the quarterly bill re-phased onto the note
+   month and paid nothing in June, and December's cash balance moved by
+   thousands with nothing on screen saying why (2026-09-01). priorYearLast and
+   priorYearRun had it right from the start; this is their rule, named. */
+function isFigure(cell) {
+  return !!cell && cell.kind !== 'missing';
+}
 const priorYearLast = (cat, m, ctx) => priorYearRun(cat, m, ctx).slice(-1)[0] || null;
 
 /* One estimate rule per category, table-driven. Each is a small pure function
@@ -5567,7 +5580,7 @@ const RULES = {
   carry(cat, m, ctx) {
     for (let i = monthDiff(ctx.yr.startMonth, m) - 1; i >= 0; i--) {
       const cell = ctx.yr.cells[`${cat.id}|${ctx.months[i]}`];
-      if (cell) return cell.v;
+      if (isFigure(cell)) return cell.v;
     }
     return priorYearLast(cat, m, ctx)?.v ?? null;
   },
@@ -5598,7 +5611,7 @@ const RULES = {
     const stepped = (v, from) => round2(v * Math.pow(1 + r, +m.slice(0, 4) - +from.slice(0, 4)));
     for (let i = monthDiff(ctx.yr.startMonth, m) - 1; i >= 0; i--) {
       const cell = ctx.yr.cells[`${cat.id}|${ctx.months[i]}`];
-      if (cell) return stepped(cell.v, ctx.months[i]);
+      if (isFigure(cell)) return stepped(cell.v, ctx.months[i]);
     }
     const prev = priorYearLast(cat, m, ctx);
     return prev ? stepped(prev.v, prev.m) : null;
@@ -5614,7 +5627,7 @@ const RULES = {
     for (const mm of ctx.months) {
       if (mm >= m) break;
       const cell = ctx.yr.cells[`${cat.id}|${mm}`];
-      if (cell) { lastV = cell.v; lastM = mm; }
+      if (isFigure(cell)) { lastV = cell.v; lastM = mm; }
     }
     /* Nothing typed into this year yet — a year built ahead of time — so the
        beat is measured from the last payment of the year before instead of
@@ -5647,7 +5660,7 @@ const RULES = {
     for (const mm of ctx.months) {
       if (mm >= m) break;
       const cell = ctx.yr.cells[`${cat.id}|${mm}`];
-      if (cell) { sum += cell.v; n++; }
+      if (isFigure(cell)) { sum += cell.v; n++; }
     }
     if (n) return sum / n;
     /* No months of its own to average — a year built ahead of time — so it

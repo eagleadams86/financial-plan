@@ -12372,6 +12372,70 @@ t('the full-screen button is furniture, so it never prints', () => {
     + 'window, and the card prints where it sits');
 });
 
+/* A two-account plan with one grid year, for the audit groups below. */
+function auditPlan(year, extra) {
+  const st = H.coerceShape({
+    schema: H.SCHEMA,
+    settings: { accounts: [
+      { id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true },
+      { id: 'mid', name: 'Savings', rate: 0, creditTo: 'mid' } ] },
+    years: {}, goals: [], people: [], side: {}, ui: {}
+  });
+  Object.assign(st, extra || {});
+  if (year) st.years = year;
+  return H.migrate(H.coerceShape(st));
+}
+function auditYear(y, entered, categories, cells, seeds) {
+  return { kind: 'grid', model: 'live', startMonth: `${y}-01`, monthCount: 12,
+           enteredThrough: entered, categories, cells: cells || {}, paychecks: {},
+           seeds: seeds || { cash: 5000 }, overrides: {}, balAdjust: {}, extraNotes: [] };
+}
+
+group('A note with no figure is not a figure (2026-09-01 audit)');
+/* CLAUDE.md said "everything downstream was already right". Four rules were
+   not: they asked `if (cell)` of yr.cells, and a note-only cell is stored. */
+const NOTED_ROWS = () => [
+  { id: 'water', name: 'Water', rule: 'carry', section: 'expense' },
+  { id: 'rent', name: 'Rent', rule: 'grow', growth: 0.03, section: 'expense' },
+  { id: 'card', name: 'Card', rule: 'avg', section: 'expense' },
+  { id: 'ins', name: 'Insurance', rule: 'quarterly', every: 3, section: 'expense' },
+];
+const NOTED_CELLS = () => ({
+  'water|2026-01': { v: -50, kind: 'actual' }, 'water|2026-02': { v: -50, kind: 'actual' },
+  'rent|2026-01': { v: -1800, kind: 'actual' }, 'rent|2026-02': { v: -1800, kind: 'actual' },
+  'card|2026-01': { v: -400, kind: 'actual' }, 'card|2026-02': { v: -400, kind: 'actual' },
+  'ins|2026-01': { v: -300, kind: 'actual' },
+});
+t('a note on a blank March changes nothing about April, or the year', () => {
+  const clean = auditPlan({ 2026: auditYear('2026', '2026-03', NOTED_ROWS(), NOTED_CELLS()) });
+  const cells = NOTED_CELLS();
+  cells['water|2026-03'] = { v: 0, kind: 'missing', note: 'bill never came' };
+  cells['rent|2026-03'] = { v: 0, kind: 'missing', note: 'check this' };
+  cells['card|2026-03'] = { v: 0, kind: 'missing', note: 'check this' };
+  cells['ins|2026-03'] = { v: 0, kind: 'missing', note: 'late' };
+  const noted = auditPlan({ 2026: auditYear('2026', '2026-03', NOTED_ROWS(), cells) });
+  eq(noted.years['2026'].cells['water|2026-03'].kind, 'missing',
+     'the boundary keeps the note-only cell as stored (the 2026-08-26 rule)');
+  const a = H.computeAll(clean, '2026-04-15')['2026'];
+  const b = H.computeAll(noted, '2026-04-15')['2026'];
+  eq(b.cells['water|2026-04'], a.cells['water|2026-04'], 'carry: April still carries -50, not the note’s $0');
+  eq(b.cells['water|2026-04'].v, -50);
+  eq(b.cells['rent|2026-04'], a.cells['rent|2026-04'], 'grow: the rent still grows from -1800');
+  eq(b.cells['card|2026-04'], a.cells['card|2026-04'], 'avg: the average is over the two real months');
+  eq(b.cells['card|2026-04'].v, -400);
+  eq(b.cells['ins|2026-04'], a.cells['ins|2026-04'], 'quarterly: the beat is still measured from January');
+  eq(b.cells['ins|2026-06'], a.cells['ins|2026-06'], 'so the bill lands in April and July, not on the note month');
+  eq(b.balances['cash|2026-12'], a.balances['cash|2026-12'], 'and December’s cash balance is the same figure');
+  eq(b.cells['water|2026-03'].note, 'bill never came', 'while the note itself is still worn');
+});
+t('a stated $0.00 in March IS carried — the other claim, still honoured', () => {
+  const cells = NOTED_CELLS();
+  cells['water|2026-03'] = { v: 0, kind: 'actual' };
+  const st = auditPlan({ 2026: auditYear('2026', '2026-03', NOTED_ROWS(), cells) });
+  eq(H.computeAll(st, '2026-04-15')['2026'].cells['water|2026-04'].v, 0,
+     'the bill came and was nothing, so that is what April expects');
+});
+
 async function run() {
   w = document.getElementById('app').contentWindow;
   /* A frame that never got the app is a SETUP problem — the folder isn't being

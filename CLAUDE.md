@@ -3980,7 +3980,11 @@ conspired, and every one of them was ours:
 - **`cellTip` prints no figure for a `missing` cell.** "$0.00 · nothing
   recorded" is the same contradiction as the context line, and it only started
   being seen once a blank month could carry a note worth hovering over.
-- **Everything downstream was already right** and needed no change:
+- **Everything downstream was already right** — EXCEPT the four rules that read
+  back along `yr.cells` with `if (cell)`: `carry`, `grow`, `quarterly` and
+  `avg` read a note-only month as a stored $0 and carried it forward, and the
+  overflow sweep took the stored branch on one (found by the 2026-09-01 audit,
+  see Six Fixes From the 2026-09-01 Audit; `isFigure(cell)` is the test now).
   `notesOfYear` reads `yr.cells` for any note whatever the kind, `hasNote`
   earns the grid dot, `rowHideable`'s note guard keeps the row on the Month
   page, and `outstandingDues` still counts the period as owing.
@@ -4875,3 +4879,18 @@ page out of five is not a convention.
   that ran on every load could never be cleared. It only ever fills an EMPTY one — a subtitle
   somebody typed is theirs. It travels in a share link like everything else in
   `state.settings`, which is existing deliberate behaviour, not something this changed.
+
+## Six Fixes From the 2026-09-01 Audit
+
+A bug audit of the three work apps on 2026-09-01 (three auditors, each finding
+reproduced headless before it was reported) found six here that the suite did not
+cover. Each has a test now, proven to fail first by reverting the fix.
+
+- **The four look-back rules ask `isFigure(cell)`, never `if (cell)` (fix 1).** A note-only cell is STORED as `{ v: 0, kind: 'missing', note }` (the 2026-08-26 rule),
+  and `carry`, `grow`, `quarterly` and `avg` asked `if (cell)` of `yr.cells` — so a note on a
+  blank March was a real $0: April's `carry` went to $0.00 "auto", `grow` rent to $0, the
+  `avg` card figure dropped by a third, the `quarterly` bill re-phased onto March and paid
+  nothing in June, and December's cash balance moved by thousands, invisibly (kind still said
+  auto estimate). `priorYearLast`/`priorYearRun` had it right; `isFigure(cell)` names their
+  rule and every rule reading `yr.cells` for a figure goes through it. The question for any
+  new rule: does it read `yr.cells`? Then it asks `isFigure`.
