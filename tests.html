@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 901;
+const EXPECTED = 903;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -12575,6 +12575,134 @@ t('the listener error path schedules a retry, and a successful push re-opens it'
      'and signing out cancels the retry along with the listener');
   ok(mod.includes('if (!user || !Fs) return;'), 'listen() refuses to open with nobody signed in');
 });
+
+group('The two long windows are laid out in sections (2026-09-02)');
+/* ── Why this needs a REAL frame ─────────────────────────────────────────────
+   Everything here is geometry and DOM built at open time: the dialog's width,
+   how many columns each block resolves to, and which block a field landed in.
+   None of it exists until the window is open, and none of it can be read from a
+   1x1 frame — every rectangle comes back 0 and "it is 1100px wide" would pass on
+   a window that was never laid out (the trap the sync-pin test records).
+   What it is really guarding is the FIT. Two windows were widened from 700px to
+   the common 1100px and cut into blocks because they had outgrown one list; the
+   thing that would silently undo that is somebody adding a field, or a `showIf`,
+   without noticing which block it lands in — so the blocks are pinned by their
+   contents, not merely counted. */
+t('a budget row and an account open wide, in three columns, in their blocks', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?secs=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    ok(typeof W.loadSample === 'function', 'the app must expose loadSample to the frame');
+    W.loadSample();
+
+    const dlg = () => [...D.querySelectorAll('dialog')].find((d) => d.open);
+    const shut = () => { const d = dlg(); if (d) { try { d.close(); } catch (e) { /* already shut */ } } };
+    const blocks = () => [...D.querySelectorAll('#rowFields .fieldsec')]
+      .filter((sec) => !sec.hidden)
+      .map((sec) => ({
+        head: sec.querySelector('.fieldsec-head').textContent,
+        cols: W.getComputedStyle(sec.querySelector('.grid-fields'))
+          .gridTemplateColumns.split(' ').filter((t) => parseFloat(t) > 0).length,
+        fields: [...sec.querySelectorAll('[data-field]')]
+          .filter((c) => !c.hidden).map((c) => c.dataset.field),
+      }));
+
+    D.querySelector('th[data-edit="category"]').click();
+    const row = dlg();
+    ok(row, 'clicking a row heading still opens the budget row window');
+    /* The width first, because it is the thing that was asked for and the thing
+       a stray `cols: 2` would silently take back: two columns is how a dialog
+       asks to be narrowed, and this one must not. */
+    approx(row.getBoundingClientRect().width, 1100, 'the budget row window is the '
+      + 'common width, the one Preferences and Share open at', 1);
+    ok(!row.classList.contains('twoup'),
+       'and never two-up — a sectioned window has several grids, so no one of them '
+       + 'can be asked what the window should be');
+    const rowBlocks = blocks();
+    eq(rowBlocks.map((b) => b.head),
+       ['What It Is', 'Future Months', 'How The Money Moves', 'When It’s Due'],
+       'the four subjects, in the order a row is described');
+    ok(rowBlocks.every((b) => b.cols === 3), 'three columns in every block — a block laid '
+       + 'out differently from the one above it reads as two windows stacked',
+       rowBlocks.map((b) => b.cols).join(','));
+    /* The three fields that MOVED, pinned where they moved to. Each was in a
+       block it had nothing to do with: "this is my pay" under the projection
+       rule, "stopped using it" and the note inside the due-date block. */
+    for (const key of ['name', 'section', 'until', 'note'])
+      ok(rowBlocks[0].fields.includes(key), key + ' belongs with what the row IS');
+    ok(!rowBlocks[1].fields.includes('isPay'),
+       '"this is my pay" is not a projection setting — it moves no figure the grid computes');
+
+    /* A block that empties DISAPPEARS, rule and heading with it. A sweep row is
+       the case: the rule dictates both of the money-moves questions, so all
+       three of that block's fields hide at once. */
+    const rule = D.getElementById('rf-rule');
+    rule.value = 'overflow';
+    rule.dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq(blocks().map((b) => b.head),
+       ['What It Is', 'Future Months', 'When It’s Due'],
+       'a sweep row has no money-moves questions left, so that block goes rather than '
+       + 'standing empty over a rule');
+    shut();
+
+    /* Saving still works, which is the one thing a section MARKER could break:
+       it has no key, so anything reading `rf-${f.key}` off it finds nothing and
+       asking that for a `.value` would throw — taking the whole save with it. */
+    D.querySelector('th[data-edit="category"]').click();
+    const before = D.getElementById('rf-name').value;
+    D.getElementById('rf-name').value = before + ' (edited)';
+    [...dlg().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save').click();
+    ok(!dlg(), 'the window closed, so the save ran instead of throwing inside it');
+    eq(D.querySelector('th[data-edit="category"]').textContent, before + ' (edited)',
+       'and the edit reached the grid');
+
+    /* The account window, whose two rate blocks are three questions each — which
+       is the shape that settled on three columns in the first place. */
+    D.querySelector('th[data-edit="account"]').click();
+    const acct = dlg();
+    approx(acct.getBoundingClientRect().width, 1100, 'the account window opens at the '
+      + 'same width', 1);
+    const acctBlocks = blocks();
+    eq(acctBlocks.map((b) => b.head), ['What It Is', 'Interest', 'Dividends'],
+       'what it is, what it earns, what it pays out');
+    eq(acctBlocks[1].fields.length, 3, 'the rate, what that rate is and where it goes fill '
+       + 'a row exactly', acctBlocks[1].fields.join(','));
+    eq(acctBlocks[2].fields, ['divRate', 'divTo', 'divEvery'],
+       'and the dividend rate, its destination and how often — the same three again');
+    ok(!D.querySelector('[data-field="name"]').classList.contains('wide'),
+       'the account name is no longer full-width: a spanning cell holds its BOX to one '
+       + 'column, so all the span bought was 780px of nothing beside a 320px box');
+    shut();
+  } finally {
+    f.remove();
+  }
+});
+/* Cheap, and it catches the one thing the frame test above cannot: a spec that
+   grows a section marker without the machinery that reads one. */
+t('a section heading is skipped everywhere a field would be read', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  ok(/if \(f\.sec\) \{ openSection\(f\.sec\); continue; \}/.test(src),
+     'buildFields opens a block on a marker rather than trying to render one');
+  ok(/function readFields\(fields\) \{[\s\S]{0,200}if \(f\.sec\) continue;/.test(src),
+     'and readFields steps over it BEFORE anything asks it for a type — a marker has no '
+     + 'key, and reading .value off rf-undefined would take the whole save with it');
+  ok(/const grids = host\.classList\.contains\('grid-fields'\)/.test(src),
+     'applyFieldSpans lays each block out on its own, so a short row ends at the end of '
+     + 'its own block instead of pulling the next block’s first field up beside it');
+});
+
 
 async function run() {
   w = document.getElementById('app').contentWindow;

@@ -1659,13 +1659,86 @@ Things that go with it and will look arbitrary later:
   and a dialog comes out barely shorter — its height is set by the hints, not by
   the field count.
 - **`cols` is layout INSIDE the fixed width, never the width itself.** `2` for a
-  dialog whose fields come in pairs — `account` puts each rate beside the account
-  it is paid into, the category dialog has role options that are whole sentences.
-  `3` for a section with exactly three things to ask (`yearAmount`): auto-fit
-  gives it four tracks and leaves a quarter of the row empty, with
-  `applyFieldSpans` stretching the LAST box into the gap so the odd one out ends
-  up wider than the two beside it. Three equal columns fill the row evenly.
-  Anything else takes auto-fit.
+  dialog whose fields come in pairs. `3` for a block of exactly three things to
+  ask (`yearAmount`, and both windows below): auto-fit gives it four tracks and
+  leaves a quarter of the row empty, with `applyFieldSpans` stretching the LAST
+  box into the gap so the odd one out ends up wider than the two beside it.
+  Three equal columns fill the row evenly. Anything else takes auto-fit.
+  **The one thing `cols: 2` also does is NARROW the window** (`dialog.twoup`,
+  700px), which is why the two long windows below had to leave it.
+
+## The two long windows are laid out in SECTIONS (2026-09-02)
+
+`category` (Budget Row) and `account` (Account Settings) were `cols: 2` and
+therefore 700px, and Charles read them as "getting pretty long, depending on the
+options selected". They were: a budget row with a sweep rule and a due date on it
+ran **1,877px** — nearly three screens — and an account 1,045px, both in a window
+half the width of Preferences sitting beside them. Now: the common 1100px, three
+columns, and cut into blocks with a rule and a small heading between them.
+
+- **Three columns, not the four auto-fit chooses**, and the old `cols: 2` note's
+  reason is why: the options here are whole sentences ("Repeat on a cycle (every
+  N months)", "Sweep what an account holds above a goal") and a quarter of 1100px
+  cuts them mid-word. A third is 340px, **wider than the 320px cap every box in
+  the app is held to** — so no box is a pixel narrower than it was at 700px and
+  nothing that read before stops reading. Measured, not guessed: the longest
+  option strings are `role` 368px, `goalId`/`capGoalId` 323px, `rule` 312px, and
+  a 320px select shows about 282px of text, so `role` was already clipped at the
+  old width. **That clipping is untouched and is not what this change was
+  about** — fixing it means either a second box cap (a box that doesn't match
+  the ones beside it reads as a mistake) or shorter option sentences.
+- **`{ sec: 'Heading' }` in a spec is the marker**, and everything after it goes
+  in that block until the next. It is OPT-IN and invisible to a spec with none:
+  with no marker `#rowFields` IS the grid exactly as it was, which is why the
+  other seventeen editors needed no thought. With markers it becomes a plain
+  block of `.fieldsec`s, each holding a grid of its own.
+- **Each block lays out ON ITS OWN, and that is the mechanical half of the
+  point.** A block that ends on a short row ends there, instead of pulling the
+  next block's first field up beside it and putting the rule through the middle
+  of a row. `applyFieldSpans` iterates the grids; `spansInGrid` does the work.
+- **A block whose every field is hidden is GONE, rule and heading with it.** A
+  sweep row has no money-moves questions left — the rule dictates both — and a
+  heading standing over nothing is worse than the fields being missing.
+- **`.fieldsec` is `.manage-sec`'s rule to the token** — `--sp-7` above and
+  below, `1px solid var(--border-strong)`, first one takes the spacing and not
+  the rule; the heading is `.manage-head`'s three values (`--fs-sm`,
+  `--fw-semibold`, `--text-primary`). Sprint Predictability, Golf Handicap and
+  the dashboard carry that block, written the same week after Flow Metrics'
+  Settings window was read as "big and a bit hard to read". **Keep it in step
+  with those three.** The name differs only because these hold a field GRID.
+- **A sectioned dialog is never `twoup`**, and `applyFieldSpans` only re-toggles
+  that class for a grid that fills the dialog (`ownsDialog`) — with several
+  grids, no one of them can be asked what the window should be.
+- **A marker is not a field, and `readFields` must step over it BEFORE anything
+  asks it for a type.** It has no key, so `rf-undefined` finds nothing and
+  reading `.value` off that throws — taking the whole save with it. `openRowEditor`'s
+  `inRow` count excludes markers too, or an editor with two fields and a marker
+  would seed itself two-up.
+- **Four fields MOVED, and each was in a block it had nothing to do with:**
+  `isPay` ("this is my pay") sat under the projection rule and moves no figure
+  the grid computes — it only tells the Giving tab how to count the row, so it is
+  a fact about what the row IS. `until` and the note sat after the due block,
+  which put them inside "When It's Due" — the one block `until` has nothing to do
+  with, under a heading that would suggest it only applies to a bill with a date.
+  In the account window, `seed`/`until`/`hub` sat after both rate blocks, which
+  put "is this the main account?" under a heading about dividends.
+  **`until` is no longer offered while ADDING a budget row**: last in a flat list
+  it was out of the way; third in the first block it was the third thing you read
+  while creating a row. The account editor already drew its own only on an
+  account that exists — this is that rule applied to the other half of the grid.
+- **`name` dropped its `wide` in the account window.** A spanning cell holds its
+  BOX to one column (`holdBox`), so the span bought 340px of nothing beside a
+  320px box at the old width and would have bought 780 at the new one.
+- **The headings are meant to read as a SET**, and the first one deliberately
+  does not repeat the window title two lines above it: *What It Is · Future
+  Months · How The Money Moves · When It's Due*, and *What It Is · Interest ·
+  Dividends*. The account's two rate blocks are three questions each — a rate,
+  what that rate is, where it goes; then a rate, where it goes, how often — and
+  that pair filling a row exactly is what settled on three columns.
+- **A real frame is what pins it.** `tests.html` opens both windows in a
+  1280x900 iframe and reads the width, the column count of every block, and each
+  block's contents by name — a 1x1 frame reads every rectangle as 0 and "it is
+  1100px wide" would pass on a window that was never laid out.
 - **`#shareDialog` sets no width of its own.** Its two side-by-side panels and a
   link readable in one line are what the common width buys; its own 760px
   two-column breakpoint is untouched, so a phone still stacks as before.

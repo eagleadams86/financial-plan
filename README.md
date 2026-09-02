@@ -1450,6 +1450,15 @@ summaries — to change, annotate or delete it. Every table has a ＋ Add button
 rows reorder with ↑↓, and each editor shows only the settings the current
 choice actually uses.
 
+- **The two long windows come in sections.** A budget row and an account settle
+  more than a dozen questions between them, and with a sweep rule and a due date
+  showing, the budget row ran to nearly three screens of one undifferentiated
+  list. Both now open at the full window width, three settings across, cut into
+  labelled blocks with a line between them — *What It Is · Future Months · How
+  The Money Moves · When It's Due* for a row, and *What It Is · Interest ·
+  Dividends* for an account. **A block with nothing left to ask disappears**: set
+  a row to sweep an account's overflow and the rule decides what the money does,
+  so the block that asks goes rather than standing empty.
 - **Landing on a box selects what's in it**, so typing replaces the figure
   instead of running on to the end of it. Click a second time to place the
   cursor and edit normally. The up/down arrows a browser draws on a number box

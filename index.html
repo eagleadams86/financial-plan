@@ -940,6 +940,37 @@ legend { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04
 .grid-fields.cols3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 560px) {
   .grid-fields.cols2, .grid-fields.cols3 { grid-template-columns: 1fr; } }
+/* ── A dialog laid out in SECTIONS ───────────────────────────────────────────
+   For the two windows that ask too much to read as one list: a budget row runs
+   to eighteen fields with an overflow rule and a due date on it, an account to
+   eleven, and at the common width both were a single column of settings with
+   nothing to say where one subject stopped and the next began. The rule and the
+   small heading are the FAMILY's answer to exactly this — `.manage-sec` in
+   Sprint Predictability, Golf Handicap and the dashboard, written the same week
+   after Flow Metrics' Settings window was read as "big and a bit hard to read".
+   Same rule, same weight, same `--border-strong`; the name differs because
+   these sections hold a field GRID rather than hand-built markup.
+   Each section lays its own grid out, and that is the mechanical half of the
+   point: a block that ends on a short row ends there, instead of pulling the
+   next block's first field up beside it and putting the rule through the
+   middle of a row. */
+.fieldsecs { display: block; }
+.fieldsec { margin-top: var(--sp-7); padding-top: var(--sp-7);
+  border-top: 1px solid var(--border-strong); }
+/* The first section takes the spacing and not the rule — above it is the
+   sentence describing the whole window, and a line under that reads as the end
+   of a section rather than the start of one. */
+.fieldsec:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+/* A section whose every field is hidden is GONE, rule and all: `showIf` can
+   empty a whole block (the money-moves one disappears on a sweep row), and a
+   heading standing over nothing is worse than the fields being missing. This
+   app declares each `[hidden]` where it is needed rather than once globally —
+   the rule above sets no display, so the UA's own would do, but a sibling that
+   grows a display later would silently un-hide it. */
+.fieldsec[hidden] { display: none; }
+/* `.manage-head`'s three values, to the token. */
+.fieldsec-head { margin: 0 0 var(--sp-5); font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold); color: var(--text-primary); }
 /* An editable row shows a hand, and its row-name cell carries the pencil
    affordance — hover alone isn't discoverable on touch. */
 tr.editrow { cursor: pointer; }
@@ -17717,10 +17748,39 @@ let rowCtx = null;   // { section, ds (the row's dataset), spec }
 
 /* Field types: text · password · money · number · percent (shown ×100) · date ·
    month · check · select (options: [[value, label]]) · note (full-width textarea) */
+/* A spec may carry `{ sec: 'Heading' }` markers, and everything after one goes
+   in that section until the next. Opt-in and invisible to a spec that has none:
+   with no marker `#rowFields` IS the grid, exactly as it was, which is why the
+   other seventeen editors need no thought here. Where there are markers it
+   becomes a plain block of `.fieldsec`s, each holding a grid of its own. */
 function buildFields(fields, values, link) {
-  const wrap = F('rowFields');
-  wrap.innerHTML = '';
+  const host = F('rowFields');
+  host.innerHTML = '';
+  const sectioned = fields.some(f => f && f.sec);
+  host.classList.toggle('grid-fields', !sectioned);
+  host.classList.toggle('fieldsecs', sectioned);
+  /* Where the next cell goes. Without markers that is the host itself; with
+     them, the grid inside the section the last marker opened. */
+  let wrap = host;
+  const openSection = (heading) => {
+    const sec = document.createElement('section');
+    sec.className = 'fieldsec';
+    const h = document.createElement('h4');
+    h.className = 'fieldsec-head';
+    h.textContent = heading;
+    sec.appendChild(h);
+    wrap = document.createElement('div');
+    wrap.className = 'grid-fields';
+    /* Named by its own heading, so a screen reader reaching the grid is told
+       which block it is in rather than meeting an unlabelled group. */
+    h.id = `rf-sec-${slugJs(heading)}`;
+    wrap.setAttribute('role', 'group');
+    wrap.setAttribute('aria-labelledby', h.id);
+    sec.appendChild(wrap);
+    host.appendChild(sec);
+  };
   for (const f of fields) {
+    if (f.sec) { openSection(f.sec); continue; }
     const cell = document.createElement('div');
     cell.dataset.field = f.key;
     if (f.type === 'note' || f.wide) cell.className = 'wide';
@@ -18012,7 +18072,25 @@ function linkBonusPct(which, base, moneyKey) {
    depends on how many optional fields above it are showing at that moment, and
    that changes under the reader as they pick a different rule. */
 function applyFieldSpans(fields) {
-  const wrap = F('rowFields');
+  const host = F('rowFields');
+  /* One grid, or one per section. Each section is laid out on its OWN, which is
+     the mechanical half of what sections buy: a block that ends on a short row
+     ends there, rather than pulling the next block's first field up beside it
+     and putting the rule through the middle of a row. */
+  const grids = host.classList.contains('grid-fields')
+    ? [host] : [...host.querySelectorAll('.grid-fields')];
+  for (const g of grids) spansInGrid(g, fields, grids.length === 1);
+  /* A section every one of whose fields is hidden goes, rule and heading with
+     it — see `.fieldsec[hidden]`. Read from the cells rather than from the spec
+     because `showIf` has already settled them, and this runs after it. */
+  for (const sec of host.querySelectorAll('.fieldsec'))
+    sec.hidden = ![...sec.querySelectorAll('[data-field]')].some(c => !c.hidden);
+}
+
+/* `ownsDialog` is false for a section's grid: the dialog's WIDTH follows the
+   column count of a grid that fills it, and a sectioned dialog's grids are
+   several. It takes the common width and says so in its spec. */
+function spansInGrid(wrap, fields, ownsDialog) {
   /* A closed <dialog> is display:none, and getComputedStyle on that hands back
      the SPECIFIED grid ("repeat(2, minmax(0, 1fr))") rather than resolved
      tracks — counting words in that gives a column count of nonsense. Wait for
@@ -18034,7 +18112,7 @@ function applyFieldSpans(fields) {
      one. Three and four columns keep the common width, and a single column
      never had the problem. */
   const dlg = wrap.closest('dialog');
-  if (dlg) dlg.classList.toggle('twoup', cols === 2);
+  if (ownsDialog && dlg) dlg.classList.toggle('twoup', cols === 2);
   if (cols < 2) return;                       // one column: every row is full
   /* One column's RESOLVED width, which is what a stretched field's box is held
      to below. Read from the grid rather than assumed, so it is right at two,
@@ -18043,6 +18121,7 @@ function applyFieldSpans(fields) {
   const boxIn = (cell) => cell.querySelector('input:not([type="checkbox"]), select');
   const cells = [];
   for (const f of fields) {
+    if (f.sec) continue;                      // a heading, not a field
     const cell = wrap.querySelector(`[data-field="${CSS.escape(f.key)}"]`);
     if (cell && !cell.hidden) cells.push(cell);
   }
@@ -18127,6 +18206,10 @@ function applyFieldVisibility(fields) {
 function readFields(fields) {
   const out = {};
   for (const f of fields) {
+    /* A section heading is not a field: it has no key, so `rf-undefined` finds
+       nothing and reading `.value` off it would throw — taking the whole save
+       with it. Skipped first, before anything asks it for a type. */
+    if (f.sec) continue;
     /* Derived on screen and never stored — it has no `.value` to read, and
        asking for one would throw. */
     if (f.type === 'readout') continue;
@@ -18172,19 +18255,31 @@ function openRowEditor(section, ds, isNew) {
      you are editing one and four while adding, and the tidy answer is three
      across then two-by-two. */
   const cols = typeof ed.cols === 'function' ? ed.cols(ds, isNew) : ed.cols;
-  F('rowFields').classList.toggle('cols2', cols === 2);
-  F('rowFields').classList.toggle('cols3', cols === 3);
   /* Seeded from the SPEC so the dialog opens at its final width instead of
      appearing wide and snapping narrower a frame later. `applyFieldSpans` has
      the authoritative answer once the grid is laid out and re-toggles this, so
      a guess that misses (a `showIf` field hiding, say) is corrected rather than
      left wrong. Two-up is either asked for outright, or arrived at by having
      exactly two fields that take a column each — everything `wide` spans the
-     row and doesn't count. */
-  const inRow = spec.filter(f => f && !f.wide && f.type !== 'note').length;
-  rowDialog.classList.toggle('twoup', cols === 2 || (!cols && inRow === 2));
+     row and doesn't count, and a section HEADING is not a field at all.
+     A sectioned dialog is never two-up: it is the long one, it takes the common
+     width outright, and its grids are several, so no one of them can be asked
+     what the window should be. */
+  const sectioned = spec.some(f => f && f.sec);
+  const inRow = spec.filter(f => f && !f.sec && !f.wide && f.type !== 'note').length;
+  rowDialog.classList.toggle('twoup',
+    !sectioned && (cols === 2 || (!cols && inRow === 2)));
   const link = ed.link && ((key) => ed.link(key, ds));
   buildFields(spec, isNew ? (ed.blank ? ed.blank(ds) : {}) : ed.get(ds), link);
+  /* AFTER building, because a sectioned dialog's grids do not exist until then.
+     Every grid takes the same column count: a section is a subject, not a
+     layout, and a block laid out differently from the one above it reads as two
+     windows stacked rather than one window in parts. */
+  for (const g of (sectioned
+        ? F('rowFields').querySelectorAll('.grid-fields') : [F('rowFields')])) {
+    g.classList.toggle('cols2', cols === 2);
+    g.classList.toggle('cols3', cols === 3);
+  }
   /* Prime the linked boxes once, so a derived field arrives in the state the
      data puts it in — filled, or disabled because there is nothing to derive
      it from — rather than waiting for the first keystroke to find out. */
@@ -18403,15 +18498,34 @@ const EDITORS = {
   /* Budget category rows (the grid's left column) */
   category: {
     title: (ds, isNew) => isNew ? 'Add a Budget Row' : 'Budget Row',
-    /* Two columns, not the three auto-fit would choose. Every option here is a
-       whole sentence — "Repeat on a cycle (every N months)" — and a third of a
-       640px dialog cut them off mid-word. Half is enough for nearly all of
-       them, and it also means the optional per-rule setting pairs with the rule
-       that summoned it instead of starting a row of its own. */
-    cols: 2,
+    /* THREE columns and the common width, in SECTIONS (2026-09-02). It was two
+       columns at 700px, which is where a two-column dialog goes, and the window
+       had outgrown that: eighteen fields with a sweep rule and a due date on it
+       ran 1,877px — nearly three screens — in a window half the width of
+       Preferences beside it.
+       Three and not the four auto-fit would choose, and the old note's reason
+       still holds: every option here is a whole sentence ("Repeat on a cycle
+       (every N months)", "Sweep what an account holds above a goal"), and a
+       quarter of 1,100px cuts them off mid-word. A third is 340px, which is
+       wider than the 320px cap every box in the app is held to — so no box is a
+       pixel narrower than it was at the old width, and nothing that reads today
+       stops reading. */
+    cols: 3,
     sub: () => 'Type picks the section it appears under. The rule fills future months automatically. '
       + 'Money leaving Cash is negative everywhere — a transfer of −$200 moves $200 into the other account.',
-    fields: (ds) => [
+    fields: (ds, isNew) => [
+      /* ── The sections ───────────────────────────────────────────────────
+         Four subjects, in the order the row is described: what it is called,
+         how it fills months you have not reached, what it does to the accounts,
+         and when the money is due. The FIELD ORDER inside each is exactly what
+         it was — the sections are a reading aid, not a rearrangement — with the
+         one move noted where it happens. */
+      /* Not "The Row": the window's own title says Budget Row two lines above,
+         and a first section repeating it reads as a heading with nothing to
+         distinguish it. The four headings are meant to be readable as a set —
+         what it is, how it fills future months, what it does to the accounts,
+         when it is due. */
+      { sec: 'What It Is' },
       { key: 'name', label: 'Name', type: 'text' },
       { key: 'section', label: 'Type', type: 'select', options: [
         ['income', 'Income'],
@@ -18426,6 +18540,49 @@ const EDITORS = {
         options: [['', 'Not said'], ...adultsOf(state).map(p => [p.id, p.name])],
         showIf: (v) => v.section === 'income',
         hint: 'For a second earner’s paycheck. Only a label — the row counts the same either way.' }] : []),
+      /* Which rows count as pay, for the Giving tab's share-of-take-home. It
+         guessed from the row's NAME against an English word list, so "Income"
+         or "Stipend" got a dash and the only cure was renaming your budget to
+         suit the code. Offered on income rows only — an expense is never pay —
+         and it overrides the guess in both directions.
+         It sat under the rule until the sections went in (2026-09-02) and read
+         as a projection setting there, which it is not: it changes no figure
+         the grid computes and only says how the Giving tab should count the
+         row. Beside "Type" and "Whose" it is what it is — another fact about
+         what this row is. */
+      { key: 'isPay', label: 'This is my pay', type: 'check',
+        showIf: (v) => v.section === 'income',
+        hint: 'Counts this row as take-home for the giving percentages. Tick it for pay '
+            + 'the app hasn\u2019t recognised; untick it for income that only looks like '
+            + 'pay \u2014 a refund, a reimbursement.' },
+      /* ── WHEN THE ROW STOPPED, and it moved here when the dialog gained its
+         sections (2026-09-02). It sat last, after the due block, on the reading
+         that it is the last thing you say about a row: everything above
+         describes how the row behaves, and this says until when. That was right
+         while the dialog was one list. It is wrong once the list has subjects —
+         last put it inside "When It's Due", which is the one block it has
+         nothing to do with, standing under a heading that would have made a
+         reader think it only applies to a bill with a date on it. It is a fact
+         about the ROW, unconditional and asked of every row, so it belongs with
+         the row's own name and type. The note follows it for the same reason.
+         Its hint carries the "until when" reading that the old position used to
+         carry by itself.
+         NOT OFFERED WHILE ADDING, and that came with the move: last in a flat
+         list it was out of the way, but third in the first block it was the
+         third thing you read while creating a row — "stopped using it" on a row
+         that does not exist yet. The account editor already draws its own
+         `until` only on an account that exists, for the same reason; this is
+         that rule applied to the other half of the grid. A row imported with a
+         stop month keeps it: nothing here writes, and the field comes back the
+         moment the row is opened again. */
+      ...(isNew ? [] : [{ key: 'until', label: 'Stopped using it', type: 'month',
+        hint: 'The last month this row had money in it \u2014 a card you stopped using, a '
+            + 'subscription you cancelled. After it the row estimates nothing, drops off '
+            + 'the Month page, stops being reminded about, and is left out when next year '
+            + 'is started. A figure you type into a later month still stands. Leave it '
+            + 'empty for a row still in use.' }]),
+      noteField,
+      { sec: 'Future Months' },
       { key: 'rule', label: 'Future months rule', type: 'select', options: [
         ['none', 'Blank (type estimates by hand)'],
         ['carry', 'Repeat the last month'],
@@ -18469,16 +18626,6 @@ const EDITORS = {
         hint: 'This rule rounds to the nearest whole dollar, the way the spreadsheet did. '
             + 'Tick this to copy last year\u2019s figure exactly \u2014 worth it on a row where the '
             + 'cents are the point, and not worth it on a bill you are only estimating.' },
-      /* Which rows count as pay, for the Giving tab's share-of-take-home. It
-         guessed from the row's NAME against an English word list, so "Income"
-         or "Stipend" got a dash and the only cure was renaming your budget to
-         suit the code. Offered on income rows only — an expense is never pay —
-         and it overrides the guess in both directions. */
-      { key: 'isPay', label: 'This is my pay', type: 'check',
-        showIf: (v) => v.section === 'income',
-        hint: 'Counts this row as take-home for the giving percentages. Tick it for pay '
-            + 'the app hasn\u2019t recognised; untick it for income that only looks like '
-            + 'pay \u2014 a refund, a reimbursement.' },
       { key: 'accounts', label: 'Earned on these accounts', type: 'checks', wide: true,
         options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
         showIf: (v) => v.rule === 'dividends',
@@ -18537,7 +18684,9 @@ const EDITORS = {
         showIf: (v) => v.rule === 'overflow' && v.capGoalId === 'amt' },
       /* Behaviour is two questions, not one long list: what the money does,
          and (only then) which account it does it with. On an overflow row
-         neither is asked \u2014 the rule dictates both. */
+         neither is asked \u2014 the rule dictates both, which is why this whole
+         SECTION disappears there rather than standing empty over a rule. */
+      { sec: 'How The Money Moves' },
       { key: 'role', label: 'Behaves as', type: 'select', options: [
         ['normal', `Ordinary ${hubAccount(state)?.name || 'cash'} money — the usual`],
         ['transfer', `Moves ${hubAccount(state)?.name || 'cash'} into another account`],
@@ -18577,6 +18726,7 @@ const EDITORS = {
          stranded at the top of a fresh one. Every field here shows together,
          which is why the rule bites harder than it does on the dividends
          picker, whose `showIf` never co-occurs with a neighbour. */
+      { sec: 'When It\u2019s Due' },
       { key: 'dueSet', label: 'It has a due date', type: 'check',
         help: 'rowDue', helpLabel: 'setting a due date',
         hint: 'A bill with a day of the month, or one that only falls in some months.' },
@@ -18632,23 +18782,6 @@ const EDITORS = {
             + 'bill is paid \u2014 and in the months it does not fall in, the row drops off '
             + 'the Month page, though only when nothing is recorded there, so a row carrying '
             + 'a figure or a note always stays.' },
-      /* ── When the row stopped ──────────────────────────────────────
-         AFTER the due block and before the note, and UNCONDITIONAL — a row
-         that stops need never have had a due date, and the one this was built
-         for had none. It reads as the last thing you say about a row because
-         it is: everything above describes how the row behaves, and this says
-         until when.
-         `dueMonths` above it is `wide`, which ends the row in progress, so an
-         ordinary-width field here starts a fresh one rather than being
-         stranded — and with the due block unticked it simply follows
-         whatever the last visible field was. */
-      { key: 'until', label: 'Stopped using it', type: 'month',
-        hint: 'The last month this row had money in it \u2014 a card you stopped using, a '
-            + 'subscription you cancelled. After it the row estimates nothing, drops off '
-            + 'the Month page, stops being reminded about, and is left out when next year '
-            + 'is started. A figure you type into a later month still stands. Leave it '
-            + 'empty for a row still in use.' },
-      noteField,
     ],
     get(ds) {
       const yr = state.years[ds.year];
@@ -19117,14 +19250,29 @@ const EDITORS = {
      (optionally) the month it starts being tracked. Click an account row. */
   account: {
     title: (ds, isNew) => isNew ? 'Add an Account' : 'Account Settings',
-    cols: 2,
+    /* Three columns, the common width and sections, the budget row's change and
+       for the same reason (2026-09-02): eleven fields at 700px ran 1,045px in a
+       window half the width of Preferences. Three is the shape the CONTENT
+       already had — a rate, what that rate is and where it goes is one row of
+       three, and the dividend rate, its destination and its frequency is
+       another — which is what the sections make visible. */
+    cols: 3,
     sub: (ds, isNew) => isNew
       ? 'A new account starts from this month. Earlier months stay blank and out of Total '
         + 'rather than inventing a history it never had — type a balance into one of them '
         + 'later and it starts from there instead.'
       : 'How this account behaves in the budget grid.',
     fields: (ds) => [
-      { key: 'name', label: 'Account name', type: 'text', wide: true },
+      /* ── The sections ───────────────────────────────────────────────────
+         What the account IS, what it earns, and what it pays out. The two rate
+         blocks are three questions each and fill a row exactly; the first holds
+         everything that is a fact about the account rather than about a rate.
+         `name` dropped its `wide` in the same pass: a full-width box at 700px
+         left 340px of nothing beside it and at 1,100px would leave 780, since a
+         spanning cell's BOX is still held to the 320px cap. Here it simply
+         pairs with the two fields that belong beside it. */
+      { sec: 'What It Is' },
+      { key: 'name', label: 'Account name', type: 'text' },
       /* Only offered once there is a household to choose from — with nobody
          named, "whose is it?" has one answer and doesn't need asking. */
       ...(peopleOf(state).length ? [{ key: 'owner', label: 'Whose account', type: 'select',
@@ -19132,6 +19280,35 @@ const EDITORS = {
                   [JOINT_OWNER, 'Joint — shared']],
         hint: 'Groups the accounts into subtotals under the grid. It changes nothing the '
           + 'budget computes.' }] : []),
+      /* THE THREE MOVED UP with the sections (2026-09-02). They were last, after
+         both rate blocks, which put "is this the main account?" under a heading
+         about dividends. Every one of them is a fact about the account itself —
+         what it holds today, when it closed, whether everything ordinary lands
+         in it — and none is about a rate, so they belong in the first block
+         with the name. Which of them is even asked still depends on whether the
+         account exists yet, exactly as before. */
+      ...(ds.bal ? [] : [{ key: 'seed', label: 'Balance right now', type: 'money',
+        hint: 'What the account holds today — the figure every later month builds on.' }]),
+      /* Only on an account that already exists: nominating the hub while
+         creating one would move every budget row's money as a side effect of
+         adding a savings account, which is not what anybody means by "add". */
+      /* Closing an account was previously reachable only through the
+         spreadsheet importer, which meant anybody else's closed account carried
+         its last balance forward for ever and quietly inflated Total — exactly
+         the bug `until` was invented to fix. `since` stays out: moving the
+         start would either blank months that hold figures or invent months
+         that never did, and it is derived from the data anyway. */
+      ...(ds.bal ? [{ key: 'until', label: 'Stopped using it', type: 'month',
+        hint: 'The last month this account held anything. After it the account is closed: '
+            + 'out of Total, out of the transfer list, and no longer carrying its final '
+            + 'balance forward. Leave empty for an account still in use.' }] : []),
+      ...(ds.bal ? [{ key: 'hub', label: 'Main account', type: 'check',
+        hint: 'Everything ordinary lands here — pay in, bills out, anything not marked as a '
+            + 'transfer. Only one account can be it, so ticking this moves it from whichever '
+            + 'holds it now, and every year the plan works out changes with it.' }] : []),
+      /* The rate, what that rate IS, and where it goes — three questions, and
+         the row they fill is why this dialog is three columns wide. */
+      { sec: 'Interest' },
       { key: 'rate', label: 'Rate %/yr', type: 'percent',
         hint: 'Compounds monthly on the balance, in future months only. 0 for an account '
           + 'that just holds money.' },
@@ -19173,6 +19350,9 @@ const EDITORS = {
         showIf: (v) => v.earns === 'growth',
         hint: 'There is nowhere to send it. Moving a gain into an account you can spend '
           + 'from would be selling, and a percentage does not say you sold anything.' },
+      /* The same three questions again — a rate, its destination, how often —
+         which is what makes the two blocks read as a pair. */
+      { sec: 'Dividends' },
       { key: 'divRate', label: 'Dividends %/yr', type: 'percent',
         hint: 'Earned on the balance each month like interest, but paid out to wherever '
           + 'you send it below instead of compounding here. 0 for an account that pays '
@@ -19189,25 +19369,6 @@ const EDITORS = {
         ['12', 'Once a year — December'],
       ], hint: 'The rate above is a yearly one either way; this only decides which months '
           + 'it arrives in.' },
-      ...(ds.bal ? [] : [{ key: 'seed', label: 'Balance right now', type: 'money',
-        hint: 'What the account holds today — the figure every later month builds on.' }]),
-      /* Only on an account that already exists: nominating the hub while
-         creating one would move every budget row's money as a side effect of
-         adding a savings account, which is not what anybody means by "add". */
-      /* Closing an account was previously reachable only through the
-         spreadsheet importer, which meant anybody else's closed account carried
-         its last balance forward for ever and quietly inflated Total — exactly
-         the bug `until` was invented to fix. `since` stays out: moving the
-         start would either blank months that hold figures or invent months
-         that never did, and it is derived from the data anyway. */
-      ...(ds.bal ? [{ key: 'until', label: 'Stopped using it', type: 'month',
-        hint: 'The last month this account held anything. After it the account is closed: '
-            + 'out of Total, out of the transfer list, and no longer carrying its final '
-            + 'balance forward. Leave empty for an account still in use.' }] : []),
-      ...(ds.bal ? [{ key: 'hub', label: 'Main account', type: 'check',
-        hint: 'Everything ordinary lands here — pay in, bills out, anything not marked as a '
-            + 'transfer. Only one account can be it, so ticking this moves it from whichever '
-            + 'holds it now, and every year the plan works out changes with it.' }] : []),
     ],
     get: (ds) => {
       const a = accountById(state, ds.bal) || {};
