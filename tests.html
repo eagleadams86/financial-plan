@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 916;
+const EXPECTED = 918;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -5009,6 +5009,19 @@ t('an empty column empties the month, which is what a round trip means', () => {
   eq(st.years['2026'].cells['rent|2026-02'], undefined, 'the file speaks for its columns');
   eq(st.years['2026'].cells['rent|2026-09'].v, -70,
     'and only for its columns — a month the file has no column for is untouched');
+});
+/* The bulk path for the same fault the parseMoney group pins: a file where the
+   negatives are written the way a finance system prints them. Both spellings in
+   ONE file, because that is how the bug showed itself — the bracketed row read
+   as a negative and the row beside it, meaning exactly the same thing, did not. */
+t('a file may write its negatives either way, and both are negative', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-12',
+    categories: [{ id: 'util', name: 'Utilities', section: 'expense' }], cells: {} } } });
+  H.applyGridCsv(st, H.readGridCsv(
+    'Section,Row,2026-01,2026-02\nExpenses,Utilities,−120.00,(130.00)'), '2026-03-01');
+  eq(st.years['2026'].cells['util|2026-01'].v, -120, 'U+2212, as a statement writes it');
+  eq(st.years['2026'].cells['util|2026-02'].v, -130, 'and the accounting brackets');
 });
 t('a row the plan does not have is added, not dropped', () => {
   const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
@@ -12622,6 +12635,27 @@ t('a bracketed figure is a negative one', () => {
     + 'one is not the accounting form');
   eq(H.parseMoney(''), null);
   eq(H.parseMoney('()'), null, 'brackets round nothing are still nothing');
+});
+/* ── And a minus is not always U+002D ───────────────────────────────────────
+   The same fault one paste further out: the strip keeps ASCII only, so the
+   MINUS SIGN a statement PDF writes was deleted rather than read and −200 in a
+   transfer row arrived as +200. Every character below is a hyphen or a minus by
+   its own Unicode name; the two dashes that are sentence punctuation are held
+   against the opposite assertion, because reading "Rent — $500" as a negative
+   would be a new wrong answer rather than a fixed one. */
+t('a typographic minus is still a minus', () => {
+  eq(H.parseMoney('−5'), -5, 'U+2212 MINUS SIGN — what a PDF or a typeset table writes');
+  eq(H.parseMoney('−$1,234.56'), -1234.56, 'through the formatting too');
+  eq(H.parseMoney('‐5'), -5, 'U+2010 HYPHEN');
+  eq(H.parseMoney('‑5'), -5, 'U+2011 NON-BREAKING HYPHEN');
+  eq(H.parseMoney('‒5'), -5, 'U+2012 FIGURE DASH');
+  eq(H.parseMoney('－5'), -5, 'U+FF0D FULLWIDTH HYPHEN-MINUS — a phone keyboard');
+  eq(H.parseMoney('﹣5'), -5, 'U+FE63 SMALL HYPHEN-MINUS');
+  eq(H.parseMoney('-5'), -5, 'the ordinary spelling is untouched');
+  eq(H.parseMoney('5'), 5, 'and a bare figure is still positive');
+  eq(H.parseMoney('–5'), 5, 'the EN DASH is not in the list: it separates a range');
+  eq(H.parseMoney('— $500'), 500, 'nor the EM DASH, which follows a label');
+  eq(H.parseMoney('−'), null, 'a sign with no figure is still nothing');
 });
 /* ── A percent shows what it kept ───────────────────────────────────────────
    readFields rounds to 2dp on the way to state and always has; what was missing

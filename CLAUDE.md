@@ -1726,6 +1726,21 @@ same day; the audit's other three are open and listed at the end.
     sign IS what a transfer means. Anchored to the whole string (a stray bracket
     is not the accounting form) and a minus already inside them is not flipped
     back.
+  - **AND A MINUS IS NOT ALWAYS U+002D (2026-09-02, the same fault one paste
+    further out).** The strip keeps ASCII only, so the MINUS SIGN a statement
+    PDF, a Word table or anything set in a real typeface writes was DELETED
+    rather than read: `−200` in a transfer row arrived as `+200`, and a CSV
+    could carry `(130.00)` and `−120.00` on neighbouring rows and read one as
+    negative and the other as positive. `MINUS_FORMS` normalises the six
+    characters that ARE hyphens or minus signs by their own Unicode names —
+    U+2010 HYPHEN, U+2011 NON-BREAKING HYPHEN, U+2012 FIGURE DASH, U+2212 MINUS
+    SIGN, U+FE63 SMALL HYPHEN-MINUS, U+FF0D FULLWIDTH HYPHEN-MINUS — before the
+    strip, so both spellings land on one code path. **The EN and EM dash are
+    deliberately excluded**: they are sentence punctuation, "Rent — $500" is a
+    label with a figure after it, and reading that dash as a sign would be a new
+    wrong answer of the kind this exists to stop. The percent branch reads with
+    `parseFloat`, which rejects all of them, so money was the outlier rather
+    than the rule.
   - **The take-home tile names the rows in its denominator** (`payRowsOf`), and
     adds the sentence about "This is my pay" ONLY where a row got in on its NAME
     alone — with every pay row saying so outright there is no guess to correct,

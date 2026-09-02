@@ -1490,7 +1490,14 @@ choice actually uses.
   places than the app stores shows you the figure it settled on rather than
   leaving you to find out next time you open the row. **A figure in brackets is
   a negative one** — paste `(500)` off a statement and the box reads
-  −$500.00, the way every ledger means it.
+  −$500.00, the way every ledger means it. **And a minus sign is a minus sign
+  whichever one it is**: a figure copied out of a statement PDF or a typeset
+  table carries a real MINUS SIGN rather than the hyphen on your keyboard, and
+  that used to be stripped out with the currency symbol — so −200 in a transfer
+  row arrived as +200 and the money moved the other way. Both spellings read the
+  same now, in a typed box and in an imported CSV alike. (A dash used as
+  punctuation — "Rent — $500" — is still just punctuation; only the characters
+  that really are hyphens and minus signs count.)
 - **Landing on a box selects what's in it**, so typing replaces the figure
   instead of running on to the end of it. Click a second time to place the
   cursor and edit normally. The up/down arrows a browser draws on a number box
