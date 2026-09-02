@@ -12470,6 +12470,39 @@ t('January earns on December’s balances from the year before', () => {
      'the first year of a plan has no December before it, so ITS January is honestly blank');
 });
 
+group('Entering a month settles what you typed too (2026-09-01 audit)');
+t('a figure typed as an estimate becomes an actual when its month is entered', () => {
+  const water = { id: 'water', name: 'Water', duePay: 'manual', dueMonths: [1, 4, 7, 10], dueDay: 15 };
+  const r = H.enteredCellFor(water, { v: -120, kind: 'manual' }, { v: -120, kind: 'manual' }, '2026-04');
+  eq(r.cell, { v: -120, kind: 'actual' }, 'the typed -120 is now a settled figure');
+  eq(H.dueStatus(water, '2026-04', r.cell, '2026-05-20', 7, true).state, 'paid',
+     'so the due-date check reads it as paid — it used to say late, 35 days, for ever');
+  eq(H.dueStatus(water, '2026-04', { v: -120, kind: 'manual' }, '2026-05-20', 7, true).state, 'late',
+     'which is what an UN-entered typed estimate still reads as, correctly');
+});
+t('a split cell is settled part by part', () => {
+  const pay = { id: 'pay', name: 'Paycheck' };
+  const stored = { v: 3000, kind: 'mixed', parts: [{ v: 1000, kind: 'actual' }, { v: 2000, kind: 'manual' }] };
+  const r = H.enteredCellFor(pay, stored, stored, '2026-04');
+  eq(r.cell.kind, 'actual');
+  eq(r.cell.parts.map(p => p.kind), ['actual', 'actual'], 'every part is stamped');
+  eq(r.cell.parts.map(p => p.v), [1000, 2000], 'and nothing about the amounts moves');
+  eq(stored.parts[1].kind, 'manual', 'the stored cell is not mutated — a new one is returned');
+});
+t('an actual is left alone, a held row waits, and an estimate is minted with its note', () => {
+  const row = { id: 'x', name: 'X' };
+  eq(H.enteredCellFor(row, { v: -5, kind: 'actual' }, { v: -5, kind: 'actual' }, '2026-04'), null,
+     'already settled');
+  const held = { id: 'w', name: 'Water', duePay: 'manual', dueHold: '2026-06' };
+  eq(H.enteredCellFor(held, { v: -120, kind: 'manual' }, { v: -120, kind: 'manual' }, '2026-04'),
+     { waiting: true }, 'a typed estimate on a row still waiting on the bill is not stamped paid');
+  eq(H.enteredCellFor(held, undefined, { v: -120, kind: 'auto' }, '2026-04'), { waiting: true });
+  eq(H.enteredCellFor(row, { v: 0, kind: 'missing', note: 'check this' }, { v: -80, kind: 'auto', note: 'check this' }, '2026-04'),
+     { cell: { v: -80, kind: 'actual', note: 'check this' } }, 'a note-only cell takes the estimate and keeps its note');
+  eq(H.enteredCellFor(row, undefined, { v: 0, kind: 'missing' }, '2026-04'), null,
+     'nothing recorded and nothing estimated stays nothing');
+});
+
 async function run() {
   w = document.getElementById('app').contentWindow;
   /* A frame that never got the app is a SETUP problem — the folder isn't being

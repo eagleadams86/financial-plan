@@ -4905,3 +4905,13 @@ cover. Each has a test now, proven to fail first by reverting the fix.
   same boundary. January was `missing` every year: a year built ahead lost 1/12 of its
   dividend income, and the live year's January stayed blank until typed. The first year of a
   plan, with no prior at all, is still honestly blank.
+
+- **Entering a month settles typed estimates too — `enteredCellFor` (fix 4).** `markMonthEntered` minted only `auto` cells to `actual`; a stored `manual` (the amount
+  box's default kind on a future month) kept its kind, and `dueStatus` treats only `actual`
+  as paid — so a water bill typed ahead read "late, 35 days" for ever, `outstandingDues`
+  counted it, and the month page called the total "your estimate". The marker's own comment
+  ("everything the marker settles arrives as actual") was false for typed estimates. The
+  per-row decision is now `enteredCellFor(cat, stored, resolved, target)` — PURE, exported in
+  the hooks, pinned: actual → leave; held row → waiting (a typed estimate on a held row is
+  NOT stamped paid); manual/mixed → actual with every part stamped; note-only → the estimate
+  with its note; nothing → nothing.

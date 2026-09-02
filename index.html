@@ -22611,6 +22611,48 @@ F('cellClearBtn').onclick = () => {
    — the app's version of overtyping the formulas in Numbers — so trailing
    averages and balances then rest on numbers you can edit. Re-opening only
    moves the marker back; stored numbers stay put and stay editable. */
+/* What entering a month writes for ONE row — pure, pinned by tests. Returns
+   `{ cell }` to store, `{ waiting: true }` for a row left blank on purpose, or
+   null to leave the row exactly as it is.
+
+   An `actual` is already settled and is left alone.
+
+   A row WAITING ON THE BILL is left blank on purpose. Minting an estimate into
+   an `actual` is the app asserting that a figure happened; a row the reader
+   has explicitly marked as still unbilled is the reader asserting that it did
+   not. Without this the held quarterly bill is stamped "paid, at the estimate"
+   the moment its month is entered — which is the default path, since a month
+   gets entered every month — and the count of what is stacking up behind it
+   reads zero while three periods are outstanding.
+
+   A FIGURE THE READER TYPED AS AN ESTIMATE IS SETTLED TOO (2026-09-01). Only
+   `auto` cells were minted before, so a `manual` — the amount box's default
+   kind on a future month — kept its estimate marking after the month was
+   entered, and `dueStatus` reads only `actual` as paid: a water bill typed in
+   ahead of time read "late, 35 days" for ever, was counted among the
+   outstanding dues, and the month page called April's expenses "your
+   estimate". The marker's own comment claimed everything it settles arrives as
+   actual; now it does. Parts come along, each stamped the same way — the cell
+   editor already does exactly that for a month that is not in the future.
+
+   A NOTE WITH NO FIGURE IS NOT AN ANSWER, so the month's estimate is still
+   minted and the note comes with it. Treating it as a stored cell would mean
+   writing "check this one" on next month quietly stopped that row being
+   entered at all — a note is an annotation, never a claim about the money. */
+function enteredCellFor(cat, stored, resolved, target) {
+  if (stored && stored.kind === 'actual') return null;
+  if (cat.dueHold && DUE_PAY.includes(cat.duePay) && cat.dueHold >= target) return { waiting: true };
+  if (stored && stored.kind !== 'missing') {
+    const cell = Object.assign({}, stored, { kind: 'actual' });
+    if (Array.isArray(stored.parts))
+      cell.parts = stored.parts.map(p => Object.assign({}, p, { kind: 'actual' }));
+    return { cell };
+  }
+  if (resolved && resolved.kind === 'auto')
+    return { cell: { v: resolved.v, kind: 'actual', ...(stored?.note ? { note: stored.note } : {}) } };
+  return null;
+}
+
 function markMonthEntered() {
   const y = activeYearKey();
   const yr = state.years[y];
@@ -22619,27 +22661,10 @@ function markMonthEntered() {
   let waiting = 0;
   for (const cat of yr.categories) {
     const key = `${cat.id}|${target}`;
-    /* A NOTE WITH NO FIGURE IS NOT AN ANSWER, so the month's estimate is still
-       minted and the note comes with it. Treating it as a stored cell would
-       mean writing "check this one" on next month quietly stopped that row
-       being entered at all — a note is an annotation, never a claim about the
-       money. */
-    const noted = yr.cells[key];
-    if (noted && noted.kind !== 'missing') continue;
-    /* A row WAITING ON THE BILL is left blank on purpose. Minting an estimate
-       into an `actual` is the app asserting that a figure happened; a row the
-       reader has explicitly marked as still unbilled is the reader asserting
-       that it did not. Without this the held quarterly bill is stamped "paid,
-       at the estimate" the moment its month is entered — which is the default
-       path, since a month gets entered every month — and the count of what is
-       stacking up behind it reads zero while three periods are outstanding. */
-    if (cat.dueHold && DUE_PAY.includes(cat.duePay) && cat.dueHold >= target) {
-      waiting++;
-      continue;
-    }
-    const r = c.cells[key];
-    if (r && r.kind === 'auto')
-      yr.cells[key] = { v: r.v, kind: 'actual', ...(noted?.note ? { note: noted.note } : {}) };
+    const r = enteredCellFor(cat, yr.cells[key], c.cells[key], target);
+    if (!r) continue;
+    if (r.waiting) { waiting++; continue; }
+    yr.cells[key] = r.cell;
   }
   yr.enteredThrough = target;
   save(); render();
@@ -24992,6 +25017,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, si
   reconcileNote, impliedGrowth, growthOfferLabel, acceptedFigures,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
+  enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals
      exactly like a right one, so nothing on screen would ever report it. */

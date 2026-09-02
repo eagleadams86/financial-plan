@@ -660,7 +660,12 @@ one long strip.
 ### Entered Months and Finished Years
 
 Mark a month **entered** to freeze its estimates into numbers, like
-overtyping formulas in Numbers.
+overtyping formulas in Numbers. A figure you typed as an estimate is frozen
+too — it becomes an actual like the rest, so a due-dated bill you estimated
+by hand stops reading as late once its month is entered (until 2026-09-01 it
+kept its estimate marking, read *late* for ever, and was counted among the
+outstanding dues). A row marked as still waiting on its bill is left blank
+either way.
 
 Once every month of a year is entered you can **mark the whole year as
 history**: the balances it computed become the balances it states, and nothing
