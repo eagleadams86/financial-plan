@@ -4899,3 +4899,9 @@ cover. Each has a test now, proven to fail first by reverting the fix.
   `-resolved.v` = $0 and `continue`d past the estimate — so "remember to do this" written on
   January's sweep cancelled the $4,000 move and every later month inherited the error. Same
   fix as the rules: `isFigure(yr.cells[key])`.
+
+- **The `dividends` rule falls back to `ctx.prior.balances` (fix 3).** `ctx.balances` holds the current year only, so January's `prev` (December) always missed,
+  even when `prior.balances` had it — the balance chain itself reads `prior.balances` at the
+  same boundary. January was `missing` every year: a year built ahead lost 1/12 of its
+  dividend income, and the live year's January stayed blank until typed. The first year of a
+  plan, with no prior at all, is still honestly blank.

@@ -12452,6 +12452,24 @@ t('a note on a sweep month does not cancel the sweep', () => {
   eq(b.balances['mid|2026-01'], a.balances['mid|2026-01'], 'and the money reached savings');
 });
 
+group('The Dividends rule in January (2026-09-01 audit)');
+t('January earns on December’s balances from the year before', () => {
+  const row = () => [{ id: 'div', name: 'Dividends', rule: 'dividends', accounts: ['cash', 'mid'],
+                       rate: 0.12, section: 'income' }];
+  const seeds = { cash: 1200, mid: 1200 };
+  const st = auditPlan({ 2025: auditYear('2025', '2024-12', row(), {}, seeds),
+                         2026: auditYear('2026', '2025-12', row(), {}, seeds) });
+  const c = H.computeAll(st, '2026-01-15');
+  const dec = c['2025'].balances['cash|2025-12'] + c['2025'].balances['mid|2025-12'];
+  ok(dec > 0, 'the prior year computed a December balance to earn on');
+  const jan = c['2026'].cells['div|2026-01'];
+  eq(jan.kind, 'auto', 'January is an estimate, not blank — it used to be missing');
+  eq(jan.v, H.round2(0.12 / 12 * dec), 'a month of the rate on December’s balances');
+  eq(c['2026'].cells['div|2026-02'].kind, 'auto', 'February as before');
+  eq(c['2025'].cells['div|2025-01'].kind, 'missing',
+     'the first year of a plan has no December before it, so ITS January is honestly blank');
+});
+
 async function run() {
   w = document.getElementById('app').contentWindow;
   /* A frame that never got the app is a SETUP problem — the folder isn't being

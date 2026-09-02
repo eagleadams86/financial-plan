@@ -489,6 +489,11 @@ typed, so you correct it on the account rather than in the grid. The Income
 total counts it — it is money in, and money in vs money out and the savings
 rate had always counted it while the grid itself showed it nowhere.
 
+A **Dividends** row that earns on last month's balances reads December's from
+the year before, so January is never blank in a year built ahead (until
+2026-09-01 it was — the row only looked inside its own year, and a projected
+year lost a twelfth of its dividend income).
+
 In a **past year it is stated**, the way the balances there are. Nothing is
 computed in a finished year — a rate an account carries today says nothing
 about what it paid in 2021 — so click the month on the account's row and type
