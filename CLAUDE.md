@@ -1710,12 +1710,38 @@ same day; the audit's other three are open and listed at the end.
   - **No em-dash inside either sentence** — the row label frames it as
     `Utilities — <desc> — click to edit this row`, and a third dash was
     unreadable.
-- **STILL OPEN from the same audit**, and each is a decision rather than a bug:
-  percent fields silently round to 2dp on save (`roundTo(n, f.dp ?? 2)`);
-  `parseMoney` strips parentheses, so a pasted `(500)` is `+500` in an app where
-  the sign carries the meaning; and the Giving tab's take-home denominator is
-  partly guessed from row NAMES (`PAY_SLUGS`) with nothing on that tab saying
-  which rows it counted.
+- **The audit's other three, closed the same day**, all on one principle: the
+  figure stays, the screen starts saying where it came from.
+  - **A percent box reformats itself on blur** to exactly what `readFields`
+    will store (`roundTo(n, f.dp ?? 2)`). Nothing is stored differently — the
+    rounding was always there; what changes is that a typed 3.456 reads 3.46
+    before you leave the field instead of at the next open. `link` is re-run
+    after, because setting `.value` fires no input event and a derived pair (the
+    bonus and its share) was worked out from the unrounded text. It is
+    `asMoneyInput`'s blur, for the other kind of number.
+  - **`parseMoney` reads wrapping parentheses as a minus sign.** Every statement
+    and export writes a negative that way and this stripped them with the
+    currency symbol, so a pasted `(500)` arrived as `+$500` — not a refusal and
+    not a warning, the right number pointing the wrong way, in an app where the
+    sign IS what a transfer means. Anchored to the whole string (a stray bracket
+    is not the accounting form) and a minus already inside them is not flipped
+    back.
+  - **The take-home tile names the rows in its denominator** (`payRowsOf`), and
+    adds the sentence about "This is my pay" ONLY where a row got in on its NAME
+    alone — with every pay row saying so outright there is no guess to correct,
+    and explaining one would answer a question the reader hasn't got. Named on
+    the actual tile and never on the projected one below it: they share a
+    denominator, and saying it twice reads as two separate claims. `PAY_SLUGS`
+    stays — it is the only thing that works for a summary year, whose rows carry
+    no rule at all.
+- **`roundToDollar` replaced `Math.round` in `samemonth` (2026-09-02), and this
+  one MOVES FIGURES.** `Math.round` breaks a tie towards +∞, so an identical
+  half-dollar went up as income and down as an expense — and the row that got
+  the smaller figure was always the expense. Half away from zero is what a
+  person means by "to the nearest dollar". A same-month row sitting on exactly
+  −$100.50 read −$100 before and reads −$101 now; nothing else in the app
+  rounds to whole dollars, so nothing else moved. It returns +0 for zero on
+  purpose: `-0` is a value `fmtMoney` renders as "-$0.00".
 - **`avg`'s fallback reads the prior year's COMPUTED cells**, estimates included,
   which is the opposite discipline from `avglastyear` ("so an estimate never
   feeds itself"). Only DESCRIBED, not changed — changing it would move figures

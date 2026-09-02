@@ -2933,6 +2933,21 @@ const roundTo = (v, dp) => {
   const f = 10 ** dp;
   return Math.round((v + Number.EPSILON) * f) / f;
 };
+/* TO THE NEAREST WHOLE DOLLAR, AND THE SAME WAY ON BOTH SIDES OF ZERO.
+   `Math.round` breaks a tie towards +∞, which is fine for a coordinate and
+   wrong for money: a $100.50 refund rounded to $101 while a −$100.50 bill
+   rounded to −$100, so the identical half-dollar was rounded up in one
+   direction and down in the other, and the row that got the smaller figure was
+   always the expense. Half away from zero is what a person means by "to the
+   nearest dollar" and what every ledger does.
+   The magnitude is rounded and the sign put back, so the tie-break can't see
+   which side of zero it is on. Zero is returned as +0 deliberately: `-0` is a
+   value `fmtMoney` can render as "-$0.00", and a helper that can hand one back
+   is a trap for whatever reuses it next. */
+const roundToDollar = (v) => {
+  const r = Math.round(Math.abs(v) + Number.EPSILON);
+  return r === 0 ? 0 : (v < 0 ? -r : r);
+};
 
 /* What a year's salary came to once its raise landed. One helper because it
    was written out in seven places, and because it is the base for two other
@@ -3045,11 +3060,23 @@ function fmtMoneyIn(v, code) {
    fields are text inputs that format themselves when you leave them and parse
    leniently on the way back in: $, commas, spaces and stray characters all
    fall away, and an empty box means "no figure" rather than zero. */
+/* PARENTHESES ARE A MINUS SIGN. Every statement, export and ledger in the
+   English-speaking world writes a negative that way, and this stripped them
+   along with the currency symbol — so a pasted "(500)" arrived as +$500, which
+   in an app where the sign IS the meaning of a transfer is the worst answer
+   available: not a refusal, not a warning, the right number pointing the wrong
+   way. Anchored to the whole string, so it is the accounting form and not a
+   stray bracket; a figure already carrying a minus inside them stays negative
+   rather than being flipped back. The box reformats itself on blur, so what it
+   decided is on screen before you leave the field. */
 function parseMoney(raw) {
-  const t = String(raw ?? '').replace(/[^0-9.\-]/g, '');
+  const s = String(raw ?? '');
+  const bracketed = /^\s*\(.*\)\s*$/.test(s);
+  const t = s.replace(/[^0-9.\-]/g, '');
   if (t === '' || t === '-' || t === '.') return null;
   const n = parseFloat(t);
-  return Number.isNaN(n) ? null : round2(n);
+  if (Number.isNaN(n)) return null;
+  return round2(bracketed ? -Math.abs(n) : n);
 }
 function asMoneyInput(input) {
   input.type = 'text';
@@ -5745,7 +5772,7 @@ const RULES = {
     /* an estimate may chain off an earlier estimate (the sheet does), but a
        month with nothing recorded must stay blank, not become a $0 estimate */
     if (!cell || cell.kind === 'missing') return null;
-    return cat.keepCents ? cell.v : Math.round(cell.v);
+    return cat.keepCents ? cell.v : roundToDollar(cell.v);
   },
 
   /* Dividends: monthly interest on last month's balances in the accounts the
@@ -15176,6 +15203,36 @@ function takeHomePay(st, computed, y, personId) {
   return round2(t);
 }
 
+/* WHICH ROWS THE DENOMINATOR IS MADE OF, and whether any of them got there by
+   a GUESS. `isPayRow` falls back to a nine-word English slug list, so a row
+   called "Income" or "Stipend" is quietly left out of take-home and every
+   percentage measured against it moves — while the Giving tab said only
+   "$X of $Y take-home pay" and never which rows made $Y. The figure is fine;
+   what was missing was any way to audit it where you read it.
+   `guessed` is the row that qualified on its NAME alone — neither on the
+   paycheck rule nor on an explicit tick. It is what decides whether the tile
+   adds the sentence about changing it: a plan where every pay row says so
+   outright has no guess in play, and telling that reader how to correct one
+   would be answering a question they haven't got. Pure, so the wording is
+   pinned by tests rather than read off a rendered tab. */
+function payRowsOf(st, y, personId) {
+  const yr = st.years[y];
+  if (!yr) return [];
+  if (yr.kind === 'summary') {
+    if (personId) return [];
+    return (yr.categoryTotals || [])
+      .filter(it => !it.isBalance && isPayRow(it.name))
+      /* A summary year has no rules and no ticks — its rows are names and
+         totals — so every one of them qualified by the list. */
+      .map(it => ({ name: it.name, guessed: true }));
+  }
+  return (yr.categories || [])
+    .filter(c => isPayRow(c.name, c.rule, c.isPay))
+    .filter(c => !personId || c.person === personId)
+    .map(c => ({ name: c.name,
+      guessed: typeof c.isPay !== 'boolean' && c.rule !== 'paycheck' }));
+}
+
 /* One pass over every year that holds a donation, oldest first — the year
    cards and the over-time chart are two views of exactly these figures, and
    working them out twice is how the two would drift apart. Pure over state and
@@ -15259,7 +15316,20 @@ function renderGiving() {
        `est` is what carries the estimate convention throughout: italic figures
        and a dashed meter rail, the chart's own "dashed means not settled yet"
        said in the vocabulary a tile has. Never a colour. */
-    const pctTile = (label, pct, of, ofLabel, why, est) => `<div class="goal${
+    /* WHAT TAKE-HOME IS MADE OF, said on the tile that divides by it. Named
+       once, on the actual tile and never on the projected one below it — the
+       same rule the missing-denominator sentence follows: the two tiles share a
+       denominator, so saying it twice reads as two separate claims. */
+    const payRows = payRowsOf(state, y);
+    const takeFrom = !payRows.length ? '' :
+      `Counted as pay: ${andList(payRows.map(r => r.name))}.${
+        /* Only where a row got in on its NAME. With every pay row saying so
+           outright there is no guess to correct, and telling that reader how to
+           correct one would answer a question they haven't got. */
+        payRows.some(r => r.guessed)
+          ? ' A row is counted by its name unless it says otherwise —'
+            + ' “This is my pay” in a row’s settings is the answer.' : ''}`;
+    const pctTile = (label, pct, of, ofLabel, why, est, from) => `<div class="goal${
       est ? ' est' : ''}">
       <div class="label">${label}</div>
       ${pct === null
@@ -15276,7 +15346,8 @@ function renderGiving() {
              aria-label="${esc(y)} ${est ? 'projected ' : ''}giving as a share of ${ofLabel}">
              <i style="width:${Math.min(100, pct / ceiling * 100).toFixed(1)}%"></i></div>
            <div class="foot">${fmtMoney(est ? t.projected : t.given)} of ${
-        fmtMoney(of)} ${ofLabel}</div>`}
+        fmtMoney(of)} ${ofLabel}</div>${
+        from && !est ? `<div class="foot">${esc(from)}</div>` : ''}`}
     </div>`;
     /* The row of three is untouched, and a year with giving still planned in it
        gets a SECOND row underneath saying the same three things about where it
@@ -15297,7 +15368,7 @@ function renderGiving() {
       ${pctTile('% of Gross Income', t.grossPct, t.gross, 'gross',
         'No salary recorded for this year on the Comp tab.', false)}
       ${pctTile('% of Take-Home Pay', t.takePct, t.take, 'take-home',
-        'No pay row in this year’s budget to measure against.', false)}
+        'No pay row in this year’s budget to measure against.', false, takeFrom)}
       ${!proj ? '' : `<div class="goal est">
         <div class="label">Projected for the Year</div>
         <div class="value">${fmtMoney(t.projected)}</div>
@@ -17948,7 +18019,28 @@ function buildFields(fields, values, link) {
       }
       /* `any`, not a tenth: a sweep account can pay 0.01%, and a step of 0.1
          makes the browser reject anything finer as invalid. */
-      if (f.type === 'percent') { input.step = 'any'; input.inputMode = 'decimal'; }
+      if (f.type === 'percent') {
+        input.step = 'any'; input.inputMode = 'decimal';
+        /* AND IT SHOWS YOU WHAT IT KEPT. `readFields` rounds a percent to 2dp
+           on the way to state (`dp` asks for more), so typing 3.456 stored
+           3.46 and the box went on reading 3.456 until the dialog was next
+           opened — a figure changed without a word, the same fault as the
+           same-month rounding. A money box already reformats itself on blur
+           (`asMoneyInput`); this is that, for the other kind of number.
+           Nothing is stored differently — the rounding was always there. What
+           changes is that you see it happen.
+           `link` is re-run afterwards because a derived pair (the bonus and its
+           share) was worked out from the unrounded text, and setting `.value`
+           fires no input event of its own. */
+        input.addEventListener('blur', () => {
+          const raw = input.value.trim();
+          if (raw === '') return;
+          const n = parseFloat(raw);
+          if (Number.isNaN(n)) return;
+          input.value = String(roundTo(n, f.dp ?? 2));
+          if (link) link(f.key);
+        });
+      }
       if (f.type === 'number') { input.step = f.step || 'any'; input.inputMode = 'decimal'; }
       const v = values[f.key];
       input.value = v === undefined || v === null ? ''
@@ -25247,13 +25339,14 @@ applyPin(savedPin());
 
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
-window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, raiseFor, sinceLastYear,
+window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDollar,
+  parseMoney, raiseFor, sinceLastYear,
   /* The sample plan, so its tests measure the SAME object the button loads
      rather than a copy of it that can drift. */
   sampleState,
   afterRaise, compParts, bonusBase, bonusShare, yearFlows, yearSpending, summaryRowIsFlow, notesOfYear,
   givenOutOfPocket, plannedOutOfPocket, grossIncome, takeHomePay, givingStats,
-  givingCeiling, isPayRow,
+  givingCeiling, isPayRow, payRowsOf,
   /* The paycheck count and the words the grid says about where it came from —
      pure, so the suite pins the three-way answer and its prose together rather
      than reading one and trusting the other. */

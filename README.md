@@ -273,7 +273,11 @@ to the penny it reads as what it is: an estimate. It is the only rule that
 rounds, so on a row where the cents *are* the figure it reads instead as a
 number that is 28 cents wrong. Tick **Keep the cents** in the row's settings and
 that row copies last year's figure exactly; every other same-month row goes on
-rounding. Either way the row's tooltip says which one it is doing.
+rounding. Either way the row's tooltip says which one it is doing. A half-dollar
+rounds **away from zero on both sides** — a −$100.50 bill to −$101, the same way
+a $100.50 refund goes to $101 — rather than the browser's own tie-break, which
+sent the two in opposite directions and always gave the expense the smaller
+figure.
 
 **A rising row** is "repeat the last month" with a clock on it: the figure
 steps up by the percentage you give it once each **calendar year**, never
@@ -931,6 +935,14 @@ over the top.
 "Given" counts what left your own accounts — fund deposits and cash gifts. A
 grant out of the fund isn't counted twice.
 
+**The take-home tile names the rows it divided by**, because take-home isn't
+every income row — it's the ones that are pay. A row counts if it's on the
+per-check rule, if you've ticked **This is my pay** in its settings, or, failing
+both, if it's *named* like pay ("Salary", "Wages", "Paycheck" — the fallback
+that lets an old summary year, whose rows carry no rule at all, still work). So
+the tile lists what it counted, and where a row got in on its name alone it says
+so and points at the tick that overrides it in either direction.
+
 ### Where a Year Is Heading
 
 A year still running that has giving **planned** in it also shows a second row
@@ -1473,6 +1485,12 @@ choice actually uses.
   Dividends* for an account. **A block with nothing left to ask disappears**: set
   a row to sweep an account's overflow and the rule decides what the money does,
   so the block that asks goes rather than standing empty.
+- **A box shows you what it kept.** Money boxes have always tidied themselves up
+  when you leave them; rate boxes do now too, so a rate typed to more decimal
+  places than the app stores shows you the figure it settled on rather than
+  leaving you to find out next time you open the row. **A figure in brackets is
+  a negative one** — paste `(500)` off a statement and the box reads
+  −$500.00, the way every ledger means it.
 - **Landing on a box selects what's in it**, so typing replaces the figure
   instead of running on to the end of it. Click a second time to place the
   cursor and edit normally. The up/down arrows a browser draws on a number box

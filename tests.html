@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 909;
+const EXPECTED = 916;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -12574,6 +12574,113 @@ t('the listener error path schedules a retry, and a successful push re-opens it'
   ok(mod.includes("if (unsub) { unsub(); unsub = null; }\n    clearTimeout(relistenTimer); relistenTimer = null;"),
      'and signing out cancels the retry along with the listener');
   ok(mod.includes('if (!user || !Fs) return;'), 'listen() refuses to open with nobody signed in');
+});
+
+group('A figure changed is a figure shown (2026-09-02)');
+/* ── Rounding is the same on both sides of zero ─────────────────────────────
+   `Math.round` breaks a tie towards +∞, so the identical half-dollar went up as
+   income and down as an expense — and the row that got the smaller figure was
+   always the expense. This moves figures: a same-month row on exactly −$100.50
+   read −$100 before today and reads −$101 now. */
+t('a half-dollar rounds away from zero whichever side it is on', () => {
+  eq(H.roundToDollar(100.5), 101, 'up, as it always did');
+  eq(H.roundToDollar(-100.5), -101, 'and DOWN by the same half — Math.round gave -100');
+  eq(H.roundToDollar(100.49), 100);
+  eq(H.roundToDollar(-100.49), -100);
+  eq(H.roundToDollar(-1741.72), -1742, 'the figure that started all this');
+  /* -0 formats as "-$0.00", so a helper that can return one is a trap for
+     whatever reuses it next. */
+  ok(Object.is(H.roundToDollar(-0.4), 0), 'and nothing rounds to negative zero');
+  ok(Object.is(H.roundToDollar(0), 0));
+});
+t('the same-month rule rounds through it, and keepCents still steps around it', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].monthCount = 12;
+  s.years['2029'].cells['electric|2029-10'] = { v: -80.5, kind: 'actual' };
+  const c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2030'];
+  approx(c.cells['electric|2030-10'].v, -81, 'an expense on the half rounds away from zero');
+  const kept = H.coerceShape(fixtureState());
+  kept.years['2030'].monthCount = 12;
+  kept.years['2029'].cells['electric|2029-10'] = { v: -80.5, kind: 'actual' };
+  kept.years['2030'].categories.find(x => x.id === 'electric').keepCents = true;
+  const c2 = H.computeAll(H.coerceShape(kept), TODAY_FIX)['2030'];
+  approx(c2.cells['electric|2030-10'].v, -80.5, 'and a row keeping its cents never sees it');
+});
+/* ── Parentheses are a minus sign ───────────────────────────────────────────
+   Every statement and export writes a negative that way, and parseMoney
+   stripped them with the currency symbol — so a pasted "(500)" arrived as
+   +$500. Not a refusal and not a warning: the right number pointing the wrong
+   way, in an app where the sign IS what a transfer means. */
+t('a bracketed figure is a negative one', () => {
+  eq(H.parseMoney('(500)'), -500);
+  eq(H.parseMoney(' ($1,234.56) '), -1234.56, 'through the formatting too');
+  eq(H.parseMoney('(-500)'), -500, 'a minus already inside them is not flipped back');
+  eq(H.parseMoney('-$500'), -500, 'the ordinary spelling is untouched');
+  eq(H.parseMoney('$1,234.56'), 1234.56);
+  eq(H.parseMoney('500'), 500, 'and a bare figure is still positive');
+  eq(H.parseMoney('a(500)b'), 500, 'the brackets have to wrap the WHOLE figure — a stray '
+    + 'one is not the accounting form');
+  eq(H.parseMoney(''), null);
+  eq(H.parseMoney('()'), null, 'brackets round nothing are still nothing');
+});
+/* ── A percent shows what it kept ───────────────────────────────────────────
+   readFields rounds to 2dp on the way to state and always has; what was missing
+   was the box saying so, which left a typed 3.456 reading 3.456 over a stored
+   3.46 until the dialog was next opened. Held against the source: the handler
+   only exists on a built dialog. */
+t('a percent box reformats itself to what will be stored', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const at = src.indexOf("if (f.type === 'percent') {");
+  ok(at > -1, 'the percent branch still exists');
+  const branch = src.slice(at, at + 700);
+  ok(/addEventListener\('blur'/.test(branch), 'it reformats on blur, the way a money box '
+    + 'already does — a figure changed without a word is the fault this whole day is about');
+  ok(/roundTo\(n, f\.dp \?\? 2\)/.test(branch),
+     'to exactly what readFields will store, not to some second opinion');
+  ok(/if \(link\) link\(f\.key\)/.test(branch),
+     'and a derived pair is re-run: setting .value fires no input event, so the bonus '
+     + 'worked out from the unrounded text would be left standing');
+});
+/* ── The take-home denominator names itself ─────────────────────────────────
+   `isPayRow` falls back to a nine-word English slug list, so a row called
+   "Income" or "Stipend" is quietly out of take-home and every percentage
+   measured against it moves. The tile said "$X of $Y take-home pay" and never
+   which rows made $Y. */
+t('the pay rows are nameable, and a guessed one says it was guessed', () => {
+  const st = { years: { '2030': { kind: 'grid', categories: [
+    { id: 'a', name: 'Rosa — paycheck', rule: 'paycheck', section: 'income' },
+    { id: 'b', name: 'Salary', rule: 'none', section: 'income' },
+    { id: 'c', name: 'Stipend', rule: 'none', section: 'income', isPay: true },
+    { id: 'd', name: 'Dividends', rule: 'none', section: 'income' },
+    { id: 'e', name: 'Wages', rule: 'none', section: 'income', isPay: false },
+  ] } } };
+  const rows = H.payRowsOf(st, '2030');
+  eq(rows.map(r => r.name), ['Rosa — paycheck', 'Salary', 'Stipend'],
+     'the rule, the slug list and the tick each get a row in; a tick can also keep one out');
+  eq(rows.map(r => r.guessed), [false, true, false],
+     'and only the one that got in on its NAME alone is a guess');
+});
+t('a plan whose pay rows all say so is not told how to correct a guess', () => {
+  const st = { years: { '2030': { kind: 'grid', categories: [
+    { id: 'a', name: 'Anything', rule: 'paycheck', section: 'income' },
+    { id: 'b', name: 'Stipend', rule: 'none', section: 'income', isPay: true },
+  ] } } };
+  ok(!H.payRowsOf(st, '2030').some(r => r.guessed),
+     'nothing here got in by its name, so there is no guess to explain — a reassurance '
+     + 'about a question the reader has not got is its own kind of wrong');
+});
+t('the take-home tile names them, and only the tile that is not a projection', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  ok(/const payRows = payRowsOf\(state, y\);/.test(src), 'the tab works the list out');
+  ok(/Counted as pay: \$\{andList\(payRows\.map\(r => r\.name\)\)\}/.test(src),
+     'and prints the names under the share they are the denominator of');
+  ok(/payRows\.some\(r => r\.guessed\)/.test(src),
+     'the sentence about changing it appears only where a guess is actually in play');
+  ok(/from && !est \? `<div class="foot">\$\{esc\(from\)\}<\/div>` : ''/.test(src),
+     'said once, on the actual tile — the projected tile below shares the denominator, '
+     + 'and saying it twice reads as two separate claims');
 });
 
 group('What the grid says about where a figure came from (2026-09-02)');
