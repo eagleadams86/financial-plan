@@ -4915,3 +4915,10 @@ cover. Each has a test now, proven to fail first by reverting the fix.
   the hooks, pinned: actual → leave; held row → waiting (a typed estimate on a held row is
   NOT stamped paid); manual/mixed → actual with every part stamped; note-only → the estimate
   with its note; nothing → nothing.
+
+- **`finAdopt` resets `undoCore` through `coreOf` (fix 5).** It built the baseline by hand as `JSON.stringify({...state, ui: null})`, but `coreOf` also
+  nulls `quotes`, so the two strings never matched: the first ui-only `save()` after an adopt
+  (a tab click) banked a snapshot and showed Undo over a change that changed nothing, and
+  pressing it re-applied the same state with "Put back the way it was". One line: `undoCore =
+  coreOf(state)`. Pinned as source, like the halt ordering beside it — the live finAdopt
+  writes this browser's fin-state.

@@ -1345,7 +1345,9 @@ straight back through them, one honest step at a time.
 
 - **The ring lives in memory for this sitting only** — a reload starts fresh.
 - **It clears when another device's changes arrive**, since undoing past
-  somebody else's work would overwrite it.
+  somebody else's work would overwrite it — and stays clear until you change
+  something (until 2026-09-01 the first tab click after a sync offered an undo
+  of nothing).
 - **There is no redo, on purpose**: linear and predictable beats a two-state
   seesaw.
 - **Because there is no redo, the button asks before it acts.** It sits among
