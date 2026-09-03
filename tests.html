@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 920;
+const EXPECTED = 921;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -12441,11 +12441,180 @@ t('a reader’s own default text size reaches the charts', () => {
     'and the page zoom is NOT applied to it — the whole document is already scaled');
 });
 
+/* ── Walking the charts on this tab without coming back down ─────────────────
+   Charles, 2026-09-03: arrows beside the leave-full-screen button that step
+   through the charts on the screen you came from. Here that screen is `#views`,
+   which this app rewrites wholesale for each tab — so the walk can never step
+   into a tab the reader is not looking at, and Progress is the tab with six
+   charts on it.
+
+   THEY SIT IN THE BAND, not in the overlay, and that divergence is the thing
+   this test guards. The siblings float their arrows over the card's top-right
+   corner; here that corner is the FOLD CONTROL, so the pair travels with the
+   maximised card and the focus is put back by hand after a step. Two things
+   follow, and both are asserted below: a press must not reach the band's fold
+   handler, and the arrow that was pressed must still have the keyboard.
+
+   ITS OWN FRAME, at a real size, for the same reason the test above has one. */
+t('the arrows walk the charts on the tab without coming back down', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?walk=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    await new Promise((r) => setTimeout(r, 400));
+
+    const shown = (el) => W.getComputedStyle(el).display !== 'none';
+    const nameUp = () => W.maxiName(W.maxiCard());
+
+    /* Looked up by id EVERY time until the card is up, because until then there
+       is nothing to look up: the nav is not in the document at all. */
+    ok(!D.getElementById('maxiNav'),
+       'the arrows are nowhere on the page while nothing is filling the window');
+
+    D.getElementById('tab-goals').click();
+    await new Promise((r) => setTimeout(r, 500));
+    const cards = [...D.querySelectorAll('#views .card')]
+      .filter(c => c.querySelector('.chartbox canvas'));
+    ok(cards.length > 2, 'the Progress tab draws several charts, so there is a walk',
+       cards.length);
+    eq(D.querySelectorAll('#views .chart-max').length, cards.length,
+       'and the arrows are not counted as chart buttons — still one of those per chart');
+
+    cards[0].querySelector(':scope > h2 > .chart-max').click();
+    await new Promise((r) => setTimeout(r, 300));
+    /* From here the three are the SAME elements wherever the nav is mounted —
+       one nav, moved from band to band, which is what lets the focus be handed
+       back to the very button that was pressed. */
+    const nav = D.getElementById('maxiNav');
+    const nextArrow = D.getElementById('maxiNext');
+    const prevArrow = D.getElementById('maxiPrev');
+    ok(nav && nav.closest('.card') === W.maxiCard(),
+       'the arrows come up INSIDE the maximised card, in its heading band — this '
+       + 'card\u2019s top-right corner is its fold control, so a cluster floating over '
+       + 'it would sit on a control');
+    ok(nav.nextElementSibling === W.maxiCard().querySelector(':scope > h2 > .chart-max'),
+       'immediately left of the ⤢ they belong with');
+    ok(shown(nav), 'and they are showing');
+    eq(W.maxiGroup().length, cards.length, 'every chart on the tab is on the walk');
+    ok(/Next chart — /.test(nextArrow.getAttribute('aria-label')),
+       'the arrow names the chart it lands on, not just a direction',
+       nextArrow.getAttribute('aria-label'));
+
+    /* ── A REAL press ───────────────────────────────────────────────────────
+       `btn.click()` makes the button the target and is blind to what folded a
+       card in this very app on the day full screen shipped: a pointer lands on
+       the `<path>` inside an icon, and the band's fold handler asks what was
+       clicked. `pointer-events: none` on the icon is what makes the button the
+       smallest thing under the pointer, and the handler stops the click there. */
+    const r = nextArrow.getBoundingClientRect();
+    const hit = D.elementFromPoint(Math.round(r.left + r.width / 2),
+                                   Math.round(r.top + r.height / 2));
+    ok(hit === nextArrow,
+       'what a pointer hits in the middle of the arrow IS the arrow',
+       hit && hit.tagName + '.' + hit.className);
+
+    const svgWas = nextArrow.firstElementChild;
+    nextArrow.focus();
+    hit.dispatchEvent(new W.MouseEvent('click', { bubbles: true }));
+    await new Promise((r2) => setTimeout(r2, 250));
+    ok(W.maxiCard() === cards[1], 'Next steps to the chart beside it');
+    ok(!W.maxiCard().classList.contains('boxshut'),
+       'and the press never reached the band\u2019s fold handler');
+    ok(D.getElementById('views').contains(cards[0]),
+       'the one that was up is back in its own seat');
+    eq(D.querySelectorAll('.chart-slot').length, 1,
+       'with exactly one placeholder held — the seat of whatever is up now');
+    ok(D.activeElement === nextArrow,
+       'the arrow still has the keyboard — the nav MOVED to another card\u2019s band, '
+       + 'which drops the focus unless it is put back by hand');
+    ok(nextArrow.firstElementChild === svgWas,
+       'and the arrow itself was never rebuilt under the pointer');
+    ok(D.getElementById('chartMaxi').classList.contains('open')
+       && D.querySelector('.wrap').inert,
+       'the window did not come down and go back up — same window, different chart');
+
+    for (let i = 1; i < cards.length; i++) nextArrow.click();
+    await new Promise((r2) => setTimeout(r2, 250));
+    ok(W.maxiCard() === cards[0], 'the last chart steps forward to the first');
+    prevArrow.click();
+    await new Promise((r2) => setTimeout(r2, 250));
+    ok(W.maxiCard() === cards[cards.length - 1], 'and the first steps back to the last');
+
+    /* Folding a sibling calls syncMaxiButtons without a render, and a folded card
+       is one the reader has put away — so it comes off the walk at once. */
+    const upNow = W.maxiCard();
+    const victim = cards.find(c => c !== upNow);
+    const wasLong = W.maxiGroup().length;
+    victim.querySelector('.box-toggle').click();
+    await new Promise((r2) => setTimeout(r2, 350));
+    eq(W.maxiGroup().length, wasLong - 1, 'a folded card drops out of the walk');
+    ok(W.maxiGroup().indexOf(victim) < 0, 'and it is the folded one that has gone');
+    victim.querySelector('.box-toggle').click();
+    await new Promise((r2) => setTimeout(r2, 350));
+    eq(W.maxiGroup().length, wasLong, 'unfolding it puts it back');
+
+    /* A render throws #views away and rebuilds it; maxiResume puts the card back
+       BY CANVAS ID, and attachMaxi has to bring the arrows back into the NEW
+       band with it — the old one went out with the old markup. */
+    const upWas = nameUp();
+    W.render();
+    await new Promise((r2) => setTimeout(r2, 500));
+    eq(nameUp(), upWas, 'a re-render leaves the same chart filling the window');
+    ok(nav.closest('.card') === W.maxiCard(),
+       'and the arrows came back into the rebuilt card\u2019s band with it');
+    ok(shown(nav), 'still showing');
+
+    /* BY NAME from here on, not by the element: the render above threw #views
+       away, so every card captured before it is a node that has gone. */
+    const keyFrom = nameUp();
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    await new Promise((r2) => setTimeout(r2, 250));
+    ok(nameUp() !== keyFrom, 'Right steps to the next chart', nameUp());
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    await new Promise((r2) => setTimeout(r2, 250));
+    eq(nameUp(), keyFrom, 'and Left steps back');
+    const picker = D.querySelector('header select');
+    picker.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    await new Promise((r2) => setTimeout(r2, 250));
+    eq(nameUp(), keyFrom,
+       'an arrow pressed in a header picker is the picker\u2019s, not the walk\u2019s');
+
+    W.closeMaxi();
+    await new Promise((r2) => setTimeout(r2, 300));
+    eq(D.querySelectorAll('.chart-slot').length, 0, 'closing leaves no placeholder behind');
+    ok(!D.getElementById('maxiNav'), 'and takes the arrows off the page with it');
+
+    /* A tab with one chart has nothing to walk, and says so by showing nothing
+       rather than looping a single card back onto itself. */
+    D.getElementById('tab-comp').click();
+    await new Promise((r2) => setTimeout(r2, 500));
+    const solo = D.querySelector('#views .chartbox canvas').closest('.card');
+    solo.querySelector(':scope > h2 > .chart-max').click();
+    await new Promise((r2) => setTimeout(r2, 300));
+    eq(W.maxiGroup().length, 1, 'the Compensation tab draws one chart');
+    ok(!shown(D.getElementById('maxiNav')), 'so there are no arrows on it');
+    W.closeMaxi();
+  } finally { f.remove(); }
+});
+
 t('the full-screen button is furniture, so it never prints', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
-  ok(APP_SRC.includes('.chart-max, #chartMaxi { display: none !important; }'),
+  ok(APP_SRC.includes('.chart-max, .maxi-nav, #chartMaxi { display: none !important; }'),
     'a full-screen chart is a thing you do to a SCREEN — on paper the page IS the '
-    + 'window, and the card prints where it sits');
+    + 'window, and the card prints where it sits. The step arrows are named here as '
+    + 'well as the button: unlike the siblings\u2019, they sit in the card\u2019s own '
+    + 'heading band, so #chartMaxi does not cover them');
 });
 
 /* A two-account plan with one grid year, for the audit groups below. */

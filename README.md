@@ -1467,6 +1467,12 @@ See [Year or Month](#year-or-month).
   table is one press of Escape away, and letting forty rows of spending squash
   the bars into a strip would answer the opposite question. On a phone the
   card's opening paragraph steps aside too, for the same reason.
+- **Step between the charts without coming back down.** Beside the ⤢ are a
+  **‹** and a **›** that walk the other charts on the tab you came from —
+  Progress has six of them — wrapping round at both ends. The **left and right
+  arrow keys** do the same, unless the caret is in a control, where an arrow
+  belongs to that control. A folded card is not on the walk, and a tab with one
+  chart shows no arrows at all.
 
 ### Editing, Everywhere
 

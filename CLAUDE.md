@@ -1762,6 +1762,45 @@ same day; the audit's other three are open and listed at the end.
   feeds itself"). Only DESCRIBED, not changed — changing it would move figures
   in every projected year, which is the reader's call, not a fix.
 
+## Stepping between charts in full screen (2026-09-03)
+
+**A `‹` and a `›` beside the ⤢ walk the charts on the tab without coming back
+down.** Charles asked for it on 2026-09-03; built first in Flow Metrics and
+ported here the same day. **This app's copy diverges from the siblings' in one
+way, for the reason its ⤢ already does.**
+
+- **The arrows sit IN THE BAND, not in the overlay.** Flow Metrics, Sprint
+  Predictability and Lottery Portfolio float their arrows over the card's
+  top-right corner, where nothing else lives. Here that corner is the FOLD
+  CONTROL, so a cluster over it would sit on a control — the same reason the ⤢
+  went into the band on 2026-08-30.
+- **One nav, moved from band to band.** `maxiNav` is built once; `attachMaxi()`
+  mounts it left of the ⤢ and `detachMaxi()` takes it away, so every door in and
+  out — open, close, a step, and the suspend/resume a render does — is covered by
+  one pair of call sites.
+- **The focus is put back BY HAND after a step**, and that is the price of the
+  band. Moving the nav to the next card's band drops the keyboard; the buttons
+  are the same two elements wherever the nav is, so the one that was pressed gets
+  it back.
+- **A step's click stops at the button.** `e.stopPropagation()` plus
+  `pointer-events: none` on the icon — without both, the band's fold handler sees
+  a click it does not recognise and folds the card, which is exactly what the ⤢
+  did on the day it shipped.
+- **The walk is `#views`**, which IS the tab the reader is on, because this app
+  rewrites it wholesale. A `.boxshut` card is not on it — `maxiReady` already
+  says a folded card has nothing to show. Read fresh on every press.
+- **`maxiCard()` reads `#chartMaxi > .card`, not `firstElementChild`**: the
+  overlay now holds the live region the arrows speak through.
+- **`.maxi-nav` takes the `margin-left: auto`, and `.maxi-nav + .chart-max` gives
+  it up.** Two elements both asking for an auto margin SPLIT the free space
+  between them, and the cluster comes apart in the middle of the band.
+- **The print rule names `.maxi-nav` explicitly.** The siblings' arrows are
+  inside `#chartMaxi`, which print already hides; these are not.
+
+Its own `t()` with its own 1280x900 frame. **A test that holds a card across a
+render is holding a node that no longer exists**, so the assertions after the
+re-render compare NAMES.
+
 ## The two long windows are laid out in SECTIONS (2026-09-02)
 
 `category` (Budget Row) and `account` (Account Settings) were `cols: 2` and
