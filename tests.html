@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 934;
+const EXPECTED = 936;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -11876,8 +11876,16 @@ t('the Investments tab draws both charts, and the sample plan reaches them',
        a `const` arrow and so is not a property of the frame's window — the same
        trap the tooltip sweep hit with `charts`. */
     const tok = (n) => W.getComputedStyle(D.documentElement).getPropertyValue(n).trim();
-    ok(conc.data.datasets.every((d, i) => d.backgroundColor === tok('--series-' + (i + 1))),
-       'every band is a pack ramp token in numeric order — the app invents none');
+    ok(conc.data.datasets.every((d, i) => d.borderColor === tok('--series-' + (i + 1))),
+       'every band is OUTLINED in a pack ramp token in numeric order — the app invents none');
+    /* Pack rule 3: the colour goes in the edge, the fill is a tint of it mixed
+       toward the card. The edge is what the ramp's ΔE gate was measured on. */
+    ok(conc.data.datasets.every((d) => /^rgb\(/.test(d.backgroundColor)
+         && d.backgroundColor !== d.borderColor),
+       'and FILLED with a tint of it, never the flat colour');
+    ok(conc.data.datasets.every((d) => d.borderWidth === 2 && d.borderSkipped === false),
+       'the edge is actually drawn, on all four sides — which is also what keeps two '
+       + 'neighbouring bands from running together');
     ok(conc.data.datasets.length <= 5,
        'and never more than five bands: past that the ramp has nowhere to stand');
 
@@ -11970,6 +11978,77 @@ t('one account with targets gets the bars, and stops naming a column that is gon
     if (before === null) localStorage.removeItem('fin-state');
     else localStorage.setItem('fin-state', before);
   }
+});
+
+/* ── Pack rule 3: the colour goes in the edge ───────────────────────────────
+   A chart bar is a tint fill plus a full-strength outline. This app has drawn its
+   STATUS and ACCENT bars that way for a long time — `--ok-bg`, `--err-bg` and
+   `--accent-bg` are the pack's own ready-made tints — but the bars coloured from
+   the CATEGORICAL ramp had no `--series-N-bg` to reach for and stayed flat and
+   edgeless. Closed 2026-09-03 with `tintOf`, ported from Sprint Velocity.
+
+   The sweep is the part worth having: pinning the three that were fixed would
+   miss the fourth chart somebody adds next year, and `borderWidth: 0` is exactly
+   what that mistake looks like. */
+t('a bar fill is the series colour mixed toward the card, and junk passes through', () => {
+  const card = w.getComputedStyle(w.document.documentElement)
+    .getPropertyValue('--surface').trim();
+  const chan = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  eq(H.tintOf('#ff0000', 0), 'rgb(255,0,0)', 'nothing mixed in is the colour itself');
+  eq(H.tintOf('#ff0000', 1), `rgb(${chan(card).join(',')})`, 'all the way in is the card');
+  /* Mixed toward the CARD rather than toward white, which is the one constant
+     that covers all four themes — so the assertion has to be "between", not a
+     literal. */
+  const mid = H.tintOf('#ff0000', H.BAR_TINT_SOLID).match(/\d+/g).map(Number);
+  const from = [255, 0, 0], to = chan(card);
+  ok(mid.every((v, i) => v >= Math.min(from[i], to[i]) && v <= Math.max(from[i], to[i])),
+     'and the fill lands between the two on every channel, whatever the theme',
+     mid.join(','));
+  ok(H.BAR_TINT_SOLID < H.BAR_TINT,
+     'a SOLID series keeps more of its colour than a textured one — it has nothing '
+     + 'but its outline, and at .68 it washed out on the white Light card');
+  eq(H.tintOf('nonsense', .45), 'nonsense',
+     'junk passes through rather than being turned into a colour');
+});
+t('no bar in the app is left a flat fill with no edge', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?bars=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;      // loadSample is gated on it, and headless DISMISSES
+    W.loadSample();
+    const TABS = ['tab-budget', 'tab-goals', 'tab-vacations', 'tab-giving',
+                  'tab-investments', 'tab-retirement', 'tab-comp'];
+    const bars = new Map();
+    for (const id of TABS) {
+      D.getElementById(id).click();
+      await new Promise((r) => setTimeout(r, 250));
+      D.querySelectorAll('canvas').forEach((cv) => {
+        const c = W.Chart.getChart(cv);
+        if (!c) return;
+        bars.set(cv.id, c.data.datasets
+          .filter((d) => (d.type || c.config.type) === 'bar')
+          .map((d) => ({ bw: d.borderWidth, edge: !!d.borderColor })));
+      });
+    }
+    ok(bars.size >= 8, 'the sweep has to actually FIND the charts, or every assertion '
+       + 'below passes over an empty list', bars.size);
+    const flat = [];
+    for (const [id, ds] of bars)
+      ds.forEach((d, i) => {
+        if (!(d.bw >= 1) || !d.edge)
+          flat.push(`${id} dataset ${i}: borderWidth ${d.bw}, edge ${d.edge}`);
+      });
+    eq(flat, [], 'these bars are a fill with nothing carrying their colour');
+  } finally { f.remove(); }
 });
 
 group('Keeping the toolbars on screen');

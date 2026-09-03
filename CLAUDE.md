@@ -730,6 +730,41 @@ that carries that column needs two pots — so a reader with one brokerage accou
 and a target on every fund gets the bars and no column, which is exactly the case
 where the bars are the ONLY place the figures appear. Found by walking the gates
 after the charts were built, not by reading them.
+**THE BAR TINT, 2026-09-03 — and first, the correction.** It was claimed in
+conversation that "none of Money Map's fourteen charts" followed theme pack rule
+3 (a bar is a tint fill plus a full-strength edge). That was wrong, and wrong in
+the direction that would have caused damage if acted on wholesale: EIGHT of the
+bar charts had followed it all along — monthNet, flow, Spending, Trip Spending,
+Giving and the Roth ladder fill with `--ok-bg` / `--err-bg` / `--accent-bg` and
+outline at full strength with `borderWidth: 2, borderSkipped: false`, which is
+the rule exactly. The pack ships a ready-made tint token for each of those
+colours. Check a claim like that against `newChart` call sites before acting on
+it; the survey is four lines of regex.
+**The real gap was the CATEGORICAL bars, and only those** — Where the Money Goes
+and the two Investments charts. `--series-1..5` exist at full strength and there
+is no `--series-N-bg`, so those three had nothing to fill with and stayed flat
+and edgeless while every other bar in the app grew an outline. `tintOf(hex,
+amount)` + `BAR_TINT` / `BAR_TINT_SOLID` are ported from Sprint Velocity property
+by property (the chartTooltipTheme precedent), and `seriesBar(token)` is the one
+place a ramp-coloured bar gets its properties, so no chart can take the pale fill
+without the outline that carries its contrast. Every bar here is SOLID and
+untextured, so every one uses `.45` — the `.68` constant is carried for the rule's
+sake and is currently unused.
+**On the stacked chart the edge replaced a hairline, and is strictly better.**
+Where It's Held used to separate its bands with a 1px line in `--bg-card`; a
+full-strength edge in the band's OWN colour separates them and says which account
+each one is, and `borderSkipped: false` is what draws it.
+**The LEGEND SWATCHES stay at full strength, and that is the pack's own carve-out
+rather than a divergence** — rule 3 says not to tint small swatches because those
+have to be told apart from EACH OTHER, and rule 4 gates the ramp at full strength
+for that reason. Sprint Velocity lets its swatches take the tint because every one
+of its series carries a TEXTURE that survives it; Where It's Held's accounts have
+none, so at 12px the fill is all a swatch has. `fullStrengthSwatches` does it
+through Chart.js's `generateLabels`. **Money Map is the first app in the family to
+need that carve-out**, which is why it is written down in the pack too.
+A sweep in the suite fails any bar dataset left at `borderWidth: 0` — pinning the
+three that were fixed would miss the fourth chart somebody adds next year, and
+that is exactly what the mistake looks like.
 The linked panes' RECONCILE line compares holdingsValue against the linked
 accounts' computed balances this month — agreement is said out loud, the
 reconcileNote rule: that is the check passing, not nothing to say.

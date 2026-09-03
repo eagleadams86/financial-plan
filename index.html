@@ -11625,11 +11625,10 @@ function buildMixChart() {
   const tick = cssVar('--chart-tick');
   newChart('mixChart', {
     type: 'bar',
-    data: { labels: mix.rows.map(r => r.name), datasets: [{
+    data: { labels: mix.rows.map(r => r.name), datasets: [Object.assign({
       label: `Spent in ${y}`,
       data: mix.rows.map(r => r.total),
-      backgroundColor: cssVar('--series-1'), borderWidth: 0,
-    }]},
+    }, seriesBar('--series-1'))]},
     options: {
       /* Horizontal, because a category name is a word and a word does not fit
          under a vertical bar — the axis reads left to right like the table
@@ -15108,16 +15107,15 @@ function buildConcentrationChart() {
   if (series.length < 2) return;
   newChart('concChart', {
     type: 'bar',
-    data: { labels: rows.map(r => r.ticker), datasets: series.map((s, i) => ({
+    /* The pale fill and the full-strength edge of pack rule 3. The edge does the
+       job the card-coloured hairline here used to do — two neighbouring bands
+       never run together — and does it better, because it is the band's OWN
+       colour at the strength the ramp is gated at, so it separates the segments
+       and says which account each one is at the same time. */
+    data: { labels: rows.map(r => r.ticker), datasets: series.map((s, i) => Object.assign({
       label: s.label,
       data: rows.map(r => r.values[i]),
-      backgroundColor: cssVar(`--series-${i + 1}`),
-      /* A hairline in the CARD's own colour, so two neighbouring bands never run
-         together into one block whatever the theme is. Deliberately not a series
-         colour: this is a separator, and drawing it from the ramp would put a
-         sixth thing on an axis the ramp is gated on. */
-      borderColor: cssVar('--bg-card'), borderWidth: 1,
-    }))},
+    }, seriesBar(`--series-${i + 1}`)))},
     options: {
       indexAxis: 'y',
       /* A bar hovers by ITSELF — the family's chart rule. A stacked segment is a
@@ -15125,7 +15123,8 @@ function buildConcentrationChart() {
          different account's; reading the whole column at once would answer a
          question nobody pointed at. */
       interaction: { mode: 'nearest', intersect: true },
-      plugins: { legend: { position: 'bottom' },
+      plugins: { legend: { position: 'bottom',
+        labels: { generateLabels: fullStrengthSwatches } },
         tooltip: { callbacks: {
           label: (t) => `${t.dataset.label}: ${fmtMoney(t.parsed.x)}`,
           /* The bar's own total under the segment you are on, because the
@@ -15159,11 +15158,10 @@ function buildDriftChart() {
   if (rows.length < 2) return;
   newChart('driftChart', {
     type: 'bar',
-    data: { labels: rows.map(r => r.label), datasets: [{
+    data: { labels: rows.map(r => r.label), datasets: [Object.assign({
       label: 'Move to reach target',
       data: rows.map(r => r.move),
-      backgroundColor: cssVar('--series-1'), borderWidth: 0,
-    }]},
+    }, seriesBar('--series-1'))]},
     options: {
       indexAxis: 'y',
       plugins: { legend: { display: false },
@@ -17381,6 +17379,71 @@ function chartAxes() {
     grid: { color: cssVar('--chart-grid') },
   };
 }
+
+/* ── A bar is a tint fill plus a full-strength edge (2026-09-03) ─────────────
+   Theme pack rule 3, and this app has followed it since long before the rule was
+   written — for the bars coloured from the STATUS and ACCENT tokens. The flow
+   bars, the month-net bars, Spending, Trip Spending, Giving and the Roth ladder
+   all fill with `--ok-bg` / `--err-bg` / `--accent-bg` and outline at full
+   strength, which is the rule exactly: the pack ships a ready-made tint for each
+   of those colours.
+
+   What it never covered is the bars coloured from the CATEGORICAL ramp, because
+   there is no `--series-N-bg` to reach for — `--series-1..5` exist at full
+   strength and nothing else. So those three (Where the Money Goes, and the two
+   Investments charts) stayed solid and edgeless while every other bar in the app
+   had grown an outline. That is what this closes.
+
+   Ported from Sprint Velocity property by property, the way chartTooltipTheme
+   was: same two constants, same mix, same `borderWidth: 2` and
+   `borderSkipped: false`. TWO strengths, and both are the pack's: a textured
+   series can travel further from its colour because the texture puts full
+   strength back over part of the bar, while a solid one has nothing but its
+   outline and washes out on the white Light card at .68. Every bar here is
+   solid, so every one of them uses .45.
+
+   Mixed toward `--surface` — the CARD, not white — which is the one constant that
+   covers all four themes, and the reason this adds no token and is not drift. */
+const BAR_TINT = .68, BAR_TINT_SOLID = .45;
+
+function tintOf(hex, amount) {
+  const card = cssVar('--surface');
+  if (!/^#[0-9a-f]{6}$/i.test(hex) || !/^#[0-9a-f]{6}$/i.test(card)) return hex;
+  const a = parseInt(hex.slice(1), 16), b = parseInt(card.slice(1), 16);
+  const mix = (sh) => {
+    const from = a >> sh & 255;
+    return Math.round(from + ((b >> sh & 255) - from) * amount);
+  };
+  return `rgb(${mix(16)},${mix(8)},${mix(0)})`;
+}
+
+/* The dataset properties a bar drawn from the ramp needs, in ONE place so no
+   chart can pick up the pale fill without the outline that carries its contrast
+   — Sprint Velocity's `seriesBar`, and its reason for existing. `borderSkipped:
+   false` is what draws the base edge at all, and on the stacked chart it is also
+   what separates one band from the next. */
+function seriesBar(token) {
+  return {
+    backgroundColor: tintOf(cssVar(token), BAR_TINT_SOLID),
+    borderColor: cssVar(token),
+    borderWidth: 2, borderSkipped: false,
+  };
+}
+
+/* A legend swatch stays at FULL STRENGTH, and this is the one place Money Map
+   parts company with Sprint Velocity's version of rule 3. The pack's own carve-out
+   says not to tint small legend swatches, because those have to be told apart
+   from EACH OTHER and a tint compresses exactly that — and rule 4 gates the ramp
+   at full strength for that reason. Sprint Velocity can let its swatches take the
+   tint because every one of its series carries a TEXTURE that survives it; the
+   accounts on Where It's Held have no texture, so at 12px the fill is all a
+   swatch has, and five pale fills is the thing the carve-out is about. The bars
+   keep the tint; the key keeps the colour. */
+const fullStrengthSwatches = (chart) => Chart.defaults.plugins.legend.labels
+  .generateLabels(chart).map((item) => Object.assign(item, {
+    fillStyle: (chart.data.datasets[item.datasetIndex] || {}).borderColor
+      || item.fillStyle,
+  }));
 
 /* ── One chart, filling the window ───────────────────────────────────────────
    Flow Metrics' feature, ported here on 2026-08-30. The CSS above records why
@@ -25976,6 +26039,9 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
      ranking and the layer choice rather than a canvas it would have to lay out
      and hover first. */
   potSeries, driftRows, driftClassGroups, driftIsByClass, OTHER_POT,
+  /* The bar tint — pack rule 3's arithmetic, so the suite pins the mix and the
+     two strengths rather than reading a colour off a canvas. */
+  tintOf, BAR_TINT, BAR_TINT_SOLID,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   enteredCellFor,
