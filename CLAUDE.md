@@ -1852,7 +1852,7 @@ Its own `t()` with its own 1280x900 frame. **A test that holds a card across a
 render is holding a node that no longer exists**, so the assertions after the
 re-render compare NAMES.
 
-## The two long windows are laid out in SECTIONS (2026-09-02)
+## The three long windows are laid out in SECTIONS (2026-09-02, Preferences 2026-09-03)
 
 `category` (Budget Row) and `account` (Account Settings) were `cols: 2` and
 therefore 700px, and Charles read them as "getting pretty long, depending on the
@@ -1920,7 +1920,42 @@ columns, and cut into blocks with a rule and a small heading between them.
   Dividends*. The account's two rate blocks are three questions each — a rate,
   what that rate is, where it goes; then a rate, where it goes, how often — and
   that pair filling a row exactly is what settled on three columns.
-- **A real frame is what pins it.** `tests.html` opens both windows in a
+- **PREFERENCES WAS MISSED BY THAT PASS AND TOOK THE SAME TREATMENT A DAY LATER
+  (2026-09-03).** Charles asked why the family's preference windows were ruled
+  and this one wasn't; it wasn't, and it is the window that needed it most —
+  sixteen settings, four to a row, with nothing but a fresh subject in the label
+  to say a new group had started. Five blocks: *Your Plan · How Figures Read ·
+  What Each Tab Offers · Rates The Plan Assumes · This Device Only*.
+- **`This Device Only` is a heading that makes a CLAIM, and that is what its test
+  guards.** `pinBars`, `zoom` and `priceApiKey` live in their own localStorage
+  keys — never synced, never in a backup, never in a share link — while `Rates
+  The Plan Assumes` directly above it holds four figures that travel with the
+  plan. Each of those three hints used to have to say "this device only" alone,
+  from three different places in one flat grid. A fourth field landing in that
+  block, or one of the three leaving it, makes the heading a false statement
+  about where the reader's data goes: `tests.html` pins the block's contents by
+  name AND pins `get()` reading them from `savedPin()`/`savedZoom()`/`priceKey()`
+  rather than from `state.settings`.
+- **Sections RETIRED three layout arguments the spec used to make.** The zoom,
+  the lead days and the pin were each PLACED — and two of them made `wide` — for
+  a reason that had nothing to do with them: an ordinary field added above the
+  three retirement rates shifted them by one column and stranded the first at the
+  end of the row above, away from the two it is read against. Each block lays out
+  its own grid now, so a field can no longer strand a field in another subject,
+  and all three sit where their subject puts them. What still holds: **a `wide`
+  field ends the row in progress, so one belongs at the top or the bottom of ITS
+  OWN block, never in the middle** (`tagline` and `pinBars` open their blocks,
+  `dueLeadDays` closes its own).
+- **`cols: 4` and `.cols4` (new) — a sectioned window must DECLARE its column
+  count.** Auto-fit sizes each block by its own field count, so "How Figures
+  Read" (two questions) came out in two half-width columns directly under a block
+  drawn in quarters: one window in two layouts, which is exactly what
+  `openRowEditor`'s note calls two windows stacked. Four is the first count that
+  needs a step on the way down — it is the only one whose columns are narrower
+  than a box at the common width — so `.cols4` goes 4 → **2** at 900px → 1 at
+  560px. Two, not three: an even split leaves no block ending on a lone field
+  beside a gap. `cols2`/`cols3` are untouched.
+- **A real frame is what pins it.** `tests.html` opens all three windows in a
   1280x900 iframe and reads the width, the column count of every block, and each
   block's contents by name — a 1x1 frame reads every rectangle as 0 and "it is
   1100px wide" would pass on a window that was never laid out.

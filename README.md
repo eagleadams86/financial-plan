@@ -1577,25 +1577,51 @@ at is the one you are still looking at.
 ## Preferences
 
 The header's **⚙ Preferences** button opens one editor holding the settings
-that apply across the whole app rather than to a row:
+that apply across the whole app rather than to a row. It is laid out in five
+ruled blocks — the same rule and small heading the Budget Row and Account
+windows use — and the last of them is the one worth reading twice: everything
+above it travels with the plan, and nothing in it does.
+
+**Your Plan**
 
 | Setting | What it changes |
 | --- | --- |
 | **Subtitle** | Your own words beside "Financial Plan" in the header and the browser tab |
 | **You file taxes as** | Which bracket table the Tax tab reads and which Roth (MAGI) threshold it checks against — always asked, since the Tax tab needs no household. Filing jointly also counts both incomes once there are two of you |
 | **Compensation tab follows** | Which person that tab's salary history is about, once there are two of you |
+
+**How Figures Read** — neither changes a number:
+
+| Setting | What it changes |
+| --- | --- |
 | **Currency** | A three-letter code (USD, EUR, GBP, CAD) — the currency the plan itself is in. It changes how figures read, not what they are. Something held in *another* currency is a rate you state on the [Household](#other-currencies) tab |
 | **Budget row order** | Your own arrangement, or alphabetical within a section (which turns dragging off and leaves your order stored underneath) |
+
+**What Each Tab Offers**
+
+| Setting | What it changes |
+| --- | --- |
 | **Paychecks vary by month** | Three some months, two in others — this is what lets a row be an amount per check |
 | **Donor-advised fund** | Whether the Giving tab shows a fund's holdings. Donations are tracked either way |
 | **PTO days a year** | What each new holiday-planner year starts with |
-| **Dividend row interest %/yr** | The rate a dividend row uses when it has none of its own |
 | **Warn about a due bill this many days ahead** | How early a hand-paid bill with a [due date](#due-dates) starts saying so on the Month page. 0 warns on the day itself |
-| **Keep the tabs on screen while scrolling** | Pins the view tabs — and the Budget's year or month strip — to the top of the page. The pin button at the right-hand end of the tab row is the same switch. Set to this device only: never synced, never in a backup, never in a share link |
-| **Zoom** | The exact percentage (50–200%), the quarter steps in the header being the everyday version |
+
+**Rates The Plan Assumes** — four figures with no source but you:
+
+| Setting | What it changes |
+| --- | --- |
+| **Dividend row interest %/yr** | The rate a dividend row uses when it has none of its own |
 | **Retirement real return %/yr** | The growth rate the [Retirement](#retirement) tab assumes, after inflation. An account can state its own and follow this only when it doesn't |
 | **If it goes worse / better %/yr** | The two rates around it that draw the cautious and optimistic lines on the same chart |
-| **Twelve Data key** | The [price-lookup](#investments) key — deliberately the last row, and the one setting that never leaves this device: it is typed here, handed to your password manager, and stays out of backups, share links and sync |
+
+**This Device Only** — three settings that live in this browser and nowhere
+else: never synced, never in a backup, never in a share link.
+
+| Setting | What it changes |
+| --- | --- |
+| **Keep the tabs on screen while scrolling** | Pins the view tabs — and the Budget's year or month strip — to the top of the page. The pin button at the right-hand end of the tab row is the same switch |
+| **Zoom** | The exact percentage (50–200%), the quarter steps in the header being the everyday version |
+| **Twelve Data key** | The [price-lookup](#investments) key — typed here, handed to your password manager, and out of backups, share links and sync |
 
 ---
 

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 922;
+const EXPECTED = 924;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -13309,6 +13309,98 @@ t('a section heading is skipped everywhere a field would be read', () => {
   ok(/const grids = host\.classList\.contains\('grid-fields'\)/.test(src),
      'applyFieldSpans lays each block out on its own, so a short row ends at the end of '
      + 'its own block instead of pulling the next block’s first field up beside it');
+});
+
+/* Preferences is the window the ruling pass MISSED (2026-09-02 cut the budget
+   row and the account into blocks; this one, twice the length of either, stayed
+   a flat grid until the next day). It is pinned separately from the two above
+   because what it is guarding is different: not the FIT — sixteen settings were
+   always going to fill the width — but the CLAIM each heading makes. "This
+   Device Only" says three named settings never leave this browser, and "Rates
+   The Plan Assumes" directly above it says everything in it travels with the
+   plan. A field that drifts across that rule is a heading telling the reader
+   something untrue about where their data goes. */
+t('Preferences opens in blocks, and the device-only block holds exactly the three', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?prefsecs=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.alert = () => {};
+    const blocks = [...D.querySelectorAll('#rowFields .fieldsec')];
+    eq(blocks.length, 0, 'nothing is open yet');
+
+    D.getElementById('prefsBtn').click();
+    const dlg = [...D.querySelectorAll('dialog')].find((d) => d.open);
+    ok(dlg, 'the header button still opens Preferences');
+    approx(dlg.getBoundingClientRect().width, 1100, 'at the common width, the one the '
+      + 'budget row and the account open at', 1);
+    ok(!dlg.classList.contains('twoup'),
+       'and never two-up — a sectioned window has several grids, so no one of them can '
+       + 'be asked what the window should be');
+
+    const read = () => [...D.querySelectorAll('#rowFields .fieldsec')]
+      .filter((sec) => !sec.hidden)
+      .map((sec) => ({
+        head: sec.querySelector('.fieldsec-head').textContent,
+        cols: W.getComputedStyle(sec.querySelector('.grid-fields'))
+          .gridTemplateColumns.split(' ').filter((t) => parseFloat(t) > 0).length,
+        fields: [...sec.querySelectorAll('[data-field]')]
+          .filter((c) => !c.hidden).map((c) => c.dataset.field),
+      }));
+    const secs = read();
+    eq(secs.map((b) => b.head),
+       ['Your Plan', 'How Figures Read', 'What Each Tab Offers',
+        'Rates The Plan Assumes', 'This Device Only'],
+       'five subjects, ending on the one that leaves the plan behind');
+    ok(secs.every((b) => b.fields.length), 'no block stands empty over a rule',
+       secs.map((b) => b.head + ':' + b.fields.length).join(' '));
+    /* The blocks are two, three and four questions long, so auto-fit would draw
+       each to its own grid — half-width columns under quarter-width ones, the
+       same window in two layouts. `cols: 4` is what stops that, and dropping it
+       would not fail anything else here. */
+    ok(secs.every((b) => b.cols === 4), 'four columns in every block, whatever it holds — '
+       + 'a block laid out differently from the one above it reads as two windows stacked',
+       secs.map((b) => b.head + ':' + b.cols).join(' '));
+    /* THE ASSERTION THIS TEST EXISTS FOR. Three settings in their own
+       localStorage keys, under a heading that promises as much. A fourth field
+       landing here — or one of these three moving out — makes the heading a
+       false statement about where the reader's data goes. */
+    eq(secs[4].fields, ['pinBars', 'zoom', 'priceApiKey'],
+       'the pin, the zoom and the price key — the only three settings that are never '
+       + 'synced, never in a backup and never in a share link');
+    eq(secs[3].fields,
+       ['midTermRateAnnual', 'retirementReturnAnnual', 'retirementReturnLow',
+        'retirementReturnHigh'],
+       'and the four assumed rates, which DO travel with the plan');
+    eq(secs[3].fields.length, 4, 'four of them, which is the row exactly — "if it goes '
+      + 'worse" and "if it goes better" mean nothing except beside the figure they are '
+      + 'worse and better than, so none of them may wrap away from the others');
+    dlg.close();
+  } finally {
+    f.remove();
+  }
+});
+/* Cheap, and the other half of the heading's promise: the block above says
+   these three are read from somewhere other than the plan, and `get` is where
+   that is decided. */
+t('the device-only preferences are read from their own keys, not from the plan', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const get = src.match(/get: \(\) => \(\{ tagline:[\s\S]*?\}\),/);
+  ok(get, 'the Preferences get() is still written as one object literal');
+  for (const [key, from] of [['zoom', 'savedZoom()'], ['pinBars', 'savedPin()'],
+                             ['priceApiKey', 'priceKey()']])
+    ok(get[0].includes(key + ': ' + from),
+       key + ' comes from ' + from + ', never from state.settings — the moment it is '
+       + 'read off the plan it starts syncing and the heading above it is a lie');
 });
 
 
