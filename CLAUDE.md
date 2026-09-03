@@ -1791,9 +1791,18 @@ way, for the reason its ⤢ already does.**
   says a folded card has nothing to show. Read fresh on every press.
 - **`maxiCard()` reads `#chartMaxi > .card`, not `firstElementChild`**: the
   overlay now holds the live region the arrows speak through.
-- **`.maxi-nav` takes the `margin-left: auto`, and `.maxi-nav + .chart-max` gives
-  it up.** Two elements both asking for an auto margin SPLIT the free space
-  between them, and the cluster comes apart in the middle of the band.
+- **`.maxi-nav` takes the `margin-left: auto`, and
+  `.maxi-nav:not([hidden]) + .chart-max` gives it up.** Two elements both asking
+  for an auto margin SPLIT the free space between them, and the cluster comes
+  apart in the middle of the band. **The `:not([hidden])` is not tidiness** —
+  without it, reported by Charles within the hour on 2026-09-03, the ⤢ jumped
+  from the far end of the band to sit against the heading on every card with one
+  chart on its tab. A hidden element is still a SIBLING: `display: none` takes it
+  out of the flex layout, not out of the selector, so the button handed its auto
+  margin to a nav that was not there to take it. The same family as
+  `.chart-max[hidden]` from the other direction — there the attribute did not
+  reach the layout, here it did not reach the selector. Pinned by RECTANGLE in
+  the suite, because a margin is only visible as geometry.
 - **The print rule names `.maxi-nav` explicitly.** The siblings' arrows are
   inside `#chartMaxi`, which print already hides; these are not.
 
