@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 924;
+const EXPECTED = 934;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -6076,6 +6076,85 @@ t('class targets are normalised and land on their group', () => {
   eq(groups[1].target, undefined,
     'the unclassed bucket carries no target — nothing to steer toward');
 });
+t('the rollup says how much of a ticker is in each account', () => {
+  const st = H.coerceShape({ side: {
+    portfolios: [{ id: 'a', name: 'Brokerage', rows: [{ ticker: 'VTI', shares: 2, price: 100 }] }],
+    retirementAccounts: [{ name: 'Roth IRA', type: 'roth-ira',
+      rows: [{ ticker: 'vti', shares: 3, price: 100 }] }],
+  } });
+  const roll = H.allHoldings(st);
+  eq(roll.rows[0].byPot, { Brokerage: 200, 'Roth IRA': 300 },
+     'the same money split by where it is held — the column above only NAMES them');
+  eq(roll.rows[0].value, 500, 'and the bands still add up to the row');
+});
+t('the accounts become one series each, largest first', () => {
+  /* The Roth's 400 against the Brokerage's 300 — its 200 of VTI PLUS its 100 of
+     BND, because an account is ranked on everything it holds, not on the row
+     the chart happens to start with. */
+  const roll = { rows: [
+    { ticker: 'VTI', byPot: { Brokerage: 200, 'Roth IRA': 400 } },
+    { ticker: 'BND', byPot: { Brokerage: 100 } },
+  ] };
+  const s = H.potSeries(roll);
+  eq(s.series.map(x => x.label), ['Roth IRA', 'Brokerage'], 'ranked by what each holds');
+  eq(s.rows[0].values, [400, 200], 'and every bar reads its bands in that one order');
+  eq(s.rows[1].values, [0, 100], 'an account with none of a ticker is a zero, not a gap');
+  eq(s.folded, [], 'nothing folded with two accounts');
+});
+t('past five accounts the tail folds rather than a sixth colour appearing', () => {
+  const byPot = { A: 60, B: 50, C: 40, D: 30, E: 20, F: 10 };
+  const s = H.potSeries({ rows: [{ ticker: 'VTI', byPot }] });
+  eq(s.series.length, 5, 'five is the ramp, and the ramp is the wall');
+  eq(s.series.map(x => x.label), ['A', 'B', 'C', 'D', H.OTHER_POT]);
+  eq(s.folded, ['E', 'F'], 'the two smallest gathered');
+  eq(s.rows[0].values, [60, 50, 40, 30, 30], 'and the band carries their sum');
+  const five = H.potSeries({ rows: [{ ticker: 'VTI', byPot: { A: 5, B: 4, C: 3, D: 2, E: 1 } }] });
+  eq(five.series.map(x => x.label), ['A', 'B', 'C', 'D', 'E'],
+     'exactly five is five real accounts — there is nothing to fold');
+});
+t('an account really called "Everything else" is not handed the folded band', () => {
+  const byPot = { 'Everything else': 60, B: 50, C: 40, D: 30, E: 20, F: 10 };
+  const s = H.potSeries({ rows: [{ ticker: 'VTI', byPot }] });
+  eq(s.series[0].keys, ['Everything else'], 'the real account keeps its own money');
+  eq(s.rows[0].values[0], 60, 'and its own figure, not the tail\'s sum');
+  eq(s.rows[0].values[4], 30, 'the band is still E and F');
+  eq(s.series[4].label, 'Everything else (2 more)',
+     'and the two are told apart in the legend as well as in the arithmetic');
+});
+t('drift ranks by the trade that would close the gap', () => {
+  const rows = [
+    { ticker: 'VTI',  value: 600, share: 0.6, target: 0.55 },
+    { ticker: 'VXUS', value: 200, share: 0.2, target: 0.30 },
+    { ticker: 'BND',  value: 200, share: 0.2 },
+  ];
+  const d = H.driftRows(rows, 1000);
+  eq(d.map(r => r.label), ['VXUS', 'VTI'], 'biggest move first, whichever way it points');
+  eq(d[0].move, -100, 'a hundred short of its target — money to put in');
+  eq(d[1].move, 50, 'and fifty past it — money to take out');
+  eq(d.length, 2, 'a ticker with no target is not on the chart: never said is not zero');
+});
+t('drift reads a class group by its label', () => {
+  const d = H.driftRows([{ label: 'Bonds', value: 200, share: 0.2, target: 0.3 }], 1000);
+  eq(d[0].label, 'Bonds', 'the class layer has no ticker to be named by');
+});
+t('the drift layer is only a choice when both layers carry a target', () => {
+  const tick = { rows: [{ ticker: 'VTI', target: 0.5 }] };
+  const none = [];
+  const cls = [{ label: 'Bonds', target: 0.3 }];
+  eq(H.driftIsByClass({ ui: { driftByClass: true } }, tick, none), false,
+     'no class target: the stored preference cannot conjure one');
+  eq(H.driftIsByClass({ ui: {} }, { rows: [{ ticker: 'VTI' }] }, cls), true,
+     'targets at one layer only means that layer, whatever was stored');
+  eq(H.driftIsByClass({ ui: {} }, tick, cls), false, 'both layers: tickers unless asked');
+  eq(H.driftIsByClass({ ui: { driftByClass: true } }, tick, cls), true, 'and the switch rules');
+});
+t('the drift switch is absent rather than false when untouched', () => {
+  eq(H.coerceShape({ ui: { driftByClass: false } }).ui.driftByClass, undefined,
+     'the flowNoTransfers shape — an untouched plan grows no key');
+  eq(H.coerceShape({ ui: { driftByClass: 'yes' } }).ui.driftByClass, undefined,
+     'and only a real true counts');
+  eq(H.coerceShape({ ui: { driftByClass: true } }).ui.driftByClass, true);
+});
 t('the rollup carries each row\'s share and its target', () => {
   const st = H.coerceShape({ side: {
     portfolios: [{ id: 'a', name: 'A', rows: [
@@ -11743,6 +11822,148 @@ t('a chart that draws a line answers by column; one that does not keeps the defa
   } finally { f.remove(); }
 });
 
+/* ── The two Investments charts ─────────────────────────────────────────────
+   Asked for on 2026-09-03: the tab was five tables and a price bar, the only
+   substantial tab in the app with no chart on it at all. Both are drawn in a
+   real frame off the SAMPLE plan rather than a fixture, because the thing most
+   worth pinning is that the demo reaches them — a chart the sample never draws
+   is a chart nobody sees until they have typed their own targets in. */
+t('the Investments tab draws both charts, and the sample plan reaches them',
+  async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?invcharts=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.loadSample();
+    D.getElementById('tab-investments').click();
+    await new Promise((r) => setTimeout(r, 250));
+
+    const conc = W.Chart.getChart(D.getElementById('concChart'));
+    const drift = W.Chart.getChart(D.getElementById('driftChart'));
+    ok(conc, 'Where It\'s Held drew on the sample plan');
+    ok(drift, 'and so did Furthest From Target');
+
+    /* ── Where It's Held ── */
+    eq(conc.data.datasets.map((d) => d.label),
+       ['Brokerage', 'Roth IRA', "Ben's brokerage"],
+       'one band per account, largest first');
+    ok(conc.options.scales.x.stacked && conc.options.scales.y.stacked,
+       'stacked on both axes, or the bands sit side by side and say nothing');
+    eq(conc.options.indexAxis, 'y', 'horizontal — a ticker is a word');
+    eq(conc.data.labels, ['VTI', 'VXUS', 'BND'], 'the rollup\'s own order, biggest first');
+    /* The gap the chart exists to close: the table names Brokerage, Ben's and
+       the Roth against VTI and has never said how the money splits between
+       them. */
+    eq(conc.data.datasets.map((d) => d.data[0]), [56364, 56364, 10736],
+       'and VTI is split across the three, not collapsed into one figure');
+    /* Read off the document rather than through the app's own `cssVar`, which is
+       a `const` arrow and so is not a property of the frame's window — the same
+       trap the tooltip sweep hit with `charts`. */
+    const tok = (n) => W.getComputedStyle(D.documentElement).getPropertyValue(n).trim();
+    ok(conc.data.datasets.every((d, i) => d.backgroundColor === tok('--series-' + (i + 1))),
+       'every band is a pack ramp token in numeric order — the app invents none');
+    ok(conc.data.datasets.length <= 5,
+       'and never more than five bands: past that the ramp has nowhere to stand');
+
+    /* ── Furthest From Target ── */
+    eq(drift.data.datasets.length, 1,
+       'one series: over and under are told apart by the SIDE of the line, not by hue');
+    eq(drift.data.labels, ['VTI', 'BND', 'VXUS'],
+       'ranked by the size of the trade, whichever way each one points');
+    ok(drift.data.datasets[0].data[0] > 0, 'VTI is over its target — money to take out');
+    ok(drift.data.datasets[0].data[1] < 0, 'BND is under its — money to put in');
+
+    /* ── The layer switch ── */
+    const box = D.getElementById('driftByClass');
+    ok(box, 'the sample sets targets at both layers, so the switch is offered');
+    eq(box.checked, false, 'tickers unless asked');
+    box.click();
+    await new Promise((r) => setTimeout(r, 250));
+    const byCls = W.Chart.getChart(D.getElementById('driftChart'));
+    eq(byCls.data.labels, ['US stocks', 'Bonds', 'International stocks'],
+       'and the bars are the class layer now');
+    ok(/Every class you have set a target for/.test(
+         D.getElementById('driftChart').closest('.card').textContent),
+       'with the card\'s opening line saying so — it re-renders rather than redrawing '
+       + 'the bars, so the prose can never describe the other setting');
+    eq(D.getElementById('driftByClass').checked, true, 'the fresh box comes back ticked');
+
+    ok(/Drift column/.test(D.getElementById('driftChart').closest('.card').textContent),
+       'and the card points at the Drift column, which the rollup above is carrying');
+
+    /* One canvas per card, which is what lets each have its own button: chartIn
+       finds a card's chart with `charts.find`, so a second canvas under one
+       heading would leave the button resizing the first and the other stale. */
+    for (const id of ['concChart', 'driftChart']) {
+      const card = D.getElementById(id).closest('.card');
+      eq(card.querySelectorAll('.chartbox canvas').length, 1,
+         id + ' has its card to itself');
+      ok(card.querySelector(':scope > h2 > .chart-max'),
+         'and its own button to fill the window with');
+    }
+  } finally { f.remove(); }
+});
+
+/* ── One account: the bars, and no column to point at ───────────────────────
+   Targets live in `side.targets` whatever shape the plan is, but the rollup card
+   that CARRIES the Drift column needs two pots. So a reader with one brokerage
+   account and a target on every fund gets these bars and no column — and that is
+   exactly the case where the bars are the only place the figures appear, which
+   is what makes a sentence sending them to a table that is not there worth a
+   test of its own.
+
+   Seeded through `fin-state` rather than by reaching into the frame: `state` is
+   a top-level `let`, so it is not a property of the frame's window (the trap the
+   tooltip sweep hit with `charts`), and the CSP ships no 'unsafe-eval' to get at
+   it another way. The plan comes off `sampleState` so this is the SAME object
+   the button loads, trimmed to one pane. Backed up and put back in the finally,
+   the rule for every test on this page that writes to storage. */
+t('one account with targets gets the bars, and stops naming a column that is gone',
+  async () => {
+  const before = localStorage.getItem('fin-state');
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  try {
+    const plan = H.migrate(H.coerceShape(H.sampleState()));
+    plan.side.portfolios = [plan.side.portfolios[0]];
+    plan.side.retirementAccounts.forEach((a) => { delete a.rows; });
+    plan.ui = { view: 'investments' };
+    localStorage.setItem('fin-state', JSON.stringify(plan));
+    await new Promise((resolve) => {
+      f.onload = resolve;
+      f.src = 'index.html?onepot=' + Date.now();
+      document.body.appendChild(f);
+    });
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    D.getElementById('tab-investments').click();
+    await new Promise((r) => setTimeout(r, 250));
+
+    const solo = D.getElementById('driftChart');
+    ok(solo, 'one account with targets still gets the chart — this is where it is needed');
+    ok(!D.getElementById('concChart'),
+       'and no Where It\'s Held: one account has no split to show');
+    ok(!/Everything You Hold/.test(D.getElementById('views').textContent),
+       'the rollup card needs two pots, so the Drift column is nowhere on the page');
+    ok(!/Drift column/.test(solo.closest('.card').textContent),
+       'so the card stops pointing at it');
+  } finally {
+    f.remove();
+    if (before === null) localStorage.removeItem('fin-state');
+    else localStorage.setItem('fin-state', before);
+  }
+});
+
 group('Keeping the toolbars on screen');
 
 /* Charles asked for this on 2026-09-01: a way to pin and unpin the two rows of
@@ -12061,7 +12282,7 @@ t('a chart fills the window under a header that stays live', async () => {
        'and it is a plain div: a real <dialog> is promoted to the top layer, which would '
        + 'paint over the very header this exists to keep', overlay.tagName);
 
-    /* Progress is the tab that carries six of the twelve charts. */
+    /* Progress is the tab that carries six of the fourteen charts. */
     D.getElementById('tab-goals').click();
     await new Promise((r) => setTimeout(r, 300));
 
@@ -12258,7 +12479,7 @@ t('a chart fills the window under a header that stays live', async () => {
     W.closeMaxi();
 
     /* A card that carries a table under its chart shows the CHART. Four of the
-       twelve do, and letting forty rows of spending push the bars into a strip
+       fourteen do, and letting forty rows of spending push the bars into a strip
        would answer the opposite question to the one that was asked. */
     const mix = cardOf('mixChart');
     mix.querySelector('.chart-max').click();

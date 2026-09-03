@@ -691,6 +691,45 @@ target — "not classed yet" is not a thing to steer toward — and classRollup
 attaches targets only to labelled groups. Ticker targets and class targets
 are independent layers on purpose; the class one is where rebalancing rules
 usually live, and each dialog's sub says so.
+**The tab's TWO CHARTS arrived 2026-09-03** — until then Investments was five
+tables and a price bar, the only substantial tab in the app with no chart on it.
+Both sit LAST, after the tables they read from, and **each has a card to
+itself**, which is not taste: `chartIn(card)` finds a card's chart with
+`charts.find`, so a second canvas under one heading would leave the ⤢ resizing
+the first and the other stale behind it, and the step arrows would walk the pair
+as one stop.
+**`allHoldings` rows carry `byPot` for the first of them** — the same money split
+by the account it is in, accumulated off the UNROUNDED figure exactly as `value`
+is, so a band and the bar it sits in are arrived at the same way. `pots` only
+ever named the accounts; the split is the thing the table cannot say, and the
+reason the chart is not a picture of a column that already exists.
+**`potSeries(roll, cap = 5)` folds the account list to the ramp.** Five is the
+pack's wall for `--series-1..5` (gated at ΔE 18 between all ten pairs under both
+dichromacies) and its stated answer past five is CHANGE THE CHART, never a sixth
+colour — so the tail gathers into one band. A series carries its LABEL and the
+accounts it stands for, never a label matched back against an account name: an
+account really called "Everything else" would otherwise be handed the folded
+band's sum and the figure would look perfectly plausible. Colour is not the only
+channel either — the bands run in one fixed order along every bar, the legend
+runs in that order, and the tooltip names the account.
+**`driftRows(rows, total)` ranks by the TRADE, not the percentage.** One series
+and one colour: over and under are told apart by which side of the zero line a
+bar is on, which is a position, so this is one of the few charts here where the
+red-green rule costs nothing. The zero line alone is drawn at `--border-strong`
+against the grid's `--chart-grid`. Rows with no target are not on it at all —
+"never said" is not a drift of zero.
+**`driftIsByClass(st, roll, clsGroups)` decides the layer in ONE place**, because
+the card's opening line names it, its switch shows it and the bars are it. The
+switch (`ui.driftByClass`, the `flowNoTransfers` shape — absent when untouched)
+only rules when BOTH layers carry a target; with one, that layer is drawn
+whatever was stored. It RE-RENDERS rather than redrawing the bars, for the flow
+chart's reason: the prose changes with it.
+**And the card names the Drift column only when the column is on the page.**
+Targets live in `side.targets` whatever shape the plan is, but the rollup card
+that carries that column needs two pots — so a reader with one brokerage account
+and a target on every fund gets the bars and no column, which is exactly the case
+where the bars are the ONLY place the figures appear. Found by walking the gates
+after the charts were built, not by reading them.
 The linked panes' RECONCILE line compares holdingsValue against the linked
 accounts' computed balances this month — agreement is said out loud, the
 reconcileNote rule: that is the check passing, not nothing to say.

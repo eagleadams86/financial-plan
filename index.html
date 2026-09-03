@@ -2146,11 +2146,11 @@ td.projected { font-style: italic; color: var(--text-secondary); }
   min-height: 0; min-width: 0; width: auto; margin: 0; }
 #chartMaxi > .card > .card-body { flex: 1 1 auto; display: flex;
   flex-direction: column; min-height: 0; }
-/* `!important` earns its place here: nine of the twelve boxes write their height
-   as an INLINE style, because a box is sized to the chart it holds, and nothing
-   weaker than this beats a style attribute. */
+/* `!important` earns its place here: eleven of the fourteen boxes write their
+   height as an INLINE style, because a box is sized to the chart it holds, and
+   nothing weaker than this beats a style attribute. */
 #chartMaxi .chartbox { flex: 1 1 auto; height: auto !important; min-height: 0; }
-/* Four of the twelve cards carry a table under their chart, and two of those an
+/* Four of the fourteen cards carry a table under their chart, and two of those an
    Add button as well. Filling the window with the CHART is what this does, so
    the table stays on the page it came from, one press of Escape away — letting
    forty rows of spending push the bars into a strip would answer the opposite
@@ -5071,6 +5071,13 @@ function coerceShape(data) {
      grow a key describing how somebody else likes to read a chart). */
   if (d.ui.flowNoTransfers === true) d.ui.flowNoTransfers = true;
   else delete d.ui.flowNoTransfers;
+  /* Which layer the Investments drift chart is ranked at. The flowNoTransfers
+     shape exactly, and for its reasons: absent rather than false when untouched,
+     so a plan that has never been asked the question keeps the `ui` it has
+     always had, and a share link does not grow a key describing how somebody
+     else likes to read a chart. */
+  if (d.ui.driftByClass === true) d.ui.driftByClass = true;
+  else delete d.ui.driftByClass;
   /* Whether the Month page is showing the rows that aren't due this month.
      The same shape and the same reason: absent when untouched, so an `ui` that
      has never been asked the question doesn't grow a key. It lives in `ui`
@@ -11731,9 +11738,20 @@ function allHoldings(st) {
   const by = new Map();
   for (const pot of pots) for (const h of pot.rows) {
     const key = String(h.ticker || '?').trim().toUpperCase();
-    if (!by.has(key)) by.set(key, { key, ticker: String(h.ticker || '?').trim(), value: 0, pots: [] });
+    if (!by.has(key)) by.set(key, { key, ticker: String(h.ticker || '?').trim(), value: 0,
+      pots: [], byPot: {} });
     const g = by.get(key);
-    g.value = round2(g.value + (h.shares || 0) * (h.price || 0));
+    const raw = (h.shares || 0) * (h.price || 0);
+    g.value = round2(g.value + raw);
+    /* The same money split by WHERE it is held. `pots` names the accounts a
+       ticker turns up in and has never said how much is in each, so VOO in a
+       brokerage and VOO in a 401(k) read as one number — true about the
+       holding and silent about the only thing you would act on. Accumulated
+       off the unrounded figure exactly as `value` is, so a segment and the bar
+       it sits in are arrived at the same way rather than one rounding twice.
+       Keyed by NAME, like `pots`: two accounts sharing a name already fold
+       together there, and disagreeing about that here would be worse. */
+    g.byPot[pot.name] = round2((g.byPot[pot.name] || 0) + raw);
     if (!g.pots.includes(pot.name)) g.pots.push(pot.name);
   }
   const rows = [...by.values()].sort((a, b) => b.value - a.value);
@@ -11776,6 +11794,99 @@ function classRollup(rows, total, classTargets) {
     if (g.label && typeof t === 'number') g.target = t;
   }
   return groups;
+}
+
+/* The label the folded tail of the account list wears. A constant because the
+   renderer's prose and the chart's legend both say it, and two spellings of one
+   band is the kind of disagreement nothing on screen would report. */
+const OTHER_POT = 'Everything else';
+
+/* The rollup's rows as a stacked bar reads them: one series per ACCOUNT, in one
+   fixed order along every bar. Pure, pinned by tests.
+
+   Five is the wall, and it is the theme pack's, not a guess. `--series-1`…`-5`
+   are gated at DeltaE 18 between all ten pairs under both dichromacies, which is
+   the whole reason a red-green reader can use them at all — and the pack's own
+   rule for a sixth category is CHANGE THE CHART, never invent a colour. So the
+   accounts are ranked by what they hold and the tail is folded into one band.
+   With exactly five there is nothing to fold; past five, four keep their own
+   colour and the rest gather.
+
+   A series carries its LABEL and the accounts it stands for, never a label
+   matched back against an account name: an account really called "Everything
+   else" would otherwise be handed the folded band's sum, and the figure would
+   look perfectly plausible. */
+function potSeries(roll, cap = 5) {
+  const totals = new Map();
+  for (const r of roll.rows)
+    for (const name of Object.keys(r.byPot || {}))
+      totals.set(name, round2((totals.get(name) || 0) + r.byPot[name]));
+  /* Ties broken by name so the band order is stable between renders — two
+     accounts holding the same amount must not swap colours on a redraw. */
+  const ranked = [...totals.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(e => e[0]);
+  const named = ranked.length > cap ? ranked.slice(0, cap - 1) : ranked;
+  const tail = ranked.slice(named.length);
+  const series = named.map(n => ({ label: n, keys: [n] }));
+  /* And an account really called "Everything else" must not end up sharing a
+     legend entry with the band either — the keys above already send the money
+     to the right place, this is so the reader can tell which line is which. */
+  if (tail.length) series.push({
+    label: named.includes(OTHER_POT) ? `${OTHER_POT} (${tail.length} more)` : OTHER_POT,
+    keys: tail });
+  const rows = roll.rows.map(r => ({
+    ticker: r.ticker,
+    values: series.map(s => round2(s.keys
+      .reduce((sum, k) => sum + ((r.byPot || {})[k] || 0), 0))),
+  }));
+  return { series, rows, folded: tail };
+}
+
+/* The rollup's rows — or its class groups, the two layers a target can be set
+   at — ranked by the TRADE that would close the gap. `move` is dollars: what is
+   held now less what the target says should be, so a positive figure is money to
+   take out and a negative one money to put in. That is the whole point of the
+   chart over the column it reads from: a table of signed percentages makes you
+   rank them in your head, and the thing you actually want is which one is worth
+   doing first.
+
+   A row with no target is not here at all. An absent target is "never said", and
+   a drift of zero measured against nothing would be a claim the reader never
+   made — the same rule that keeps the Target and Drift columns hidden until one
+   exists. Ties broken by name, so the order is stable between renders. Pure. */
+function driftRows(rows, total) {
+  return rows.filter(r => typeof r.target === 'number')
+    .map(r => ({
+      label: r.ticker || r.label,
+      move: round2(r.value - r.target * total),
+      share: r.share, target: r.target,
+    }))
+    .sort((a, b) => Math.abs(b.move) - Math.abs(a.move) || a.label.localeCompare(b.label));
+}
+
+/* The class groups the drift chart measures over, built in one place so the
+   card and the bars cannot disagree about them. Empty when nothing is classed
+   yet — classRollup would happily return a single "Not classed yet" bucket, and
+   that bucket can carry no target, so there would be nothing to draw. */
+function driftClassGroups(st, roll) {
+  return roll.rows.some(r => r.cls)
+    ? classRollup(roll.rows, roll.total, ((st.side || {}).classTargets || {})) : [];
+}
+
+/* WHICH layer the drift chart is drawn over, decided once. The card's heading
+   line names the layer, its switch shows the layer, and the bars are the layer:
+   three things that have to agree, and a second reader of this is exactly how a
+   chart ends up captioned as the other one.
+   The switch only rules when there is really a choice. With targets at one layer
+   only, that layer is drawn whatever the stored preference says — offering to
+   rank by a class nobody has set a target for would be an empty chart with a
+   tick beside it. */
+function driftIsByClass(st, roll, clsGroups) {
+  const anyTicker = roll.rows.some(r => typeof r.target === 'number');
+  const anyClass = clsGroups.some(g => typeof g.target === 'number');
+  if (!anyClass) return false;
+  if (!anyTicker) return true;
+  return !!(st.ui || {}).driftByClass;
 }
 
 /* Gain over a typed cost basis, formatted once for the tables and the dialog
@@ -14848,6 +14959,11 @@ function renderInvestments() {
      with one, it is that pane's own table wearing a grander heading. */
   const roll = allHoldings(state);
   const potCount = new Set(roll.rows.flatMap(r => r.pots)).size;
+  /* Built once, up here, because the By Class table below and the drift card at
+     the bottom of the tab both read it. Two calls would be two readers of one
+     fact, and this app's whole argument against that is that they drift in
+     silence. */
+  const clsGroups = driftClassGroups(state, roll);
   /* Target and Drift columns appear once any row has a target — the column
      rule everywhere else. Drift is POINTS (a difference of two percentages),
      with the dollar move that would close it: share × total is what the
@@ -14890,7 +15006,7 @@ function renderInvestments() {
     ${!roll.rows.some(r => r.cls) ? '' : (() => {
       /* Only once a class exists — a table of one "Not classed yet" row would
          be the feature demanding attention before it has anything to say. */
-      const groups = classRollup(roll.rows, roll.total, (s.classTargets || {}));
+      const groups = clsGroups;
       const anyClsTarget = groups.some(g => typeof g.target === 'number');
       return `<h3 style="margin:18px 0 4px">By Class</h3>
       <p class="sub" style="margin-bottom:10px">The same money folded into the classes you
@@ -14914,12 +15030,166 @@ function renderInvestments() {
       </table></div>`;
     })()}
   </div>` : '';
+  /* ── The two charts, last on the tab ───────────────────────────────────────
+     After the tables they read from — the rule Progress and Vacations already
+     follow, and for the same reason: the tables are what you came here for and
+     a chart is the summary you look up at afterwards.
+
+     ONE CANVAS PER CARD, which is not a matter of taste. `chartIn(card)` finds
+     a card's chart with `charts.find`, so a second canvas under one heading
+     would leave the maximise button resizing the first and the other one stale
+     behind it, and the arrows would walk past both as one stop. */
+  const boxH = (n) => Math.max(180, Math.min(560, n * 26 + 60));
+  /* Both gates ask for TWO rows, not one. The Drift column appears as soon as a
+     single target exists, and that is right for a column — but a chart of one
+     bar has no comparison to make, which is the only thing a chart is for. Same
+     answer as the rollup's own two-pot gate one card up. */
+  const ser = potSeries(roll);
+  const concCard = (roll.rows.length >= 2 && potCount >= 2 && ser.series.length >= 2)
+    ? `<div class="card">
+    <h2>Where It's Held</h2>
+    <p class="sub">The same holdings, biggest first, each bar cut by the account it sits in.
+      The table above names the accounts a ticker turns up in; this says how much is in
+      each.${ser.folded.length ? ` The smallest ${plural(ser.folded.length, 'account')}
+      ${ser.folded.length === 1 ? 'is' : 'are'} gathered into one band — five is as many as
+      the palette can hold apart, and a sixth colour nobody can tell from the fifth would be
+      worse than a band that says what it is.` : ''}</p>
+    <div class="chartbox" style="height:${boxH(roll.rows.length)}px"><canvas id="concChart"></canvas></div>
+    <p class="chartkey">Bands run in the same order along every bar, largest account first.</p>
+  </div>` : '';
+  /* The card points at the Drift column only when the column is THERE. Targets
+     live in `side.targets` whatever the shape of the plan, so a reader with one
+     brokerage account and a target on every fund gets these bars — and the
+     rollup card that CARRIES the Drift column needs two pots, so it never drew
+     for them. The figures are the same either way; a sentence sending them to a
+     table that is not on the page is the part that would be wrong, and it would
+     be wrong exactly where these bars are the only place the numbers appear. */
+  const byClass = driftIsByClass(state, roll, clsGroups);
+  const anyClsTarget = clsGroups.some(g => typeof g.target === 'number');
+  const drift = driftRows(byClass ? clsGroups : roll.rows, roll.total);
+  const driftCard = drift.length >= 2 ? `<div class="card">
+    <h2>Furthest From Target</h2>
+    <p class="sub">Every ${byClass ? 'class' : 'ticker'} you have set a target for, ranked by
+      the trade that would close the gap. To the right of the line is money to take out; to
+      the left, money to put in.${rollup ? ` These are the Drift column's own figures — all
+      this does is put them in the order you would act on them.` : ''}</p>
+    ${!(anyTarget && anyClsTarget) ? '' : `<label class="checkline stacked" style="margin-bottom:10px">
+      <input type="checkbox" id="driftByClass"${byClass ? ' checked' : ''}>
+      <span>Rank by asset class instead of by ticker
+      <span class="checkhint">Three funds tracking one index are one bet, and one target, at
+        this layer — usually where a rebalancing rule actually lives.</span></span></label>`}
+    <div class="chartbox" style="height:${boxH(drift.length)}px"><canvas id="driftChart"></canvas></div>
+  </div>` : '';
   return priceBar
-    + (panes ? `<div class="cards2">${panes}</div>${rollup}`
+    + (panes ? `<div class="cards2">${panes}</div>${rollup}${concCard}${driftCard}`
              : `<div class="card"><div class="empty"><h2>No Investment Accounts Yet</h2>
                 <p>Add one for each place you hold investments — a brokerage, an HSA, a
                   pension pot. Each gets its own pane of holdings.</p></div></div>`)
     + `<div class="addbar"><button class="btn small" data-add="portfolio">＋ Add an Investment Account</button></div>`;
+}
+
+/* One bar per ticker, cut by the account it is held in — the concentration
+   question the rollup's own opening line asks, with "and where is it?" answered
+   in the same look. Horizontal for the reason the spending bars are: a ticker is
+   a word, and a word does not fit under a vertical bar.
+
+   COLOUR MEANS AN ACCOUNT here, so it comes off `--series-1`…`-5` in numeric
+   order and nothing else — the pack's categorical ramp, and the app never
+   invents one of its own. potSeries can never hand back more than five, so the
+   ramp is never run past.
+   And colour is not the only channel carrying it, which for a red-green reader
+   is the part that matters: the bands run in the SAME ORDER along every bar, the
+   legend runs in that order too, and the tooltip names the account beside its
+   figure. */
+function buildConcentrationChart() {
+  const roll = allHoldings(state);
+  if (roll.rows.length < 2) return;
+  const { series, rows } = potSeries(roll);
+  if (series.length < 2) return;
+  newChart('concChart', {
+    type: 'bar',
+    data: { labels: rows.map(r => r.ticker), datasets: series.map((s, i) => ({
+      label: s.label,
+      data: rows.map(r => r.values[i]),
+      backgroundColor: cssVar(`--series-${i + 1}`),
+      /* A hairline in the CARD's own colour, so two neighbouring bands never run
+         together into one block whatever the theme is. Deliberately not a series
+         colour: this is a separator, and drawing it from the ramp would put a
+         sixth thing on an axis the ramp is gated on. */
+      borderColor: cssVar('--bg-card'), borderWidth: 1,
+    }))},
+    options: {
+      indexAxis: 'y',
+      /* A bar hovers by ITSELF — the family's chart rule. A stacked segment is a
+         figure of its own about one account, and the segment beside it is a
+         different account's; reading the whole column at once would answer a
+         question nobody pointed at. */
+      interaction: { mode: 'nearest', intersect: true },
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: {
+          label: (t) => `${t.dataset.label}: ${fmtMoney(t.parsed.x)}`,
+          /* The bar's own total under the segment you are on, because the
+             segment alone cannot say how big a share of the whole this is —
+             which is the question the card exists for. */
+          footer: (items) => {
+            const r = roll.rows[items[0].dataIndex];
+            return `${fmtMoney(r.value)} in all · ${(r.share * 100).toFixed(1)}% of holdings`;
+          },
+        } } },
+      scales: { y: Object.assign(chartAxes(), { stacked: true }),
+        x: Object.assign(chartAxes(), { stacked: true,
+          ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) } }) },
+    },
+  }, `Holdings by ticker and account: ${rows.map((r, i) =>
+    `${r.ticker}, ${fmtMoney(roll.rows[i].value)} — ${series
+      .map((s, j) => r.values[j] ? `${s.label} ${fmtMoney(r.values[j])}` : null)
+      .filter(Boolean).join(', ')}`).join('; ')}.`);
+}
+
+/* The drift column, put in order. One series and one colour: over and under are
+   told apart by WHICH SIDE OF THE LINE the bar is on, which is a position, not a
+   hue — so this is one of the few charts in the app where the red-green rule
+   costs nothing to obey, because there was never a reason to reach for two
+   colours in the first place. */
+function buildDriftChart() {
+  const roll = allHoldings(state);
+  const clsGroups = driftClassGroups(state, roll);
+  const byClass = driftIsByClass(state, roll, clsGroups);
+  const rows = driftRows(byClass ? clsGroups : roll.rows, roll.total);
+  if (rows.length < 2) return;
+  newChart('driftChart', {
+    type: 'bar',
+    data: { labels: rows.map(r => r.label), datasets: [{
+      label: 'Move to reach target',
+      data: rows.map(r => r.move),
+      backgroundColor: cssVar('--series-1'), borderWidth: 0,
+    }]},
+    options: {
+      indexAxis: 'y',
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (t) => {
+          const r = rows[t.dataIndex];
+          const pts = (r.share - r.target) * 100;
+          return [
+            r.move === 0 ? 'On target'
+              : `${fmtMoney(Math.abs(r.move))} ${r.move > 0 ? 'over' : 'under'}`,
+            `Holding ${(r.share * 100).toFixed(1)}%, target ${(r.target * 100).toFixed(1)}% · ${
+              pts > 0 ? '+' : ''}${pts.toFixed(1)} pts`,
+          ];
+        } } } },
+      scales: { y: chartAxes(), x: {
+        ticks: { color: cssVar('--chart-tick'), callback: (v) => fmtMoney0(v) },
+        /* Zero is this chart's whole reference — everything is measured as a
+           distance from it — so that one line is drawn at border strength and
+           the rest of the grid stays quiet behind the bars. A token, not a new
+           colour. */
+        grid: { color: (ctx) => ctx.tick && ctx.tick.value === 0
+          ? cssVar('--border-strong') : cssVar('--chart-grid') },
+      } },
+    },
+  }, `${byClass ? 'Classes' : 'Tickers'} furthest from target: ${rows.map(r =>
+    `${r.label}, ${r.move === 0 ? 'on target'
+      : `${fmtMoney(Math.abs(r.move))} ${r.move > 0 ? 'over' : 'under'}`}`).join('; ')}.`);
 }
 
 function wireInvestments() {
@@ -16840,7 +17110,26 @@ function wireView(view) {
     });
   }
   if (view === 'vacations') buildVacationsChart();
-  if (view === 'investments') wireInvestments();
+  if (view === 'investments') {
+    wireInvestments();
+    buildConcentrationChart();
+    buildDriftChart();
+    /* The drift chart's layer switch, built on the flow chart's: it RE-RENDERS
+       rather than redrawing the bars, because the card's opening line names the
+       layer too, and bars that had changed under prose that had not would be
+       exactly the disagreement that rule exists to stop. Focus goes back onto
+       the fresh box — the re-render destroys the one just ticked. */
+    const byCls = F('driftByClass');
+    if (byCls) byCls.onchange = () => {
+      state.ui = state.ui || {};
+      /* Absent, not false, when it is off — coerceShape's rule, applied where
+         it is written so a backup made before the next load matches. */
+      if (byCls.checked) state.ui.driftByClass = true;
+      else delete state.ui.driftByClass;
+      save(); render();
+      F('driftByClass')?.focus();
+    };
+  }
   /* LAST, after the charts. A canvas built inside a display:none card sizes
      itself to nothing; drawing them first and folding the box afterwards means
      each one is already the right size when its box is opened again. */
@@ -25683,6 +25972,10 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   coerceQuotes,
   fmtMoney, fmtMoneyIn, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
   reconcileNote, impliedGrowth, growthOfferLabel, acceptedFigures,
+  /* The Investments charts' readers — pure, so the suite pins the folding, the
+     ranking and the layer choice rather than a canvas it would have to lay out
+     and hover first. */
+  potSeries, driftRows, driftClassGroups, driftIsByClass, OTHER_POT,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   enteredCellFor,

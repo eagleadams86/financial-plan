@@ -1043,6 +1043,29 @@ retirement accounts and your allocation targets, and says so.
   level, where saying it per ticker would measure each fund alone against the
   whole.
 
+### The Two Charts
+
+Both sit at the bottom of the tab, after the tables they read from, and each
+fills the window on its own with the ⤢ button.
+
+- **Where It's Held** — one bar per ticker, biggest first, cut into bands by
+  the account it sits in. The rollup table names the accounts a ticker turns up
+  in and has never said how much is in each, so VOO in a brokerage and VOO in a
+  401(k) read there as a single number; this is where they come apart. Bands run
+  in the same order along every bar, and the palette holds five accounts apart —
+  past that the smallest are gathered into one band rather than a sixth colour
+  nobody could tell from the fifth.
+- **Furthest From Target** — the Drift column put in order: every ticker you
+  have set a target for, ranked by the size of the trade that would close the
+  gap. Right of the line is money to take out, left of it money to put in, so
+  which way a holding has wandered is a position on the chart rather than a
+  colour. Once you have set class targets too, a switch ranks by **asset class**
+  instead — usually the layer a rebalancing rule actually lives at.
+
+Both appear only once they have something to say: two tickers and two accounts
+for the first, two targets for the second. A single bar is a table row wearing a
+bigger heading.
+
 ### Reconciling Against the Budget
 
 A pane that names budget accounts also reconciles against them: its subtitle
