@@ -1762,6 +1762,40 @@ same day; the audit's other three are open and listed at the end.
   feeds itself"). Only DESCRIBED, not changed — changing it would move figures
   in every projected year, which is the reader's call, not a fix.
 
+## The as-of pair stacks rather than overflowing (2026-09-03)
+
+Charles: *"fix the overflowing pill on mobile."* The Net Worth card's "as of"
+switch ran past the right edge of its card at phone width — 360px of nowrap text
+against a 305px card body at 375px.
+
+- **Nothing in it could shrink, and that is by design.** Each label carries a
+  month AND what that month is — "Aug 2026 · settled", "Sep 2026 · this month" —
+  and `.vswitch` is `white-space: nowrap` because breaking a label at its own "·"
+  reads as two separate things rather than one qualified month.
+- **`flex-wrap` on the frame plus `flex: 1 1 auto` on the buttons is the whole
+  fix, and it is deliberately NOT a width test.** The pair stacks exactly when
+  the line will not hold it, so a reader whose browser default is 20px gets the
+  stack at a width where a 16px reader does not. `flex: 1 1 auto` fills each line
+  it lands on, so stacked the two segments are equal.
+- **Two things CSS cannot ask about — whether it actually wrapped — are asked of
+  the width instead**, at 520px, comfortably below the ~474px where the line
+  stops holding it at a 16px root. Get that wrong at an unusual root size and the
+  result is a radius that looks dated, never a control that runs off the card.
+  - The frame **stops being a pill**: a `--radius-pill` box two rows tall is a
+    lozenge whose ends curve through the buttons inside it. Segments take 2px
+    less than the frame, the way the heading band does.
+  - `.asofrow` **stops wrapping**, so the ⓘ stays BESIDE the pair instead of
+    dropping to a line of its own. A help dot stranded under a control reads as
+    explaining whatever comes next. Held to one line, the pair shrinks instead —
+    which is what makes it stack.
+
+**The test is a SWEEP, not this one control**: at 375px, nothing in `#views` on
+any tab may be wider than the window unless it sits in a box that scrolls
+sideways on purpose. A width that overflows is a class of bug — it arrives
+whenever a label gains a word — and it is invisible on the desktop where the work
+is done. The sweep found exactly one offender, which is what made the fix a
+one-line answer instead of a hunt.
+
 ## Stepping between charts in full screen (2026-09-03)
 
 **A `‹` and a `›` beside the ⤢ walk the charts on the tab without coming back
@@ -1805,6 +1839,14 @@ way, for the reason its ⤢ already does.**
   the suite, because a margin is only visible as geometry.
 - **The print rule names `.maxi-nav` explicitly.** The siblings' arrows are
   inside `#chartMaxi`, which print already hides; these are not.
+- **The arrow-key handler skips ARIA ROLES, not just form controls.** Found here
+  the same day: the Net Worth card carries its "as of" radio pair INSIDE the
+  card, so it is still on screen and still reachable while that card fills the
+  window — and Right both moved the month and stepped the chart. A
+  `<button role="radio">` is not an `<input>`. The guard now names radiogroup,
+  tablist, listbox, menu, menubar, slider, spinbutton, grid and tree, and **the
+  same list went into all four apps**, because the next such control will be the
+  same shape and nobody will remember this.
 
 Its own `t()` with its own 1280x900 frame. **A test that holds a card across a
 render is holding a node that no longer exists**, so the assertions after the

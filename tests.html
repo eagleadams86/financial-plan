@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 921;
+const EXPECTED = 922;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -12590,6 +12590,34 @@ t('the arrows walk the charts on the tab without coming back down', async () => 
     eq(nameUp(), keyFrom,
        'an arrow pressed in a header picker is the picker\u2019s, not the walk\u2019s');
 
+    /* ── …and so is one pressed in a RADIO GROUP ───────────────────────────
+       Form controls were the obvious half of that rule and the ARIA roles were
+       the half that bit. The Net Worth card carries its "as of" pair INSIDE the
+       card, so it is still on screen and still reachable while that card fills
+       the window — and Right both moved the month and stepped the chart. Nothing
+       about a `<button role="radio">` is an <input>. */
+    W.closeMaxi();
+    await new Promise((r2) => setTimeout(r2, 250));
+    D.getElementById('tab-goals').click();
+    await new Promise((r2) => setTimeout(r2, 450));
+    const worth = [...D.querySelectorAll('#views .card')]
+      .find(c => /Net Worth/.test(c.textContent) && c.querySelector('.asofswitch'));
+    ok(!!worth, 'the Net Worth card carries an as-of pair');
+    worth.querySelector(':scope > h2 > .chart-max').click();
+    await new Promise((r2) => setTimeout(r2, 350));
+    const heldUp = nameUp();
+    const onNow = D.querySelector('#chartMaxi .vswitch[aria-checked="true"]').dataset.asof;
+    const other = D.querySelector(`#chartMaxi .vswitch:not([data-asof="${onNow}"])`);
+    other.focus();
+    other.dispatchEvent(new W.KeyboardEvent('keydown',
+      { key: onNow === 'now' ? 'ArrowLeft' : 'ArrowRight', bubbles: true }));
+    await new Promise((r2) => setTimeout(r2, 500));
+    eq(nameUp(), heldUp,
+       'an arrow in the as-of pair leaves the chart where it was');
+    ok(D.querySelector('#chartMaxi .vswitch[aria-checked="true"]').dataset.asof !== onNow,
+       'and moves the month, which is whose arrow it was');
+    W.closeMaxi();
+
     W.closeMaxi();
     await new Promise((r2) => setTimeout(r2, 300));
     eq(D.querySelectorAll('.chart-slot').length, 0, 'closing leaves no placeholder behind');
@@ -12624,6 +12652,97 @@ t('the arrows walk the charts on the tab without coming back down', async () => 
        'and not shoved up against the heading it is nothing to do with',
        Math.round(btnBox.left - soloTitle.right) + 'px of gap');
     W.closeMaxi();
+  } finally { f.remove(); }
+});
+
+/* ── Nothing runs off the side of a phone ────────────────────────────────────
+   Reported by Charles on 2026-09-03: the Net Worth card's "as of" pair ran past
+   the right edge of its card at phone width. The pair carries a month AND what
+   that month is — "Aug 2026 · settled", "Sep 2026 · this month" — 360px of
+   nowrap text against a 305px card body, and nothing in it could shrink.
+
+   THE SWEEP IS THE TEST, not the one control. A width that overflows is a class
+   of bug, not an instance: it arrives whenever a label gets longer or a control
+   gains a word, and it is invisible on the desktop where the work is done. The
+   sweep found exactly one offender across every tab, which is what made the fix
+   a one-line answer instead of a hunt.
+
+   Anything inside a box that scrolls sideways ON PURPOSE is not an offender —
+   the budget grid is twelve months wide and always will be. */
+t('nothing runs off the side of a phone', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:375px;height:812px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?narrow=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    await new Promise((r) => setTimeout(r, 400));
+
+    const tabs = [...D.querySelectorAll('.tabs [role="tab"]')].filter(t => !t.hidden);
+    ok(tabs.length > 3, 'there are tabs to walk', tabs.length);
+
+    const over = [];
+    for (const tab of tabs) {
+      tab.click();
+      await new Promise((r) => setTimeout(r, 400));
+      const vw = D.documentElement.clientWidth;
+      for (const el of D.querySelectorAll('#views *')) {
+        const b = el.getBoundingClientRect();
+        if (b.width === 0 || b.right <= vw + 1) continue;
+        let inScroller = false;
+        for (let p = el.parentElement; p && p !== D.body; p = p.parentElement) {
+          const ox = W.getComputedStyle(p).overflowX;
+          if (ox === 'auto' || ox === 'scroll') { inScroller = true; break; }
+        }
+        if (!inScroller) {
+          over.push(tab.textContent.trim() + ' → ' + el.tagName.toLowerCase()
+                    + '.' + String(el.className || '').split(' ')[0]);
+        }
+      }
+    }
+    eq([...new Set(over)].slice(0, 8), [],
+       'every tab fits the width of a phone, unless it is in a box that scrolls sideways '
+       + 'on purpose');
+
+    /* And what the fix actually does, at the one place it fires. */
+    D.getElementById('tab-goals').click();
+    await new Promise((r) => setTimeout(r, 400));
+    const row = D.querySelector('.asofrow');
+    const sw = row.querySelector('.asofswitch');
+    const dot = row.querySelector('.tile-help');
+    const seg = [...sw.querySelectorAll('.vswitch')];
+    const swBox = sw.getBoundingClientRect();
+    ok(swBox.height > 44, 'the pair STACKS when the line will not hold it',
+       Math.round(swBox.height) + 'px tall');
+    eq(Math.round(seg[0].getBoundingClientRect().width),
+       Math.round(seg[1].getBoundingClientRect().width),
+       'and the two segments take the same width as each other');
+    ok(parseFloat(W.getComputedStyle(sw).borderRadius) < swBox.height / 2,
+       'the frame stops being a pill — two rows inside a stadium is a lozenge whose '
+       + 'ends curve through the buttons', W.getComputedStyle(sw).borderRadius);
+    ok(Math.abs(dot.getBoundingClientRect().top - swBox.top) < swBox.height,
+       'and the ⓘ stays BESIDE the pair rather than stranded on a line of its own — '
+       + 'a help dot under a control reads as explaining whatever comes next');
+
+    /* Wide again: the desktop shape is untouched. The frame is resized rather
+       than a second one booted, so this is the real rule firing at a real width. */
+    f.style.width = '1280px';
+    await new Promise((r) => setTimeout(r, 400));
+    const wideBox = D.querySelector('.asofswitch').getBoundingClientRect();
+    ok(wideBox.height < 44, 'with room, the pair is one line again',
+       Math.round(wideBox.height) + 'px tall');
+    ok(parseFloat(W.getComputedStyle(D.querySelector('.asofswitch')).borderRadius)
+       > wideBox.height / 2,
+       'and a pill again — the frame is what says these two are alternatives');
   } finally { f.remove(); }
 });
 
