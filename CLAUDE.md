@@ -5395,3 +5395,16 @@ against the unfixed page; the commit that fixed it quotes the row.
   (tab + 4) rather than as a number, and starts from unpinned and restores the pin it
   found — the pin is a device setting on the harness's origin, and a run that threw
   half-way once left the next run measuring a pinned row.
+
+- **The ⓘ dots answer on a maximised card (fix 4).** Every info dot is answered by one delegated listener on `#views` (the row editor's
+  dialog has its own), and `attachMaxi()` MOVES the card into `#chartMaxi`, outside both —
+  so on five cards (Net Worth's band dot and its as-of row dot, Where the Money Goes, Where
+  the Pot Is Heading, Giving over Time, Raises over Time) the dot did nothing while the
+  chart filled the window, though the Escape handler's own comment assumed it did.
+  `#chartMaxi` carries the same three-line handler now — read the dot, `stopPropagation`
+  (the band's click folds the card), `openHelp` — a third copy on the root of a subtree
+  the other two cannot reach. The same dot opens the same window from any of them, so one
+  dot still has one explanation. The test presses the dot through `elementFromPoint` and
+  shows the Escape handler yielding while the dialog is open; the dialog's own cancel is
+  the browser's, exercised by a real key in `mm-verify-f4-helpdot.mjs` rather than by a
+  synthetic one that cannot drive it.

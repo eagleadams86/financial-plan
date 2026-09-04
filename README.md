@@ -1542,7 +1542,10 @@ choice actually uses.
   (A note is the exception: those are written over several lines and added to,
   so they're left as they are.)
 - **Clicking outside any dialog closes it** without saving.
-- **A small ⓘ beside a figure explains the arithmetic** behind it.
+- **A small ⓘ beside a figure explains the arithmetic** behind it — including
+  on a chart that is filling the window: the explanation opens on top, Escape
+  closes it first, and the chart is still there behind it. (Fixed 2026-09-04;
+  the dots on a full-screen card used to do nothing at all.)
 - **The budget grid is keyboard-operable**: Tab into it, move between cells
   with the arrow keys, and press Enter to edit the one you're on. Every
   clickable row on the other tabs — a donation, a trip line, a comp year, a

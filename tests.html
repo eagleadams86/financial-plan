@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 939;
+const EXPECTED = 940;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -13915,6 +13915,84 @@ t('at a phone width the tab scroller leaves the focus ring room on every side', 
        + 'padding — the height the pin code measured before the fix',
        stuck.getBoundingClientRect().height.toFixed(1) + ' vs ' + (fb.height + 4 + padB).toFixed(1));
   } finally { W.applyPin(pinWas); f.remove(); }
+});
+
+/* ── Fix 4: the ⓘ dots were dead on a maximised card ───────────────────────
+   Every info dot on the page is answered by ONE delegated listener on #views
+   (the row editor's dialog has its own). attachMaxi() MOVES the card into
+   #chartMaxi, which is outside both — so on five cards (Net Worth's band dot
+   and its as-of row dot, Where the Money Goes, Where the Pot Is Heading, Giving
+   over Time, Raises over Time) the dot did nothing while the chart filled the
+   window. The Escape handler's own comment already assumed it worked up there.
+   A REAL press through elementFromPoint, because the band's fold handler is
+   what a wrong dispatch would have missed. */
+t('a ⓘ on a maximised chart card opens its explanation, and Escape closes that first', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'maxihelp');
+  try {
+    D.getElementById('tab-goals').click();
+    await new Promise((r) => setTimeout(r, 500));
+    const worth = [...D.querySelectorAll('#views .card')]
+      .find(c => /Net Worth/.test(c.textContent) && c.querySelector(':scope > h2 [data-help]'));
+    ok(!!worth, 'the Net Worth card carries a ⓘ in its heading band');
+    worth.querySelector(':scope > h2 > .chart-max').click();
+    await new Promise((r) => setTimeout(r, 300));
+    ok(W.maxiCard() === worth, 'and it is filling the window');
+    const help = D.getElementById('helpDialog');
+    ok(!help.open, 'nothing is explained yet');
+
+    const press = async (dot) => {
+      const r = dot.getBoundingClientRect();
+      const hit = D.elementFromPoint(Math.round(r.left + r.width / 2),
+                                     Math.round(r.top + r.height / 2));
+      ok(hit === dot, 'what a pointer hits in the middle of the dot IS the dot',
+         hit && hit.tagName + '.' + hit.className);
+      hit.dispatchEvent(new W.MouseEvent('click', { bubbles: true, cancelable: true,
+        clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+      await new Promise((r2) => setTimeout(r2, 200));
+    };
+    const bandDot = worth.querySelector(':scope > h2 [data-help]');
+    await press(bandDot);
+    ok(help.open,
+       'pressing the band’s ⓘ on a MAXIMISED card opens its explanation — the card '
+       + 'is in #chartMaxi now, outside the #views listener that answers every other dot');
+    /* HELP is a top-level const, not a property of the frame's window, so the
+       title is pinned by rule: it is something, and the second dot's is another. */
+    const bandTitle = D.getElementById('helpTitle').textContent.trim();
+    ok(bandTitle.length > 0, 'with a title in it', JSON.stringify(bandTitle));
+    ok(!worth.classList.contains('boxshut'),
+       'and the press never reached the band’s fold handler');
+    ok(W.maxiCard() === worth, 'the chart is still up behind it');
+
+    /* Escape belongs to the dialog while it is open — the full-screen handler
+       must stand aside, or one Escape would close both. A synthetic key cannot
+       drive a real <dialog>'s own cancel, so the dialog is closed by hand after
+       the handler has been shown to yield. */
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 200));
+    ok(W.maxiCard() === worth,
+       'Escape with the explanation open leaves the chart up — it was the dialog’s');
+    help.close();
+    await new Promise((r) => setTimeout(r, 100));
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 300));
+    ok(!W.maxiCard(), 'and the next Escape, with nothing on top, brings the chart down');
+
+    /* The dot INSIDE the card body — the as-of row's — goes the same way. */
+    D.getElementById('tab-goals').click();
+    await new Promise((r) => setTimeout(r, 450));
+    const again = [...D.querySelectorAll('#views .card')]
+      .find(c => /Net Worth/.test(c.textContent) && c.querySelector('.asofrow [data-help]'));
+    ok(!!again, 'the Net Worth card carries a second ⓘ, on its as-of row');
+    again.querySelector(':scope > h2 > .chart-max').click();
+    await new Promise((r) => setTimeout(r, 300));
+    await press(again.querySelector('.asofrow [data-help]'));
+    ok(help.open, 'the as-of row’s ⓘ opens too while the card fills the window');
+    ok(D.getElementById('helpTitle').textContent.trim() !== bandTitle,
+       'and it is a different explanation — one dot, one explanation',
+       JSON.stringify(D.getElementById('helpTitle').textContent.trim()));
+    help.close();
+    W.closeMaxi();
+  } finally { f.remove(); }
 });
 
 
