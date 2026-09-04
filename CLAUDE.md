@@ -730,6 +730,12 @@ switch (`ui.driftByClass`, the `flowNoTransfers` shape — absent when untouched
 only rules when BOTH layers carry a target; with one, that layer is drawn
 whatever was stored. It RE-RENDERS rather than redrawing the bars, for the flow
 chart's reason: the prose changes with it.
+**Both switches sit UNDER their chart** (2026-09-04, this one moved to join the
+flow card's): a control between a card's opening sentence and its bars pushes
+the bars down the screen, and each of these asks a question you only have after
+looking. 16px above, `.sub`'s own bottom margin — the interval the add bars
+already use after prose. The gate is the reason this one is easy to forget: a
+plan with class targets and no ticker target never draws it at all.
 **And the card names the Drift column only when the column is on the page.**
 Targets live in `side.targets` whatever shape the plan is, but the rollup card
 that carries that column needs two pots — so a reader with one brokerage account
