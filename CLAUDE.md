@@ -1889,7 +1889,10 @@ way, for the reason its ⤢ already does.**
 - **The focus is put back BY HAND after a step**, and that is the price of the
   band. Moving the nav to the next card's band drops the keyboard; the buttons
   are the same two elements wherever the nav is, so the one that was pressed gets
-  it back.
+  it back. **And if nothing up there holds it afterwards, the new card's ⤢
+  takes it** (2026-09-04): a step lands focus on the arrow that pressed it, or
+  on the new card's ⤢, never on the page underneath. See the 2026-09-03 audit
+  fixes at the end.
 - **A step's click stops at the button.** `e.stopPropagation()` plus
   `pointer-events: none` on the icon — without both, the band's fold handler sees
   a click it does not recognise and folds the card, which is exactly what the ⤢
@@ -5351,3 +5354,22 @@ cover. Each has a test now, proven to fail first by reverting the fix.
   (60 s) timer while it is down; sign-out cancels the timer; `listen()` refuses with nobody
   signed in. Module-scoped, so pinned over the source. The same pattern exists in Golf
   Handicap and PAPTrack and is NOT fixed there — worth a pass if either shows the symptom.
+
+## Fixes From the 2026-09-03 Audit
+
+A bug audit of the three work apps on 2026-09-03 (three auditors, each finding
+reproduced headless before it was reported) looked hardest at the code that had
+shipped the day before — full-screen stepping, the pinned tab row, the phone tab
+row — and found these here. Each has a test now, written first and proven red
+against the unfixed page; the commit that fixed it quotes the row.
+
+- **A step by ARROW KEY lands the focus on the new card's ⤢ (fix 1).** `maxiStep` handed the focus back only to a step BUTTON that had held it. Open
+  a chart with the ⤢ — which is what holds the focus on opening — and press Right,
+  and the element that had it was the old card's ⤢, which the swap had just carried
+  back into the inert page: the browser let go, `activeElement` was `<body>`, and the
+  next Tab started at the top of a page the reader could not see. After the hand-back
+  the function now asks "is the focus a connected element inside `#chartMaxi`?" and if
+  not, focuses the new card's `.chart-max` with `{ preventScroll: true }`. The rule in
+  one sentence: a step lands focus on the arrow that pressed it, or on the new card's
+  ⤢, never on the page underneath. Family-wide; the same shape went into Sprint
+  Velocity and Flow Metrics the same day.

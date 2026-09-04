@@ -1495,7 +1495,11 @@ See [Year or Month](#year-or-month).
   Progress has six of them — wrapping round at both ends. The **left and right
   arrow keys** do the same, unless the caret is in a control, where an arrow
   belongs to that control. A folded card is not on the walk, and a tab with one
-  chart shows no arrows at all.
+  chart shows no arrows at all. A step never drops the keyboard: the focus lands
+  on the arrow you pressed, or — after an arrow *key* — on the new chart's ⤢,
+  so the next Tab carries on inside the window rather than starting from the
+  top of the page hidden underneath (fixed 2026-09-04; it used to fall to the
+  page).
 
 ### Editing, Everywhere
 

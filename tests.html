@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 936;
+const EXPECTED = 937;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -13709,6 +13709,89 @@ t('the device-only preferences are read from their own keys, not from the plan',
     ok(get[0].includes(key + ': ' + from),
        key + ' comes from ' + from + ', never from state.settings — the moment it is '
        + 'read off the plan it starts syncing and the heading above it is a lie');
+});
+
+
+group('Fixes from the 2026-09-03 audit');
+/* Each of these is a bug the 2026-09-03 audit reproduced headless in the code
+   that had shipped the day before. Every test here was written first and proven
+   to fail against the unfixed page — the commit that fixed it quotes the red row.
+   They need a REAL frame for the same reason the full-screen group does: they
+   are geometry and focus, and neither exists in the suite's 1x1 frame. */
+async function auditFrame(width, height, tag) {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = `position:absolute;left:-9999px;width:${width}px;height:${height}px;border:0`;
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?' + tag + '=' + Date.now();
+    document.body.appendChild(f);
+  });
+  const W = f.contentWindow;
+  W.save = () => {};
+  W.confirm = () => true;
+  W.alert = () => {};
+  W.loadSample();
+  await new Promise((r) => setTimeout(r, 400));
+  return { f, W, D: W.document };
+}
+
+/* ── Fix 1: an arrow key must not drop the keyboard on the page underneath ──
+   maxiStep() hands the focus back to the ARROW that was pressed, and only to
+   that: open a chart with the ⤢ (which is what gets the focus on opening) and
+   press Right, and the element that had it was the OLD card's ⤢ — which the
+   step has just carried back into the inert page. The browser lets go of it,
+   activeElement is <body>, and the next Tab starts from the top of a page the
+   reader cannot see. The rule in one sentence: a step lands focus on the arrow
+   that pressed it, or on the new card's ⤢, never on the page underneath. */
+t('a step by arrow key lands the focus inside the window, never on the page underneath', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'stepfocus');
+  try {
+    D.getElementById('tab-goals').click();
+    await new Promise((r) => setTimeout(r, 500));
+    const cards = [...D.querySelectorAll('#views .card')]
+      .filter(c => c.querySelector('.chartbox canvas'));
+    ok(cards.length > 2, 'the Progress tab draws several charts, so there is a walk',
+       cards.length);
+    const ov = D.getElementById('chartMaxi');
+
+    /* Opened with the ⤢, the way a keyboard reader opens it. */
+    cards[0].querySelector(':scope > h2 > .chart-max').click();
+    await new Promise((r) => setTimeout(r, 300));
+    ok(W.maxiCard() === cards[0], 'the first chart is up');
+    ok(ov.contains(D.activeElement), 'and its ⤢ holds the focus — the starting point');
+
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 300));
+    ok(W.maxiCard() === cards[1], 'Right steps to the chart beside it');
+    const a = D.activeElement;
+    ok(a && a !== D.body && a.isConnected && ov.contains(a),
+       'after a step by arrow key the focus is INSIDE the window — a keyboard reader '
+       + 'must not be dropped on the inert page underneath',
+       a ? (a === D.body ? 'body' : a.tagName + '.' + a.className) : 'null');
+    ok(a === W.maxiCard().querySelector(':scope > h2 > .chart-max'),
+       'and it is the NEW card’s ⤢ — no arrow was pressed, so there is no arrow to '
+       + 'give it back to');
+
+    /* The other half of the rule still holds: an arrow that was pressed keeps it. */
+    const nextArrow = D.getElementById('maxiNext');
+    nextArrow.focus();
+    nextArrow.click();
+    await new Promise((r) => setTimeout(r, 300));
+    ok(W.maxiCard() === cards[2], 'the button steps on');
+    ok(D.activeElement === nextArrow,
+       'and a step BUTTON that had the focus keeps it, as it did before');
+
+    /* Left, from the arrow: it still holds the key, so a further key step
+       leaves it where it is rather than jumping to the ⤢. */
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 300));
+    ok(W.maxiCard() === cards[1], 'Left steps back');
+    ok(D.activeElement === nextArrow,
+       'and the arrow that already held the focus was not taken off it');
+    W.closeMaxi();
+  } finally { f.remove(); }
 });
 
 
