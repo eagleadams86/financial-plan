@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 942;
+const EXPECTED = 943;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14029,6 +14029,82 @@ t('a CSV cell written by a spreadsheet in Accounting format imports as a negativ
   eq(st.years['2026'].cells['util|2026-01'].v, -1234.56,
      'the symbol-outside form writes −1234.56, not +1234.56');
   eq(st.years['2026'].cells['util|2026-02'].v, -1234.56, 'and the symbol-inside form still does');
+});
+
+/* ══ Round two, 2026-09-04: the audit leftovers Charles chose to fix ═══════
+   Same routine as the five above — each test written first and proven red
+   against the unfixed page, the commit quoting the row. */
+
+/* ── A drift with no prices behind it said "on target" ─────────────────────
+   The Drift column is `value − target × total`, and with no price on any
+   holding both are 0, so the move was 0 and the cell read "on target" — a
+   claim with nothing behind it, the fault the 2026-09-02 standard names: a
+   figure the app cannot know must say so where it is read. The "Furthest From
+   Target" chart's tooltip and its spoken text are the second reader of the same
+   fact and had the same line. Both say "no prices" now, the cell muted. A
+   holding with no price AMONG priced ones is the same case one row at a time —
+   its move would have read "under by the whole target" — so `allHoldings`
+   marks each row `priced` and `driftMove` answers null for one that is not.
+   Pure first, then the page: the rollup (two pots, so it draws) and the chart. */
+t('a drift measured with no prices says "no prices", never "on target"', async () => {
+  const bare = H.coerceShape({ side: {
+    portfolios: [{ id: 'a', name: 'Brokerage', rows: [{ ticker: 'VOO', shares: 10 }] }],
+    targets: { voo: 0.6 } } });
+  const r1 = H.allHoldings(bare);
+  eq(r1.total, 0, 'nothing is priced, so the whole is nothing');
+  eq(H.driftRows(r1.rows, r1.total)[0].move, null,
+     'a move measured against nothing is null — not a zero that reads as "on target"');
+  eq(r1.rows[0].priced, false, 'and the row knows it has no price');
+  const half = H.coerceShape({ side: {
+    portfolios: [{ id: 'a', name: 'Brokerage', rows: [
+      { ticker: 'VOO', shares: 10, price: 100 }, { ticker: 'BND', shares: 10 }] }],
+    targets: { voo: 0.6, bnd: 0.4 } } });
+  const r2 = H.allHoldings(half);
+  const d2 = H.driftRows(r2.rows, r2.total);
+  eq(d2.find(r => r.label === 'BND').move, null,
+     'an unpriced holding among priced ones is a figure the app cannot know either');
+  eq(d2.find(r => r.label === 'VOO').move, 400,
+     'while the priced one is measured as it always was: $1,000 held, 60% of it wanted');
+
+  const { f, W, D } = await auditFrame(1280, 900, 'noprices');
+  try {
+    const st = W.finGet();
+    st.side.portfolios = [{ id: 'a', name: 'Brokerage',
+      rows: [{ ticker: 'VOO', shares: 10 }] }];
+    st.side.retirementAccounts = [{ id: 'k', name: '401(k)', type: '401k', kind: 'traditional',
+      rows: [{ ticker: 'VTI', shares: 5 }] }];
+    /* Keyed the way coerceShape keys them — the rollup's own upper-cased key. */
+    st.side.targets = { VOO: 0.6, VTI: 0.4 };
+    st.side.classes = {}; st.side.classTargets = {};
+    D.getElementById('tab-investments').click();
+    await new Promise((r) => setTimeout(r, 400));
+    const rollCard = () => [...D.querySelectorAll('#views .card')]
+      .find(c => /Everything You Hold/.test((c.querySelector('h2') || {}).textContent || ''));
+    ok(!!rollCard(), 'two pots, so the rollup that carries the Drift column is drawn');
+    const driftOf = (tk) => [...rollCard().querySelectorAll('table tbody tr')]
+      .find(tr => tr.querySelector('th').textContent.trim().startsWith(tk)).lastElementChild;
+    eq(driftOf('VOO').textContent.trim(), 'no prices', 'the Drift cell says what it cannot know');
+    ok(driftOf('VOO').querySelector('.muted'), 'muted — an absence, not a figure');
+    ok(!/on target/i.test(rollCard().textContent), 'and "on target" is nowhere in the table',
+       rollCard().textContent.match(/.{0,30}on target.{0,30}/i) + '');
+    const chart = () => D.getElementById('driftChart');
+    ok(!!chart(), 'two targets, so the Furthest From Target chart is drawn');
+    ok(/VOO, no prices/.test(chart().getAttribute('aria-label')),
+       'and the chart’s own text says the same', chart().getAttribute('aria-label'));
+    ok(!/on target/i.test(chart().getAttribute('aria-label')), 'never "on target"',
+       chart().getAttribute('aria-label'));
+
+    /* With prices, nothing has changed: 10 × $60 and 5 × $80 is $600 of $1,000,
+       exactly VOO’s 60%, and VTI’s $400 is exactly its 40%. */
+    st.side.portfolios[0].rows[0].price = 60;
+    st.side.retirementAccounts[0].rows[0].price = 80;
+    W.render();
+    await new Promise((r) => setTimeout(r, 400));
+    eq(driftOf('VOO').textContent.trim(), 'on target',
+       'a priced holding sitting on its target still says so');
+    ok(/VOO, on target/.test(chart().getAttribute('aria-label')),
+       'in the chart’s text too', chart().getAttribute('aria-label'));
+  } finally { f.remove(); }
 });
 
 

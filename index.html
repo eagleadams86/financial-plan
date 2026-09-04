@@ -11768,9 +11768,16 @@ function allHoldings(st) {
   for (const pot of pots) for (const h of pot.rows) {
     const key = String(h.ticker || '?').trim().toUpperCase();
     if (!by.has(key)) by.set(key, { key, ticker: String(h.ticker || '?').trim(), value: 0,
-      pots: [], byPot: {} });
+      pots: [], byPot: {}, priced: false });
     const g = by.get(key);
     const raw = (h.shares || 0) * (h.price || 0);
+    /* WHETHER A PRICE STANDS BEHIND THE VALUE (2026-09-04). A holding with no
+       price is worth 0 here, and 0 is a number the Drift column would happily
+       measure — "on target" when nothing is priced, "under by the whole target"
+       when this one is not. Neither is a figure the app knows, and the
+       2026-09-02 rule is that such a figure says so where it is read. The flag
+       is what lets the readers tell a value of nothing from no value at all. */
+    if ((h.price || 0) > 0) g.priced = true;
     g.value = round2(g.value + raw);
     /* The same money split by WHERE it is held. `pots` names the accounts a
        ticker turns up in and has never said how much is in each, so VOO in a
@@ -11812,6 +11819,10 @@ function classRollup(rows, total, classTargets) {
     const g = by.get(key);
     g.value = round2(g.value + r.value);
     g.tickers.push(r.ticker);
+    /* A class has a price behind it if any ticker in it does (2026-09-04) —
+       carried only when the rows carry it, so a fixture that never said grows
+       no key. See `priced` in allHoldings. */
+    if ('priced' in r) g.priced = !!(g.priced || r.priced);
   }
   const groups = [...by.values()].sort((a, b) =>
     (!a.label) - (!b.label) || b.value - a.value);
@@ -11883,14 +11894,30 @@ function potSeries(roll, cap = 5) {
    a drift of zero measured against nothing would be a claim the reader never
    made — the same rule that keeps the Target and Drift columns hidden until one
    exists. Ties broken by name, so the order is stable between renders. Pure. */
+/* The dollar move that would close a row's gap — or NULL when there is no figure
+   to measure (2026-09-04). With no price on any holding the total is 0, value is
+   0, and `0 − target × 0` is 0: the Drift column read "on target" and the chart
+   said the same, a claim with nothing behind it. A holding with no price among
+   priced ones is the same fault one row at a time — its "move" was the whole of
+   its target, read as "under". One function, because the column and the chart
+   are two readers of one fact and were already computing it separately. Null,
+   not 0, so every reader has to say "no prices" rather than round it into a
+   number. */
+function driftMove(r, total) {
+  if (!(total > 0) || r.priced === false) return null;
+  return round2(r.value - r.target * total);
+}
+
 function driftRows(rows, total) {
   return rows.filter(r => typeof r.target === 'number')
     .map(r => ({
       label: r.ticker || r.label,
-      move: round2(r.value - r.target * total),
+      move: driftMove(r, total),
       share: r.share, target: r.target,
     }))
-    .sort((a, b) => Math.abs(b.move) - Math.abs(a.move) || a.label.localeCompare(b.label));
+    /* A null move sorts as no move at all — last, with the ones on target. */
+    .sort((a, b) => Math.abs(b.move ?? 0) - Math.abs(a.move ?? 0)
+      || a.label.localeCompare(b.label));
 }
 
 /* The class groups the drift chart measures over, built in one place so the
@@ -15002,7 +15029,11 @@ function renderInvestments() {
   const driftCell = (r) => {
     if (typeof r.target !== 'number') return '<span class="muted">—</span>';
     const pts = (r.share - r.target) * 100;
-    const move = round2(r.value - r.target * roll.total);
+    /* Through driftMove, the chart's own arithmetic (2026-09-04): with no price
+       behind the row the answer is null and the cell says "no prices" — until
+       then it said "on target", a 0 measured against a total of 0. */
+    const move = driftMove(r, roll.total);
+    if (move === null) return '<span class="muted">no prices</span>';
     if (Math.abs(move) < 0.005) return 'on target';
     return `${pts > 0 ? '+' : ''}${pts.toFixed(1)} pts · ${fmtMoney(Math.abs(move))} ${
       move > 0 ? 'over' : 'under'}`;
@@ -15198,6 +15229,10 @@ function buildDriftChart() {
         tooltip: { callbacks: { label: (t) => {
           const r = rows[t.dataIndex];
           const pts = (r.share - r.target) * 100;
+          /* A null move is "no prices" here too (2026-09-04) — the same fact the
+             Drift column reads, said the same way in its second reader. */
+          if (r.move === null)
+            return ['No prices', `Target ${(r.target * 100).toFixed(1)}%`];
           return [
             r.move === 0 ? 'On target'
               : `${fmtMoney(Math.abs(r.move))} ${r.move > 0 ? 'over' : 'under'}`,
@@ -15216,7 +15251,7 @@ function buildDriftChart() {
       } },
     },
   }, `${byClass ? 'Classes' : 'Tickers'} furthest from target: ${rows.map(r =>
-    `${r.label}, ${r.move === 0 ? 'on target'
+    `${r.label}, ${r.move === null ? 'no prices' : r.move === 0 ? 'on target'
       : `${fmtMoney(Math.abs(r.move))} ${r.move > 0 ? 'over' : 'under'}`}`).join('; ')}.`);
 }
 

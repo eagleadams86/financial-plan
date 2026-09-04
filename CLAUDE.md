@@ -5419,3 +5419,23 @@ against the unfixed page; the commit that fixed it quotes the row.
   (`500-`) and a `CR` suffix are deliberately NOT read** — they were the audit's
   unconfirmed items, and each is a spelling with its own false positives to think
   about first.
+
+### Round two, 2026-09-04
+
+The audit's leftovers Charles chose to fix the next day — the same routine, a
+test first and proven red, the commit quoting the row.
+
+- **A drift with no prices behind it says "no prices", not "on target" (round two, 1).** The Drift column is `value − target × total`, and with no price on any
+  holding both are 0 — so the move was 0 and the cell read "on target", a claim with
+  nothing behind it (the 2026-09-02 rule: a figure the app cannot know says so where it
+  is read). The Furthest From Target chart's tooltip and spoken text are the second
+  reader of the same fact and said the same. Now `allHoldings` marks each rollup row
+  `priced` (any holding in it with a price above 0), `classRollup` carries the flag up
+  to a class when its rows carry it, and one `driftMove(r, total)` answers NULL for a
+  total of 0 or an unpriced row — the column and the chart both read it, where before
+  each did the subtraction itself. Null rather than 0 on purpose: every reader has to
+  say "no prices" instead of rounding it into a number. The cell is muted (an absence,
+  not a figure); a null bar draws nothing and sorts last. **An unpriced holding among
+  priced ones is covered too** — its move used to be the whole of its target, read as
+  "under". Fixture rows that never carried `priced` behave exactly as before, which is
+  why the flag is read as `=== false` and not as falsy.

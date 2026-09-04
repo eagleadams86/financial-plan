@@ -1032,7 +1032,10 @@ retirement accounts and your allocation targets, and says so.
 - **Targets per ticker** — click a rollup row to set the share it should be. A
   Drift column then shows how far each targeted ticker has wandered, in points
   and in the dollars that would bring it back. Targets don't have to cover
-  every row or sum to 100%.
+  every row or sum to 100%. **A holding with no price reads "no prices"** in
+  that column, and in the Furthest From Target chart's text — a drift is measured
+  from what the holding is worth, and without a price the app does not know that
+  (until 2026-09-04 it said "on target", a zero measured against nothing).
 - **Asset classes in your own words** ("S&P 500", "Bonds") — the app
   deliberately ships no fund taxonomy, the same principle as the tax tables. A
   **By Class** table folds the rollup into those labels, so three funds
