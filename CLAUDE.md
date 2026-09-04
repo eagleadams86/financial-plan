@@ -5410,6 +5410,24 @@ against the unfixed page; the commit that fixed it quotes the row.
   (tab + 4) rather than as a number, and starts from unpinned and restores the pin it
   found — the pin is a device setting on the harness's origin, and a run that threw
   half-way once left the next run measuring a pinned row.
+  **Completed 2026-09-04: the CSS bought the room and `renderTabs`' own nudge spent
+  it again.** Picking a tab that sits off an end scrolls the row, and that arithmetic
+  measured against the scroller's BORDER edge — so it landed the tab flush and took
+  back exactly the 4px the padding had just paid for: tap the last tab and the ring
+  was sliced down its right, come back to the first and down its left. The nudge now
+  measures against the PADDING edge, reading the figure off `getComputedStyle` so the
+  two can never drift. The test passed throughout because it only ever measured the
+  row AT REST, which is not the state a reader is in; it now taps the last tab and
+  the first and measures after each.
+  Two things in that test were also environment-blind, and both read as a false red
+  on a Mac while CI stayed green: the 4px checks were exact, where scrolling to an
+  end lands a fraction short (3.984375px here — `scrollWidth`/`clientWidth` are
+  integers over fractional content), and the row-height rule assumed an overlay
+  scrollbar, where `.tabs` asks for `scrollbar-width: thin` on purpose and a machine
+  drawing classic scrollbars puts ~11px under the row. The checks now allow the
+  sub-pixel and measure the scrollbar rather than assuming it. **A local red that CI
+  calls green is worth reading before it is dismissed** — under these two there was a
+  real bug.
 
 - **The ⓘ dots answer on a maximised card (fix 4).** Every info dot is answered by one delegated listener on `#views` (the row editor's
   dialog has its own), and `attachMaxi()` MOVES the card into `#chartMaxi`, outside both —

@@ -13877,6 +13877,14 @@ t('printing while a chart fills the window brings the card down first', async ()
    pin code measures that row and a change here would move `--strip-top`. */
 t('at a phone width the tab scroller leaves the focus ring room on every side', async () => {
   const { f, W, D } = await auditFrame(375, 812, 'tabring');
+  /* The room is 4px; the MEASUREMENT of it is not exact. `scrollWidth` and
+     `clientWidth` are integers while the content behind them is fractional, so
+     scrolling to an end lands the row a fraction short of where the arithmetic
+     says — 3.984375px of the 4 here, a 64th of a pixel, and a different fraction
+     on a machine whose tab labels wrap differently. A ring is not clipped by a
+     64th of a pixel, so the check is `nearly 4` rather than `4 or more`: a
+     padding actually missing reads 0, which this tolerance is nowhere near. */
+  const ROOM = 3.9;
   /* The pin is a DEVICE setting on this origin, and this test presses it — so
      it starts from unpinned whatever the browser remembers, and puts back what
      it found even when an assertion throws. A run that failed half-way would
@@ -13893,21 +13901,48 @@ t('at a phone width the tab scroller leaves the focus ring room on every side', 
        + 'here is being measured', tabs.scrollWidth + ' vs ' + tabs.clientWidth);
     const first = vis[0], last = vis[vis.length - 1];
     const box = tabs.getBoundingClientRect(), fb = first.getBoundingClientRect();
-    ok(fb.top - box.top >= 4,
+    ok(fb.top - box.top >= ROOM,
        'the first tab sits at least 4px inside the scroller’s TOP edge — the '
-       + 'ring’s 2px plus its 2px offset', (fb.top - box.top).toFixed(1) + 'px');
-    ok(fb.left - box.left >= 4,
-       'and 4px inside its LEFT edge', (fb.left - box.left).toFixed(1) + 'px');
+       + 'ring’s 2px plus its 2px offset', (fb.top - box.top).toFixed(3) + 'px');
+    ok(fb.left - box.left >= ROOM,
+       'and 4px inside its LEFT edge', (fb.left - box.left).toFixed(3) + 'px');
     ok(tabs.clientHeight >= fb.height + 8,
        'the scrollport is at least the tab’s height plus 8, so a ring fits above '
        + 'and below', tabs.clientHeight + ' for a ' + fb.height.toFixed(1) + 'px tab');
     tabs.scrollLeft = tabs.scrollWidth;
     await new Promise((r) => setTimeout(r, 100));
     const lb = last.getBoundingClientRect();
-    ok(box.right - lb.right >= 4,
+    ok(box.right - lb.right >= ROOM,
        'scrolled to the end, the last tab sits 4px inside the RIGHT edge',
-       (box.right - lb.right).toFixed(1) + 'px');
+       (box.right - lb.right).toFixed(3) + 'px');
     tabs.scrollLeft = 0;
+
+    /* AND AFTER THE APP'S OWN NUDGE, which is the state a reader is actually
+       in: picking a tab off an end scrolls the row, and that arithmetic used to
+       measure against the scroller's BORDER edge — landing the tab flush and
+       spending the very 4px the padding above had just bought. The row at rest
+       passed the whole time, which is why the checks above never saw it: nothing
+       here scrolls the row the way a tap does. Fixed 2026-09-04.
+       Driven by clicking the tabs, not by setting scrollLeft, because the nudge
+       is the thing under test. */
+    D.getElementById('tab-tax').click();
+    await new Promise((r) => setTimeout(r, 250));
+    const nudgedBox = tabs.getBoundingClientRect();
+    const nudgedLast = last.getBoundingClientRect();
+    ok(nudgedBox.right - nudgedLast.right >= ROOM,
+       'tapping the last tab leaves the ring its 4px on the RIGHT, rather than '
+       + 'pulling the tab flush with the edge',
+       (nudgedBox.right - nudgedLast.right).toFixed(3) + 'px');
+    D.getElementById('tab-budget').click();
+    await new Promise((r) => setTimeout(r, 250));
+    const backBox = tabs.getBoundingClientRect();
+    const backFirst = first.getBoundingClientRect();
+    ok(backFirst.left - backBox.left >= ROOM,
+       'and coming back to the first tab leaves it its 4px on the LEFT',
+       (backFirst.left - backBox.left).toFixed(3) + 'px');
+    ok(tabs.scrollLeft === 0,
+       'which for the first tab means the row is scrolled all the way home',
+       'scrollLeft ' + tabs.scrollLeft);
 
     /* WITHOUT MOVING ANYTHING. The room is padding paid for by a negative
        margin, the `.yearrail` shape, so the tab's own place in the row and the
@@ -13917,11 +13952,19 @@ t('at a phone width the tab scroller leaves the focus ring room on every side', 
        one edge was there before the fix and stays in the row's height, so the
        pinned band is not a hair shorter than it was), and the tab starts where
        the row does. */
+    /* Plus whatever the SCROLLBAR reserves, which is not the same everywhere and
+       is not this fix's doing: `.tabs` asks for `scrollbar-width: thin` — a
+       visible one, deliberately, unlike `.yearrail` which hides its — so a
+       machine drawing classic scrollbars puts ~11px under the row that a
+       machine drawing overlay ones does not. Measured off the element rather
+       than assumed either way, or this reads as a regression on one of the two
+       and CI never sees it on the other. */
+    const sb = tabs.offsetHeight - tabs.clientHeight;
     const row = D.querySelector('.tabrow').getBoundingClientRect();
-    ok(Math.abs(row.height - (fb.height + 4)) <= 0.5,
+    ok(Math.abs(row.height - (fb.height + 4 + sb)) <= 0.5,
        'the tab row is the tab plus the scroller’s 4px bottom padding, as it was — '
        + 'the ring’s room did not thicken it', row.height.toFixed(1) + ' vs '
-       + (fb.height + 4).toFixed(1));
+       + (fb.height + 4 + sb).toFixed(1) + (sb ? ' (' + sb + 'px of scrollbar)' : ''));
     ok(Math.abs(fb.top - row.top) <= 0.5,
        'and the first tab starts where the row starts',
        (fb.top - row.top).toFixed(1) + 'px');
@@ -13932,10 +13975,12 @@ t('at a phone width the tab scroller leaves the focus ring room on every side', 
     const stuck = D.querySelector('.tabrow');
     eq(W.getComputedStyle(stuck).position, 'sticky', 'pinned, the row sticks');
     const padB = parseFloat(W.getComputedStyle(stuck).paddingBottom);
-    ok(Math.abs(stuck.getBoundingClientRect().height - (fb.height + 4 + padB)) <= 0.5,
+    const sbPinned = tabs.offsetHeight - tabs.clientHeight;
+    ok(Math.abs(stuck.getBoundingClientRect().height - (fb.height + 4 + padB + sbPinned)) <= 0.5,
        'and the pinned band is the tab, the scroller’s 4px and the row’s own bottom '
        + 'padding — the height the pin code measured before the fix',
-       stuck.getBoundingClientRect().height.toFixed(1) + ' vs ' + (fb.height + 4 + padB).toFixed(1));
+       stuck.getBoundingClientRect().height.toFixed(1) + ' vs '
+       + (fb.height + 4 + padB + sbPinned).toFixed(1));
   } finally { W.applyPin(pinWas); f.remove(); }
 });
 
