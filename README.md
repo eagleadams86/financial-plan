@@ -1048,8 +1048,9 @@ retirement accounts and your allocation targets, and says so.
 
 ### The Two Charts
 
-Both sit at the bottom of the tab, after the tables they read from, and each
-fills the window on its own with the ⤢ button.
+Both sit at the bottom of the tab, after the tables they read from, side by
+side on a desktop window and stacked on a narrow one, and each fills the window
+on its own with the ⤢ button.
 
 - **Where It's Held** — one bar per ticker, biggest first, cut into bands by
   the account it sits in. The rollup table names the accounts a ticker turns up
