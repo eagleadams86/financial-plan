@@ -5408,3 +5408,14 @@ against the unfixed page; the commit that fixed it quotes the row.
   shows the Escape handler yielding while the dialog is open; the dialog's own cancel is
   the browser's, exercised by a real key in `mm-verify-f4-helpdot.mjs` rather than by a
   synthetic one that cannot drive it.
+
+- **`$ (1,234.56)` is the accounting form too (fix 5).** `parseMoney`'s bracket test wanted the brackets to wrap the WHOLE string, and Excel's
+  Accounting format — and most statement exports — put the currency symbol OUTSIDE them,
+  so `$ (1,234.56)` and `$(1,234.56)` arrived POSITIVE, in a typed box and through
+  `readGridCsv` alike: the right number pointing the wrong way. `BRACKETED` now admits a
+  run of currency symbols (`\p{Sc}`) and whitespace before the opening bracket and nothing
+  else — `a(500)b` is still not the form, and the dash boundary above `MINUS_FORMS`
+  (en/em dash are punctuation, "Rent — $500" is +500) is untouched. **A trailing minus
+  (`500-`) and a `CR` suffix are deliberately NOT read** — they were the audit's
+  unconfirmed items, and each is a spelling with its own false positives to think
+  about first.

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 940;
+const EXPECTED = 942;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -13993,6 +13993,42 @@ t('a ⓘ on a maximised chart card opens its explanation, and Escape closes that
     help.close();
     W.closeMaxi();
   } finally { f.remove(); }
+});
+
+/* ── Fix 5: `$ (1,234.56)` read as +1234.56 ─────────────────────────────────
+   The bracket test wanted the brackets to wrap the WHOLE string, and Excel's
+   Accounting format — and a good many statement exports — put the currency
+   symbol OUTSIDE them: `$ (1,234.56)`, `$(1,234.56)`. So the very form a
+   spreadsheet writes its negatives in arrived positive, silently: the right
+   number pointing the wrong way, which the 2026-08-30 comment on the brackets
+   already calls the worst answer available. The form with the symbol INSIDE,
+   `($1,234.56)`, worked. The dash rules from 2026-09-02 are untouched: an en or
+   em dash is still punctuation, and "Rent — $500" still parses as it did. */
+t('a currency symbol before the brackets is still the accounting form', () => {
+  eq(H.parseMoney('$ (1,234.56)'), -1234.56, 'Excel’s Accounting format: symbol, space, brackets');
+  eq(H.parseMoney('$(1,234.56)'), -1234.56, 'and without the space');
+  eq(H.parseMoney('£ (12)'), -12, 'a pound');
+  eq(H.parseMoney('€(3.50)'), -3.5, 'a euro');
+  eq(H.parseMoney(' $ (1,234.56) '), -1234.56, 'with the cell’s own whitespace round it');
+  eq(H.parseMoney('($1,234.56)'), -1234.56, 'the symbol INSIDE the brackets still reads as it did');
+  eq(H.parseMoney('(500)'), -500, 'and bare brackets');
+  eq(H.parseMoney('$ (-500)'), -500, 'a minus already inside them is not flipped back');
+  eq(H.parseMoney('Rent — $500'), 500,
+     'the em dash is punctuation, not a sign — exactly as the 2026-09-02 rule left it');
+  eq(H.parseMoney('a(500)b'), 500, 'letters round the brackets are still not the accounting form');
+  eq(H.parseMoney('$ 1,234.56'), 1234.56, 'a symbol with a space and no brackets is still positive');
+  eq(H.parseMoney('$ ()'), null, 'a symbol and empty brackets are still nothing');
+});
+t('a CSV cell written by a spreadsheet in Accounting format imports as a negative', () => {
+  const st = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-12',
+    categories: [{ id: 'util', name: 'Utilities', section: 'expense' }], cells: {} } } });
+  /* Quoted, because the figure carries a comma of its own. */
+  H.applyGridCsv(st, H.readGridCsv(
+    'Section,Row,2026-01,2026-02\nExpenses,Utilities,"$ (1,234.56)","($1,234.56)"'), '2026-03-01');
+  eq(st.years['2026'].cells['util|2026-01'].v, -1234.56,
+     'the symbol-outside form writes −1234.56, not +1234.56');
+  eq(st.years['2026'].cells['util|2026-02'].v, -1234.56, 'and the symbol-inside form still does');
 });
 
 

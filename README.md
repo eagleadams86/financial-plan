@@ -1527,7 +1527,10 @@ choice actually uses.
   places than the app stores shows you the figure it settled on rather than
   leaving you to find out next time you open the row. **A figure in brackets is
   a negative one** — paste `(500)` off a statement and the box reads
-  −$500.00, the way every ledger means it. **And a minus sign is a minus sign
+  −$500.00, the way every ledger means it, and so does `$ (1,234.56)`, the way
+  Excel's Accounting format and most statement exports write it, with the
+  currency symbol outside the brackets (fixed 2026-09-04: that form used to
+  arrive positive, in a typed box and in an imported CSV alike). **And a minus sign is a minus sign
   whichever one it is**: a figure copied out of a statement PDF or a typeset
   table carries a real MINUS SIGN rather than the hyphen on your keyboard, and
   that used to be stripped out with the currency symbol — so −200 in a transfer
