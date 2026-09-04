@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 944;
+const EXPECTED = 945;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14146,6 +14146,93 @@ t('a percent typed as 4.57 is stored as exactly 0.0457', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   ok(/roundTo\(raiseFor\(salary, v\.after\) \/ 100, 8\)/.test(stripComments(APP_SRC)),
      'the comp editor’s raise fallback rounds the fraction it stores the same way');
+});
+
+/* ── Where the page lands when a full-screen chart comes down ──────────────
+   closeMaxi put the scroll back where the reader left it and THEN focused the
+   card's ⤢ without preventScroll — so with no step the page went back to its
+   place, and after a step the page went back to its place and the browser
+   then dragged it to wherever the NEW card's ⤢ happened to be, by accident.
+   Charles's decision (2026-09-04): landing on the chart you were last looking
+   at IS wanted after a step, so it is made deliberate — the new card's top
+   sits at the pin clearance (the same `--pin-clear` a Tab landing uses to keep
+   clear of the pinned band), the scroll is a plain jump, and the ⤢ is focused
+   with preventScroll so nothing moves the page afterwards. With no step the
+   return point is exactly where the reader left. */
+t('closing a full-screen chart returns to where you left, or after a step to the chart you were looking at', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'maxiland');
+  try {
+    D.getElementById('tab-goals').click();
+    await new Promise((r) => setTimeout(r, 500));
+    const cards = [...D.querySelectorAll('#views .card')]
+      .filter(c => c.querySelector('.chartbox canvas'));
+    ok(cards.length > 2, 'the Progress tab draws several charts, so there is a walk', cards.length);
+    /* The frame must actually scroll, or every scrollY below reads 0 and the
+       test measures nothing (the 1x1-frame trap). */
+    ok(D.documentElement.scrollHeight > 900 + 400,
+       'the page is tall enough to scroll to 300 and past it', D.documentElement.scrollHeight);
+    const maxi = (c) => c.querySelector(':scope > h2 > .chart-max');
+    const clearance = () => parseFloat(D.documentElement.style.getPropertyValue('--pin-clear')) || 0;
+    /* The pin is a localStorage setting the frame shares with the whole origin,
+       so it is whatever the last reader left it — set it, both ways, rather
+       than assume it (the ambient-state trap), and put it back at the end. */
+    const pinWas = W.savedPin();
+    W.applyPin(false);
+    await new Promise((r) => setTimeout(r, 100));
+
+    /* No step: back to exactly where the reader left. */
+    W.scrollTo(0, 300);
+    await new Promise((r) => setTimeout(r, 100));
+    eq(W.scrollY, 300, 'the frame scrolled to 300');
+    maxi(cards[0]).click();
+    await new Promise((r) => setTimeout(r, 300));
+    ok(W.maxiCard() === cards[0], 'the first chart is up');
+    eq(W.scrollY, 0, 'and the page went to the top under it (the iOS sticky-header rule)');
+    maxi(cards[0]).click();
+    await new Promise((r) => setTimeout(r, 300));
+    ok(!W.maxiCard(), 'closed again');
+    eq(W.scrollY, 300, 'with no step, closing returns to exactly where the reader left');
+    ok(D.activeElement === maxi(cards[0]), 'and the ⤢ that opened it holds the focus');
+
+    /* One step: the NEW card's seat, its top at the pin clearance. */
+    W.scrollTo(0, 300);
+    await new Promise((r) => setTimeout(r, 100));
+    maxi(cards[0]).click();
+    await new Promise((r) => setTimeout(r, 300));
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 300));
+    ok(W.maxiCard() === cards[1], 'Right steps to the chart beside it');
+    W.closeMaxi();
+    await new Promise((r) => setTimeout(r, 300));
+    const clear = clearance();
+    ok(clear > 8, 'the pin clearance has been measured (header + whatever is stuck + 8)', clear);
+    const top = cards[1].getBoundingClientRect().top;
+    ok(Math.abs(top - clear) <= 2,
+       'after a step, closing lands with the NEW card’s top at the pin clearance (±2px) — '
+       + 'the chart you were last looking at, on purpose',
+       `top ${top.toFixed(1)}, clearance ${clear}, scrollY ${W.scrollY}`);
+    ok(W.scrollY !== 300, 'so the page did not go back to 300', W.scrollY);
+    ok(D.activeElement === maxi(cards[1]), 'and the focus is that card’s ⤢');
+
+    /* With the tab row pinned the clearance is taller, and the landing tracks it. */
+    W.applyPin(true);
+    await new Promise((r) => setTimeout(r, 100));
+    W.scrollTo(0, 300);
+    await new Promise((r) => setTimeout(r, 100));
+    maxi(cards[0]).click();
+    await new Promise((r) => setTimeout(r, 300));
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 300));
+    W.closeMaxi();
+    await new Promise((r) => setTimeout(r, 300));
+    const clearPinned = clearance();
+    ok(clearPinned > clear, 'pinned, the clearance grew by the tab row', `${clear} → ${clearPinned}`);
+    const topPinned = cards[1].getBoundingClientRect().top;
+    ok(Math.abs(topPinned - clearPinned) <= 2,
+       'and the card lands under the pinned band, not behind it',
+       `top ${topPinned.toFixed(1)}, clearance ${clearPinned}`);
+    W.applyPin(pinWas);
+  } finally { f.remove(); }
 });
 
 

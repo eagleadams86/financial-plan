@@ -1493,7 +1493,13 @@ See [Year or Month](#year-or-month).
   usable** — change the zoom or the theme and the chart redraws in front of
   you, still full screen. Escape, the same button (now an arrows-in icon), or
   a click on the margin round the card brings it back down, and the page is
-  where you left it. A card with a table under its chart shows the chart: the
+  where you left it — unless you stepped to another chart up there, in which
+  case the page lands on **that** chart, its top just under the header (and
+  under the tab row, if you have pinned it), with its ⤢ ready for the keyboard.
+  That was decided on 2026-09-04: until then the page went back to where you
+  left and was then dragged to wherever the new chart's button happened to be,
+  a landing that was right by accident and put the chart nowhere in particular.
+  A card with a table under its chart shows the chart: the
   table is one press of Escape away, and letting forty rows of spending squash
   the bars into a strip would answer the opposite question. On a phone the
   card's opening paragraph steps aside too, for the same reason.

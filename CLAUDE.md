@@ -1893,6 +1893,15 @@ way, for the reason its ⤢ already does.**
   takes it** (2026-09-04): a step lands focus on the arrow that pressed it, or
   on the new card's ⤢, never on the page underneath. See the 2026-09-03 audit
   fixes at the end.
+- **The way out after a step lands on the NEW card, on purpose** (2026-09-04).
+  `closeMaxi` used to put the scroll back where the reader left and then focus
+  the ⤢ without `preventScroll`, so after a step the browser dragged the page to
+  wherever that button was — the right chart, by accident, with its top nowhere
+  in particular. Charles decided the landing IS wanted, so `maxiStepped` (set by
+  `maxiStep`, cleared by `openMaxi`) makes it deliberate: the card's top goes to
+  `--pin-clear` (re-measured, × zoomScale), a plain `behavior: 'auto'` jump, and
+  the ⤢ is focused with `preventScroll`. No step, the return point is untouched.
+  See the 2026-09-03 audit fixes at the end, round two.
 - **A step's click stops at the button.** `e.stopPropagation()` plus
   `pointer-events: none` on the icon — without both, the band's fold handler sees
   a click it does not recognise and folds the card, which is exactly what the ⤢
@@ -5455,3 +5464,21 @@ test first and proven red, the commit quoting the row.
   is left alone: nothing is stored there. Nothing already in a plan is rewritten —
   every reader has always coped with the long form, and the next save of that row
   writes it clean.
+
+- **Closing after a step lands on the chart you were looking at — deliberately (round two, 3).** `closeMaxi` restored `maxiScrollY` and then called `btn.focus()` with no
+  `preventScroll`, so with no step the page went back to its place and after a
+  step it went back and was then dragged to wherever the NEW card's ⤢ was — the
+  right card by accident, its top at 424px in the test that caught it. Charles
+  decided on 2026-09-04 that landing on that chart IS what a reader wants, so it
+  is now stated: `maxiStep` sets `maxiStepped`, `openMaxi` clears it, and on the
+  way out a stepped close re-measures the pin (`measurePinTops`), reads
+  `--pin-clear` — the same clearance a Tab landing uses to stay out from under the
+  pinned band, header + whatever is stuck + 8 — and scrolls so the card's top sits
+  there (`× zoomScale`, because the property is in layout pixels for the zoomed
+  root and the rect is visual; the pinGridHeader lesson the other way round).
+  `scrollTo({ behavior: 'auto' })` spells the jump out, and the ⤢ is focused with
+  `{ preventScroll: true }` like every other focus() the app makes, so nothing
+  moves the page after the landing. With no step the return point is exactly where
+  the reader left, as before. **The test sets the pin both ways and restores it**:
+  the frame shares the origin's localStorage, and the first draft ran "unpinned"
+  with the pin on — the ambient-state trap, again.

@@ -17604,6 +17604,7 @@ const maxiNav = (() => {
 
 let maxiSlot = null;    /* the hidden placeholder holding the card's seat */
 let maxiScrollY = 0;    /* where the page was, to put it back on the way out */
+let maxiStepped = false; /* a step happened up there, so the way out lands on the NEW card */
 
 /* Which card is filling the window, read off the DOM rather than held in a
    variable of its own: the overlay holds exactly one card or none, and a
@@ -17789,6 +17790,9 @@ function maxiStep(dir) {
 
   const pressed = (document.activeElement === maxiNav.prev) ? maxiNav.prev
                 : (document.activeElement === maxiNav.next) ? maxiNav.next : null;
+  /* The way out now lands on THIS card, not where the reader left — see
+     closeMaxi (2026-09-04). */
+  maxiStepped = true;
   detachMaxi();
   attachMaxi(card);          /* dresses the button, mounts the arrows, resizes */
   dressMaxiBtn(leaving);     /* the one going back wants its arrows-out icon */
@@ -17898,6 +17902,7 @@ function openMaxi(card) {
      Chromium keeps the header pinned either way — and found in the Simulator
      while porting this feature to the starter on 2026-08-23. */
   maxiScrollY = window.scrollY;
+  maxiStepped = false;
   window.scrollTo(0, 0);
 
   attachMaxi(card);
@@ -17913,9 +17918,31 @@ function closeMaxi() {
   const card = detachMaxi();
   if (!card) return;
   document.body.classList.remove('maxi-open');
-  /* After the overflow comes off, or the body is not a scroll container yet and
-     the position is dropped on the floor. */
-  window.scrollTo(0, maxiScrollY);
+  /* WHERE THE PAGE LANDS IS DECIDED HERE, AND NOWHERE ELSE (2026-09-04). With
+     no step it is exactly where the reader left. After a step it is the card
+     they were LAST LOOKING AT, its top sitting at the pin clearance — the same
+     `--pin-clear` a Tab landing uses to stay out from under the pinned band,
+     re-measured first because the header can have changed height up there.
+     Before this the scroll went back to the old place and the focus() below,
+     made without preventScroll, then dragged the page to wherever the new
+     card's ⤢ happened to be: a landing that was right by accident and put the
+     card's top nowhere in particular (485px down, in the test that caught it).
+     Charles decided on 2026-09-04 that landing on that chart IS wanted, so it
+     is done on purpose and to a stated place. The overflow has to be off the
+     body first, or it is not a scroll container yet and the position is
+     dropped on the floor; the rect is read while the scroll is still at 0,
+     where openMaxi put it, so its top IS the card's page offset. The clearance
+     is written in layout pixels for the zoomed root and the rect is read in
+     visual ones, hence the × zoomScale — the pinGridHeader lesson, the other
+     way round. `behavior: 'auto'` is spelled out: this is a jump, not a glide,
+     the same rule the arrows follow. */
+  let y = maxiScrollY;
+  if (maxiStepped) {
+    measurePinTops();
+    const clear = parseFloat(document.documentElement.style.getPropertyValue('--pin-clear')) || 0;
+    y = Math.max(0, window.scrollY + card.getBoundingClientRect().top - clear * (zoomScale || 1));
+  }
+  window.scrollTo({ top: y, behavior: 'auto' });
   document.querySelector('.wrap').inert = false;
   if (maxiHeaderWatch) maxiHeaderWatch.disconnect();
   dressMaxiBtn(card);
@@ -17923,9 +17950,11 @@ function closeMaxi() {
   const ch = chartIn(card);
   if (ch) ch.resize();
   /* Back to the button that opened it, which is now back in its card — a
-     keyboard user who pressed it must not be dropped at the top of the page. */
+     keyboard user who pressed it must not be dropped at the top of the page.
+     `preventScroll`, like every other focus() this app makes (2026-09-04): the
+     scroll above is the landing, and the focus must not move it. */
   const btn = card.querySelector(':scope > h2 > .chart-max');
-  if (btn && !btn.hidden) btn.focus();
+  if (btn && !btn.hidden) btn.focus({ preventScroll: true });
 }
 
 /* ── Living through a re-render ─────────────────────────────────────────────
