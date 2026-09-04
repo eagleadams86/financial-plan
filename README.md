@@ -1434,7 +1434,11 @@ synced, never in a backup and never carried in a share link. It is in
 
 On a phone the pin holds the **tab row only**. Three bands of chrome is most of
 a small screen, so the year strip is let go there and only the tabs stay — the
-one that buys you changing tab without scrolling back to the top.
+one that buys you changing tab without scrolling back to the top. The tabs
+themselves sit in one row that scrolls sideways there, rather than wrapping to
+four; a tab reached from the keyboard shows its focus ring whole, on every
+side (fixed 2026-09-04 — the scrolling row used to slice the ring off along
+the top and at both ends).
 
 A year kept as a yearly summary is set in italics, one built before it has
 started is underlined with dots, **this year carries an underscore** wherever it

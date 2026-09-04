@@ -5382,3 +5382,16 @@ against the unfixed page; the commit that fixed it quotes the row.
   comment that said "the card prints where it sits" was wrong and says so now; the
   rule stays as the belt to the closing's braces. Driven through the real
   `beforeprint` event in the suite and read back off the DOM.
+
+- **The phone's tab scroller leaves the focus ring room on every side (fix 3).** At ≤700px `.tabs` is a sideways scroller, and a scroller clips at its padding
+  edge: with only `padding-bottom: 4px` the family's 2px ring at 2px offset was sliced
+  off along the top, the left of the first tab and the right of the last. Now `padding:
+  4px; margin: -4px -4px 0` — the `.yearrail` shape, padding bought back with a negative
+  margin so nothing moves. **The bottom margin is 0, not -4px, on purpose**: that 4px was
+  already inside the row's height, which `measurePinTops` reads for `--strip-top`, and
+  taking it out would have made the pinned band 4px shorter. Measured before and after
+  at 375px: row 46px unpinned / 56px pinned, first tab at the row's own top-left, all
+  unchanged; only the scroller's own box grew. The test pins the row's height as a RULE
+  (tab + 4) rather than as a number, and starts from unpinned and restores the pin it
+  found — the pin is a device setting on the harness's origin, and a run that threw
+  half-way once left the next run measuring a pinned row.

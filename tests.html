@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 938;
+const EXPECTED = 939;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -13842,6 +13842,79 @@ t('printing while a chart fills the window brings the card down first', async ()
        + 'but a window reopening under a print dialog is not a thing anyone asked for');
     eq(D.documentElement.getAttribute('data-theme'), themeWas, 'the theme comes back afterwards');
   } finally { f.remove(); }
+});
+
+/* ── Fix 3: the phone's tab row clipped the focus ring ──────────────────────
+   At the phone width the tab row is a sideways scroller (`overflow-x: auto`),
+   and a scroller clips at its padding edge — with only `padding-bottom: 4px` the
+   family's 2px ring at 2px offset was sliced off along the top, the left of the
+   first tab and the right of the last. `.yearrail` has carried the answer since
+   it was built: padding for the ring with a matching negative margin, so the
+   room is bought without moving a thing. Measured, because a padding is only
+   visible as geometry; and the row's own height is pinned alongside, because the
+   pin code measures that row and a change here would move `--strip-top`. */
+t('at a phone width the tab scroller leaves the focus ring room on every side', async () => {
+  const { f, W, D } = await auditFrame(375, 812, 'tabring');
+  /* The pin is a DEVICE setting on this origin, and this test presses it — so
+     it starts from unpinned whatever the browser remembers, and puts back what
+     it found even when an assertion throws. A run that failed half-way would
+     otherwise leave the next run measuring a pinned row and blaming the fix. */
+  const pinWas = W.savedPin();
+  try {
+    W.applyPin(false);
+    await new Promise((r) => setTimeout(r, 200));
+    const tabs = D.querySelector('.tabs');
+    const vis = [...tabs.querySelectorAll('[role="tab"]')].filter(t => !t.hidden);
+    ok(vis.length > 3, 'there are tabs in the row', vis.length);
+    ok(tabs.scrollWidth > tabs.clientWidth,
+       'the row really is a sideways scroller at this width — otherwise nothing '
+       + 'here is being measured', tabs.scrollWidth + ' vs ' + tabs.clientWidth);
+    const first = vis[0], last = vis[vis.length - 1];
+    const box = tabs.getBoundingClientRect(), fb = first.getBoundingClientRect();
+    ok(fb.top - box.top >= 4,
+       'the first tab sits at least 4px inside the scroller’s TOP edge — the '
+       + 'ring’s 2px plus its 2px offset', (fb.top - box.top).toFixed(1) + 'px');
+    ok(fb.left - box.left >= 4,
+       'and 4px inside its LEFT edge', (fb.left - box.left).toFixed(1) + 'px');
+    ok(tabs.clientHeight >= fb.height + 8,
+       'the scrollport is at least the tab’s height plus 8, so a ring fits above '
+       + 'and below', tabs.clientHeight + ' for a ' + fb.height.toFixed(1) + 'px tab');
+    tabs.scrollLeft = tabs.scrollWidth;
+    await new Promise((r) => setTimeout(r, 100));
+    const lb = last.getBoundingClientRect();
+    ok(box.right - lb.right >= 4,
+       'scrolled to the end, the last tab sits 4px inside the RIGHT edge',
+       (box.right - lb.right).toFixed(1) + 'px');
+    tabs.scrollLeft = 0;
+
+    /* WITHOUT MOVING ANYTHING. The room is padding paid for by a negative
+       margin, the `.yearrail` shape, so the tab's own place in the row and the
+       row's height — which the pin code measures for `--strip-top` — are exactly
+       what they were. Pinned by the rule rather than by yesterday's numbers: the
+       row is the tab plus the 4px the scroller has always kept under it (that
+       one edge was there before the fix and stays in the row's height, so the
+       pinned band is not a hair shorter than it was), and the tab starts where
+       the row does. */
+    const row = D.querySelector('.tabrow').getBoundingClientRect();
+    ok(Math.abs(row.height - (fb.height + 4)) <= 0.5,
+       'the tab row is the tab plus the scroller’s 4px bottom padding, as it was — '
+       + 'the ring’s room did not thicken it', row.height.toFixed(1) + ' vs '
+       + (fb.height + 4).toFixed(1));
+    ok(Math.abs(fb.top - row.top) <= 0.5,
+       'and the first tab starts where the row starts',
+       (fb.top - row.top).toFixed(1) + 'px');
+    ok(Math.abs(fb.left - row.left) <= 0.5,
+       'at the row’s own left edge', (fb.left - row.left).toFixed(1) + 'px');
+    W.applyPin(true);
+    await new Promise((r) => setTimeout(r, 200));
+    const stuck = D.querySelector('.tabrow');
+    eq(W.getComputedStyle(stuck).position, 'sticky', 'pinned, the row sticks');
+    const padB = parseFloat(W.getComputedStyle(stuck).paddingBottom);
+    ok(Math.abs(stuck.getBoundingClientRect().height - (fb.height + 4 + padB)) <= 0.5,
+       'and the pinned band is the tab, the scroller’s 4px and the row’s own bottom '
+       + 'padding — the height the pin code measured before the fix',
+       stuck.getBoundingClientRect().height.toFixed(1) + ' vs ' + (fb.height + 4 + padB).toFixed(1));
+  } finally { W.applyPin(pinWas); f.remove(); }
 });
 
 
