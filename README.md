@@ -1528,7 +1528,12 @@ choice actually uses.
 - **A box shows you what it kept.** Money boxes have always tidied themselves up
   when you leave them; rate boxes do now too, so a rate typed to more decimal
   places than the app stores shows you the figure it settled on rather than
-  leaving you to find out next time you open the row. **A figure in brackets is
+  leaving you to find out next time you open the row. **And the figure it kept
+  is the one you typed**: 4.57% is stored as exactly 0.0457 (fixed 2026-09-04 —
+  it used to land as 0.045700000000000005, a computer's rounding slip that the
+  box hid by rounding on the way back but that a backup file carried in full;
+  a pasted tax schedule's rates and a raise worked out from a new salary had the
+  same slip and the same fix). **A figure in brackets is
   a negative one** — paste `(500)` off a statement and the box reads
   −$500.00, the way every ledger means it, and so does `$ (1,234.56)`, the way
   Excel's Accounting format and most statement exports write it, with the

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 943;
+const EXPECTED = 944;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14105,6 +14105,47 @@ t('a drift measured with no prices says "no prices", never "on target"', async (
     ok(/VOO, on target/.test(chart().getAttribute('aria-label')),
        'in the chart’s text too', chart().getAttribute('aria-label'));
   } finally { f.remove(); }
+});
+
+/* ── A percent typed as 4.57 was stored as 0.045700000000000005 ────────────
+   readFields rounded the PERCENT to 2dp and then divided — `roundTo(4.57, 2) /
+   100` — and 4.57 / 100 is not 0.0457 in floating point. The box read 4.57
+   again next time (the display branch rounds on the way back), so nobody saw
+   it; the backup file carried the long form, and so did every figure computed
+   from it. The fix rounds the FRACTION after dividing, to two more places than
+   the percent asked for. The same shape goes into the two other places the app
+   stores a fraction it made from a percent: a pasted tax schedule (a real
+   5.85% landed as 0.058499999999999996) and the comp editor's raise fallback.
+   Nothing already stored is rewritten — the reader has always coped. */
+t('a percent typed as 4.57 is stored as exactly 0.0457', () => {
+  const box = w.document.createElement('input');
+  box.id = 'rf-rate'; box.value = '4.57';
+  w.document.body.appendChild(box);
+  try {
+    const out = w.readFields([{ key: 'rate', type: 'percent' }]);
+    eq(out.rate, 0.0457, 'the fraction is the number, not the number plus float noise');
+    eq(JSON.stringify(out), '{"rate":0.0457}',
+       'so a backup — JSON.stringify(state) — carries 0.0457 and not 0.045700000000000005');
+    box.value = '5.85';
+    eq(w.readFields([{ key: 'rate', type: 'percent' }]).rate, 0.0585, 'a real state rate');
+    box.value = '2.5';
+    eq(w.readFields([{ key: 'rate', type: 'percent', dp: 6 }]).rate, 0.025,
+       'with the raise field’s six places');
+    box.value = '3.456';
+    eq(w.readFields([{ key: 'rate', type: 'percent' }]).rate, 0.0346,
+       'still 2dp of a percent — the blur reformat that shows 3.46 is still telling the truth');
+    box.value = '';
+    eq(w.readFields([{ key: 'rate', type: 'percent' }]).rate, null, 'and empty is still nothing');
+  } finally { box.remove(); }
+  const r = H.parseBrackets('5.85%   $0 to $10,000\n6.85%   $10,000 or more');
+  eq(r.ok, true, r.why);
+  eq(r.bands.map(b => b.rate), [0.0585, 0.0685], 'a pasted schedule’s rates land clean too');
+  /* The third writer is a fallback inside the comp editor's save, reachable
+     only through a built dialog — held against the source, as the percent
+     blur test above is. */
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  ok(/roundTo\(raiseFor\(salary, v\.after\) \/ 100, 8\)/.test(stripComments(APP_SRC)),
+     'the comp editor’s raise fallback rounds the fraction it stores the same way');
 });
 
 

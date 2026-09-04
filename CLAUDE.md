@@ -5439,3 +5439,19 @@ test first and proven red, the commit quoting the row.
   priced ones is covered too** — its move used to be the whole of its target, read as
   "under". Fixture rows that never carried `priced` behave exactly as before, which is
   why the flag is read as `=== false` and not as falsy.
+
+- **A percent is stored as the fraction you typed, not the fraction plus float noise (round two, 2).** `readFields` rounded the PERCENT to `dp` and then divided:
+  `roundTo(4.57, 2) / 100`, and 4.57 / 100 is 0.045700000000000005 in floating
+  point. Nobody saw it — the display branch rounds the fraction back to 4.57 on the
+  way in — but that long form was what the state held, what a backup carried, and
+  what every figure computed from the rate started with. Now the FRACTION is rounded
+  after the division, to `dp + 2` places (two more than the percent asked for, which
+  is exactly what the division took): `roundTo(n / 100, (f.dp ?? 2) + 2)`, so 4.57
+  stores as 0.0457 and the raise field's six places store as eight. The same shape
+  went into the two other places a fraction made from a percent is STORED — a pasted
+  tax schedule's rate (`parseBrackets`, a real 5.85% landed as 0.058499999999999996)
+  and the comp editor's raise fallback (`raiseFor(...) / 100`). A `/ 100` that only
+  feeds a readout (the drawdown editor's safe-rate line, the salary-after preview)
+  is left alone: nothing is stored there. Nothing already in a plan is rewritten —
+  every reader has always coped with the long form, and the next save of that row
+  writes it clean.

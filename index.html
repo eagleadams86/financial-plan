@@ -13852,7 +13852,11 @@ function parseBrackets(text, filing) {
     sawPercent = true;
     if (pcts.length > 1)
       return no(`Two rates on one line — “${line.slice(0, 70)}”. Split them onto separate lines.`);
-    const rate = parseFloat(pcts[0]) / 100;
+    /* Rounded AFTER the division (2026-09-04): a pasted 5.85% is 5.85 / 100 =
+       0.058499999999999996 in floating point, and this is a rate that is
+       STORED — the same fault readFields had with a typed percent. Four places
+       of a fraction is two of a percent, which is all a schedule prints. */
+    const rate = roundTo(parseFloat(pcts[0]) / 100, 4);
     if (rate > 1) return no(`A rate over 100% — “${line.slice(0, 70)}”.`);
 
     /* The percentage is taken OUT before any number is read, so a rate can
@@ -19095,9 +19099,16 @@ function readFields(fields) {
       /* 2dp of a percent (0.01%) is plenty for a rate you type. A field can ask
          for more with `dp` — the comp raise does, because it may be derived
          from a new salary rather than typed, and has to land on that exact
-         cent when it is applied back. */
+         cent when it is applied back.
+         THE FRACTION IS ROUNDED AFTER THE DIVISION, NOT THE PERCENT BEFORE IT
+         (2026-09-04). `roundTo(4.57, 2) / 100` is 0.045700000000000005 in
+         floating point — the box read 4.57 again next time, because the
+         display branch rounds on the way back, so nobody saw it; but that long
+         form is what the state held, what a backup carried, and what every
+         figure made from it started with. Dividing first and then rounding to
+         two more places than the percent asked for gives exactly 0.0457. */
       out[f.key] = (n === null || Number.isNaN(n)) ? null
-        : f.type === 'percent' ? roundTo(n, f.dp ?? 2) / 100 : n;
+        : f.type === 'percent' ? roundTo(n / 100, (f.dp ?? 2) + 2) : n;
     } else out[f.key] = raw;
   }
   return out;
@@ -21953,7 +21964,11 @@ const EDITORS = {
          so raisePct is normally already right; this is the belt and braces for
          a path that fires no input event, a paste or an autofill. */
       const raisePct = v.raisePct
-        ?? (salary && v.after ? raiseFor(salary, v.after) / 100 : 0);
+        /* Rounded after the division (2026-09-04), the way readFields rounds
+           the typed one: raiseFor answers a percent, and percent / 100 can
+           carry float noise into a stored fraction. Eight places of a fraction
+           is the six the raise field asks for, plus the two the division took. */
+        ?? (salary && v.after ? roundTo(raiseFor(salary, v.after) / 100, 8) : 0);
       const row = { salary, raisePct };
       /* Written only when there is something to write. An empty box removes
          the key rather than storing a 0, so a year clears back to "not
