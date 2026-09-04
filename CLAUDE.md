@@ -3560,7 +3560,8 @@ different way and will drift apart again if one is edited alone:
 
 | seam | how the 18px is made |
 |---|---|
-| add bar → first year | the bar's own inline `margin: 0 0 18px` |
+| add bar → the chart card | the bar's own inline `margin: 0 0 18px` |
+| chart card → first year's heading | the card's 18px collapsing into `.yearhead`'s 12px — the same collapse the add bar used to make, so the seam is unchanged |
 | trip card → next year's heading | `.triprow`'s 12px collapsing into `.yearhead`'s 12px, **plus the row's 6px `padding-bottom`** |
 | trip card → the leave planner | that same 6px, with nothing to collapse into, over `.triprow`'s 12px |
 | one tail card → the next | the plain `.card` margin |
@@ -3605,6 +3606,14 @@ chart had drifted to the top and pushed the working card below the fold:
   Runway, then the four long-run charts, then Where the Money Goes.
 - **Vacations** — the add bar, then the trips by year, then the PTO cards,
   then Trip Spending, Year by Year. Leave counting follows the trips it counts.
+  **REVERSED on 2026-09-04, for this tab only**: Charlie asked for the chart at
+  the top and it is the one tab where the rule reads badly. The trips are a
+  horizontal row per year, newest first, so the working card is at the top of
+  the page either way — while at the foot the chart sat under every year of
+  trips AND every PTO table, several screens down on a full plan, which made
+  the one card that compares this year with the last few the one card nobody
+  saw. The add bar still leads: it is the tab's toolbar, not a card. The other
+  three tabs keep the rule.
 - **Giving** — the filing note (it carries the CSV export and says a year's
   table appears *below*, so it stays welded to them), then the year tables,
   then the Giving Fund, then Giving over Time.

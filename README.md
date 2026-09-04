@@ -899,8 +899,15 @@ unreadable for anyone.
 
 ## Vacations
 
-The trips come first — they are what the tab is for and what you edit.
+The year-by-year chart opens the tab and the trips follow it. The trips are
+still what the tab is *for* — but they read newest-first, so the top of the
+page already shows this year, and the chart is the only card here that says how
+this year compares with the last few.
 
+- **Trip Spending, Year by Year** — under the add bar, once two years have
+  trips. Each bar adds a year's trips up (paid, minus credits, plus still due),
+  with the trips themselves broken out in the hover, a dotted average across
+  the finished years, and a dashed edge on a year whose figure can still grow.
 - **Per-trip cost tables**, grouped into one row per year, newest first, and
   reorderable within a year. A new trip starts from the lines most trips need
   — airfare, stay, transport, excursions, food, tips, spa — or from nothing,
@@ -908,11 +915,6 @@ The trips come first — they are what the tab is for and what you edit.
 - **Each line tracks what's paid, what's credited and what's still due**, with
   a **✓ Paid** button that settles the rest in one click.
 - **A holidays & PTO planner**, with from/to dates, under the trips it counts.
-- **Trip Spending, Year by Year** — a chart at the foot of the tab, once two
-  years have trips. Each bar adds a year's trips up (paid, minus credits, plus
-  still due), with the trips themselves broken out in the hover, a dotted
-  average across the finished years, and a dashed edge on a year whose figure
-  can still grow.
 
 ---
 
