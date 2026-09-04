@@ -2093,6 +2093,28 @@ It writes a new file beside the input and never modifies the original.
 (Folding a year into a summary is a per-year decision with a button on the
 year itself — the script never does it for you.)
 
+`merge_debit_card.py` is the other one-off: it makes the **ATM** row and the
+**Debit Card** row into one row, in every year.
+
+```bash
+python3 merge_debit_card.py financial-plan-data.json
+```
+
+The same spending had been recorded under three ids since 2013 — `atm`,
+`debit-card` and `atm-debit` — and the last two were both wearing the name
+"ATM". Nothing paired them, because *Where the Money Goes* matches this year's
+rows against last year's by category **id**: the live year's row read "new this
+year" while the previous year's read "down 100%", two lines apart in the same
+table. All three become `debit-card`, named **Debit Card**, which is what the
+row actually holds — card purchases and cash taken out on the card.
+
+2019 is the only year that is a real merge: it kept both rows, and four months
+have a figure in each. Those become one **split cell**, the app's own way of
+saying a month was several payments, so every original amount is still on the
+screen and nothing is added up out of sight. The script asserts each year's row
+total is unchanged, writes a new file beside the input, and never modifies the
+original.
+
 **Why there is a `package.json` in a repo with no build step.** It is not a package and it
 installs nothing — it exists so Dependabot has a manifest to scan. Its only entry is the
 Chart.js that is *vendored* as `chart.min.js` beside the app, pinned exactly, and CI passes
