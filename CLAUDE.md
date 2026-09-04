@@ -383,7 +383,13 @@ family names as well as balances.
   views — searching carried data is reading. ⌘K opens (Ctrl+K off a Mac; the
   title hints say both); a `role="status"` count span announces results to a
   screen reader — the list itself stays out of the live region. The dialog
-  renders through esc() everywhere.
+  renders through esc() everywhere. **Enter in the box opens the first hit**
+  (a keydown listener beside the `input` one; nothing when there is no hit),
+  and **`goToSearchHit` lands the focus on `#tab-<activeTab>` when it would
+  otherwise be on <body> or something with no client rects** — a visible focus
+  is left alone, and a cell hit's editor, opened after, keeps its own. Both
+  2026-09-04, the family shape from Flow Metrics' 6183b71; see the audit fixes
+  at the end, round two.
 - **`savingsPulse` / `yearIncome`** are the Progress tab's Savings Rate &
   Runway card — yearIncome mirrors yearSpending exactly (computed cells,
   netted, summary fallback), and a missing denominator is NULL, never 0: no
@@ -5482,3 +5488,19 @@ test first and proven red, the commit quoting the row.
   the reader left, as before. **The test sets the pin both ways and restores it**:
   the frame shares the origin's localStorage, and the first draft ran "unpinned"
   with the pin on — the ambient-state trap, again.
+
+- **The Find window: Enter opens the first hit, and the keyboard lands somewhere visible (round two, FF — family-wide).** Two faults. The box had only an `input`
+  listener, so Enter did nothing; now a `keydown` listener beside it opens
+  `searchHits[0]` the way a click does, `preventDefault`ed, and does nothing at all
+  when there is no hit (a plain Enter only — a modified one is left to the box).
+  And the dialog closing handed the focus to whatever had it before, which after a
+  ⌘K from nowhere in particular was <body>, while the hit had just changed the tab
+  underneath — so `goToSearchHit`, after `render()`, asks "is the focus on
+  something the reader can see?" and if not (body, or an element with no client
+  rects) focuses `#tab-<state.ui.activeTab>` with `preventScroll`. A visible focus —
+  the Find button after a click on it — is left alone. The landing happens BEFORE
+  a cell hit's editor opens, so the editor takes the focus as it always did and has
+  a real place to hand it back to. Flow Metrics' 6183b71 is the model; Sprint
+  Velocity got the same shape the same day. The test reads hits through the pure
+  `searchPlan` — `searchHits` and `F` are top-level bindings the test frame cannot
+  reach, which cost the first two runs of the red-row proof.

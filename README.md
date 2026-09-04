@@ -1394,8 +1394,15 @@ notes (split-part notes and balance notes included), donations, trips and
 their line items, goals, people, property, and holdings by ticker.
 
 A budget hit opens straight into its cell's editor; everything else lands you
-on the right tab. When results are capped it says how many more there were
-rather than trimming silently.
+on the right tab. **Enter opens the first result** — the same as clicking it
+(added 2026-09-04; until then Enter did nothing, and you had to reach for the
+mouse). **The keyboard lands somewhere you can see**: after a result, if the
+focus would otherwise have fallen to nowhere — the way it does after a ⌘K
+pressed from the middle of nothing — it goes to the tab you landed on, so the
+next Tab press carries on from there; a budget hit's editor keeps its own
+focus, and a Find button you clicked gets it back as before. The same rule in
+every app in the family (Flow Metrics set it on 2026-09-04). When results are
+capped it says how many more there were rather than trimming silently.
 
 ### Undo
 

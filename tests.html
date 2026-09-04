@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 945;
+const EXPECTED = 946;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14232,6 +14232,100 @@ t('closing a full-screen chart returns to where you left, or after a step to the
        'and the card lands under the pinned band, not behind it',
        `top ${topPinned.toFixed(1)}, clearance ${clearPinned}`);
     W.applyPin(pinWas);
+  } finally { f.remove(); }
+});
+
+/* ── The Find window: Enter, and where the keyboard lands after a hit ───────
+   Two faults from the 2026-09-03 audit, the same in all three apps. (1) The
+   box had only an `input` listener, so Enter did nothing: a reader who typed
+   a word and pressed Enter — what every search box on earth does — sat there.
+   (2) The dialog closing handed the focus back to whatever had it before,
+   which after a ⌘K pressed from nowhere in particular was <body>; the hit had
+   changed the tab, and the next Tab started from the top of the page. Flow
+   Metrics' commit 6183b71 is the model: a focus on nothing the reader can see
+   goes onto the hit's own tab button; a focus that is somewhere visible is
+   left alone; and a hit that opens an editor leaves the editor's own focus. */
+t('Find: Enter opens the first hit, and the keyboard lands somewhere visible', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'findkeys');
+  try {
+    const box = D.getElementById('searchBox'), dlg = D.getElementById('searchDialog');
+    /* `searchHits` is a top-level let, out of the frame's reach — the pure
+       searchPlan answers the same question. */
+    const hitsFor = (q) => W.searchPlan(W.finGet(), q, null).hits;
+    const type = async (q) => {
+      box.value = q;
+      box.dispatchEvent(new W.Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 100));
+    };
+    const enter = async () => {
+      box.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 400));
+    };
+    D.getElementById('tab-budget').click();
+    await new Promise((r) => setTimeout(r, 300));
+
+    /* Opened by the ⌘K route with nothing focused — the case that fell to body. */
+    D.activeElement && D.activeElement.blur();
+    D.getElementById('findBtn').onclick();
+    await new Promise((r) => setTimeout(r, 200));
+    ok(dlg.open, 'the Find window is open');
+    await type('house');
+    const hh = hitsFor('house');
+    ok(hh.length === 1 && hh[0].view === 'household',
+       'one hit, on Household — the fixture the test is built on', JSON.stringify(hh[0]));
+    await enter();
+    ok(!dlg.open, 'Enter closed the window — it opened the first hit');
+    eq(W.finGet().ui.activeTab, 'household', 'and the page is on the hit’s tab');
+    const a = D.activeElement;
+    ok(a && a !== D.body && a.getClientRects().length > 0,
+       'the focus is on something the reader can see, not <body>',
+       a ? (a === D.body ? 'body' : a.tagName + '#' + a.id) : 'null');
+    ok(a === D.getElementById('tab-household'),
+       'and it is the tab button of the view the hit landed on', a && a.id);
+
+    /* Enter with nothing to open does nothing at all. */
+    D.getElementById('findBtn').onclick();
+    await new Promise((r) => setTimeout(r, 200));
+    await type('zzqx-nothing');
+    eq(hitsFor('zzqx-nothing').length, 0, 'no hits');
+    await enter();
+    ok(dlg.open, 'Enter over no hits leaves the window open');
+    await type('h');
+    await enter();
+    ok(dlg.open, 'and so does Enter over one character');
+    dlg.close();
+    await new Promise((r) => setTimeout(r, 100));
+
+    /* A cell hit opens its editor, and the editor keeps its own focus. */
+    D.getElementById('findBtn').onclick();
+    await new Promise((r) => setTimeout(r, 200));
+    await type('boiler');
+    const bh = hitsFor('boiler');
+    ok(bh.length === 1 && bh[0].cell,
+       'one hit, a budget cell note — the fixture the test is built on', JSON.stringify(bh[0]));
+    await enter();
+    const cell = D.getElementById('cellDialog');
+    ok(cell && cell.open, 'the cell editor opened over the Budget');
+    ok(cell.contains(D.activeElement), 'and the focus is inside it, where the editor put it',
+       D.activeElement ? D.activeElement.tagName + '#' + D.activeElement.id : 'null');
+    cell.close();
+    await new Promise((r) => setTimeout(r, 100));
+
+    /* A focus that is somewhere visible already is left alone: opened by a
+       click on the Find button, the button gets it back when the window
+       closes, and that is a real place. */
+    const findBtn = D.getElementById('findBtn');
+    findBtn.focus();
+    findBtn.click();
+    await new Promise((r) => setTimeout(r, 200));
+    await type('house');
+    const first = D.querySelector('#searchResults [data-hit]');
+    first.click();
+    await new Promise((r) => setTimeout(r, 400));
+    ok(!dlg.open, 'a click on the hit still works as before');
+    ok(D.activeElement === findBtn || D.activeElement === D.getElementById('tab-household'),
+       'the focus is on the Find button it came from, or on the tab — either is visible; never body',
+       D.activeElement ? D.activeElement.id : 'null');
   } finally { f.remove(); }
 });
 

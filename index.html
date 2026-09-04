@@ -24382,8 +24382,24 @@ function goToSearchHit(h) {
   state.ui.activeTab = h.view;
   save();   // ui-only, so nothing joins the undo ring
   render();
+  /* WHERE THE KEYBOARD LANDS (2026-09-04, from the 2026-09-03 audit). The
+     window closing handed the focus back to whatever had it before — after a
+     ⌘K pressed from nowhere in particular that was <body>, and the next Tab
+     started from the top of a page whose tab had just changed under it. A
+     focus on nothing the reader can see goes onto the hit's own tab button
+     (`state.ui.activeTab`, which render has just honoured), so a reader
+     without a mouse is where the hit took them, and the editor about to open
+     below has something real to return to when it closes. A focus that is
+     somewhere visible — the Find button, after a click on it — is left alone.
+     Flow Metrics' commit 6183b71 is the model; the same shape in all three
+     apps. `preventScroll`, like every focus() this app makes. */
+  const had = document.activeElement;
+  const landing = F(`tab-${state.ui.activeTab}`);
+  if (landing && (!had || had === document.body || !had.getClientRects().length))
+    landing.focus({ preventScroll: true });
   /* A cell hit opens straight into its editor — the note found is the note on
-     screen. Navigation-only in a shared view, where the editor refuses. */
+     screen, and the editor's own focus is the one that stands. Navigation-only
+     in a shared view, where the editor refuses. */
   if (h.cell && !viewOnly) openCellEditor(h.year, h.cell.type, h.cell.id, h.cell.m);
 }
 F('findBtn').onclick = () => {
@@ -24397,6 +24413,17 @@ F('findBtn').onclick = () => {
   F('searchBox').focus();
 };
 F('searchBox').addEventListener('input', renderSearchResults);
+/* ENTER OPENS THE FIRST HIT (2026-09-04, from the 2026-09-03 audit). The box
+   had only the `input` listener above, so a reader who typed a word and pressed
+   Enter — what every search box does — sat there with the list in front of
+   them. Enter now does what a click on the first hit does, and nothing when
+   there is no hit to open; every other key is left to the box. The same shape
+   in all three apps. */
+F('searchBox').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+  e.preventDefault();
+  if (searchHits[0]) goToSearchHit(searchHits[0]);
+});
 F('searchResults').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-hit]');
   if (btn && searchHits[+btn.dataset.hit]) goToSearchHit(searchHits[+btn.dataset.hit]);
