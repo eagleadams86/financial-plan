@@ -876,6 +876,13 @@ you which row is biggest, and you already know which row is biggest.
   yearly summary, which has no rows to point at, they are matched by name.
 - **A row that has vanished since last year still gets a line.** Money that
   stopped being spent is as much a finding as money that started.
+- **A row that hands back more than it takes is negative** — cash back, a
+  parking benefit — and its change is said in those terms: "$961.71 less back"
+  means less came back than last year, never "up $961.71", which is a true
+  sentence about the year and a false one about the row. The caret always
+  points the way the *year* went, because the column has to explain the total
+  under it, so less money back points up. A row that crosses zero between the
+  two years says which side it was on instead of a percentage.
 - Anything that spent nothing in either year is left out — a screenful of
   $0.00 is how a table stops being read.
 - The current year includes the months the plan has worked out, so August
