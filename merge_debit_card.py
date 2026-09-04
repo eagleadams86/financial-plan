@@ -21,11 +21,12 @@ still on the screen, in the cell editor, exactly as it was typed.
 
 What is deliberately NOT touched:
 
-* **`cash`** — 2020's "Cash" row is the same habit under a fourth name, but it
-  is a decision about what the row MEANS, not a spelling, so it is left for
-  Charlie to say. (`cash` is also the checking account's id; the two live in
-  different namespaces and only `cells` is rewritten here, which is the same
-  rule `normalizeIds` follows in the app.)
+* **Every other year's `cash`.** 2020's "Cash" row is the same habit under a
+  fourth name and Charlie said to fold it in, so it moves — but ONLY in 2020.
+  `cash` is also the checking account's id, and while the two live in different
+  namespaces (only `cells` is rewritten here, the same rule `normalizeIds`
+  follows in the app), an id that means two things is not one to rewrite across
+  the board on a pattern match.
 * **Any figure.** A rename moves keys; the merge adds the four overlapping
   months together and asserts the year totals are unchanged.
 
@@ -44,10 +45,13 @@ import sys
 from pathlib import Path
 
 # The whole decision, in one place: what each old id becomes, and what the
-# surviving row is called. Folding 2020's `cash` row in as well is one more
-# line here — and nothing else.
-MOVES = {"atm": "debit-card", "atm-debit": "debit-card"}
+# surviving row is called.
+MOVES = {"atm": "debit-card", "atm-debit": "debit-card", "cash": "debit-card"}
 NAMES = {"debit-card": "Debit Card"}
+# A move that is only true in some years. `cash` names the 2020 spending row
+# AND the checking account, so it is named here with the year it may move in
+# rather than trusted to a bare id match.
+ONLY_IN = {"cash": {"2020"}}
 
 
 def round2(v):
@@ -91,7 +95,13 @@ def merge_cells(a, b):
     return cell
 
 
-def rewrite_year(yr):
+def moves_for(year):
+    """The renames that apply to one year — see ONLY_IN."""
+    return {old: new for old, new in MOVES.items()
+            if old not in ONLY_IN or year in ONLY_IN[old]}
+
+
+def rewrite_year(yr, year):
     """Rename the ids in one year's rows, merging any two that collide.
 
     The cell keys are rewritten from the list of ids that MOVED, matched as a
@@ -101,6 +111,7 @@ def rewrite_year(yr):
     cats = yr.get("categories")
     if not isinstance(cats, list):
         return 0, 0
+    renames = moves_for(year)
     moved = {}
     kept, dropped = [], set()
     by_id = {}
@@ -108,7 +119,7 @@ def rewrite_year(yr):
         if not isinstance(c, dict):
             continue
         old = c.get("id")
-        new = MOVES.get(old, old)
+        new = renames.get(old, old)
         if new != old:
             moved[old] = new
             c["id"] = new
@@ -164,7 +175,7 @@ def main(argv):
         yr = years[y]
         if not isinstance(yr, dict):
             continue
-        renamed, merged = rewrite_year(yr)
+        renamed, merged = rewrite_year(yr, y)
         after = spend(yr, ids)
         # A rename must not move a dollar, and the merge must only add up.
         if abs(after - before[y]) > 0.005:

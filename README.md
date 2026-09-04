@@ -2100,13 +2100,16 @@ year itself — the script never does it for you.)
 python3 merge_debit_card.py financial-plan-data.json
 ```
 
-The same spending had been recorded under three ids since 2013 — `atm`,
-`debit-card` and `atm-debit` — and the last two were both wearing the name
-"ATM". Nothing paired them, because *Where the Money Goes* matches this year's
+The same spending had been recorded under four ids since 2013 — `atm`,
+`debit-card`, `atm-debit` and 2020's `cash` — and two of them were both wearing
+the name "ATM". Nothing paired them, because *Where the Money Goes* matches this year's
 rows against last year's by category **id**: the live year's row read "new this
 year" while the previous year's read "down 100%", two lines apart in the same
-table. All three become `debit-card`, named **Debit Card**, which is what the
-row actually holds — card purchases and cash taken out on the card.
+table. All four become `debit-card`, named **Debit Card**, which is what the
+row actually holds — card purchases and cash taken out on the card. `cash` is
+also the checking ACCOUNT's id, so it is listed in `ONLY_IN` with the single
+year it may move in rather than trusted to a bare id match; only `cells` are
+ever rekeyed, which is the rule `normalizeIds` follows in the app.
 
 2019 is the only year that is a real merge: it kept both rows, and four months
 have a figure in each. Those become one **split cell**, the app's own way of
