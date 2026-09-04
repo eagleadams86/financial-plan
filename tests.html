@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 937;
+const EXPECTED = 938;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -13791,6 +13791,56 @@ t('a step by arrow key lands the focus inside the window, never on the page unde
     ok(D.activeElement === nextArrow,
        'and the arrow that already held the focus was not taken off it');
     W.closeMaxi();
+  } finally { f.remove(); }
+});
+
+/* ── Fix 2: printing while a chart fills the window ─────────────────────────
+   `@media print` hides #chartMaxi, and the maximised card is INSIDE it — so a
+   reader who pressed ⌘P over a full-screen chart got every other card and not
+   the one they were looking at, with the page inert behind it. Flow Metrics'
+   beforePrint() closes the overlay before the theme swap and is the model; this
+   app's printForPaper() did not. Driven through the real event, the way the
+   browser fires it, and read back off the DOM: the card is back in its seat
+   with its canvas, and the overlay is empty and closed. */
+t('printing while a chart fills the window brings the card down first', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'printmaxi');
+  try {
+    D.getElementById('tab-goals').click();
+    await new Promise((r) => setTimeout(r, 500));
+    const card = [...D.querySelectorAll('#views .card')]
+      .find(c => c.querySelector('.chartbox canvas'));
+    const cvId = card.querySelector('.chartbox canvas').id;
+    const name = W.maxiName(card);
+    card.querySelector(':scope > h2 > .chart-max').click();
+    await new Promise((r) => setTimeout(r, 300));
+    ok(D.querySelector('#chartMaxi > .card'), 'a chart is filling the window');
+    const themeWas = D.documentElement.getAttribute('data-theme');
+    ok(themeWas !== 'light' && themeWas !== 'sepia',
+       'the fresh frame is on a theme the print will swap', themeWas);
+
+    W.dispatchEvent(new W.Event('beforeprint'));
+    await new Promise((r) => setTimeout(r, 400));
+    ok(!D.querySelector('#chartMaxi > .card'),
+       'the print event brings the card DOWN — #chartMaxi is hidden on paper, and a '
+       + 'card left inside it would be the one chart the reader asked for, missing');
+    ok(!D.getElementById('chartMaxi').classList.contains('open')
+       && !D.body.classList.contains('maxi-open') && !D.querySelector('.wrap').inert,
+       'and the window is properly closed, not merely emptied');
+    const back = D.getElementById(cvId);
+    ok(back && D.getElementById('views').contains(back),
+       'the card is back in #views with its canvas, drawn for paper');
+    ok(back && back.closest('.card') && W.maxiName(back.closest('.card')) === name,
+       'the same card, by name');
+    eq(D.documentElement.getAttribute('data-theme'), 'light',
+       'and the theme swap the print already did still happens after it');
+    eq(D.querySelectorAll('.chart-slot').length, 0, 'no placeholder is left in the page');
+
+    W.dispatchEvent(new W.Event('afterprint'));
+    await new Promise((r) => setTimeout(r, 400));
+    ok(!D.querySelector('#chartMaxi > .card'),
+       'the print ending does not put the chart back up — the reader closed nothing, '
+       + 'but a window reopening under a print dialog is not a thing anyone asked for');
+    eq(D.documentElement.getAttribute('data-theme'), themeWas, 'the theme comes back afterwards');
   } finally { f.remove(); }
 });
 

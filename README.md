@@ -1599,6 +1599,12 @@ Printing borrows the **Light** theme and gives it back afterwards, so a dark
 theme doesn't arrive on paper. Nothing is saved, and the theme you were looking
 at is the one you are still looking at.
 
+If a chart is filling the window when you print, it comes down first and prints
+in its own place on the page, with everything else. (Until 2026-09-04 it did the
+opposite: the full-screen window is hidden on paper, and the card was hidden
+inside it, so the one chart you were looking at was the one missing from the
+print.) The window stays down afterwards.
+
 ---
 
 ## Preferences

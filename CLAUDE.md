@@ -5373,3 +5373,12 @@ against the unfixed page; the commit that fixed it quotes the row.
   one sentence: a step lands focus on the arrow that pressed it, or on the new card's
   ⤢, never on the page underneath. Family-wide; the same shape went into Sprint
   Velocity and Flow Metrics the same day.
+
+- **Printing closes the full-screen window first (fix 2).** `@media print` hides `#chartMaxi`, and the maximised card was INSIDE it — so ⌘P
+  over a full-screen chart printed every card but the one the reader was looking at,
+  with the page inert behind it. `printForPaper(true)` now calls `closeMaxi()` as its
+  first line, ABOVE the Light/Sepia early return (those two skip the theme swap and
+  must not skip this) — the line Flow Metrics' `beforePrint()` has always had. The CSS
+  comment that said "the card prints where it sits" was wrong and says so now; the
+  rule stays as the belt to the closing's braces. Driven through the real
+  `beforeprint` event in the suite and read back off the DOM.
