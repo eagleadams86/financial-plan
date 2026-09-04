@@ -3612,14 +3612,19 @@ chart had drifted to the top and pushed the working card below the fold:
   Runway, then the four long-run charts, then Where the Money Goes.
 - **Vacations** — the add bar, then the trips by year, then the PTO cards,
   then Trip Spending, Year by Year. Leave counting follows the trips it counts.
-  **REVERSED on 2026-09-04, for this tab only**: Charlie asked for the chart at
-  the top and it is the one tab where the rule reads badly. The trips are a
-  horizontal row per year, newest first, so the working card is at the top of
-  the page either way — while at the foot the chart sat under every year of
-  trips AND every PTO table, several screens down on a full plan, which made
-  the one card that compares this year with the last few the one card nobody
-  saw. The add bar still leads: it is the tab's toolbar, not a card. The other
-  three tabs keep the rule.
+  **REVERSED on 2026-09-04, for this tab only, and DELIBERATELY** — Charlie
+  asked for it, agreed the rule is right elsewhere, and wants this kept as a
+  documented exception rather than quietly restored. His reason first, because
+  it is the one that decided it: *it looks better than just boxes at the top.*
+  The newest year is usually trips that are still only titles — "Not Planned
+  Yet" — so the tab opened on a row of collapsed boxes with no figures in them,
+  which is a poor first screen however correct the ordering rule is. The rest
+  agrees: the trips are a horizontal row per year, newest first, so the working
+  card is at the top of the page either way, while at the foot the chart sat
+  under every year of trips AND every PTO table, several screens down on a full
+  plan — the one card comparing this year with the last few was the one card
+  nobody saw. The add bar still leads: it is the tab's toolbar, not a card. The
+  other three tabs keep the rule; do not "fix" this one back to match them.
 - **Giving** — the filing note (it carries the CSV export and says a year's
   table appears *below*, so it stays welded to them), then the year tables,
   then the Giving Fund, then Giving over Time.

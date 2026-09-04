@@ -900,9 +900,10 @@ unreadable for anyone.
 ## Vacations
 
 The year-by-year chart opens the tab and the trips follow it. The trips are
-still what the tab is *for* — but they read newest-first, so the top of the
-page already shows this year, and the chart is the only card here that says how
-this year compares with the last few.
+still what the tab is *for* — but they read newest-first, and the newest year is
+usually trips that are still only titles, so the page used to open on a row of
+boxes with no figures in them. The chart is the only card here that says how
+this year compares with the last few, and it gives the tab something to open on.
 
 - **Trip Spending, Year by Year** — under the add bar, once two years have
   trips. Each bar adds a year's trips up (paid, minus credits, plus still due),
