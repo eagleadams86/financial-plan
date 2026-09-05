@@ -5599,8 +5599,9 @@ focus ended up. One finding, fixed:
   passes at 4.61), while the Find box already drew its hint in `--text-hint` (5.05 / 5.17 / 5.17
   / 5.33). One `::placeholder` rule in that token now, for every box, so a new field cannot
   arrive at the grey again. **It is a family fault** — the theme pack carries no placeholder rule
-  and Sprint Predictability and Flow Metrics had the same grey on 8 and 17 boxes — flagged to
-  Charles as a pack decision. One test, the placeholder colour on every box on every theme.
+  and Sprint Predictability and Flow Metrics had the same grey on 8 and 17 boxes — **Charles
+  moved it into the pack the same day — rule 16 — and this app's own copy went**; the test
+  stays, on the computed colour. One test, the placeholder colour on every box on every theme.
 
 Recorded as PASSING so they are not re-audited: every stop on every tab has a visible ring that
 clears 3:1 on both sides; the Tab loop closes on every view with no trap; every dialog — header
