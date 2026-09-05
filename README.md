@@ -432,7 +432,10 @@ as an oversight. Clear the field and the row is simply in use again.
 An **overflow sweep row** watches one account and moves whatever it would end
 the month holding above a threshold into another account. The threshold is
 either a **goal's target, read live** — edit the goal and every future month
-moves with it — or a plain dollar amount.
+moves with it — or a plain dollar amount. A goal set to months of expenses
+resolves from each year's own spending, and the row's label, its editor and a
+share link all name the figure for the year the row is in (a year built ahead
+measures its own projected expenses).
 
 - A goal that adds up **several accounts is measured across all of them**. An
   emergency fund living in cash plus two checking accounts is over its target

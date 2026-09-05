@@ -5776,14 +5776,27 @@ const startedGridYears = (st, todayIso) => Object.keys(st.years).sort()
 /* The goals as the live year RESOLVED them (a months-of-expenses target is a
    figure there), and that year's monthly spend — for the editors, which draw
    before/without computeGoals and must not read `state.goals` for a target.
-   Falls back to the plain list when nothing is computed yet. */
+   Falls back to the plain list when nothing is computed yet.
+   `latestGridYear() || newestGridYear()` (review fix 5): a plan whose only
+   grid year has not begun — built for next January — has no STARTED year, and
+   the fallback to `state.goals` put a months goal at $0 in every label and
+   froze a $0 threshold into a share link. The newest grid is computed like
+   any other, so it always has a resolved list to offer.
+   `goalsOfYear(y)` is what a reader with a YEAR in hand asks (fix 5 again):
+   each year resolves a months goal from its own expenses, so a row in a year
+   built ahead is measured against THAT year's figure, and the row label, the
+   cell editor, the sweep-row editor's options and the share freeze all read
+   it — the live year's list was one figure short for every other year. */
 function liveGoals() {
-  const y = latestGridYear();
+  const y = latestGridYear() || newestGridYear();
   return (y && C[y] && C[y].goals) || state.goals;
 }
 function liveMonthlySpend() {
-  const y = latestGridYear();
+  const y = latestGridYear() || newestGridYear();
   return (y && C[y] && C[y].monthlySpend) || 0;
+}
+function goalsOfYear(y) {
+  return (y && C[y] && C[y].goals) || liveGoals();
 }
 function latestGridYear() {
   const ks = startedGridYears(state);
@@ -6304,7 +6317,7 @@ function computeYearWith(st, yearKey, prior, goals) {
   const ctx = { st, yr, months, resolved, balances, prior, paychecks };
   const live = yr.model === 'live';
   const running = {};   // account id -> tracking has begun
-  const overflow = overflowOrder(yr.categories, st.goals);   // once — rows don't change mid-year
+  const overflow = overflowOrder(yr.categories, goals);      // once — rows don't change mid-year
 
   for (const m of months) {
     /* 1 · categories */
@@ -8769,7 +8782,7 @@ function gridCard(y, yr) {
 
   const catTh = (cat) => `<th class="lbl" scope="row" data-edit="category"
     data-year="${esc(y)}" data-id="${esc(cat.id)}" style="cursor:pointer"
-    title="${esc(cat.name)} — ${esc(ruleDesc(cat))}${
+    title="${esc(cat.name)} — ${esc(ruleDesc(cat, state, goalsOfYear(y)))}${
     /* The whole schedule, not just this year's — the label is the one place in
        the grid a due date appears at all, and it is here rather than on the
        cells because the schedule is a fact about the ROW. `ruleDesc` beside it
@@ -10927,7 +10940,7 @@ function renderMonthView() {
         bits.push(back ? `reduced ${label} by ${pct}%` : `${pct}% of ${label}`);
       }
       bits.push(r.kind === 'auto'
-        ? `auto estimate — ${esc(ruleDesc(cat))}` : kindWord(r.kind));
+        ? `auto estimate — ${esc(ruleDesc(cat, state, goalsOfYear(y)))}` : kindWord(r.kind));
       if (sec === 'transfer' && inside.has(cat.id))
         bits.push('between your own accounts');
       /* A STOPPED ROW SAYS WHEN, right here, and it is worth the words because
@@ -20059,7 +20072,7 @@ const EDITORS = {
             + 'holding above the threshold \u2014 worked out after its interest.' },
       { key: 'goalId', label: 'Above this goal\u2019s target', type: 'select',
         options: [['', 'A dollar amount instead'],
-          ...liveGoals().map(g => [g.id,
+          ...goalsOfYear(ds.year).map(g => [g.id,
             `${g.name || g.id} \u2014 ${fmtMoney(g.target || 0)}`])],
         showIf: (v) => v.rule === 'overflow',
         hint: 'Reads the goal live \u2014 edit the goal and this row moves with it. For a '
@@ -20083,7 +20096,7 @@ const EDITORS = {
          the catch-all. */
       { key: 'capGoalId', label: 'Fill it only up to', type: 'select',
         options: [['', 'No cap — it takes all the overflow'],
-          ...liveGoals().map(g => [g.id,
+          ...goalsOfYear(ds.year).map(g => [g.id,
             `${g.name || g.id} — ${fmtMoney(g.target || 0)}`]),
           ['amt', 'A dollar amount instead']],
         showIf: (v) => v.rule === 'overflow',
@@ -23798,7 +23811,7 @@ function openCellEditor(yearKey, type, id, m) {
        is never a mystery — the answer to "where did this come from?" is
        right in the context line. */
     const kindText = resolvedCell?.kind === 'auto'
-      ? `auto estimate (${ruleDesc(cat)})`
+      ? `auto estimate (${ruleDesc(cat, state, goalsOfYear(yearKey))})`
       : KIND_LABEL[resolvedCell?.kind || 'missing'];
     /* WHAT IS ACTUALLY RECORDED HERE, which is not the same as what the cell
        resolves to (2026-08-26). `missing` is worth $0 because nothing was
@@ -23835,7 +23848,7 @@ function openCellEditor(yearKey, type, id, m) {
     const overflowMissing = [];
     if (rule === 'overflow') {
       if (!cat.overflowFrom) overflowMissing.push('the account it watches');
-      if (!(state.goals || []).some(g => g.id === cat.goalId)
+      if (!goalsOfYear(yearKey).some(g => g.id === cat.goalId)
           && typeof cat.threshold !== 'number')
         overflowMissing.push('the threshold');
       if (!cat.transferTo) overflowMissing.push('where the money goes');
@@ -23845,7 +23858,7 @@ function openCellEditor(yearKey, type, id, m) {
         + andList(overflowMissing) + (overflowMissing.length > 1 ? ' aren\'t' : ' isn\'t')
         + ' set — open Row settings.';
     else if (future && rule === 'overflow'
-             && overflowOrder(yr.categories, state.goals).refused.has(cat.id))
+             && overflowOrder(yr.categories, goalsOfYear(yearKey)).refused.has(cat.id))
       hint.textContent = '⚠ This row is part of a loop — overflow rows sweep into '
         + 'each other\'s accounts, and a loop has no answer, so they all stay '
         + 'blank. Change one row\'s destination.';
@@ -23855,32 +23868,32 @@ function openCellEditor(yearKey, type, id, m) {
        the cap). A row set up the other way round could sweep for ever and
        never land the goal on its target, so it stays blank — and says why. */
     else if (future && rule === 'overflow'
-             && !overflowMeasure(cat, state.goals).measure.includes(cat.overflowFrom))
+             && !overflowMeasure(cat, goalsOfYear(yearKey)).measure.includes(cat.overflowFrom))
       hint.textContent = '⚠ The goal this row reads doesn\'t count '
         + accountName(state, cat.overflowFrom) + ', so sweeping from it could '
         + 'never bring the goal down to its target — the row stays blank. Tick '
         + 'the account in the goal, or watch a different account.';
     else if (future && rule === 'overflow'
-             && overflowMeasure(cat, state.goals).measure.includes(cat.transferTo))
+             && overflowMeasure(cat, goalsOfYear(yearKey)).measure.includes(cat.transferTo))
       hint.textContent = '⚠ This row sweeps into an account the goal it reads '
         + 'counts — moving money there changes nothing the goal can see, so the '
         + 'row stays blank. Send it to an account outside the goal.';
     else if (future && rule === 'overflow'
-             && overflowMeasure(cat, state.goals).claim.includes(cat.transferTo))
+             && overflowMeasure(cat, goalsOfYear(yearKey)).claim.includes(cat.transferTo))
       hint.textContent = '⚠ This row sweeps into an account that a goal AHEAD of '
         + 'the one it reads counts — what that goal still needs sets this row\'s '
         + 'line, so filling it from here would move the line as the row runs. The '
         + 'row stays blank; send the money somewhere neither goal counts.';
     else if (future && rule === 'overflow'
-             && overflowMeasure(cat, state.goals).capClaim
-             && overflowMeasure(cat, state.goals).capClaim.includes(cat.overflowFrom))
+             && overflowMeasure(cat, goalsOfYear(yearKey)).capClaim
+             && overflowMeasure(cat, goalsOfYear(yearKey)).capClaim.includes(cat.overflowFrom))
       hint.textContent = '⚠ The cap goal is claimed first by a goal that counts the '
         + 'account this row drains, so the cap would move as the row runs — the '
         + 'row stays blank. Watch a different account, or change the cap.';
     else if (future && rule === 'overflow'
-             && overflowMeasure(cat, state.goals).capMeasure
-             && (!overflowMeasure(cat, state.goals).capMeasure.includes(cat.transferTo)
-                 || overflowMeasure(cat, state.goals).capMeasure.includes(cat.overflowFrom)))
+             && overflowMeasure(cat, goalsOfYear(yearKey)).capMeasure
+             && (!overflowMeasure(cat, goalsOfYear(yearKey)).capMeasure.includes(cat.transferTo)
+                 || overflowMeasure(cat, goalsOfYear(yearKey)).capMeasure.includes(cat.overflowFrom)))
       hint.textContent = '⚠ The cap goal has to count the account this row fills '
         + '(and not the one it drains), or filling could never reach the cap — '
         + 'the row stays blank. Fix the cap in Row settings, or tick the right '
@@ -26178,10 +26191,16 @@ function reseedShareYears(data) {
    recipient loses is the live tie they couldn't have had anyway. A link that
    DOES carry the goals resolves the id and nothing is frozen. Pure over the
    payload, like reseedShareYears — it never touches the real state. */
-function freezeOverflowThresholds(data, goals, bal = () => 0) {
+function freezeOverflowThresholds(data, goalsIn, bal = () => 0) {
   const kept = new Set((data.goals || []).map(g => g.id));
-  for (const yr of Object.values(data.years || {})) {
+  /* A list, or a function of the YEAR KEY (review fix 5): a months goal
+     resolves to a different figure in each year, so the sender's rows are
+     frozen at the figure their own year's engine used — one list for every
+     carried year froze a 2027 row at 2026's spend. */
+  const goalsOf = typeof goalsIn === 'function' ? goalsIn : () => goalsIn;
+  for (const [yearKey, yr] of Object.entries(data.years || {})) {
     if (yr.kind !== 'grid') continue;
+    const goals = goalsOf(yearKey) || [];
     for (const cat of yr.categories || []) {
       if (cat.rule !== 'overflow') continue;
       if (cat.goalId !== undefined && !kept.has(cat.goalId)) {
@@ -26297,10 +26316,13 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
   if (!need.has('years')) data.settings.accounts = [];
   else {
     reseedShareYears(data);
-    const live = latestGridYear();
+    /* Each carried year's rows freeze at ITS resolved goals; the claim's
+       balances are the sender's current month, on the live year — or the
+       newest grid's first month when nothing has begun yet (fix 5). */
+    const live = latestGridYear() || newestGridYear();
     const at = live ? currentMonthOf(state.years[live], todayISO()) : null;
-    freezeOverflowThresholds(data, live ? C[live].goals : state.goals,
-      live ? (id) => C[live].balances[`${id}|${at}`] || 0 : () => 0);
+    freezeOverflowThresholds(data, (y) => goalsOfYear(y),
+      live && C[live] ? (id) => C[live].balances[`${id}|${at}`] || 0 : () => 0);
   }
   if (!includeNotes) stripNotes(data);
   if (!includeNames) anonymisePeople(data);

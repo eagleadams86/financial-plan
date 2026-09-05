@@ -5734,3 +5734,21 @@ and proven red against the pre-fix page, README and this file in the commit.
   `monthsLeft`; the tile's "(1 yr 2 mo)" still counts from today, which is
   the question it answers. The pace fixtures set `monthCount: 12` so their
   figures did not move.
+- **Every reader with a year in hand reads THAT year's resolved goals
+  (fix 5).** `computeYear` resolves a months goal per year, but `ruleDesc`'s
+  default, the sweep-row editor's two pickers and `buildSharePayload` all
+  read `liveGoals()` — the LIVE year's list — so a row in a year built ahead
+  was labelled, offered and frozen at a figure its own engine never used, and
+  a budget-only link handed the recipient a 2027 row at 2026's spend.
+  `goalsOfYear(y)` is the reader now (`C[y].goals`, else `liveGoals()`); the
+  three `ruleDesc` call sites pass it (the grid label and Month page with
+  `y`, the cell editor with `yearKey`), the pickers pass `ds.year`, the cell
+  editor's own diagnostics read it, and `freezeOverflowThresholds` takes a
+  list OR a function of the year key and resolves each carried year through
+  it. The second instance: `liveGoals()` fell to `state.goals` when no grid
+  year had STARTED (a plan built for next January), where a months goal has
+  no `target` at all, so every label read $0 and a link froze `threshold: 0`
+  — the recipient's row swept every dollar. `latestGridYear() ||
+  newestGridYear()` closes it; the newest grid is computed like any other.
+  Also `computeYearWith` orders its rows on the goals it was handed rather
+  than `st.goals` (ids only, so no figure moved — one list in the engine).

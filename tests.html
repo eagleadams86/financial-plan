@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 978;
+const EXPECTED = 980;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1257,6 +1257,26 @@ t('the pace runs over the months the grid holds, and ahead/behind is read from t
   eq(late.eta, H.monthAdd('2027-12', late.etaMonths), 'the landing month counts from the clamped month');
   eq(late.aheadMonths, H.monthDiff(late.eta, '2028-06'),
     'and ahead/behind is exactly the landing month against the target — it was one month more behind');
+});
+t('a share link freezes each carried year\'s sweep at that year\'s own resolved goal (fix 5)', () => {
+  /* A months goal resolves per year, so a row in a year built ahead sweeps
+     at THAT year's figure; the freeze was handed one list — the live year's —
+     for every year in the payload. */
+  const s = H.coerceShape(overflowFixture());
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'e';
+  s.years['2027'] = JSON.parse(JSON.stringify(s.years['2026']));
+  s.years['2027'].startMonth = '2027-01';
+  const byYear = { '2026': [{ id: 'e', target: 3600, accounts: ['cash'], targetMonths: 6 }],
+                   '2027': [{ id: 'e', target: 4320, accounts: ['cash'], targetMonths: 6 }] };
+  const payload = JSON.parse(JSON.stringify({ years: s.years, goals: [] }));
+  H.freezeOverflowThresholds(payload, (y) => byYear[y]);
+  eq(payload.years['2026'].categories[1].threshold, 3600, '2026 at 2026\'s spend');
+  eq(payload.years['2027'].categories[1].threshold, 4320, '2027 at 2027\'s — it froze at 3,600');
+  const flat = JSON.parse(JSON.stringify({ years: s.years, goals: [] }));
+  H.freezeOverflowThresholds(flat, byYear['2026']);
+  eq(flat.years['2027'].categories[1].threshold, 3600, 'a plain list still means the same list for every year');
 });
 
 group('Sections & quarterly rule');
@@ -10993,8 +11013,21 @@ t('the goal editor never stores both a figure and a months tie', () => {
   ok(/g\.target = v\.target \?\? 0; delete g\.targetMonths;/.test(body), 'figure set: the months go');
   ok(/key: 'target'[\s\S]{0,200}action: \{ label: 'Use 6 months of expenses'/.test(body),
     'and Target carries the one-off button');
-  ok(/liveGoals\(\)/.test(src.slice(src.indexOf("key: 'goalId', label: 'Above this goal"), src.indexOf("key: 'capAmount'"))),
-    'the sweep-row editor labels read the RESOLVED goals');
+  ok(/goalsOfYear\(ds\.year\)/.test(src.slice(src.indexOf("key: 'goalId', label: 'Above this goal"), src.indexOf("key: 'capAmount'"))),
+    'the sweep-row editor labels read the RESOLVED goals of the row\'s year');
+});
+t('every reader with a year in hand asks for THAT year\'s goals, and nothing falls back to $0 (fix 5)', () => {
+  const src = stripComments(APP_SRC);
+  eq((src.match(/ruleDesc\(cat, state, goalsOfYear\(y\)\)/g) || []).length, 2,
+    'the grid\'s row label and the Month page name the year on screen');
+  ok(/ruleDesc\(cat, state, goalsOfYear\(yearKey\)\)/.test(src), 'and so does the cell editor');
+  eq((src.match(/\.\.\.goalsOfYear\(ds\.year\)\.map\(/g) || []).length, 2,
+    'the sweep-row editor\'s two goal pickers read the row\'s own year');
+  ok(/freezeOverflowThresholds\(data, \(y\) => goalsOfYear\(y\),/.test(src),
+    'the share freeze resolves each carried year on its own');
+  ok(/function liveGoals\(\) \{\n  const y = latestGridYear\(\) \|\| newestGridYear\(\);/.test(src),
+    'a plan whose only grid has not begun still reads a resolved list, never state.goals at $0');
+  ok(!/overflowOrder\(yr\.categories, st\.goals\)/.test(src), 'the engine orders on the goals it was handed');
 });
 t('the Progress tab no longer paces a goal off total liquidity', () => {
   const src = stripComments(APP_SRC);
