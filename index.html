@@ -8008,7 +8008,7 @@ function sampleState() {
             { label: 'Cottage', paid: 1150, credits: 0, due: 0 },
             { label: 'Ferry and fuel', paid: 0, credits: 0, due: 240 },
             { label: 'Food and days out', paid: 0, credits: 0, due: 500 },
-          ] }],
+          ] },],
         pto: { [y]: { allowance: 25, entries: [
           { name: 'Coast week', from: `${Y}-08-03`, to: `${Y}-08-07`, nights: 7, ptoDays: 5 },
           { name: 'Half term',  from: `${Y}-02-16`, to: `${Y}-02-18`, nights: 0, ptoDays: 3 },
@@ -15362,13 +15362,27 @@ function vacationYearStats(st) {
     if (!/^\d{4}$/.test(y)) continue;
     const total = round2((t.items || []).reduce((s, i) =>
       s + (i.paid || 0) + (i.credits || 0) + (i.due || 0), 0));
-    if (!byYear.has(y)) byYear.set(y, { y, total: 0, nights: 0, trips: [] });
+    if (!byYear.has(y)) byYear.set(y, { y, total: 0, nights: 0, due: 0, trips: [] });
     const rec = byYear.get(y);
     rec.total = round2(rec.total + total);
     rec.nights += t.nights || 0;
+    /* What the year still owes, kept beside the total: a bar with money due
+       behind it is not settled, whatever the calendar says (vacationYearRunning). */
+    rec.due = round2(rec.due + (t.items || []).reduce((s, i) => s + (i.due || 0), 0));
     rec.trips.push({ name: t.name || '', total });
   }
   return [...byYear.values()].sort((a, b) => a.y.localeCompare(b.y));
+}
+
+/* Which bars can still grow. The calendar year and anything after it, as
+   before — and, since 2026-09-04, any year with MONEY STILL DUE: a December
+   trip whose last bill lands in January is a past year whose bar is not
+   finished, and the key beside the chart already promised that a dashed edge
+   meant "its bar can still grow". Drawn solid, that year was also averaged as
+   finished, which pulled the dotted line down by a bill nobody had paid yet.
+   Pure over the stats and the year, so the rule is pinned by arithmetic. */
+function vacationYearRunning(stats, thisYear) {
+  return stats.map(s => s.y >= thisYear || s.due > 0);
 }
 
 /* Trip spending, year by year — the budget spending chart's grammar applied to
@@ -15381,7 +15395,7 @@ function buildVacationsChart() {
   const stats = vacationYearStats(state);
   if (stats.length < 2) return;   // one year is not a trend — the giving rule
   const thisYear = todayISO().slice(0, 4);
-  const running = stats.map(s => s.y >= thisYear);
+  const running = vacationYearRunning(stats, thisYear);
   const accent = cssVar('--accent'), tick = cssVar('--chart-tick');
   const finished = stats.filter((s, i) => !running[i] && s.total).map(s => s.total);
   const avg = finished.length > 1
@@ -15527,7 +15541,7 @@ function renderVacations() {
     <p class="sub">Each bar is a year's trips added up — money paid, minus any credits, plus
       whatever is still due. Hover a bar for the trips inside it.</p>
     <div class="chartbox" style="height:260px"><canvas id="vacChart"></canvas></div>
-    <p class="chartkey"><i></i> Dashed — a year still going, or trips still being planned:
+    <p class="chartkey"><i></i> Dashed — a year still going, or a trip with money still due:
       its bar can still grow.</p>
   </div>`;
 
@@ -26333,7 +26347,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
-  netWorthParts, PROPERTY_KINDS, vacationYearStats,
+  netWorthParts, PROPERTY_KINDS, vacationYearStats, vacationYearRunning,
   /* Debts: the schedule, where it lands in a given month, and when it ends.
      Pure over one row, so a test pins the arithmetic rather than the card. */
   amortize, liabilityAt, payoffMonth, LIABILITY_KINDS, SECURED_KINDS,

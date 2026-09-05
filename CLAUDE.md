@@ -5542,3 +5542,20 @@ test first and proven red, the commit quoting the row.
   Velocity got the same shape the same day. The test reads hits through the pure
   `searchPlan` — `searchHits` and `F` are top-level bindings the test frame cannot
   reach, which cost the first two runs of the red-row proof.
+
+## Fixes From the 2026-09-04 Evening Audit
+
+Charles asked for a bug check the evening the Vacations chart moved to the top of its tab and the
+two card switches dropped under their charts. One fix per commit, a test proven red against the
+pre-fix `index.html` first, README and this file in the same commit.
+
+- **A year with money still due can still grow (fix 1).** The chart's key promised that a
+  dashed edge meant "its bar can still grow", and only the calendar year and later were dashed —
+  a past year with a trip still owing $740 drew solid, and was averaged as FINISHED, pulling the
+  dotted line down by a bill nobody had paid. `vacationYearStats` now carries `due` per year and
+  `vacationYearRunning(stats, thisYear)` — pure, in the test hooks — says which bars are still
+  forming: the current year and after, and any year with money due. The key says "a trip with
+  money still due" instead of "trips still being planned". Three checks in "a year with money
+  still due can still grow, whatever the calendar says", including the year that settles once the
+  calendar passes it with nothing owed.
+

@@ -908,7 +908,9 @@ this year compares with the last few, and it gives the tab something to open on.
 - **Trip Spending, Year by Year** — under the add bar, once two years have
   trips. Each bar adds a year's trips up (paid, minus credits, plus still due),
   with the trips themselves broken out in the hover, a dotted average across
-  the finished years, and a dashed edge on a year whose figure can still grow.
+  the finished years, and a dashed edge on a year whose figure can still grow — the current
+  year and anything after it, and any past year with money still due, since a December trip
+  whose last bill lands in January is not finished whatever the calendar says.
 - **Per-trip cost tables**, grouped into one row per year, newest first, and
   reorderable within a year. A new trip starts from the lines most trips need
   — airfare, stay, transport, excursions, food, tips, spa — or from nothing,
