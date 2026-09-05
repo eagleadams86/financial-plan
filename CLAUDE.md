@@ -5778,3 +5778,15 @@ and proven red against the pre-fix page, README and this file in the commit.
   itself is unchanged — it was already what a reload produced — which is
   what makes this the 2026-09-02 standard's case: a changed figure must be
   shown.
+- **`targetMonths` is bounded, and a non-positive one is refused (fix 8).**
+  `rateOrNone` accepts any finite number and `coerceShape` asked only `> 0`,
+  so `1e300` — typed, or in a share link's attacker-controlled goals — put
+  "1e+300 months of this year's expenses" on the tile and `monthAdd(cur,
+  1e300)` printed a garbage landing month. `TARGET_MONTHS_MAX` (120, ten
+  years; above `load()` for the TDZ rule) clamps at the boundary, in `save`,
+  and as `min`/`max` on the box — `buildFields` now hands a number field's
+  `min`/`max` to the browser — the `dueLeadDays` discipline. And a months
+  figure at or below zero took `save`'s else-branch, which stored the
+  resolved figure the box had been filled with as a plain target: the live
+  tie dropped with no word. It is refused with a toast now and the goal keeps
+  the claim it had.

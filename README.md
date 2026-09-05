@@ -769,7 +769,8 @@ Where the whole plan stands and where it has been, on one tab.
 
 Goals add up whichever accounts you tick, so splitting an account is a matter
 of ticking the new ones. A target is a figure, or **a number of months of
-expenses**: type 6 into "Months of expenses" and the target becomes six months
+expenses**: type 6 into "Months of expenses" (up to 120 — ten years; nothing
+at or below zero) and the target becomes six months
 of this year's Expenses total, live, everywhere the target is read — the tile,
 the pace check, and any sweep row tied to the goal. The button beside Target
 copies that figure once instead, as a plain number that stays put. The Savings

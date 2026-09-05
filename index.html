@@ -2928,6 +2928,12 @@ const TAX_JURISDICTIONS = ['federal', 'state'];
    dead zone when `load()` runs, and load()'s catch swallows the ReferenceError
    and brings the whole workbook up empty. */
 const DUE_PAY = ['manual', 'auto'];
+/* The most months of expenses a goal may follow — ten years. A share link's
+   goals are attacker-controlled and `rateOrNone` accepts any finite number,
+   so 1e300 reached the tile as "1e+300 months" and the ETA as a garbage
+   month (review fix 8); the `dueLeadDays` discipline, clamped at the
+   boundary AND in the editor. Above `let state = load()` for the TDZ rule. */
+const TARGET_MONTHS_MAX = 120;
 /* "Claimed first by" must name another goal that exists, and the chain it
    forms must end: a goal behind a goal behind itself has no first dollar.
    A loop is broken deterministically — walked in list order, the first goal
@@ -4424,8 +4430,9 @@ function coerceShape(data) {
        goes, since the figure is derived and a stale copy beside it would be
        the one an older build read. */
     const tm = rateOrNone(g.targetMonths);
-    if (typeof tm === 'number' && tm > 0) { g.targetMonths = tm; delete g.target; }
-    else delete g.targetMonths;
+    if (typeof tm === 'number' && tm > 0) {
+      g.targetMonths = Math.min(TARGET_MONTHS_MAX, tm); delete g.target;
+    } else delete g.targetMonths;
     /* Who the goal is for — a child, usually, for a college pot. Only ever a
        label and a target-date suggestion; `computeGoals` never reads it. */
     if (g.for && !peopleIds.has(g.for)) delete g.for;
@@ -19340,7 +19347,12 @@ function buildFields(fields, values, link) {
           if (link) link(f.key);
         });
       }
-      if (f.type === 'number') { input.step = f.step || 'any'; input.inputMode = 'decimal'; }
+      if (f.type === 'number') {
+        input.step = f.step || 'any'; input.inputMode = 'decimal';
+        /* A range the browser can refuse before Save does (review fix 8). */
+        if (f.min !== undefined) input.min = f.min;
+        if (f.max !== undefined) input.max = f.max;
+      }
       const v = values[f.key];
       input.value = v === undefined || v === null ? ''
         : f.type === 'percent' ? roundTo(v * 100, f.dp ?? 2)
@@ -21406,6 +21418,7 @@ const EDITORS = {
           } },
         hint: 'Filled in for you while Months of expenses is set.' },
       { key: 'targetMonths', label: 'Months of expenses', type: 'number', step: 0.5,
+        min: 0.5, max: TARGET_MONTHS_MAX,
         hint: 'Type a number here and the target follows this year\u2019s expenses live \u2014 '
             + '6 is the usual emergency-fund rule of thumb. Leave it empty to keep the figure '
             + 'in Target.' },
@@ -21483,20 +21496,32 @@ const EDITORS = {
            state.goals[state.goals.length - 1]);
       Object.assign(g, { name: v.name, accounts: v.accounts || [],
         count: v.count, targetDate: v.targetDate || null });
+      let said;
       /* One claim, never both: months set means the target is derived and the
-         stored figure goes; otherwise the figure stands and months goes. */
-      if (typeof v.targetMonths === 'number' && v.targetMonths > 0) {
-        g.targetMonths = v.targetMonths; delete g.target;
+         stored figure goes; otherwise the figure stands and months goes.
+         A months figure at or below zero is REFUSED and said (review fix 8):
+         it used to take the else-branch, storing the resolved figure the box
+         had been filled with as a plain target — the live tie dropped with no
+         word, and the goal looking identical until the year's expenses moved.
+         The goal keeps whichever claim it had. Above the cap, clamped and
+         said, the boundary's rule. */
+      if (typeof v.targetMonths === 'number' && v.targetMonths <= 0) {
+        said = 'Months of expenses has to be above zero \u2014 the goal keeps the target it had';
+        if (!onMonthsGoal(g) && g.target === undefined) g.target = v.target ?? 0;
+      } else if (typeof v.targetMonths === 'number' && v.targetMonths > 0) {
+        g.targetMonths = Math.min(TARGET_MONTHS_MAX, v.targetMonths); delete g.target;
+        if (v.targetMonths > TARGET_MONTHS_MAX)
+          said = `Months of expenses is capped at ${TARGET_MONTHS_MAX} \u2014 ten years`;
       } else { g.target = v.target ?? 0; delete g.targetMonths; }
       /* A claim that would loop is refused and SAID, the rest of the edit
          kept (review fix 6) — the picker hides such goals, but a form opened
          before another goal was queued behind this one can still name it. */
-      let said;
       const pred = v.overflowOf && state.goals.find(x => x.id === v.overflowOf);
       if (pred && pred !== g && !goalChainReaches(pred.id, g.id, state.goals)) g.overflowOf = pred.id;
       else {
-        if (pred) said = `"${pred.name || pred.id}" is already claimed first by this goal, so `
-          + 'the two would claim each other — Claimed first by was left empty';
+        if (pred) said = (said ? said + '; ' : '')
+          + `"${pred.name || pred.id}" is already claimed first by this goal, so `
+          + 'the two would claim each other \u2014 Claimed first by was left empty';
         delete g.overflowOf;
       }
       /* Only when the field was on the form — a goal filed under a child stays
@@ -26916,7 +26941,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   goalNeed, goalClaim, claimAccounts, goalPace, goalTargetOf, onMonthsGoal, resolveGoals, computeYearWith,
-  pruneGoalLinks, goalChainReaches,
+  pruneGoalLinks, goalChainReaches, TARGET_MONTHS_MAX,
   enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 983;
+const EXPECTED = 985;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1156,6 +1156,18 @@ t('coerceShape reads months strictly and keeps one claim', () => {
   eq(by.b, [500, undefined], 'junk months delete, the figure stands');
   eq(by.c, [500, undefined], 'zero months is no tie');
   eq(by.d, [500, undefined], 'nor is a negative one');
+});
+t('months of expenses is capped at ten years, at the boundary and in the editor (fix 8)', () => {
+  /* rateOrNone accepts any finite number, so 1e300 reached the tile as
+     "1e+300 months" and `monthAdd(cur, 1e300)` printed a garbage month. */
+  eq(H.TARGET_MONTHS_MAX, 120);
+  const d = H.coerceShape({ goals: [
+    { id: 'a', accounts: [], target: 500, targetMonths: 1e300 },
+    { id: 'b', accounts: [], target: 500, targetMonths: 121 },
+    { id: 'c', accounts: [], target: 500, targetMonths: 120 },
+  ] });
+  eq(d.goals.map(g => g.targetMonths), [120, 120, 120], 'clamped, never refused — the tie is what was meant');
+  eq(d.goals[0].target, undefined, 'and the figure still goes');
 });
 
 /* ── Fixes from the 2026-09-05 code review ────────────────────────────────
@@ -11029,7 +11041,7 @@ t('the goal editor never stores both a figure and a months tie', () => {
   const start = src.indexOf("  goal: {\n    title: (ds, isNew) => isNew ? 'Add a Goal'");
   ok(start > 0, 'found the goal editor');
   const body = src.slice(start, src.indexOf('\n  holding: {', start));
-  ok(/g\.targetMonths = v\.targetMonths; delete g\.target;/.test(body), 'months set: the figure goes');
+  ok(/g\.targetMonths = Math\.min\(TARGET_MONTHS_MAX, v\.targetMonths\); delete g\.target;/.test(body), 'months set: the figure goes');
   ok(/g\.target = v\.target \?\? 0; delete g\.targetMonths;/.test(body), 'figure set: the months go');
   ok(/key: 'target'[\s\S]{0,200}action: \{ label: 'Use 6 months of expenses'/.test(body),
     'and Target carries the one-off button');
@@ -11083,6 +11095,18 @@ t('deleting a goal frees the goals it was claimed first by, and the toast names 
   ok(/const freed = pruneGoalLinks\(state\.goals\)/.test(del), 'delete runs the shared rule on the spot');
   ok(/claimed first by/.test(del) && /from the first dollar now/.test(del),
     'and says so, rather than leaving the figure to change on the next render');
+});
+t('a months figure at or below zero is refused by the editor, not turned into a frozen target (fix 8)', () => {
+  /* -3 took the else-branch: the tie deleted and the resolved figure the box
+     had been filled with stored as a plain target, silently. */
+  const src = stripComments(APP_SRC);
+  const start = src.indexOf("  goal: {\n    title: (ds, isNew) => isNew ? 'Add a Goal'");
+  const body = src.slice(start, src.indexOf('\n  holding: {', start));
+  ok(/if \(typeof v\.targetMonths === 'number' && v\.targetMonths <= 0\) \{\n\s+said = 'Months of expenses has to be above zero/.test(body),
+    'save refuses and says so, before the else-branch can store the box');
+  ok(/g\.targetMonths = Math\.min\(TARGET_MONTHS_MAX, v\.targetMonths\)/.test(body), 'and clamps above the cap');
+  ok(/key: 'targetMonths'[^}]*min: 0\.5, max: TARGET_MONTHS_MAX/.test(body), 'the box carries the range too');
+  ok(/if \(f\.min !== undefined\) input\.min = f\.min;/.test(src), 'which buildFields hands to the browser');
 });
 t('the Progress tab no longer paces a goal off total liquidity', () => {
   const src = stripComments(APP_SRC);
