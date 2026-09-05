@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 980;
+const EXPECTED = 982;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1277,6 +1277,26 @@ t('a share link freezes each carried year\'s sweep at that year\'s own resolved 
   const flat = JSON.parse(JSON.stringify({ years: s.years, goals: [] }));
   H.freezeOverflowThresholds(flat, byYear['2026']);
   eq(flat.years['2027'].categories[1].threshold, 3600, 'a plain list still means the same list for every year');
+});
+t('a goal cannot be claimed first by a goal already behind it — the loop the next load would break (fix 6)', () => {
+  /* In-session both goals claimed each other (goalNeed terminates but doubles
+     both), and the reload dropped whichever link came first in the list: two
+     figures for one saved file. `goalChainReaches` is the editor's question;
+     `pruneGoalLinks` is the boundary's rule, now callable from the editor. */
+  const goals = [
+    { id: 'roof', name: 'Roof', target: 14000, accounts: ['mid'], overflowOf: 'kitchen' },
+    { id: 'kitchen', name: 'Kitchen', target: 6000, accounts: ['mid'] },
+    { id: 'car', name: 'Car', target: 5000, accounts: ['mid'], overflowOf: 'roof' },
+  ];
+  ok(H.goalChainReaches('roof', 'kitchen', goals), 'Roof\'s chain passes through Kitchen');
+  ok(H.goalChainReaches('car', 'kitchen', goals), 'and so does Car\'s, two steps on');
+  ok(!H.goalChainReaches('kitchen', 'roof', goals), 'Kitchen\'s chain does not come back to Roof');
+  ok(!H.goalChainReaches('kitchen', 'kitchen', goals), 'a goal is not on its own chain');
+  const loop = goals.map(g => ({ ...g }));
+  loop[1].overflowOf = 'roof';
+  ok(H.goalChainReaches('roof', 'kitchen', loop), 'terminates on a loop, and still answers');
+  eq(H.pruneGoalLinks(loop), ['roof'], 'the boundary drops the first goal in list order and says which');
+  eq(loop.map(g => g.overflowOf), [undefined, 'roof', 'roof'], 'the others keep their places');
 });
 
 group('Sections & quarterly rule');
@@ -11028,6 +11048,18 @@ t('every reader with a year in hand asks for THAT year\'s goals, and nothing fal
   ok(/function liveGoals\(\) \{\n  const y = latestGridYear\(\) \|\| newestGridYear\(\);/.test(src),
     'a plan whose only grid has not begun still reads a resolved list, never state.goals at $0');
   ok(!/overflowOrder\(yr\.categories, st\.goals\)/.test(src), 'the engine orders on the goals it was handed');
+});
+t('the goal editor refuses the loop, hides it from the picker, and never reuses an id (fix 6)', () => {
+  const src = stripComments(APP_SRC);
+  const start = src.indexOf("  goal: {\n    title: (ds, isNew) => isNew ? 'Add a Goal'");
+  const body = src.slice(start, src.indexOf('\n  holding: {', start));
+  ok(/!goalChainReaches\(pred\.id, g\.id, state\.goals\)\) g\.overflowOf = pred\.id;/.test(body),
+    'save stores a claim only when the named goal is not already behind this one');
+  ok(/goalChainReaches\(g\.id, state\.goals\[\+ds\.idx\]\.id, state\.goals\)/.test(body),
+    'and the picker leaves such goals out');
+  ok(/uniqueId\(state\.goals, v\.name, 'goal'\)/.test(body), 'a new goal takes an id nobody holds');
+  ok(!/slugJs\(v\.name \|\| 'goal'\)/.test(body), 'slugJs alone is gone from here');
+  ok(/pruneGoalLinks\(d\.goals\);/.test(src), 'coerceShape runs the shared rule');
 });
 t('the Progress tab no longer paces a goal off total liquidity', () => {
   const src = stripComments(APP_SRC);

@@ -2928,6 +2928,53 @@ const TAX_JURISDICTIONS = ['federal', 'state'];
    dead zone when `load()` runs, and load()'s catch swallows the ReferenceError
    and brings the whole workbook up empty. */
 const DUE_PAY = ['manual', 'auto'];
+/* "Claimed first by" must name another goal that exists, and the chain it
+   forms must end: a goal behind a goal behind itself has no first dollar.
+   A loop is broken deterministically — walked in list order, the first goal
+   whose chain comes back round to it loses ITS link — so two loads of one
+   file agree, and every other goal keeps the place it was given. Mutates the
+   list and returns the ids whose link was dropped, so a caller can say so.
+   Called by coerceShape on every load and by the goal editor's delete
+   (review fixes 6 and 7, 2026-09-05): the boundary was the only place the
+   rule lived, so a link deleted in-session left a claim dangling until the
+   next reload, when the figures changed with no edit. A function DECLARATION
+   above `let state = load()` — coerceShape runs inside load(), whose catch
+   swallows a ReferenceError and brings the workbook up empty. */
+function pruneGoalLinks(goals) {
+  const dropped = [];
+  const goalIds = new Set(goals.map(g => g.id));
+  const byGoalId = new Map(goals.map(g => [g.id, g]));
+  for (const g of goals)
+    if (g.overflowOf !== undefined
+        && (typeof g.overflowOf !== 'string' || !goalIds.has(g.overflowOf)
+            || g.overflowOf === g.id)) { delete g.overflowOf; dropped.push(g.id); }
+  for (const g of goals) {
+    let p = g.overflowOf ? byGoalId.get(g.overflowOf) : null, steps = 0;
+    while (p && steps++ <= goals.length) {
+      if (p === g) { delete g.overflowOf; dropped.push(g.id); break; }
+      p = p.overflowOf ? byGoalId.get(p.overflowOf) : null;
+    }
+  }
+  return dropped;
+}
+/* Does the claim chain starting at `fromId` pass through `targetId`? The goal
+   editor's question before it stores a link (review fix 6): a goal may not be
+   claimed first by one that is, itself, behind it — the two would claim each
+   other, `goalNeed` would terminate but double both, and the next load would
+   silently drop whichever came first in the list. Pure; terminates on a loop
+   the boundary never saw. */
+function goalChainReaches(fromId, targetId, goals) {
+  const byId = new Map((goals || []).map(g => [g.id, g]));
+  const seen = new Set();
+  const from = byId.get(fromId);
+  let p = from && from.overflowOf ? byId.get(from.overflowOf) : null;   // the chain BEHIND it
+  while (p && !seen.has(p.id)) {
+    if (p.id === targetId) return true;
+    seen.add(p.id);
+    p = p.overflowOf ? byId.get(p.overflowOf) : null;
+  }
+  return false;
+}
 /* Days before a due date that a manually-paid bill starts warning. The
    Preferences box edits it; absent falls back to this. */
 const DUE_LEAD_DEFAULT = 7;
@@ -4384,25 +4431,10 @@ function coerceShape(data) {
     if (g.for && !peopleIds.has(g.for)) delete g.for;
   }
   /* "Claimed first by" must name another goal that exists, and the chain it
-     forms must end: a goal behind a goal behind itself has no first dollar.
-     A loop is broken deterministically — walked in list order, the first goal
-     whose chain comes back round to it loses ITS link — so two loads of one
-     file agree, and every other goal keeps the place it was given. */
-  {
-    const goalIds = new Set(d.goals.map(g => g.id));
-    const byGoalId = new Map(d.goals.map(g => [g.id, g]));
-    for (const g of d.goals)
-      if (g.overflowOf !== undefined
-          && (typeof g.overflowOf !== 'string' || !goalIds.has(g.overflowOf)
-              || g.overflowOf === g.id)) delete g.overflowOf;
-    for (const g of d.goals) {
-      let p = g.overflowOf ? byGoalId.get(g.overflowOf) : null, steps = 0;
-      while (p && steps++ <= d.goals.length) {
-        if (p === g) { delete g.overflowOf; break; }
-        p = p.overflowOf ? byGoalId.get(p.overflowOf) : null;
-      }
-    }
-  }
+     forms must end — `pruneGoalLinks`, shared with the goal editor's delete
+     (review fix 7) so the state a session holds is the state a reload would
+     produce. */
+  pruneGoalLinks(d.goals);
   /* Overflow rows that tie their threshold to a goal — checked here, after
      the goals are settled, because the years loop above runs first. A deleted
      goal leaves the row blank rather than broken, and exactly one of goalId /
@@ -21390,9 +21422,16 @@ const EDITORS = {
       ], hint: 'Whether the bar stops at the target or keeps counting past it.' },
       { key: 'overflowOf', label: 'Claimed first by', type: 'select', help: 'goalClaims',
         helpLabel: 'how a claim is worked out',
+        /* Not itself, and not a goal already queued BEHIND it — that one's
+           chain comes back here, and two goals claiming each other is a loop
+           the next load would break by dropping whichever is first in the
+           list (review fix 6). `save` refuses the same thing, for a stale
+           form. */
         options: [['', 'Nobody \u2014 this goal counts from the first dollar'],
           ...state.goals
-            .filter((g, i) => String(i) !== String(ds.idx))
+            .filter((g, i) => String(i) !== String(ds.idx)
+              && !(ds.idx !== undefined && state.goals[+ds.idx]
+                   && goalChainReaches(g.id, state.goals[+ds.idx].id, state.goals)))
             .map(g => [g.id, g.name || g.id])],
         hint: 'Two goals can share an account: name the one that fills first, and this '
             + 'goal counts only what sits above its claim \u2014 up to its own target, or '
@@ -21436,8 +21475,12 @@ const EDITORS = {
     blank: () => ({ count: 'capped',
                     accounts: [hubAccount(state)?.id].filter(Boolean) }),
     save(ds, v) {
+      /* `uniqueId`, not `slugJs` (review fix 6): a second goal called "Roof"
+         took the id `roof` again, and everything that names a goal by id —
+         a claim, a sweep row's threshold — then found the first one. */
       const g = ds.idx !== undefined ? state.goals[+ds.idx]
-        : (state.goals.push({ id: slugJs(v.name || 'goal') }), state.goals[state.goals.length - 1]);
+        : (state.goals.push({ id: uniqueId(state.goals, v.name, 'goal') }),
+           state.goals[state.goals.length - 1]);
       Object.assign(g, { name: v.name, accounts: v.accounts || [],
         count: v.count, targetDate: v.targetDate || null });
       /* One claim, never both: months set means the target is derived and the
@@ -21445,8 +21488,17 @@ const EDITORS = {
       if (typeof v.targetMonths === 'number' && v.targetMonths > 0) {
         g.targetMonths = v.targetMonths; delete g.target;
       } else { g.target = v.target ?? 0; delete g.targetMonths; }
-      if (v.overflowOf) g.overflowOf = v.overflowOf;
-      else delete g.overflowOf;
+      /* A claim that would loop is refused and SAID, the rest of the edit
+         kept (review fix 6) — the picker hides such goals, but a form opened
+         before another goal was queued behind this one can still name it. */
+      let said;
+      const pred = v.overflowOf && state.goals.find(x => x.id === v.overflowOf);
+      if (pred && pred !== g && !goalChainReaches(pred.id, g.id, state.goals)) g.overflowOf = pred.id;
+      else {
+        if (pred) said = `"${pred.name || pred.id}" is already claimed first by this goal, so `
+          + 'the two would claim each other — Claimed first by was left empty';
+        delete g.overflowOf;
+      }
       /* Only when the field was on the form — a goal filed under a child stays
          filed under them when the dialog never asked the question. Only a
          child can be named: "for" means money being saved on someone's behalf. */
@@ -21455,6 +21507,7 @@ const EDITORS = {
         else delete g.for;
       }
       g.note = v.note || undefined;
+      return said;
     },
     /* Deleting still deletes — dangling ids degrade, they don't block, the
        house rule — but the budget rows reading this goal's target as their
@@ -26850,6 +26903,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
   goalNeed, goalClaim, claimAccounts, goalPace, goalTargetOf, onMonthsGoal, resolveGoals, computeYearWith,
+  pruneGoalLinks, goalChainReaches,
   enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals

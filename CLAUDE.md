@@ -5752,3 +5752,18 @@ and proven red against the pre-fix page, README and this file in the commit.
   newestGridYear()` closes it; the newest grid is computed like any other.
   Also `computeYearWith` orders its rows on the goals it was handed rather
   than `st.goals` (ids only, so no figure moved — one list in the engine).
+- **The goal editor refuses a claim that would loop (fix 6).** The picker
+  excluded only the goal itself, and `save` stored whatever was picked, so
+  "A claimed first by B, then B claimed first by A" was two saves away: in
+  session `goalNeed` terminated but each goal claimed the other (both tiles
+  "after $20,000 claimed first by …", a tied sweep at the doubled line), and
+  the next load's loop-breaker dropped whichever link came first — different
+  figures for one saved file, and a synced device on the reload figures while
+  the editing one sat on the loop's. `goalChainReaches(fromId, targetId,
+  goals)` (pure, hooks, above `load()`) is the question: the picker leaves out
+  any goal whose chain already passes through this one, and `save` refuses
+  the same thing with a toast, keeping the rest of the edit. The boundary's
+  rule is `pruneGoalLinks(goals)` now — the coerceShape block lifted out
+  whole, returning the ids it dropped — so the delete path (fix 7) can run it.
+  Also `uniqueId`, not `slugJs`, for a new goal's id: a second "Roof" took
+  `roof` again, and every id-keyed reader found the first one.

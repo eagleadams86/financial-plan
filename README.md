@@ -783,7 +783,9 @@ counts** — up to the target, or all of it however far past — and **who is pa
 first**. Name another goal there and this one counts only what sits above that
 goal's claim: the earlier goal's target, plus whatever it in turn leaves to the
 goals ahead of it, so three goals can queue on one account and each stop at its
-own target. A goal that holds part of its money in accounts you didn't tick
+own target. (A goal already queued behind this one is not offered — the two
+would claim each other — and if a stale form names one anyway the save says so
+and leaves the claim empty.) A goal that holds part of its money in accounts you didn't tick
 here claims only its shortfall from the shared ones, so no dollar is counted by
 two goals and none is missed; the tile says what was claimed ahead of it.
 
