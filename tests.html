@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 986;
+const EXPECTED = 988;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1289,6 +1289,18 @@ t('a share link freezes each carried year\'s sweep at that year\'s own resolved 
   const flat = JSON.parse(JSON.stringify({ years: s.years, goals: [] }));
   H.freezeOverflowThresholds(flat, byYear['2026']);
   eq(flat.years['2027'].categories[1].threshold, 3600, 'a plain list still means the same list for every year');
+});
+t('a goal with no balance to pace by says so, on the tile and on the line (fix 10)', () => {
+  /* `paceMo` is null when no account of the goal has a year-end balance; the
+     tile printed neither an ETA nor "not growing", and the line skipped the
+     goal for a later one. */
+  const [gone, later] = paceFixture([
+    { id: 'g', name: 'Gone', target: 5000, accounts: ['nope'], count: 'capped', targetDate: '2026-09-15' },
+    { id: 'l', name: 'Later', target: 5000, accounts: ['mid'], count: 'capped', targetDate: '2028-01-15' },
+  ]);
+  eq(gone.paceMo, null, 'no account, no pace');
+  eq(gone.aheadMonths, null, 'and no verdict');
+  ok(later.aheadMonths !== null, 'fixture: the later goal has one');
 });
 t('a goal cannot be claimed first by a goal already behind it — the loop the next load would break (fix 6)', () => {
   /* In-session both goals claimed each other (goalNeed terminates but doubles
@@ -11108,12 +11120,23 @@ t('a months figure at or below zero is refused by the editor, not turned into a 
   ok(/key: 'targetMonths'[^}]*min: 0\.5, max: TARGET_MONTHS_MAX/.test(body), 'the box carries the range too');
   ok(/if \(f\.min !== undefined\) input\.min = f\.min;/.test(src), 'which buildFields hands to the browser');
 });
+t('the pace line takes the soonest dated unmet goal whatever its pace, and the tile names a null one (fix 10)', () => {
+  const src = stripComments(APP_SRC);
+  const start = src.indexOf('function renderGoals(');
+  const body = src.slice(start, src.indexOf('\nfunction ', start + 1));
+  ok(/\.filter\(g => g\.targetDate && g\.target && g\.saved < g\.target\)\n/.test(body),
+    'the line takes the soonest dated unmet goal whatever its pace — it skipped a flat one for the next');
+  ok(/no pace to land it by/.test(body) && /never lands/.test(body), 'and says which of the two reasons it has none');
+  const card = src.slice(src.indexOf('function goalCard('), src.indexOf('\nfunction ', src.indexOf('function goalCard(') + 1));
+  ok(/g\.paceMo === null \? ' · no balance to pace it by this year'/.test(card), 'the tile says so too');
+});
 t('the Progress tab no longer paces a goal off total liquidity', () => {
   const src = stripComments(APP_SRC);
   const start = src.indexOf('function renderGoals(');
   const body = src.slice(start, src.indexOf('\nfunction ', start + 1));
   ok(!/eoyPrev|growth \/ 12/.test(body), 'renderGoals reads the verdict off the goal, not eoyCash');
-  ok(/aheadMonths !== null/.test(body), 'and only a goal with a verdict draws the line');
+  ok(/next\.aheadMonths === null/.test(body),
+    'and a goal with no verdict still draws the line, saying why (review fix 10)');
 });
 t('the Transfers band explains the sign whether or not a sweep row exists', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');

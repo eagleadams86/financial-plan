@@ -799,7 +799,9 @@ lands at this pace** — worked out from the growth of the accounts that goal
 counts over the months this year's grid runs, over the whole gap still to arrive (a goal queued behind
 another counts what the goals ahead of it still need). A goal with no date
 gets that on its tile; the pace line follows the soonest-dated goal you
-haven't met and sets its landing month against its target.
+haven't met and sets its landing month against its target — or, when that
+goal's accounts are flat or hold no balance yet, says so instead of moving on
+to a later goal.
 
 **Where the Total Is Heading** goes **dashed the moment it passes the month
 you've entered through**, so a month the plan has merely worked out never

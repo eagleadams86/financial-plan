@@ -7339,9 +7339,11 @@ const HELP = {
       + 'reaches it until they are paid. "Needs $X/mo" on the tile divides the same gap by '
       + 'the months left.'],
     ['The line follows the soonest-dated goal you have not met and sets its landing month '
-      + 'against its target. ', b('A goal with no date gets the same sum on its own tile'),
-      ' — "at this pace about …" — and a goal whose accounts are not growing this year '
-      + 'says so rather than guessing a date.'],
+      + 'against its target — or says why it has no landing month: its accounts are not '
+      + 'growing this year, or none of them holds a balance yet. ',
+      b('A goal with no date gets the same sum on its own tile'),
+      ' — "at this pace about …" — and a goal that cannot be paced says so there too, '
+      + 'rather than guessing a date.'],
   ] },
   k401Limit: { title: 'The 401(k) Limit Check', body: [
     ['Your own contributions are salary × the salary percentage, plus bonus × the bonus '
@@ -11389,6 +11391,7 @@ function goalCard(g, idx) {
       ${!done && g.monthlyReq ? ` · needs ${fmtMoney(g.monthlyReq)}/mo` : ''}
       ${!done && g.etaMonths > 0 ? ` · at this pace about ${esc(monthLabel(g.eta))}` : ''}
       ${!done && g.gap > 0 && g.paceMo !== null && g.paceMo <= 0 ? ' · not growing this year' : ''}
+      ${!done && g.gap > 0 && g.paceMo === null ? ' · no balance to pace it by this year' : ''}
       ${g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}` : ''}
       ${g.targetMonths > 0 ? ` · ${g.targetMonths} month${g.targetMonths === 1 ? '' : 's'} of this year's expenses` : ''}</div>
   </div>`;
@@ -11899,11 +11902,25 @@ function renderGoals() {
      which read New Car "4 yr 7 mo ahead" while Renovations still stood
      between it and every dollar (2026-09-05). An undated goal's answer is the
      "at this pace" on its tile; with no dated unmet goal there is no line. */
+  /* The SOONEST dated unmet goal, whatever its pace (review fix 10): the
+     filter used to drop a goal whose accounts were flat, so a later goal was
+     announced as "next" while the nearer one sat unpaced and unmentioned —
+     the opposite of what the line is for. A flat or empty goal gets the line
+     too, and it says which. */
   const next = goals
-    .filter(g => g.targetDate && g.target && g.saved < g.target && g.aheadMonths !== null)
+    .filter(g => g.targetDate && g.target && g.saved < g.target)
     .sort((a, b) => a.targetDate.localeCompare(b.targetDate))[0];
   let paceHtml = '';
-  if (next) {
+  if (next && next.aheadMonths === null) {
+    const why = next.paceMo === null
+      ? 'none of its accounts holds a balance this year, so there is no pace to land it by'
+      : `its own accounts are not growing this year (${fmtMoney(next.paceMo)}/mo), so at this
+         pace it never lands`;
+    paceHtml = `<p class="sub" style="margin-top:12px">Next dated goal — ${esc(next.name)}${
+      helpBtn('paceCheck', 'the pace check')}: ${why} —
+      <span class="pill warn">! ${next.paceMo === null ? 'no balance to pace by' : 'not growing'}</span>
+      (target ${esc(monthLabel(next.targetDate.slice(0, 7)))})</p>`;
+  } else if (next) {
     const behind = next.aheadMonths < 0;
     const verdict = next.aheadMonths === 0 ? '✓ on time'
       : `${behind ? '!' : '✓'} ${fmtYrMo(Math.abs(next.aheadMonths))} ${behind ? 'behind' : 'ahead'}`;

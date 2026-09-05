@@ -5800,3 +5800,13 @@ and proven red against the pre-fix page, README and this file in the commit.
   Months first, since a plain figure is the opposite of the tie; the hint
   says so. Driven through the real dialog in a 1280x900 frame off the
   sample's emergency fund — a source test could not see `readOnly` change.
+- **The pace line follows the soonest dated goal even when it cannot be
+  paced (fix 10).** The filter dropped any goal whose `aheadMonths` was null
+  BEFORE sorting by date, so a flat Roof was skipped and New Car announced
+  as "Next dated goal" — the opposite of the help's promise — and a goal
+  with `paceMo === null` (no account of it holds a year-end balance: closed,
+  or not begun) printed neither an ETA nor "not growing" on its tile. The
+  line takes the soonest dated unmet goal whatever its pace and, with no
+  landing month, says which of the two reasons applies; the tile carries
+  "no balance to pace it by this year" for the null case beside the
+  existing "not growing this year".
