@@ -5705,3 +5705,19 @@ and proven red against the pre-fix page, README and this file in the commit.
   .includes(src)`; the cell editor has a sentence for each. The test deposits
   into the earlier goal's account from a LATER row and pins that the tied row
   now reads the post-deposit figure the tile shows.
+- **The engine iterates to a fixed point, and `monthlySpend` is always the
+  returned year's own spend (fix 3).** Pass one ran with the months goals at
+  $0 and rested on "expense cells never read a balance", which nothing
+  enforced: the rule select offers `dividends` on any row and `save` never
+  forces it to Income, so a fee row on that rule under Expense read a balance
+  the $0 thresholds had swept away — `c.monthlySpend` (pass one) and
+  `yearSpending(c)` (pass two) disagreed, and with them the Six-months tile
+  and the Runway divisor. `computeYear` now recomputes until the spend a pass
+  produces resolves the targets that pass ran on (one extra pass in the
+  ordinary case — the old cost), gives up at eight with the targets resolved
+  from the LAST pass's spend, and `monthlySpend` is by construction the
+  returned year's. Two smaller things ride with it: a year with no sweep row
+  tied to a goal computes ONCE whatever the goals say (the goals reach the
+  engine through that door alone — the efficiency finding), and `coerceShape`
+  files an overflow row under Transfers, which the editor always did and a
+  hand-edited file could dodge. `onMonthsGoal(g)` is the one predicate.

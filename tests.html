@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 976;
+const EXPECTED = 977;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1212,6 +1212,30 @@ t('a sweep waits for the deposits a queued goal\'s claim reads, and never fills 
   tied.transferTo = 'long';
   const c2 = H.computeAll(H.coerceShape(s), '2026-01-15')['2026'];
   eq(c2.cells['tomid|2026-01'].kind, 'missing', 'refused — the deposit would move the line it is measured against');
+});
+t('a months goal resolves from the spend of the year it was computed with, and the two agree (fix 3)', () => {
+  /* Pass one ran with the months goals at $0 and trusted that no expense row
+     reads a balance. A dividends-rule row filed under Expense does, and the $0
+     thresholds had swept the balance away — so `monthlySpend` (pass one) and
+     the returned year's own spending (pass two) disagreed, and with them the
+     Six-months tile and the Runway divisor. */
+  const s = spendFixture();
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'e';
+  s.years['2026'].categories.push({ id: 'fee', name: 'Account fee', role: 'normal',
+    rule: 'dividends', section: 'expense', rate: -0.12, accounts: ['cash'] });
+  s.goals = [{ id: 'e', name: 'Emergencies', targetMonths: 6, accounts: ['cash'], count: 'capped' }];
+  const st = H.coerceShape(s);
+  const c = H.computeAll(st, '2026-01-15')['2026'];
+  ok(c.cells['fee|2026-02'].v < 0, 'fixture: the fee reads January\'s balance, so it is money out', c.cells['fee|2026-02'].v);
+  eq(H.round2(H.yearSpending(st.years['2026'], c, '2026') / 12), c.monthlySpend,
+    'monthlySpend IS the returned year\'s spend over twelve — it was pass one\'s, 600 against 633');
+  eq(c.goals[0].target, H.round2(6 * c.monthlySpend), 'and the target is six of exactly that');
+  /* the boundary files a sweep row under Transfers, whatever a hand-edited file said */
+  const t = overflowFixture();
+  t.years['2026'].categories[1].section = 'expense';
+  eq(H.coerceShape(t).years['2026'].categories[1].section, 'transfer', 'a sweep is a move, never spending');
 });
 
 group('Sections & quarterly rule');

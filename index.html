@@ -4256,6 +4256,11 @@ function coerceShape(data) {
         if (cat.rule === 'samemonth' && cat.keepCents === true) cat.keepCents = true;
         else delete cat.keepCents;
         if (cat.rule === 'overflow') {
+          /* A sweep is a move between the reader's own accounts, whatever a
+             hand-edited file says: the editor already forces Transfers, and
+             filed under Expense the row would count its sweeps as spending
+             (review fix 3). */
+          cat.section = 'transfer';
           if (!acctIds.has(cat.overflowFrom)) delete cat.overflowFrom;
           if (!acctIds.has(cat.transferTo)) delete cat.transferTo;
           const th = rateOrNone(cat.threshold);
@@ -6212,28 +6217,50 @@ function overflowOrder(categories, goals) {
    this wrapper decides which. A goal whose target is N months of expenses
    needs the year's expense total, and the loop below resolves categories and
    balances month by month — January's sweep runs before December's rent is
-   known. So when any goal is on months the year is computed TWICE: once with
-   those goals at $0 to learn what the year spends (expense cells never read a
-   balance — only a `dividends`-rule row does, and that is income — so pass
-   one's total is exact), then again with every target resolved. A plan with
-   no months goal runs once, with `st.goals` itself, and is bit-identical to
-   the engine before the wrapper existed; a test compares every cell and
-   balance. Each year resolves from ITS OWN expenses — a year built ahead
+   known. So when a sweep row is tied to a goal and any goal is on months, the
+   year is computed until the spend it produces and the targets it ran on
+   agree (see the loop). A plan with no months goal runs once, with `st.goals`
+   itself, and is bit-identical to the engine before the wrapper existed; a
+   test compares every cell and balance. Each year resolves from ITS OWN expenses — a year built ahead
    from its projection — which keeps the engine clock-free and each year
    consistent with itself; the Progress tab reads the live year's. */
 function computeYear(st, yearKey, prior) {
   const yr = st.years[yearKey];
   const goals = st.goals || [];
-  const onMonths = goals.some(g => typeof g.targetMonths === 'number' && g.targetMonths > 0);
-  if (!onMonths) {
+  const onMonths = goals.some(onMonthsGoal);
+  const spendOf = (c) => round2(yearSpending(yr, c, yearKey) / 12);
+  /* The goals reach the engine through ONE door — a sweep row tied to one,
+     as threshold or cap. A year with no such row computes the same whatever
+     the targets are, so one pass learns its spend and the targets follow
+     (review fix 3, 2026-09-05 — pass one used to run on every year). */
+  const tied = onMonths && (yr.categories || [])
+    .some(c => c.rule === 'overflow' && (c.goalId || c.capGoalId));
+  if (!tied) {
     const c = computeYearWith(st, yearKey, prior, goals);
-    return { ...c, goals, monthlySpend: round2(yearSpending(yr, c, yearKey) / 12) };
+    const monthlySpend = spendOf(c);
+    return { ...c, goals: onMonths ? resolveGoals(goals, monthlySpend) : goals, monthlySpend };
   }
-  const first = computeYearWith(st, yearKey, prior, resolveGoals(goals, 0));
-  const monthlySpend = round2(yearSpending(yr, first, yearKey) / 12);
-  const resolvedGoals = resolveGoals(goals, monthlySpend);
-  const c = computeYearWith(st, yearKey, prior, resolvedGoals);
-  return { ...c, goals: resolvedGoals, monthlySpend };
+  /* Iterated to a FIXED POINT rather than run exactly twice (review fix 3).
+     "Expense cells never read a balance" was the claim that made pass one
+     exact, and nothing enforces it: a `dividends`-rule row filed under Expense
+     reads last month's balance, which pass one's $0 thresholds had swept
+     away. So the year is recomputed until the spend it produces resolves the
+     same targets it was computed with — one extra pass in the ordinary case,
+     the same cost as before — and `monthlySpend` is ALWAYS the returned
+     year's own spend, so the Six-months tile and the Runway divisor cannot
+     disagree. A year that never settles (eight passes) returns its last pass
+     with the targets resolved from that pass's spend: consistent on screen,
+     and only the sweeps a cent or two off the fixed point. */
+  let resolved = resolveGoals(goals, 0), c, monthlySpend;
+  for (let pass = 0; ; pass++) {
+    c = computeYearWith(st, yearKey, prior, resolved);
+    monthlySpend = spendOf(c);
+    const next = resolveGoals(goals, monthlySpend);
+    const settled = next.every((g, i) => g.target === resolved[i].target);
+    resolved = next;
+    if (settled || pass >= 7) break;
+  }
+  return { ...c, goals: resolved, monthlySpend };
 }
 function computeYearWith(st, yearKey, prior, goals) {
   const yr = st.years[yearKey];
@@ -6639,9 +6666,11 @@ function currentMonthOf(yr, todayIso) {
    reader takes that list rather than `state.goals` — computeGoals, the sweep
    step, the share freeze, the sweep-row editor's labels, ruleDesc. A reader
    that reaches for `state.goals` sees a months goal at $0. Pure. */
+function onMonthsGoal(g) {
+  return !!g && typeof g.targetMonths === 'number' && g.targetMonths > 0;
+}
 function goalTargetOf(g, monthlySpend) {
-  return typeof g.targetMonths === 'number' && g.targetMonths > 0
-    ? round2(g.targetMonths * (monthlySpend || 0)) : (g.target || 0);
+  return onMonthsGoal(g) ? round2(g.targetMonths * (monthlySpend || 0)) : (g.target || 0);
 }
 function resolveGoals(goals, monthlySpend) {
   return (goals || []).map(g => ({ ...g, target: goalTargetOf(g, monthlySpend) }));
@@ -11766,7 +11795,7 @@ function renderGoals() {
   /* The third tile is the figure Charles asked to SEE (2026-09-05): six months
      of this year's expenses, the emergency-fund rule of thumb, read off the
      same `spent` the runway divides by. It names the goals that follow it. */
-  const monthsGoals = goals.filter(g => typeof g.targetMonths === 'number' && g.targetMonths > 0);
+  const monthsGoals = goals.filter(onMonthsGoal);
   const pulseTile = (label, value, foot) => `<div class="goal">
     <div class="label">${label}</div>
     <div class="value">${value}</div>
@@ -26787,7 +26816,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tintOf, BAR_TINT, BAR_TINT_SOLID,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  goalNeed, goalClaim, claimAccounts, goalPace, goalTargetOf, resolveGoals, computeYearWith,
+  goalNeed, goalClaim, claimAccounts, goalPace, goalTargetOf, onMonthsGoal, resolveGoals, computeYearWith,
   enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals

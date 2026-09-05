@@ -771,7 +771,10 @@ of this year's Expenses total, live, everywhere the target is read — the tile,
 the pace check, and any sweep row tied to the goal. The button beside Target
 copies that figure once instead, as a plain number that stays put. The Savings
 Rate & Runway card shows **six months of expenses** as its third tile, worked
-out from the same monthly figure the runway divides by. Each goal answers two
+out from the same monthly figure the runway divides by — the year's own
+Expenses total over twelve, always; a months goal's target is that figure
+times its months, and a sweep row tied to it is re-run until the spend it
+produces and the target it ran on agree. Each goal answers two
 questions: **how much of it
 counts** — up to the target, or all of it however far past — and **who is paid
 first**. Name another goal there and this one counts only what sits above that
