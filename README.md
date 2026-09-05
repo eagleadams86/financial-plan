@@ -443,6 +443,10 @@ moves with it — or a plain dollar amount.
   third in a queue of $20k, $50k and $50k means the sweep begins near $120k,
   not $50k. (A goal ahead of it that holds part of its money in accounts the
   queued goal doesn't count claims only its shortfall — see Savings Goals.)
+  Because that claim reads balances in the earlier goal's accounts, the row
+  waits for any sweep that deposits into one of them the same month, and it
+  refuses (blank, with the cell editor saying why) to sweep INTO one — the
+  line it is measured against would move as it ran.
 - It is worked out **at the end of the month, after the accounts' interest**,
   so the measured pot lands exactly on the threshold. A month that ends under
   it stays blank — nothing to sweep is not a $0 transfer.

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 975;
+const EXPECTED = 976;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1178,6 +1178,40 @@ t('an account that closes mid-year drops out of a goal-tied sweep instead of poi
   eq(c.cells['tomid|2026-02'].v, -894, 'February still sweeps once Investments has closed — it read NaN and stayed blank');
   approx(c.balances['cash|2026-02'], 15000, 'and cash lands on the threshold');
   eq(c.balances['long|2026-02'], undefined, 'the closed account states no balance');
+});
+t('a sweep waits for the deposits a queued goal\'s claim reads, and never fills one itself (fix 2)', () => {
+  /* The claim of a goal behind another reads the balances the earlier goal
+     holds OUTSIDE the queued goal's accounts. Those were not ordering inputs,
+     so a row tied to the queued goal could run before another row deposited
+     into one of them and read a threshold the month-end figures — and the
+     Progress tab — did not agree with. */
+  const s = overflowFixture();
+  s.settings.accounts.push({ id: 'chk', name: 'Checking', rate: 0, creditTo: 'chk' });
+  s.years['2026'].seeds.chk = 5000;
+  const [, tied] = s.years['2026'].categories;
+  delete tied.threshold;
+  tied.goalId = 'car';
+  s.years['2026'].categories.push({ id: 'tolong', name: 'To Long', rule: 'overflow',
+    role: 'normal', section: 'transfer', overflowFrom: 'chk', transferTo: 'long', threshold: 2000 });
+  s.goals = [
+    { id: 'ef', name: 'EF', target: 10000, accounts: ['cash', 'long'], count: 'capped' },
+    { id: 'car', name: 'Car', target: 5000, accounts: ['cash'], count: 'capped', overflowOf: 'ef' },
+  ];
+  const st = H.coerceShape(s);
+  const computed = H.computeAll(st, '2026-01-15');
+  const c = computed['2026'];
+  eq(c.cells['tolong|2026-01'].v, -3000, 'Checking sweeps 3,000 into Investments');
+  /* EF still needs 10,000 − 3,000 = 7,000 from cash, so Car is full at 12,000 */
+  eq(c.cells['tomid|2026-01'].v, -5894, 'read AFTER the deposit: 17,894 above 12,000 — it read 15,000 and swept 2,894');
+  approx(c.balances['cash|2026-01'], 12000, 'cash lands where the Progress tab says Car is full');
+  const [, car] = H.computeGoals(st, computed, '2026-01-15');
+  eq(car.claimed, 7000, 'and the tile agrees with the grid');
+  eq(H.claimAccounts(st.goals[1], st.goals), ['cash', 'long'], 'the claim reads EF\'s accounts');
+  eq(H.overflowMeasure(tied, st.goals).claim, ['long'], 'minus the measure it already shares');
+  /* the other way round: a row filling an account the claim reads has no answer */
+  tied.transferTo = 'long';
+  const c2 = H.computeAll(H.coerceShape(s), '2026-01-15')['2026'];
+  eq(c2.cells['tomid|2026-01'].kind, 'missing', 'refused — the deposit would move the line it is measured against');
 });
 
 group('Sections & quarterly rule');

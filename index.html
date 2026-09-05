@@ -6129,13 +6129,27 @@ function overflowMeasure(cat, goals) {
     : Array.isArray(cat.capAccounts) && cat.capAccounts.length
       ? cat.capAccounts
       : cat.transferTo ? [cat.transferTo] : [];
-  return { measure: [...new Set(m)], capMeasure: c ? [...new Set(c)] : null };
+  /* The accounts a QUEUED goal's claim reads (2026-09-05, review fix 2): a
+     goal behind another is full at its target plus what the goal ahead still
+     needs from accounts OUTSIDE this goal's set, so its threshold moves with
+     balances the measure never names. Those accounts are ordering inputs
+     (overflowOrder) and a destination guard (the sweep step) — reading them
+     before a later row deposits into one gave the grid a line the Progress
+     tab did not agree with, every month; filling one from this very row
+     made the line depend on the sweep being decided. Minus the measure,
+     which already carries whatever the two sets share. */
+  const claimOf = (goal, base) => goal
+    ? claimAccounts(goal, goals).filter(id => !base.includes(id)) : [];
+  const measure = [...new Set(m)], capMeasure = c ? [...new Set(c)] : null;
+  return { measure, capMeasure,
+           claim: claimOf(g, measure), capClaim: capMeasure ? claimOf(cg, capMeasure) : null };
 }
 
 /* Orders the overflow rows so a sweep's arrival is seen by any row whose
    MEASURE includes the account it lands in — Kahn's walk over the account
-   ids, with edges from every account a row DRAINS AGAINST (its source and
-   its threshold's measured set) to its destination. Rows sharing the same
+   ids, with edges from every account a row DRAINS AGAINST (its source, its
+   threshold's measured set, and the accounts a queued goal's CLAIM reads —
+   see overflowMeasure) to its destination. Rows sharing the same
    reads keep category-list order, so a later row sees the source already
    drained by the earlier one.
    The CAP's measured set is deliberately NOT an ordering input: a cap is a
@@ -6159,8 +6173,8 @@ function overflowOrder(categories, goals) {
     && c.overflowFrom && c.transferTo && c.overflowFrom !== c.transferTo);
   const insOf = new Map();
   for (const c of edges) {
-    const { measure } = overflowMeasure(c, goals);
-    const ins = new Set([c.overflowFrom, ...measure]);
+    const { measure, claim } = overflowMeasure(c, goals);
+    const ins = new Set([c.overflowFrom, ...measure, ...claim]);
     ins.delete(c.transferTo);   // no self-edges
     insOf.set(c, [...ins]);
   }
@@ -6480,10 +6494,16 @@ function computeYearWith(st, yearKey, prior, goals) {
            and the destination must be OUT of it (filling a counted account
            moves nothing at all). Either way round the row is misconfigured
            and stays blank; the cell editor says which. */
-        const { measure, capMeasure } = overflowMeasure(cat, goals);
+        const { measure, capMeasure, claim, capClaim } = overflowMeasure(cat, goals);
         const sumEnd = (ids) =>
           ids.reduce((s, id) => running[id] ? s + endOf(id) : s, 0);
         if (!measure.includes(src) || measure.includes(dst)) continue;
+        /* Nor may the destination be an account the goal's CLAIM reads — the
+           balance there sets how much the goal ahead still needs, so filling
+           it from this row would move the line the row is measured against
+           while the row is being decided (review fix 2). Blank, and the cell
+           editor says so. */
+        if (claim.includes(dst)) continue;
         let amount = round2(Math.max(0, sumEnd(measure) - threshold));
         /* An optional DESTINATION cap: fill the far side only up to a goal's
            target (read live, like the threshold) or a typed figure, and
@@ -6505,6 +6525,7 @@ function computeYearWith(st, yearKey, prior, goals) {
           : typeof cat.capAmount === 'number' ? cat.capAmount : undefined;
         if (cap !== undefined) {
           if (!capMeasure.includes(dst) || capMeasure.includes(src)) continue;
+          if (capClaim.includes(src)) continue;   // the mirror: draining it moves the cap
           amount = Math.min(amount, round2(Math.max(0, cap - sumEnd(capMeasure))));
         }
         if (!amount) continue;
@@ -6657,6 +6678,17 @@ function goalNeed(goal, goals, bal, seen = new Set()) {
   seen.add(goal.id);
   const pred = goal.overflowOf ? (goals || []).find(x => x.id === goal.overflowOf) : null;
   return round2((goal.target || 0) + goalClaim(pred, goal.accounts || [], goals, bal, seen));
+}
+/* Every account a goal's claim chain reads: the accounts of the goal ahead
+   of it, and of the goal ahead of THAT, and so on. What `goalClaim` measures
+   "held elsewhere" against, listed so the engine can order on it and refuse
+   to fill it. Terminates on a loop like its siblings. Pure. */
+function claimAccounts(goal, goals, seen = new Set()) {
+  if (!goal || seen.has(goal.id)) return [];
+  seen.add(goal.id);
+  const pred = goal.overflowOf ? (goals || []).find(x => x.id === goal.overflowOf) : null;
+  if (!pred) return [];
+  return [...new Set([...(pred.accounts || []), ...claimAccounts(pred, goals, seen)])];
 }
 function goalClaim(pred, accounts, goals, bal, seen = new Set()) {
   if (!pred || seen.has(pred.id)) return 0;
@@ -23794,6 +23826,18 @@ function openCellEditor(yearKey, type, id, m) {
         + 'counts — moving money there changes nothing the goal can see, so the '
         + 'row stays blank. Send it to an account outside the goal.';
     else if (future && rule === 'overflow'
+             && overflowMeasure(cat, state.goals).claim.includes(cat.transferTo))
+      hint.textContent = '⚠ This row sweeps into an account that a goal AHEAD of '
+        + 'the one it reads counts — what that goal still needs sets this row\'s '
+        + 'line, so filling it from here would move the line as the row runs. The '
+        + 'row stays blank; send the money somewhere neither goal counts.';
+    else if (future && rule === 'overflow'
+             && overflowMeasure(cat, state.goals).capClaim
+             && overflowMeasure(cat, state.goals).capClaim.includes(cat.overflowFrom))
+      hint.textContent = '⚠ The cap goal is claimed first by a goal that counts the '
+        + 'account this row drains, so the cap would move as the row runs — the '
+        + 'row stays blank. Watch a different account, or change the cap.';
+    else if (future && rule === 'overflow'
              && overflowMeasure(cat, state.goals).capMeasure
              && (!overflowMeasure(cat, state.goals).capMeasure.includes(cat.transferTo)
                  || overflowMeasure(cat, state.goals).capMeasure.includes(cat.overflowFrom)))
@@ -26743,7 +26787,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tintOf, BAR_TINT, BAR_TINT_SOLID,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  goalNeed, goalClaim, goalPace, goalTargetOf, resolveGoals, computeYearWith,
+  goalNeed, goalClaim, claimAccounts, goalPace, goalTargetOf, resolveGoals, computeYearWith,
   enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals

@@ -5691,3 +5691,17 @@ and proven red against the pre-fix page, README and this file in the commit.
   cleared the month after `until`, in the one place the account is filtered
   out. Earnings routing never read the latch (`payInto` asks `liveThisMonth`),
   so nothing else moves; a test sweeps a February after Investments closed.
+- **The sweep step orders on, and refuses to fill, the accounts a queued
+  goal's claim reads (fix 2).** `goalClaim` measures what the goal ahead holds
+  in accounts OUTSIDE the queued goal's set, but `overflowOrder` only knew the
+  source and the goal's own measure — so a row tied to a queued goal could run
+  before another row deposited into one of those accounts and read a threshold
+  the month-end figures (and the Progress tab) never agreed with, every month;
+  and with the destination itself among them the line depended on the sweep
+  being decided. `claimAccounts(goal, goals)` (pure, hooks) lists the chain's
+  accounts; `overflowMeasure` returns them as `claim`/`capClaim` minus what the
+  measure already shares; `overflowOrder` adds `claim` to a row's `ins`; the
+  sweep step refuses `claim.includes(dst)` and, for the cap, `capClaim
+  .includes(src)`; the cell editor has a sentence for each. The test deposits
+  into the earlier goal's account from a LATER row and pins that the tied row
+  now reads the post-deposit figure the tile shows.
