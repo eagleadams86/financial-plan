@@ -555,14 +555,10 @@ html[data-pin] #views :is(button, a[href], input, select, textarea, [tabindex]) 
 .yearnav { flex: 0 0 auto; display: flex; align-items: center;
   padding-left: 6px; margin-left: 4px; border-left: 1px solid var(--border); }
 .yearnav[hidden] { display: none; }
-/* The arrows come and go with the WINDOW; "This year" comes and goes with the
-   year you're reading. Two conditions, so two boxes. */
-.yarrows { display: flex; align-items: center; }
-.yarrows[hidden] { display: none; }
 /* Sized like the month strip's "This month" — a word beside a glyph reads as
-   shouting at the arrows' own size — and given a thumb-sized box on touch,
-   which the year ARROWS deliberately don't get: this one is a control somebody
-   actually navigates with. */
+   shouting at the arrows' own size — and given a thumb-sized box on touch. The
+   arrows beside it get one too, since 2026-09-05: they step the year now, so
+   both controls in here are things somebody navigates with. */
 .ynav.ynow { font-size: var(--fs-xs); }
 @media (pointer: coarse) { .ynav.ynow { min-height: 40px; } }
 .ynav { background: none; border: 0; border-radius: var(--radius-sm);
@@ -1705,13 +1701,15 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 .vswitch[aria-checked="true"] { background: var(--accent-bg); color: var(--accent);
   font-weight: var(--fw-semibold); }
 .vswitch:focus-visible { outline: 2px solid var(--focus-border); outline-offset: 2px; }
-/* The month arrows STEP — they move the selection, where the year strip's
-   scroll a rail — so they are the control this view is actually driven by and
-   they carry a touch target to match. `.ynav` itself is left exactly as it is:
-   nobody navigates the plan with the year arrows. */
-.ynav.mnav { padding: 6px 12px; font-size: var(--fs-md); line-height: 1.1; }
-.ynav.mnav.mnow { font-size: var(--fs-xs); }
-@media (pointer: coarse) { .ynav.mnav { min-width: 40px; min-height: 40px; } }
+/* THE STEP ARROWS, IN BOTH STRIPS. They move the selection rather than scrolling
+   a rail, so they are what each lens is actually driven by, and they carry a
+   touch target to match. Called `.snav` since 2026-09-05, when the year strip
+   took the month strip's arrows and the name `.mnav` stopped being true — until
+   then the year arrows only scrolled the rail and were left deliberately small,
+   on the grounds that nobody navigated the plan with them. Now they do. */
+.ynav.snav { padding: 6px 12px; font-size: var(--fs-md); line-height: 1.1; }
+.ynav.snav.mnow { font-size: var(--fs-xs); }
+@media (pointer: coarse) { .ynav.snav { min-width: 40px; min-height: 40px; } }
 /* Three controls in one row is one too many at a phone's width: the switch on
    its own takes more than half of a 430px screen, and the month rail was left
    showing a month and a half of the twelve. So the switch and the arrows take
@@ -8156,7 +8154,11 @@ function yearPickerHtml(active) {
      has no chip for this year and nothing is marked, exactly as a month strip
      that does not reach this month marks none. */
   const nowY = todayISO().slice(0, 4);
-  const chips = yearKeys().slice().reverse().map(y => {
+  /* NEWEST FIRST, and named because the arrows below step this list rather than
+     the plan's own order — a fact worth having in one place now that two things
+     read it. */
+  const order = yearKeys().slice().reverse();
+  const chips = order.map(y => {
     const yr = state.years[y];
     const summary = yr.kind === 'summary';
     const future = !summary && !yearStarted(state, y);
@@ -8179,46 +8181,51 @@ function yearPickerHtml(active) {
      the width changes. Last, the button's arrival would shove both arrows left
      by its own width, out from under the pointer that had just clicked one.
 
-     The arrows have their own wrapper because the two halves come and go for
-     UNRELATED reasons — the arrows on whether the rail overflows the window,
-     this button on which year you are reading — and the outer `.yearnav` owns
-     the divider rule that separates the nav from the rail, so it has to stay
-     out until BOTH are gone or the strip ends in a stray hairline. */
+     THE ARROWS STEP THE YEAR, the way the month strip's have always stepped the
+     month. Asked for by Charles on 2026-09-05: "add the arrows from the month
+     view to the year view." Until then they scrolled the rail and were hidden
+     unless it overflowed, which made them a different control wearing the same
+     glyphs — you pressed ‹ in one lens and moved a month, pressed it in the
+     other and moved the view sideways without changing anything.
+
+     WHICH WAY IS WHICH IS DECIDED BY THE RAIL, NOT BY THE CALENDAR. This list is
+     newest first, so the chip to the LEFT of the one you are reading is the year
+     AFTER it — the opposite way round from the month rail, which runs oldest
+     first. An arrow beside a row of chips means "one along, this way", and that
+     is the promise kept here: ‹ takes the chip on the left, › the chip on the
+     right, in both strips, and the labels say which year that turns out to be.
+     Making ‹ mean "earlier" instead would have moved the highlight rightwards on
+     a press of the left arrow, which no amount of labelling rescues. It is also
+     what the rail's own arrow KEYS have always done.
+
+     Always rendered and only ever `disabled`, again like the month strip: a
+     control that comes and goes changes the width of the nav and shoves whatever
+     is beside it out from under the pointer that has just used it. */
   const showNow = yearKeys().includes(nowY) && active !== nowY;
+  const at = order.indexOf(active);
   return `<div class="yearstrip">
     ${budgetSwitchHtml('year')}
     <div class="yearrail" id="yearRail" role="radiogroup"
       aria-label="Which year you're looking at">${chips}</div>
-    <div class="yearnav" id="yearNav"${showNow ? '' : ' hidden'}>
+    <div class="yearnav" id="yearNav">
       ${showNow ? `<button type="button" class="ynav ynow" id="yearNow"
         data-year="${esc(nowY)}" title="Back to ${esc(nowY)}">This year</button>` : ''}
-      <span class="yarrows" id="yearArrows" hidden>
-        <button type="button" class="ynav" id="yearPrev"
-          aria-label="Scroll to later years" title="Later years">&#8249;</button>
-        <button type="button" class="ynav" id="yearNext"
-          aria-label="Scroll to earlier years" title="Earlier years">&#8250;</button>
-      </span>
+      <button type="button" class="ynav snav" id="yearPrev"${at <= 0 ? ' disabled' : ''}
+        aria-label="The year after" title="The year after">&#8249;</button>
+      <button type="button" class="ynav snav" id="yearNext"${
+        at < 0 || at >= order.length - 1 ? ' disabled' : ''}
+        aria-label="The year before" title="The year before">&#8250;</button>
     </div>
   </div>`;
 }
 
-/* Whether either end of the strip is off-screen is a fact about the WINDOW,
-   not about the plan, so it's measured rather than stored — and re-measured
-   when the window changes, since the strip itself is only rebuilt by a redraw. */
-function syncYearNav() {
-  const rail = F('yearRail'), nav = F('yearNav'), arrows = F('yearArrows');
-  if (!rail || !nav || !arrows || !rail.clientWidth) return;
-  const over = rail.scrollWidth - rail.clientWidth;
-  arrows.hidden = over <= 1;
-  /* The nav goes only when it holds nothing at all. "This year" is rendered or
-     not by the redraw and this function must not take it away — the strip fits
-     without arrows most of the time, which is exactly when the button is the
-     only thing in here. */
-  nav.hidden = arrows.hidden && !F('yearNow');
-  F('yearPrev').disabled = rail.scrollLeft <= 1;
-  F('yearNext').disabled = rail.scrollLeft >= over - 1;
-}
-window.addEventListener('resize', syncYearNav);
+/* syncYearNav went on 2026-09-05, with the scrolling arrows it existed for.
+   Nothing about this strip is decided by the window any more: the arrows step
+   the chip list, so which of them is live is a fact about WHERE YOU ARE in the
+   plan, and the redraw that moves you is the only thing that can change it —
+   which is why it is written into the markup above and not measured here. The
+   rail still scrolls, by drag, by wheel and by `settle()` bringing the chosen
+   year into view; it just no longer has an opinion about a button. */
 
 /* Set by a keyboard move so the redraw can hand focus back. Choosing a year
    rebuilds the whole view, which blurs whatever you were on — without this the
@@ -8246,15 +8253,19 @@ function wireYearStrip() {
       : step === 'last' ? chips[chips.length - 1]
       : chips[(i + step + chips.length) % chips.length], true);
   };
-  rail.onscroll = syncYearNav;
-  /* Most of a screenful, so something you were looking at stays on it to tell
-     you where you've got to, and never less than one year's width. */
-  const nudge = (dir) => {
-    rail.scrollLeft += dir * Math.max(140, rail.clientWidth * 0.7);
-    syncYearNav();
+  /* ONE CHIP ALONG, and `pick` is the same door a click on that chip uses — so
+     the year lands, the rail follows it and the strip is redrawn by exactly the
+     one path, rather than by an arrow that knows how to choose a year on its
+     own. `false` for `byKey`: the pointer is on the arrow and the arrow is still
+     there after the redraw, so there is no focus to hand back. A disabled button
+     never fires, which is what makes the ends safe without a guard here. */
+  const step = (dir) => {
+    const i = chips.findIndex(c => c.getAttribute('aria-checked') === 'true');
+    if (i < 0) return;
+    pick(chips[i + dir], false);
   };
-  F('yearPrev').onclick = () => nudge(-1);
-  F('yearNext').onclick = () => nudge(1);
+  F('yearPrev').onclick = () => step(-1);
+  F('yearNext').onclick = () => step(1);
   /* Exactly what clicking this year's chip does — the button is a shortcut to a
      chip that may be scrolled off the end of the rail, not a second way of
      choosing a year. `settle()` below then brings the chip into view. */
@@ -8286,7 +8297,6 @@ function wireYearStrip() {
       if (chip.left < box.left || chip.right > box.right)
         rail.scrollLeft += chip.left - box.left - (box.width - chip.width) / 2;
     }
-    syncYearNav();
   };
   settle();
   if (yearKeyMove) { yearKeyMove = false; on?.focus({ preventScroll: true }); }
@@ -10114,11 +10124,11 @@ function monthPickerHtml(active, all) {
     <div class="yearrail" id="monthRail" role="radiogroup"
       aria-label="Which month you're looking at">${chips}</div>
     <div class="yearnav">
-      ${all.includes(now) && active !== now ? `<button type="button" class="ynav mnav mnow"
+      ${all.includes(now) && active !== now ? `<button type="button" class="ynav snav mnow"
         id="monthNow" title="Back to ${esc(monthTitle(now))}">This month</button>` : ''}
-      <button type="button" class="ynav mnav" id="monthPrev"${i <= 0 ? ' disabled' : ''}
+      <button type="button" class="ynav snav" id="monthPrev"${i <= 0 ? ' disabled' : ''}
         aria-label="The month before" title="The month before">&#8249;</button>
-      <button type="button" class="ynav mnav" id="monthNext"${
+      <button type="button" class="ynav snav" id="monthNext"${
         i < 0 || i >= all.length - 1 ? ' disabled' : ''}
         aria-label="The month after" title="The month after">&#8250;</button>
     </div>
@@ -17269,8 +17279,11 @@ function wireView(view) {
       /* Focus back onto the fresh box: the re-render destroys the one that was
          just ticked, and a keyboard reader would otherwise be dropped at the
          top of the page — the trap the tab bar, the year strip and every row
-         editor hit before this. */
-      F('flowNoTransfers')?.focus();
+         editor hit before this. `preventScroll` (2026-09-05): without it the
+         browser brings the fresh box into view, and a reader who ticked it from
+         halfway down the card is pulled somewhere they did not ask to go. The
+         same rule the tab row, the year strip and goToSearchHit already keep. */
+      F('flowNoTransfers')?.focus({ preventScroll: true });
     };
   }
   if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
@@ -17306,9 +17319,12 @@ function wireView(view) {
         /* Back onto the button that was just pressed. The re-render destroyed
            it, and without this a keyboard reader is dropped at the top of the
            page — the trap every other re-rendering control here already
-           avoids. It now points one year further on, which is the truth. */
+           avoids. It now points one year further on, which is the truth.
+           `preventScroll` (2026-09-05), like every focus() this app makes onto
+           the page: the button is a long way down Giving, and dragging the page
+           to it is a second thing happening that nobody asked for. */
         [...document.querySelectorAll('[data-clone-donations]')]
-          .find(b => b.dataset.cloneDonations === from)?.focus();
+          .find(b => b.dataset.cloneDonations === from)?.focus({ preventScroll: true });
       };
     });
     document.querySelectorAll('[data-delete-donations]').forEach((btn) => {
@@ -17339,7 +17355,9 @@ function wireView(view) {
        rather than redrawing the bars, because the card's opening line names the
        layer too, and bars that had changed under prose that had not would be
        exactly the disagreement that rule exists to stop. Focus goes back onto
-       the fresh box — the re-render destroys the one just ticked. */
+       the fresh box — the re-render destroys the one just ticked — and with
+       `preventScroll` (2026-09-05), so ticking it from halfway down the card
+       does not drag the page to the top of that card. */
     const byCls = F('driftByClass');
     if (byCls) byCls.onchange = () => {
       state.ui = state.ui || {};
@@ -17348,7 +17366,7 @@ function wireView(view) {
       if (byCls.checked) state.ui.driftByClass = true;
       else delete state.ui.driftByClass;
       save(); render();
-      F('driftByClass')?.focus();
+      F('driftByClass')?.focus({ preventScroll: true });
     };
   }
   /* LAST, after the charts. A canvas built inside a display:none card sizes
@@ -25310,13 +25328,20 @@ document.querySelectorAll('.tab').forEach(tab => {
       if (!swap) return;
       tab.parentElement.insertBefore(step < 0 ? tab : swap, step < 0 ? swap : tab);
       saveTabOrder();
-      tab.focus();
+      /* `preventScroll` (2026-09-05): dragging a tab along the bar with Alt does
+         NOT change the view, so there is nothing here that should move the page
+         — and without this the browser hauls a reader halfway down the Budget
+         back up to the tab row for a reordering they did from down there. */
+      tab.focus({ preventScroll: true });
       return;
     }
     const next = step === 'first' ? list[0]
       : step === 'last' ? list[list.length - 1]
       : list[(i + step + list.length) % list.length];
-    if (next) { next.focus(); next.click(); }
+    /* `preventScroll` again: the press below is what decides where the page
+       lands — the top of the new view — and a focus that scrolled first would
+       be a second answer to the same question. */
+    if (next) { next.focus({ preventScroll: true }); next.click(); }
   };
 });
 

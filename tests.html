@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 951;
+const EXPECTED = 953;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -10328,18 +10328,70 @@ t('the year strip offers "This year" on the same terms the month strip does', ()
      'and it comes FIRST, so its arrival grows leftwards into the rail instead of '
      + 'shoving the arrows out from under the pointer');
 });
-t('the year arrows hide on their own, so "This year" survives a strip that fits', () => {
+/* ── The year arrows STEP the year (2026-09-05) ──────────────────────────────
+   Charles: "add the arrows from the month view to the year view." They used to
+   scroll the rail and hide themselves unless it overflowed, which made them a
+   different control wearing the same glyphs. They are now the month strip's
+   arrows in the other lens: always rendered, only ever disabled, one chip a
+   press. The test that pinned the old hiding went with the behaviour it
+   described — deliberately, and this is the note that says so. */
+t('the year arrows step one year a press, like the month strip\'s', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'yearstep');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    D.getElementById('tab-budget').click();
+    await wait(300);
+    const rail = () => [...D.querySelectorAll('#yearRail .yearchip')].map(c => c.dataset.year);
+    const on = () => D.querySelector('#yearRail .yearchip[aria-checked="true"]').dataset.year;
+    const order = rail();
+    ok(order.length > 2, 'the sample plan has years to walk', order.join(','));
+    /* NEWEST FIRST, which is what makes the direction worth pinning: the chip to
+       the LEFT is the year AFTER, the opposite way round from the month rail. */
+    ok(+order[0] > +order[order.length - 1], 'and they run newest first', order.join(','));
+    eq(on(), order[0], 'the sample opens on the newest year');
+    eq(D.getElementById('yearPrev').disabled, true,
+       'so ‹ — one chip to the left — has nowhere to go and is disabled');
+    eq(D.getElementById('yearNext').disabled, false, 'and › is live');
+
+    D.getElementById('yearNext').click();
+    await wait(300);
+    eq(on(), order[1], '› takes the chip on the right: one year earlier');
+    eq(D.getElementById('yearPrev').disabled, false, 'and ‹ comes alive behind it');
+    D.getElementById('yearPrev').click();
+    await wait(300);
+    eq(on(), order[0], '‹ takes the chip on the left: one year later, and back where we were');
+
+    /* To the far end, where › must stop rather than wrap. */
+    for (let i = 0; i < order.length; i++) {
+      const b = D.getElementById('yearNext');
+      if (b.disabled) break;
+      b.click();
+      await wait(250);
+    }
+    eq(on(), order[order.length - 1], 'pressing › to the end lands on the oldest year');
+    eq(D.getElementById('yearNext').disabled, true, 'where it stops rather than wrapping');
+    /* The nav is always there now, so nothing in it can move under a pointer. */
+    eq(D.getElementById('yearNav').hidden, false, 'the nav is never taken away');
+    ok(D.getElementById('yearPrev').classList.contains('snav')
+       && D.getElementById('yearNext').classList.contains('snav'),
+       'and both wear the step arrows\' own class, which is what gives them the '
+       + 'month strip\'s size and its 40px touch target');
+  } finally { f.remove(); }
+});
+t('the year arrows are rendered whatever the plan, and only ever disabled', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const src = stripComments(APP_SRC);
-  const fn = src.match(/function syncYearNav\([\s\S]*?\n\}/);
-  ok(fn, 'syncYearNav still measures the strip against the window');
-  ok(/arrows\.hidden = over <= 1/.test(fn[0]),
-     'overflow hides the ARROWS, not the whole nav');
-  ok(/nav\.hidden = arrows\.hidden && !F\('yearNow'\)/.test(fn[0]),
-     'and the nav itself goes only when it holds nothing at all — otherwise the '
-     + 'usual case, a plan short enough to fit, would take the button with it');
-  ok(/<span class="yarrows" id="yearArrows" hidden>/.test(src),
-     'the arrows have their own box in the markup to be hidden by');
+  const fn = src.match(/function yearPickerHtml\([\s\S]*?\n\}/);
+  ok(fn, 'yearPickerHtml is still the one place the year strip is built');
+  ok(!/id="yearArrows"/.test(src) && !/yarrows/.test(src),
+     'the wrapper the old hiding needed is gone with it');
+  ok(!/function syncYearNav/.test(src),
+     'and so is syncYearNav — nothing about this strip is decided by the window now');
+  ok(/id="yearPrev"\$\{at <= 0 \? ' disabled' : ''\}/.test(fn[0]),
+     '‹ is disabled on the first chip rather than removed');
+  ok(/at < 0 \|\| at >= order\.length - 1 \? ' disabled' : ''/.test(fn[0]),
+     'and › on the last — a control that comes and goes changes the width of the nav '
+     + 'and shoves whatever is beside it out from under the pointer');
 });
 t('"This year" picks a year exactly as its chip does', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
@@ -14580,6 +14632,77 @@ t('a tab press goes to the top; the period rails hold the scroll', async () => {
     mchip.click();
     await wait(400);
     eq(W.scrollY, onMonth, 'a month chip holds it as well');
+  } finally { f.remove(); }
+});
+
+
+/* ── A CONTROL THAT REDRAWS THE PAGE MUST NOT MOVE IT ───────────────────────
+   Three controls re-render and then put the focus back onto the fresh copy of
+   themselves, because the redraw destroys the one that was just pressed and a
+   keyboard reader would otherwise be dropped at the top of the page. All three
+   did it with a bare `focus()`, so the browser also brought the control into
+   view — and dragging the page to a switch the reader had just used from where
+   they were sitting is a second thing happening that nobody asked for. Found
+   on 2026-09-05 while fixing the Month page's scroll creep, and fixed the way
+   the tab row, the year strip and goToSearchHit already do it: `preventScroll`.
+
+   THE PAGE IS PUT WHERE THE CONTROL IS OFF-SCREEN before each handler runs.
+   That is not how a reader meets it — they can see what they are ticking — but
+   it is what makes the difference legible: with the bare focus() the page jumps
+   by however far down the control sits (2,709px for the flow switch in the
+   sample plan), and with the fix it does not move at all. A leg that started
+   with the control already in view would be asserting against a few pixels of
+   browser discretion instead. */
+t('a switch that re-renders puts the focus back without moving the page', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'focusscroll');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const tick = async (tab, id) => {
+      D.getElementById('tab-' + tab).click();
+      await wait(400);
+      W.scrollTo(0, 0);
+      await wait(120);
+      const box = D.getElementById(id);
+      ok(!!box, 'the ' + id + ' switch is on the ' + tab + ' tab');
+      ok(box.getBoundingClientRect().top + W.scrollY > W.innerHeight,
+         'and it sits below the fold, so a focus that scrolled would be unmistakable',
+         Math.round(box.getBoundingClientRect().top + W.scrollY));
+      box.checked = !box.checked;
+      box.dispatchEvent(new W.Event('change', { bubbles: true }));
+      await wait(400);
+      eq(W.scrollY, 0, 'ticking ' + id + ' leaves the page where it was');
+      eq(D.activeElement && D.activeElement.id, id,
+         'and the focus is back on the fresh box, which is what the focus() is for');
+    };
+    await tick('goals', 'flowNoTransfers');
+    await tick('investments', 'driftByClass');
+
+    /* The third one is a BUTTON that rebuilds the page under itself, and it is
+       found again by the year it points at rather than by id. */
+    D.getElementById('tab-giving').click();
+    await wait(400);
+    W.scrollTo(0, 0);
+    await wait(120);
+    const btn = D.querySelector('[data-clone-donations]');
+    ok(!!btn, 'Giving offers a copy-forward button');
+    const from = btn.dataset.cloneDonations;
+    /* This one sits ABOVE the fold on the sample plan (883px down, in a 900px
+       frame), so the page is put PAST it instead — off-screen upwards is just as
+       good a way of making a focus that scrolls unmistakable, and it is the
+       honest way round rather than moving the assertion's goalposts. */
+    W.scrollTo(0, 1400);
+    await wait(120);
+    const past = W.scrollY;
+    ok(past > btn.getBoundingClientRect().top + past,
+       'the button is off the top of the window', Math.round(past));
+    btn.click();
+    await wait(400);
+    eq(W.scrollY, Math.min(past, Math.max(0, D.documentElement.scrollHeight - W.innerHeight)),
+       'copying donations forward leaves the page where it was — as far as the page it '
+       + 'redrew has room for');
+    eq(D.activeElement && D.activeElement.dataset
+       && D.activeElement.dataset.cloneDonations, from,
+       'and the focus is on the fresh copy of the button that was pressed');
   } finally { f.remove(); }
 });
 

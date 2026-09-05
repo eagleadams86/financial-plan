@@ -1441,11 +1441,15 @@ straight back through them, one honest step at a time.
 The years run across the top, the way the sheet tabs did in Numbers — newest
 first, with the one you're reading drawn as a filled pill.
 
-Drag or swipe the strip sideways, or use the ‹ › arrows at its right end,
-which grey out once you reach an end and vanish altogether when every year
-already fits. Click a year to open it; from the keyboard, one Tab lands on the
-strip and the left and right arrow keys walk along it (Home for the newest
-year, End for the oldest).
+Click a year to open it, or **step one year at a press with the ‹ › arrows** at
+the strip's right end — the month strip's arrows, in this lens since September
+2026, where they used to scroll the rail sideways and hide themselves whenever
+every year already fitted. They follow the strip rather than the calendar: the
+chip to the left is the year *after* the one you're reading, because the years
+run newest first, so ‹ moves one to the left and › one to the right, and each
+one greys out at its end rather than wrapping round. The strip still drags and
+swipes sideways. From the keyboard, one Tab lands on the strip and the left and
+right arrow keys walk along it (Home for the newest year, End for the oldest).
 
 The tabs above the strip, and the strip itself, can be **pinned** to the top of
 the page: press the pin at the right-hand end of the tab row and both stay put
@@ -1471,8 +1475,8 @@ Month lens's button, on the same terms — and takes you back in one click, from
 however far down the strip you have read.
 
 The same strip carries the Budget's **Year / Month** switch at its left end, and
-in the Month lens the years are replaced by the plan's months — the arrows there
-step from one month to the next rather than scrolling, and the current month is
+in the Month lens the years are replaced by the plan's months — the arrows step
+from one to the next in both lenses now, and the current month is
 marked with an underscore wherever it has got to. Both lenses put their way back
 to now in the same place, and neither shows it when you are already there. On a phone the switch and the
 arrows take the line above and the strip gets the full width underneath.
