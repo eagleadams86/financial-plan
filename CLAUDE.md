@@ -5790,3 +5790,13 @@ and proven red against the pre-fix page, README and this file in the commit.
   resolved figure the box had been filled with as a plain target: the live
   tie dropped with no word. It is refused with a toast now and the goal keeps
   the claim it had.
+- **The Target box is read-only while Months of expenses is set (fix 9).**
+  It stayed editable, and its "Use 6 months" button live, while `save`
+  deleted `target` and stored months — a figure typed there was thrown away
+  with no toast, under a hint ("Filled in for you while Months of expenses
+  is set") that described a lock the box did not have. `link` sets
+  `readOnly` on open (`''`), on every Months keystroke and after the button
+  (`'target'`), so the lock matches the box beside it; the button clears
+  Months first, since a plain figure is the opposite of the tie; the hint
+  says so. Driven through the real dialog in a 1280x900 frame off the
+  sample's emergency fund — a source test could not see `readOnly` change.

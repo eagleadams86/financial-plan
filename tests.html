@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 985;
+const EXPECTED = 986;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14229,6 +14229,48 @@ group('The two long windows are laid out in sections (2026-09-02)');
    thing that would silently undo that is somebody adding a field, or a `showIf`,
    without noticing which block it lands in — so the blocks are pinned by their
    contents, not merely counted. */
+t('the Target box is read-only while Months of expenses is set, and the button clears Months (fix 9)', async () => {
+  /* It stayed editable and Save threw the typed figure away without a word,
+     under a hint that read as if the box were locked. Driven through the real
+     dialog: the sample's emergency fund is a months goal. */
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?tgt=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    D.getElementById('tab-goals').click();
+    const card = [...D.querySelectorAll('[data-edit="goal"]')]
+      .find((el) => /Emergency fund/.test(el.textContent));
+    ok(card, 'the sample\'s emergency fund is on the Progress tab');
+    card.click();
+    const target = D.getElementById('rf-target'), months = D.getElementById('rf-targetMonths');
+    eq(months.value, '6', 'the sample goal follows six months');
+    ok(target.readOnly, 'so the Target box opens locked — it opened editable and Save discarded it');
+    ok(target.value.length > 0, 'showing the resolved figure', target.value);
+    months.value = '';
+    months.dispatchEvent(new W.Event('input', { bubbles: true }));
+    ok(!target.readOnly, 'clearing Months unlocks it');
+    months.value = '3';
+    months.dispatchEvent(new W.Event('input', { bubbles: true }));
+    ok(target.readOnly, 'and typing months locks it again');
+    const btn = [...D.querySelectorAll('#rowFields button')].find((b) => /Use 6 months/.test(b.textContent));
+    ok(btn, 'the one-off button is there');
+    btn.click();
+    eq(months.value, '', 'the button clears Months — a plain figure is the opposite of the tie');
+    ok(!target.readOnly, 'and leaves the box editable');
+    [...D.querySelectorAll('dialog')].filter((d) => d.open).forEach((d) => d.close());
+  } finally { f.remove(); }
+});
 t('a budget row and an account open wide, in three columns, in their blocks', async () => {
   const f = document.createElement('iframe');
   f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame

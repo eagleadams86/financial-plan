@@ -773,7 +773,9 @@ expenses**: type 6 into "Months of expenses" (up to 120 — ten years; nothing
 at or below zero) and the target becomes six months
 of this year's Expenses total, live, everywhere the target is read — the tile,
 the pace check, and any sweep row tied to the goal. The button beside Target
-copies that figure once instead, as a plain number that stays put. The Savings
+copies that figure once instead, as a plain number that stays put (it clears
+the months box, and while months are set the Target box is read-only — the
+figure follows the year's expenses). The Savings
 Rate & Runway card shows **six months of expenses** as its third tile, worked
 out from the same monthly figure the runway divides by — the year's own
 Expenses total over twelve, always; a months goal's target is that figure
