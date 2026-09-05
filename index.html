@@ -6308,13 +6308,20 @@ function computeYearWith(st, yearKey, prior, goals) {
     if (live) {
       const hub = hubAccount(st);
       /* Started once, started for good: an account that has begun keeps its
-         row for the rest of the year even in months where nothing moves. */
+         row for the rest of the year even in months where nothing moves —
+         until it CLOSES. The latch is cleared the month after `until`
+         (2026-09-05): a closed account has no `base` this month, so every
+         reader that trusts `running` — the sweep step's `balAt` and `sumEnd`
+         — got `undefined + 0` = NaN from `endOf`, and a goal-tied sweep
+         measuring a goal that named the closed account went blank for the
+         rest of the year, silently. Earnings routing never read the latch
+         (`payInto` asks `liveThisMonth`), so nothing else moves. */
       const accounts = accountsOf(st).filter(a => {
         /* An account that has been closed stops here. Without this, a bank you
            left in 2022 keeps its last balance and rides forward into every
            year after it, silently inflating Total — the live year carries the
            prior December forward, and history is full of prior Decembers. */
-        if (a.until && m > a.until) return false;
+        if (a.until && m > a.until) { delete running[a.id]; return false; }
         if (running[a.id]) return true;
         const from = accountBeginsAt(yr, a, hub && hub.id);
         if (from === null || m >= from) { running[a.id] = true; return true; }

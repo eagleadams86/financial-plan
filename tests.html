@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 974;
+const EXPECTED = 975;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1154,6 +1154,30 @@ t('coerceShape reads months strictly and keeps one claim', () => {
   eq(by.b, [500, undefined], 'junk months delete, the figure stands');
   eq(by.c, [500, undefined], 'zero months is no tie');
   eq(by.d, [500, undefined], 'nor is a negative one');
+});
+
+/* ── Fixes from the 2026-09-05 code review ────────────────────────────────
+   Ten findings from a review of the queued-goals and months-of-expenses
+   work, each with a test written first and proven red against the page it
+   was found in. The fixture is the sweep one above. */
+group('Fixes from the 2026-09-05 code review');
+t('an account that closes mid-year drops out of a goal-tied sweep instead of poisoning it (fix 1)', () => {
+  /* `running` was a latch never cleared: a closed account had no `base` this
+     month, `endOf` read NaN, and `sumEnd` over a goal naming it turned the
+     whole sweep to NaN — the row went blank for the rest of the year. */
+  const s = overflowFixture();
+  s.settings.accounts[2].until = '2026-01';   // Investments closes after January
+  s.years['2026'].cells['pay|2026-02'] = { v: 894, kind: 'manual' };
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'ef';
+  s.goals = [{ id: 'ef', name: 'EF', target: 15000, accounts: ['cash', 'long'], count: 'capped' }];
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'], { v: -2894, kind: 'auto' }, 'January sweeps as before');
+  ok(Number.isFinite(c.balances['cash|2026-02']), 'February cash is a number', c.balances['cash|2026-02']);
+  eq(c.cells['tomid|2026-02'].v, -894, 'February still sweeps once Investments has closed — it read NaN and stayed blank');
+  approx(c.balances['cash|2026-02'], 15000, 'and cash lands on the threshold');
+  eq(c.balances['long|2026-02'], undefined, 'the closed account states no balance');
 });
 
 group('Sections & quarterly rule');

@@ -5675,3 +5675,19 @@ four Tab stops with one id, so a loop keyed on element identity "closes" after f
 regex helper read out of a template literal by `readFileSync` keeps its doubled backslashes,
 so every colour parsed as null and every backdrop came back white — 372 "failures" that were
 one bug in the harness.
+
+## Fixes From the 2026-09-05 Code Review
+
+A code review of the two PRs merged that day (queued goals, months-of-expenses
+targets, the pace check) found ten things; Charles asked for all of them fixed.
+Same routine as the audits above: one commit per finding, a test written first
+and proven red against the pre-fix page, README and this file in the commit.
+
+- **A closed account no longer poisons a goal-tied sweep (fix 1).** `running`
+  was a latch set once and never cleared, while an account past its `until`
+  drops out of the month's `accounts` list and so has no `base` — `endOf` read
+  `undefined + 0` = NaN, `sumEnd` had no guard, `amount` was NaN and the row
+  went blank for the rest of the year with nothing saying why. The latch is
+  cleared the month after `until`, in the one place the account is filtered
+  out. Earnings routing never read the latch (`payInto` asks `liveThisMonth`),
+  so nothing else moves; a test sweeps a February after Investments closed.

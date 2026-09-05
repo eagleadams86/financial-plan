@@ -456,6 +456,10 @@ moves with it — or a plain dollar amount.
 - An account that dips under its cap **refills before anything flows past
   it**, and a full one keeps its own interest — a cap stops money going in,
   it never sweeps money out.
+- An account that **closes mid-year** (Stopped using it) drops out of the
+  goal's measured pot from the month after it closes, and the row keeps
+  sweeping the accounts that are left. (Until 2026-09-05 the closed account
+  poisoned the sum and the row went blank for the rest of the year.)
 - Rows can **chain**: one row watching the account another fills, resolved in
   dependency order within the same month. Two rows sweeping into each other's
   accounts is a loop with no answer, so both stay blank and the cell editor
