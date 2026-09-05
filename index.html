@@ -6596,6 +6596,39 @@ function goalClaim(pred, accounts, goals, bal, seen = new Set()) {
   return round2(Math.max(0, need - outside));
 }
 
+/* How fast a goal's OWN accounts are growing this year, and what that says
+   about when it lands (2026-09-05). `paceMo` is this year's projected last
+   month less the accounts' opening figure — the engine's own January rule:
+   the prior computed year's December, else the year's seed — over twelve
+   months, so the pace is what the year's rows and sweeps actually leave in
+   those accounts. Total liquidity was the rate until this date, and it
+   flattered every cash goal with growth that lives in the brokerage and can
+   never reach them. `gap` is the money still to ARRIVE: the goal's need less
+   what its accounts hold, so a goal queued behind another counts what the
+   goals ahead of it still need — nothing reaches it until they are paid.
+   `etaMonths` is the quotient (0 once the gap is closed), null when nothing
+   is growing — a fact the tile states rather than a date it invents — and
+   `aheadMonths` sets it against a target date when there is one. Pure. */
+function goalPace(g, need, held, monthsLeft, c, yr, priorC) {
+  const months = yearMonths(yr);
+  const last = months[months.length - 1], prevM = monthAdd(months[0], -1);
+  let end = 0, open = 0, seen = false;
+  for (const id of g.accounts || []) {
+    const e = c.balances[`${id}|${last}`];
+    if (e === undefined) continue;
+    seen = true;
+    end += e;
+    const carried = priorC ? priorC.balances[`${id}|${prevM}`] : undefined;
+    open += carried !== undefined ? carried : ((yr.seeds || {})[id] || 0);
+  }
+  const paceMo = seen ? round2((end - open) / 12) : null;
+  const gap = round2(Math.max(0, need - held));
+  const etaMonths = gap === 0 ? 0
+    : paceMo !== null && paceMo > 0 ? Math.ceil(gap / paceMo) : null;
+  const aheadMonths = g.targetDate && etaMonths !== null ? monthsLeft - etaMonths : null;
+  return { paceMo, gap, etaMonths, aheadMonths };
+}
+
 /* Savings-goal figures, ported row for row from the sheet's Savings Goals
    table and generalised since: a goal adds up the accounts it names, counts
    what sits above another goal's claim when it is queued behind one
@@ -6611,6 +6644,10 @@ function computeGoals(st, computed, todayIso) {
   const cur = currentMonthOf(yr, todayIso);
   const bal = (bid) => c.balances[`${bid}|${cur}`] || 0;
   const byId = (id) => st.goals.find(g => g.id === id);
+  /* The computed year before the live one — where January's opening balance
+     lives, exactly as the balance chain reads it. */
+  const gridAll = Object.keys(st.years).filter(y => st.years[y].kind === 'grid').sort();
+  const priorC = computed[gridAll[gridAll.indexOf(liveKey) - 1]] || null;
 
   return st.goals.map(g => {
     /* An account named by a goal but since deleted contributes nothing rather
@@ -6624,12 +6661,20 @@ function computeGoals(st, computed, todayIso) {
     saved = round2(saved);
     const monthsLeft = g.targetDate
       ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
+    const need = goalNeed(g, st.goals, bal);
+    const pace = goalPace(g, need, held, monthsLeft, c, yr, priorC);
     return {
       ...g, saved, held, claimed,
       claimedBy: pred ? (pred.name || pred.id) : null,
       progress: g.target ? saved / g.target : 0,
       monthsLeft,
-      monthlyReq: monthsLeft > 0 ? round2((g.target - saved) / monthsLeft) : 0,
+      /* Over the GAP, not the goal's own shortfall — a goal queued behind
+         another needs the goals ahead of it paid first, and a figure that
+         left them out read a third too low (2026-09-05). Unchanged for a goal
+         with nobody ahead of it: its need is its target. */
+      monthlyReq: monthsLeft > 0 ? round2(pace.gap / monthsLeft) : 0,
+      ...pace,
+      eta: pace.etaMonths !== null ? monthAdd(cur, pace.etaMonths) : null,
     };
   });
 }
@@ -7074,11 +7119,19 @@ const HELP = {
      option labels are already whole sentences. An explanation nothing renders
      is not help; it is a second copy waiting to drift. */
   paceCheck: { title: 'The Pace Check', body: [
-    ['It takes ', b('this year\'s projected growth'), ' (December\'s total minus last '
-      + 'year\'s), spreads it over twelve months, and compares that with what your next '
-      + 'unmet goal needs each month to arrive on time.'],
-    ['The "behind / ahead" figure converts the monthly gap into ', b('how much sooner or '
-      + 'later the goal lands at this pace'), '.'],
+    ['It takes ', b('this year\'s projected growth of the accounts the goal counts'),
+      ' — their December figure less what they opened the year with — spreads it over '
+      + 'twelve months, and asks how many months of that it takes to close the gap. Money '
+      + 'growing in an account the goal does not count, or swept out of one it does, '
+      + 'is not in it.'],
+    ['The gap is ', b('everything still to arrive'), ': for a goal claimed first by '
+      + 'another, that includes what the goals ahead of it still need, since nothing '
+      + 'reaches it until they are paid. "Needs $X/mo" on the tile divides the same gap by '
+      + 'the months left.'],
+    ['The line follows the soonest-dated goal you have not met and sets its landing month '
+      + 'against its target. ', b('A goal with no date gets the same sum on its own tile'),
+      ' — "at this pace about …" — and a goal whose accounts are not growing this year '
+      + 'says so rather than guessing a date.'],
   ] },
   k401Limit: { title: 'The 401(k) Limit Check', body: [
     ['Your own contributions are salary × the salary percentage, plus bonus × the bonus '
@@ -11120,6 +11173,8 @@ function goalCard(g, idx) {
     <div class="foot">${Math.round(g.progress * 100)}%
       ${g.targetDate ? ` · target ${esc(monthLabel(g.targetDate.slice(0, 7)))} (${fmtYrMo(g.monthsLeft)})` : ''}
       ${!done && g.monthlyReq ? ` · needs ${fmtMoney(g.monthlyReq)}/mo` : ''}
+      ${!done && g.etaMonths > 0 ? ` · at this pace about ${esc(monthLabel(g.eta))}` : ''}
+      ${!done && g.gap > 0 && g.paceMo !== null && g.paceMo <= 0 ? ' · not growing this year' : ''}
       ${g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}` : ''}</div>
   </div>`;
 }
@@ -11608,28 +11663,26 @@ function renderGoals() {
     </div>
   </div>`;
 
-  /* EOY strip + reno pace, ported from the sheet's side table */
-  const decThis = `${liveKey}-12`;
-  const eoyThis = c.balances[`total|${decThis}`];
-  const prevYear = String(+liveKey - 1);
-  const eoyPrev = state.years[prevYear]?.eoyCash;
-  const growth = (eoyThis !== undefined && eoyPrev !== undefined)
-    ? round2(eoyThis - eoyPrev) : null;
-  /* The pace check follows whichever goal is next: the soonest deadline you
-     haven't met yet. Meet it and the check moves on by itself. */
+  /* The pace check follows the soonest-DATED goal you haven't met, and reads
+     its verdict off the goal itself (`goalPace`): the gap counts what the
+     goals ahead of it still need, and the pace is its own accounts' growth.
+     It used to set total liquidity's growth against the goal's own shortfall,
+     which read New Car "4 yr 7 mo ahead" while Renovations still stood
+     between it and every dollar (2026-09-05). An undated goal's answer is the
+     "at this pace" on its tile; with no dated unmet goal there is no line. */
   const next = goals
-    .filter(g => g.targetDate && g.target && g.saved < g.target && g.monthlyReq > 0)
+    .filter(g => g.targetDate && g.target && g.saved < g.target && g.aheadMonths !== null)
     .sort((a, b) => a.targetDate.localeCompare(b.targetDate))[0];
   let paceHtml = '';
-  if (growth !== null && next) {
-    const paceGap = round2(growth / 12 - next.monthlyReq);
-    const behind = paceGap < 0;
-    const gapMonths = Math.round(Math.abs(paceGap) * next.monthsLeft / next.monthlyReq);
-    paceHtml = `<p class="sub" style="margin-top:12px">Next goal — ${esc(next.name)}${
-      helpBtn('paceCheck', 'the pace check')}: on this year's
-      projected growth you're saving ${fmtMoney(Math.abs(paceGap))}/mo
-      ${behind ? 'less' : 'more'} than it needs —
-      <span class="pill ${behind ? 'warn' : 'good'}">${behind ? '!' : '✓'} ${fmtYrMo(gapMonths)} ${behind ? 'behind' : 'ahead'}</span></p>`;
+  if (next) {
+    const behind = next.aheadMonths < 0;
+    const verdict = next.aheadMonths === 0 ? '✓ on time'
+      : `${behind ? '!' : '✓'} ${fmtYrMo(Math.abs(next.aheadMonths))} ${behind ? 'behind' : 'ahead'}`;
+    paceHtml = `<p class="sub" style="margin-top:12px">Next dated goal — ${esc(next.name)}${
+      helpBtn('paceCheck', 'the pace check')}: its own accounts are growing
+      ${fmtMoney(next.paceMo)}/mo this year, so it lands about ${esc(monthLabel(next.eta))}
+      against a target of ${esc(monthLabel(next.targetDate.slice(0, 7)))} —
+      <span class="pill ${behind ? 'warn' : 'good'}">${verdict}</span></p>`;
   }
 
   /* Where the line goes dashed, said in words — and read off the SAME points
@@ -26555,7 +26608,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tintOf, BAR_TINT, BAR_TINT_SOLID,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  goalNeed, goalClaim,
+  goalNeed, goalClaim, goalPace,
   enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals

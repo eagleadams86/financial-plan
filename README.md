@@ -766,8 +766,12 @@ own target. A goal that holds part of its money in accounts you didn't tick
 here claims only its shortfall from the shared ones, so no dollar is counted by
 two goals and none is missed; the tile says what was claimed ahead of it.
 
-Plus progress, target dates, required monthly saving, and a pace check that
-follows whichever goal is next — the soonest deadline you haven't met yet.
+Plus progress, target dates, required monthly saving, and **when each goal
+lands at this pace** — worked out from the growth of the accounts that goal
+counts this year, over the whole gap still to arrive (a goal queued behind
+another counts what the goals ahead of it still need). A goal with no date
+gets that on its tile; the pace line follows the soonest-dated goal you
+haven't met and sets its landing month against its target.
 
 **Where the Total Is Heading** goes **dashed the moment it passes the month
 you've entered through**, so a month the plan has merely worked out never

@@ -1442,6 +1442,16 @@ suite passed while the card was wrong.
     `overflowOf` as a plain capped goal and draw the claim away.
   - The sample carries `kitchen` queued behind `roof` on Mid-term, so the
     "after $X claimed first by" foot is in the demo.
+  - **`goalPace` is the pace check** (same day). Rate = the goal's OWN
+    accounts' growth this year (last month less the engine's January opening:
+    prior computed December, else the seed) over twelve; gap = `goalNeed −
+    held`, so a queued goal counts the goals ahead of it; `monthlyReq` divides
+    THAT gap. `renderGoals` reads `aheadMonths`/`eta` off the goal and no
+    longer touches `eoyCash` (the long-run chart still does). Total liquidity
+    was the rate before and flattered every cash goal with brokerage growth;
+    New Car read "4 yr 7 mo ahead" with Renovations still unfilled ahead of
+    it. An undated goal's answer is "at this pace about …" on its tile; an
+    account that is not growing says so rather than dating the goal.
 - **`accountShowsInYear(a, yr, c, months, accounts)` decides whether an account
   earns a ROW in a live year** — pure and pinned, and shared with the cell
   editor so the grid and the button that empties a cell cannot disagree about

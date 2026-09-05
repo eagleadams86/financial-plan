@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 964;
+const EXPECTED = 968;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1014,6 +1014,66 @@ t('a dangling, self-pointing or looping "claimed first by" is dropped at the bou
   const loop = [{ id: 'p', target: 1, accounts: ['cash'], overflowOf: 'q' },
                 { id: 'q', target: 2, accounts: ['cash'], overflowOf: 'p' }];
   eq(H.goalNeed(loop[0], loop, () => 0), 3, 'p needs its target plus q\'s; q\'s path back to p claims nothing');
+});
+/* ── The pace check reads the queue, and every goal says when it lands ────
+   (2026-09-05, the same afternoon) The "Next goal" line used to set TOTAL
+   liquidity's growth against a goal's own shortfall — New Car read "4 yr 7 mo
+   ahead" while Renovations still stood between it and every dollar. `goalPace`
+   is pure: the goal's own accounts' growth this year, the gap to its NEED, the
+   months that takes, and that against a date when there is one. The fixture
+   is the sweep one: cash 17,000 + 894 pay − 2,894 swept = 15,000; Savings
+   10,000 + 2,894 = 12,894 and then flat, so its pace is 2,894 / 12 = 241.17. */
+const paceFixture = (goals) => {
+  const s = overflowFixture();
+  s.goals = goals;
+  const st = H.coerceShape(s);
+  return H.computeGoals(st, H.computeAll(st, '2026-01-15'), '2026-01-15');
+};
+t('a goal is paced by its OWN accounts\' growth, not total liquidity\'s', () => {
+  const [mid, long, cash] = paceFixture([
+    { id: 'm', name: 'Mid', target: 20000, accounts: ['mid'], count: 'capped' },
+    { id: 'l', name: 'Long', target: 5000, accounts: ['long'], count: 'capped' },
+    { id: 'c', name: 'Cash', target: 15000, accounts: ['cash'], count: 'capped' },
+  ]);
+  approx(mid.paceMo, 241.17, 'Savings: (12,894 − 10,000) / 12');
+  eq(mid.gap, 7106, '20,000 less the 12,894 it holds');
+  eq(mid.etaMonths, 30, 'ceil(7,106 / 241.17)');
+  eq(mid.eta, '2028-07', 'thirty months on from Jan 2026');
+  eq(mid.aheadMonths, null, 'no date, no verdict — the tile carries the ETA');
+  eq(long.paceMo, 0, 'Investments opened and closed the year at 0, whatever cash did');
+  eq(long.etaMonths, null, 'nothing growing is no date, not a date at infinity');
+  eq(cash.gap, 0, 'cash lands exactly on 15,000');
+  eq(cash.etaMonths, 0, 'a closed gap is zero months, not "not growing"');
+});
+t('a queued goal\'s gap, pace and monthly need count the goals ahead of it', () => {
+  const [, behind] = paceFixture([
+    { id: 'a', name: 'A', target: 20000, accounts: ['mid'], count: 'capped' },
+    { id: 'b', name: 'B', target: 2000, accounts: ['mid'], count: 'capped',
+      overflowOf: 'a', targetDate: '2027-01-15' },
+  ]);
+  eq(behind.saved, 0, 'nothing has reached it yet');
+  eq(behind.gap, 9106, '22,000 to be full, less the 12,894 Savings holds — NOT its own 2,000');
+  eq(behind.monthsLeft, 12);
+  approx(behind.monthlyReq, 758.83, '9,106 / 12; the old shortfall arithmetic said 166.67');
+  eq(behind.etaMonths, 38, 'ceil(9,106 / 241.17)');
+  eq(behind.aheadMonths, 12 - 38, 'twenty-six months behind its Jan 2027 date');
+  /* a goal with nobody ahead of it is exactly what it always was */
+  const [alone] = paceFixture([
+    { id: 'a', name: 'A', target: 14000, accounts: ['mid'], count: 'capped', targetDate: '2027-01-15' },
+  ]);
+  approx(alone.monthlyReq, H.round2((14000 - 12894) / 12), 'target − saved, as before');
+  eq(alone.aheadMonths, 12 - 5, 'ceil(1,106 / 241.17) = 5 months against 12 left');
+});
+t('the opening figure is the engine\'s own January rule: the prior December, else the seed', () => {
+  const s = overflowFixture();
+  s.years['2025'] = { kind: 'grid', model: 'pinned', startMonth: '2025-01', monthCount: 12,
+    enteredThrough: '2025-12', categories: [], cells: {}, paychecks: {}, seeds: {},
+    overrides: { 'mid|2025-12': { v: 11000 } }, balAdjust: {} };
+  s.goals = [{ id: 'm', name: 'Mid', target: 20000, accounts: ['mid'], count: 'capped' }];
+  const st = H.coerceShape(s);
+  const [g] = H.computeGoals(st, H.computeAll(st, '2026-01-15'), '2026-01-15');
+  eq(g.held, 13894, 'the engine opened Savings on last December\'s stated 11,000, not the 10,000 seed');
+  approx(g.paceMo, 241.17, 'and so does the pace: the year still grew 2,894 — read off the seed it would say 324.50');
 });
 
 group('Sections & quarterly rule');
@@ -10737,6 +10797,13 @@ t('every info dot has words behind it', () => {
     'every dot has an entry to open — a key with none opens an empty sheet');
   eq(Object.keys(H.HELP).filter(k => !used.includes(k)).join(', '), '',
     'and no entry sits unrendered, which is a second copy of an explanation waiting to drift');
+});
+t('the Progress tab no longer paces a goal off total liquidity', () => {
+  const src = stripComments(APP_SRC);
+  const start = src.indexOf('function renderGoals(');
+  const body = src.slice(start, src.indexOf('\nfunction ', start + 1));
+  ok(!/eoyPrev|growth \/ 12/.test(body), 'renderGoals reads the verdict off the goal, not eoyCash');
+  ok(/aheadMonths !== null/.test(body), 'and only a goal with a verdict draws the line');
 });
 t('the Transfers band explains the sign whether or not a sweep row exists', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
