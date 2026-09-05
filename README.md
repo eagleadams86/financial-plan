@@ -1478,6 +1478,29 @@ to now in the same place, and neither shows it when you are already there. On a 
 arrows take the line above and the strip gets the full width underneath.
 See [Year or Month](#year-or-month).
 
+### Where a Press Leaves the Page
+
+**Changing what you're looking at starts at the top; changing which period
+you're looking at holds still.** Press a tab and the view you open begins at the
+top of its page, rather than at whatever offset the last one had you scrolled
+to — before September 2026 it kept that offset, so where you landed on Goals
+depended on how far down the Budget you had been, and changed again with the pin
+on. Pressing the tab you're already on does nothing, so it never throws the page
+about. A [Find](#find) result that only changes the view lands the same way.
+
+The **year rail, the month rail and the Year / Month switch are the exception,
+on purpose**: press 2025, then 2024, then Mar 26 and the page stays exactly
+where it is, because that is a comparison — you are reading the same rows while
+the figures change under them. (A year kept as a yearly summary is a single
+short card, so there is simply less page to hold; that is the window, not the
+app moving you.) Every other control that changes what a view is showing rather
+than which view you are on — the **This Year** button, the ‹ › arrows, the
+switches inside a card — holds the page in the same way.
+
+A Find result that **opens a record** holds too: the editor is over the cell you
+searched for, and moving the page would leave you at the top of a long grid the
+moment you closed it.
+
 ### Arranging Things
 
 - **The tabs are yours to arrange** — drag one anywhere along the bar, with a

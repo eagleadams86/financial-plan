@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 949;
+const EXPECTED = 950;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14398,6 +14398,12 @@ t('Find: Enter opens the first hit, and the keyboard lands somewhere visible', a
 
     /* Opened by the ⌘K route with nothing focused — the case that fell to body. */
     D.activeElement && D.activeElement.blur();
+    /* Scrolled down first, so the two landings below are about a page that had
+       somewhere to fall back to. */
+    W.scrollTo(0, 300);
+    await new Promise((r) => setTimeout(r, 120));
+    const wasDown = W.scrollY;
+    ok(wasDown > 0, 'the frame really can scroll, so the landings below mean something', wasDown);
     D.getElementById('findBtn').onclick();
     await new Promise((r) => setTimeout(r, 200));
     ok(dlg.open, 'the Find window is open');
@@ -14414,6 +14420,10 @@ t('Find: Enter opens the first hit, and the keyboard lands somewhere visible', a
        a ? (a === D.body ? 'body' : a.tagName + '#' + a.id) : 'null');
     ok(a === D.getElementById('tab-household'),
        'and it is the tab button of the view the hit landed on', a && a.id);
+    /* AND WHERE THE PAGE IS (2026-09-05). A hit that only changes the view is a
+       tab press by another route, so it lands at the top of the view it opened
+       rather than at whatever offset the last one left behind. */
+    eq(W.scrollY, 0, 'a hit that only changes the view starts that view at the top');
 
     /* Enter with nothing to open does nothing at all. */
     D.getElementById('findBtn').onclick();
@@ -14429,6 +14439,11 @@ t('Find: Enter opens the first hit, and the keyboard lands somewhere visible', a
     await new Promise((r) => setTimeout(r, 100));
 
     /* A cell hit opens its editor, and the editor keeps its own focus. */
+    W.scrollTo(0, 300);
+    await new Promise((r) => setTimeout(r, 120));
+    const heldForCell = W.scrollY;
+    ok(heldForCell > 0, 'scrolled down before the cell hit, so "held" can be told from "top"',
+       heldForCell);
     D.getElementById('findBtn').onclick();
     await new Promise((r) => setTimeout(r, 200));
     await type('boiler');
@@ -14438,6 +14453,11 @@ t('Find: Enter opens the first hit, and the keyboard lands somewhere visible', a
     await enter();
     const cell = D.getElementById('cellDialog');
     ok(cell && cell.open, 'the cell editor opened over the Budget');
+    /* THE EXCEPTION Charles settled on 2026-09-05: a hit that OPENS A RECORD
+       leaves the page alone. The reader asked for that cell and the editor is
+       over it; moving the page would strand them at the top of a long grid the
+       moment they closed it. */
+    eq(W.scrollY, heldForCell, 'and the page behind it was left where it was, not sent to the top');
     ok(cell.contains(D.activeElement), 'and the focus is inside it, where the editor put it',
        D.activeElement ? D.activeElement.tagName + '#' + D.activeElement.id : 'null');
     cell.close();
@@ -14458,6 +14478,82 @@ t('Find: Enter opens the first hit, and the keyboard lands somewhere visible', a
     ok(D.activeElement === findBtn || D.activeElement === D.getElementById('tab-household'),
        'the focus is on the Find button it came from, or on the tab — either is visible; never body',
        D.activeElement ? D.activeElement.id : 'null');
+  } finally { f.remove(); }
+});
+
+
+/* ── WHERE A PRESS LANDS THE PAGE ───────────────────────────────────────────
+   Charles, 2026-09-05: "clicking on a tab in money map doesn't reset the
+   scrollbar", and then the rule that settles every case of it — CHANGING WHAT
+   YOU ARE LOOKING AT GOES TO THE TOP, CHANGING WHICH PERIOD YOU ARE LOOKING AT
+   HOLDS STILL. A tab press is the first; the year rail, the month rail and the
+   Year/Month switch are all the second, because pressing 2025, then 2024, then
+   Mar 26 is a comparison and the comparison only works if the rows stay put
+   under your eye.
+
+   A REAL FRAME, 1280x900. The suite's own frame is 1px by 1px, so nothing in it
+   can scroll, `scrollY` is 0 before and after, and every line below would pass
+   without the app doing anything — the trap this whole group would otherwise
+   fall into. Each leg re-reads the scroll it managed to reach and asserts
+   against THAT rather than against 300, and the ok() before it fails if the
+   page turned out not to scroll at all. */
+t('a tab press goes to the top; the period rails hold the scroll', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'landing');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const settle = async (y) => { W.scrollTo(0, y); await wait(120); return W.scrollY; };
+
+    D.getElementById('tab-budget').click();
+    await wait(400);
+    const down = await settle(300);
+    ok(down > 0, 'the frame really can scroll — a 1px frame would pass this group on its own', down);
+
+    D.getElementById('tab-goals').click();
+    await wait(400);
+    eq(W.scrollY, 0, 'pressing another tab starts that view at the top');
+
+    /* The tab you are already on is not a move, and must not throw the page
+       about — the same guard the month chart's click has always made. */
+    const held = await settle(300);
+    D.getElementById('tab-goals').click();
+    await wait(400);
+    eq(W.scrollY, held, 'pressing the tab you are already on leaves the page where it is');
+
+    D.getElementById('tab-budget').click();
+    await wait(400);
+    /* THE EXCEPTION, and the reason it is one. */
+    const onYear = await settle(300);
+    ok(onYear > 0, 'the Budget scrolls too', onYear);
+    const chip = [...D.querySelectorAll('.yearchip')].find(
+      (b) => b.getAttribute('aria-checked') !== 'true');
+    ok(!!chip, 'the sample plan has more than one year, so there is a chip to move to');
+    chip.click();
+    await wait(400);
+    /* CLAMP-AWARE, and it has to be: the sample plan's other two years are
+       SUMMARY years, whose page is one card and shorter than the window, so
+       there is nowhere for any scroll to be held — the browser puts it at 0 and
+       an exact `eq(onYear)` would fail over the app doing nothing wrong. What
+       is being asserted is that the app did not scroll BEYOND what the new
+       year's page allows. The two legs below are the exact ones: both stay
+       inside 2026's grid year, where the page is tall either way. */
+    const cap = Math.max(0, D.documentElement.scrollHeight - W.innerHeight);
+    eq(W.scrollY, Math.min(onYear, cap),
+       'a year chip HOLDS the scroll, as far as the year it opened has room for — '
+       + 'comparing years is what the rail is for');
+
+    const onLens = await settle(300);
+    D.querySelector('.vswitch[data-mode="month"]').click();
+    await wait(400);
+    eq(W.scrollY, onLens, 'and so does the Year/Month switch, which lives in the same strip');
+
+    const onMonth = await settle(300);
+    ok(onMonth > 0, 'the Month page scrolls too', onMonth);
+    const mchip = [...D.querySelectorAll('[data-month]')].find(
+      (b) => b.getAttribute('aria-checked') === 'false');
+    ok(!!mchip, 'and it has months to move between');
+    mchip.click();
+    await wait(400);
+    eq(W.scrollY, onMonth, 'a month chip holds it as well');
   } finally { f.remove(); }
 });
 
