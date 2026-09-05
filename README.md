@@ -432,7 +432,10 @@ as an oversight. Clear the field and the row is simply in use again.
 An **overflow sweep row** watches one account and moves whatever it would end
 the month holding above a threshold into another account. The threshold is
 either a **goal's target, read live** — edit the goal and every future month
-moves with it — or a plain dollar amount.
+moves with it — or a plain dollar amount. A goal set to months of expenses
+resolves from each year's own spending, and the row's label, its editor and a
+share link all name the figure for the year the row is in (a year built ahead
+measures its own projected expenses).
 
 - A goal that adds up **several accounts is measured across all of them**. An
   emergency fund living in cash plus two checking accounts is over its target
@@ -443,6 +446,10 @@ moves with it — or a plain dollar amount.
   third in a queue of $20k, $50k and $50k means the sweep begins near $120k,
   not $50k. (A goal ahead of it that holds part of its money in accounts the
   queued goal doesn't count claims only its shortfall — see Savings Goals.)
+  Because that claim reads balances in the earlier goal's accounts, the row
+  waits for any sweep that deposits into one of them the same month, and it
+  refuses (blank, with the cell editor saying why) to sweep INTO one — the
+  line it is measured against would move as it ran.
 - It is worked out **at the end of the month, after the accounts' interest**,
   so the measured pot lands exactly on the threshold. A month that ends under
   it stays blank — nothing to sweep is not a $0 transfer.
@@ -456,6 +463,10 @@ moves with it — or a plain dollar amount.
 - An account that dips under its cap **refills before anything flows past
   it**, and a full one keeps its own interest — a cap stops money going in,
   it never sweeps money out.
+- An account that **closes mid-year** (Stopped using it) drops out of the
+  goal's measured pot from the month after it closes, and the row keeps
+  sweeping the accounts that are left. (Until 2026-09-05 the closed account
+  poisoned the sum and the row went blank for the rest of the year.)
 - Rows can **chain**: one row watching the account another fills, resolved in
   dependency order within the same month. Two rows sweeping into each other's
   accounts is a loop with no answer, so both stay blank and the cell editor
@@ -758,27 +769,39 @@ Where the whole plan stands and where it has been, on one tab.
 
 Goals add up whichever accounts you tick, so splitting an account is a matter
 of ticking the new ones. A target is a figure, or **a number of months of
-expenses**: type 6 into "Months of expenses" and the target becomes six months
+expenses**: type 6 into "Months of expenses" (up to 120 — ten years; nothing
+at or below zero) and the target becomes six months
 of this year's Expenses total, live, everywhere the target is read — the tile,
 the pace check, and any sweep row tied to the goal. The button beside Target
-copies that figure once instead, as a plain number that stays put. The Savings
+copies that figure once instead, as a plain number that stays put (it clears
+the months box, and while months are set the Target box is read-only — the
+figure follows the year's expenses). The Savings
 Rate & Runway card shows **six months of expenses** as its third tile, worked
-out from the same monthly figure the runway divides by. Each goal answers two
+out from the same monthly figure the runway divides by — the year's own
+Expenses total over twelve, always; a months goal's target is that figure
+times its months, and a sweep row tied to it is re-run until the spend it
+produces and the target it ran on agree. Each goal answers two
 questions: **how much of it
 counts** — up to the target, or all of it however far past — and **who is paid
 first**. Name another goal there and this one counts only what sits above that
 goal's claim: the earlier goal's target, plus whatever it in turn leaves to the
 goals ahead of it, so three goals can queue on one account and each stop at its
-own target. A goal that holds part of its money in accounts you didn't tick
+own target. (A goal already queued behind this one is not offered — the two
+would claim each other — and if a stale form names one anyway the save says so
+and leaves the claim empty.) A goal that holds part of its money in accounts you didn't tick
 here claims only its shortfall from the shared ones, so no dollar is counted by
 two goals and none is missed; the tile says what was claimed ahead of it.
+Deleting a goal frees the goals that were claimed first by it — they count
+from the first dollar from then on — and the toast names them.
 
 Plus progress, target dates, required monthly saving, and **when each goal
 lands at this pace** — worked out from the growth of the accounts that goal
-counts this year, over the whole gap still to arrive (a goal queued behind
+counts over the months this year's grid runs, over the whole gap still to arrive (a goal queued behind
 another counts what the goals ahead of it still need). A goal with no date
 gets that on its tile; the pace line follows the soonest-dated goal you
-haven't met and sets its landing month against its target.
+haven't met and sets its landing month against its target — or, when that
+goal's accounts are flat or hold no balance yet, says so instead of moving on
+to a later goal.
 
 **Where the Total Is Heading** goes **dashed the moment it passes the month
 you've entered through**, so a month the plan has merely worked out never

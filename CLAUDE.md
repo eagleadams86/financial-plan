@@ -5675,3 +5675,138 @@ four Tab stops with one id, so a loop keyed on element identity "closes" after f
 regex helper read out of a template literal by `readFileSync` keeps its doubled backslashes,
 so every colour parsed as null and every backdrop came back white — 372 "failures" that were
 one bug in the harness.
+
+## Fixes From the 2026-09-05 Code Review
+
+A code review of the two PRs merged that day (queued goals, months-of-expenses
+targets, the pace check) found ten things; Charles asked for all of them fixed.
+Same routine as the audits above: one commit per finding, a test written first
+and proven red against the pre-fix page, README and this file in the commit.
+
+- **A closed account no longer poisons a goal-tied sweep (fix 1).** `running`
+  was a latch set once and never cleared, while an account past its `until`
+  drops out of the month's `accounts` list and so has no `base` — `endOf` read
+  `undefined + 0` = NaN, `sumEnd` had no guard, `amount` was NaN and the row
+  went blank for the rest of the year with nothing saying why. The latch is
+  cleared the month after `until`, in the one place the account is filtered
+  out. Earnings routing never read the latch (`payInto` asks `liveThisMonth`),
+  so nothing else moves; a test sweeps a February after Investments closed.
+- **The sweep step orders on, and refuses to fill, the accounts a queued
+  goal's claim reads (fix 2).** `goalClaim` measures what the goal ahead holds
+  in accounts OUTSIDE the queued goal's set, but `overflowOrder` only knew the
+  source and the goal's own measure — so a row tied to a queued goal could run
+  before another row deposited into one of those accounts and read a threshold
+  the month-end figures (and the Progress tab) never agreed with, every month;
+  and with the destination itself among them the line depended on the sweep
+  being decided. `claimAccounts(goal, goals)` (pure, hooks) lists the chain's
+  accounts; `overflowMeasure` returns them as `claim`/`capClaim` minus what the
+  measure already shares; `overflowOrder` adds `claim` to a row's `ins`; the
+  sweep step refuses `claim.includes(dst)` and, for the cap, `capClaim
+  .includes(src)`; the cell editor has a sentence for each. The test deposits
+  into the earlier goal's account from a LATER row and pins that the tied row
+  now reads the post-deposit figure the tile shows.
+- **The engine iterates to a fixed point, and `monthlySpend` is always the
+  returned year's own spend (fix 3).** Pass one ran with the months goals at
+  $0 and rested on "expense cells never read a balance", which nothing
+  enforced: the rule select offers `dividends` on any row and `save` never
+  forces it to Income, so a fee row on that rule under Expense read a balance
+  the $0 thresholds had swept away — `c.monthlySpend` (pass one) and
+  `yearSpending(c)` (pass two) disagreed, and with them the Six-months tile
+  and the Runway divisor. `computeYear` now recomputes until the spend a pass
+  produces resolves the targets that pass ran on (one extra pass in the
+  ordinary case — the old cost), gives up at eight with the targets resolved
+  from the LAST pass's spend, and `monthlySpend` is by construction the
+  returned year's. Two smaller things ride with it: a year with no sweep row
+  tied to a goal computes ONCE whatever the goals say (the goals reach the
+  engine through that door alone — the efficiency finding), and `coerceShape`
+  files an overflow row under Transfers, which the editor always did and a
+  hand-edited file could dodge. `onMonthsGoal(g)` is the one predicate.
+- **`goalPace` divides by the grid's own span, and ahead/behind is read from
+  `cur` (fix 4).** `paceMo` was growth over a fixed 12 while `end` was the
+  grid's LAST month — a 24-month grid (the importer's shape, the one
+  `migrate_local_data.py` trims) doubled the pace and halved the ETA; it is
+  `months.length` now, twelve for every grid the app builds. And
+  `aheadMonths` was `monthsLeft − etaMonths` with `monthsLeft` counted from
+  TODAY and the ETA from `cur`, which clamps to the grid's last month: in a
+  January with no new grid built the line read a month more behind than its
+  own landing date. Both are counted from `cur` now, so `aheadMonths` is
+  exactly `monthDiff(eta, targetDate)`. `goalPace` takes `cur` in place of
+  `monthsLeft`; the tile's "(1 yr 2 mo)" still counts from today, which is
+  the question it answers. The pace fixtures set `monthCount: 12` so their
+  figures did not move.
+- **Every reader with a year in hand reads THAT year's resolved goals
+  (fix 5).** `computeYear` resolves a months goal per year, but `ruleDesc`'s
+  default, the sweep-row editor's two pickers and `buildSharePayload` all
+  read `liveGoals()` — the LIVE year's list — so a row in a year built ahead
+  was labelled, offered and frozen at a figure its own engine never used, and
+  a budget-only link handed the recipient a 2027 row at 2026's spend.
+  `goalsOfYear(y)` is the reader now (`C[y].goals`, else `liveGoals()`); the
+  three `ruleDesc` call sites pass it (the grid label and Month page with
+  `y`, the cell editor with `yearKey`), the pickers pass `ds.year`, the cell
+  editor's own diagnostics read it, and `freezeOverflowThresholds` takes a
+  list OR a function of the year key and resolves each carried year through
+  it. The second instance: `liveGoals()` fell to `state.goals` when no grid
+  year had STARTED (a plan built for next January), where a months goal has
+  no `target` at all, so every label read $0 and a link froze `threshold: 0`
+  — the recipient's row swept every dollar. `latestGridYear() ||
+  newestGridYear()` closes it; the newest grid is computed like any other.
+  Also `computeYearWith` orders its rows on the goals it was handed rather
+  than `st.goals` (ids only, so no figure moved — one list in the engine).
+- **The goal editor refuses a claim that would loop (fix 6).** The picker
+  excluded only the goal itself, and `save` stored whatever was picked, so
+  "A claimed first by B, then B claimed first by A" was two saves away: in
+  session `goalNeed` terminated but each goal claimed the other (both tiles
+  "after $20,000 claimed first by …", a tied sweep at the doubled line), and
+  the next load's loop-breaker dropped whichever link came first — different
+  figures for one saved file, and a synced device on the reload figures while
+  the editing one sat on the loop's. `goalChainReaches(fromId, targetId,
+  goals)` (pure, hooks, above `load()`) is the question: the picker leaves out
+  any goal whose chain already passes through this one, and `save` refuses
+  the same thing with a toast, keeping the rest of the edit. The boundary's
+  rule is `pruneGoalLinks(goals)` now — the coerceShape block lifted out
+  whole, returning the ids it dropped — so the delete path (fix 7) can run it.
+  Also `uniqueId`, not `slugJs`, for a new goal's id: a second "Roof" took
+  `roof` again, and every id-keyed reader found the first one.
+- **Deleting a goal prunes the claims that named it, and says so (fix 7).**
+  `EDITORS.goal.del` toasted only the budget rows whose `goalId`/`capGoalId`
+  named the deleted goal; a goal whose `overflowOf` named it was left dangling
+  until the next load, and `goalNeed` reads a missing predecessor as "nobody
+  ahead" — so its need, and any sweep threshold or cap tied to it, dropped by
+  the whole claim on the next render with nothing said. The delete runs
+  `pruneGoalLinks(state.goals)` now and names every goal it freed ("counts
+  from the first dollar now") beside the rows it already named. The figure
+  itself is unchanged — it was already what a reload produced — which is
+  what makes this the 2026-09-02 standard's case: a changed figure must be
+  shown.
+- **`targetMonths` is bounded, and a non-positive one is refused (fix 8).**
+  `rateOrNone` accepts any finite number and `coerceShape` asked only `> 0`,
+  so `1e300` — typed, or in a share link's attacker-controlled goals — put
+  "1e+300 months of this year's expenses" on the tile and `monthAdd(cur,
+  1e300)` printed a garbage landing month. `TARGET_MONTHS_MAX` (120, ten
+  years; above `load()` for the TDZ rule) clamps at the boundary, in `save`,
+  and as `min`/`max` on the box — `buildFields` now hands a number field's
+  `min`/`max` to the browser — the `dueLeadDays` discipline. And a months
+  figure at or below zero took `save`'s else-branch, which stored the
+  resolved figure the box had been filled with as a plain target: the live
+  tie dropped with no word. It is refused with a toast now and the goal keeps
+  the claim it had.
+- **The Target box is read-only while Months of expenses is set (fix 9).**
+  It stayed editable, and its "Use 6 months" button live, while `save`
+  deleted `target` and stored months — a figure typed there was thrown away
+  with no toast, under a hint ("Filled in for you while Months of expenses
+  is set") that described a lock the box did not have. `link` sets
+  `readOnly` on open (`''`), on every Months keystroke and after the button
+  (`'target'`), so the lock matches the box beside it; the button clears
+  Months first, since a plain figure is the opposite of the tie; the hint
+  says so. Driven through the real dialog in a 1280x900 frame off the
+  sample's emergency fund — a source test could not see `readOnly` change.
+- **The pace line follows the soonest dated goal even when it cannot be
+  paced (fix 10).** The filter dropped any goal whose `aheadMonths` was null
+  BEFORE sorting by date, so a flat Roof was skipped and New Car announced
+  as "Next dated goal" — the opposite of the help's promise — and a goal
+  with `paceMo === null` (no account of it holds a year-end balance: closed,
+  or not begun) printed neither an ETA nor "not growing" on its tile. The
+  line takes the soonest dated unmet goal whatever its pace and, with no
+  landing month, says which of the two reasons applies; the tile carries
+  "no balance to pace it by this year" for the null case beside the
+  existing "not growing this year".
