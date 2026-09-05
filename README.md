@@ -906,7 +906,7 @@ boxes with no figures in them. The chart is the only card here that says how
 this year compares with the last few, and it gives the tab something to open on.
 
 - **Trip Spending, Year by Year** — under the add bar, once two years have
-  trips. Each bar adds a year's trips up (paid, minus credits, plus still due),
+  trips (the sample plan has two, one settled and one still forming, so the demo opens on it). Each bar adds a year's trips up (paid, minus credits, plus still due),
   with the trips themselves broken out in the hover, a dotted average across
   the finished years, and a dashed edge on a year whose figure can still grow — the current
   year and anything after it, and any past year with money still due, since a December trip

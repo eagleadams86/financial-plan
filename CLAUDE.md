@@ -5559,3 +5559,13 @@ pre-fix `index.html` first, README and this file in the same commit.
   still due can still grow, whatever the calendar says", including the year that settles once the
   calendar passes it with nothing owed.
 
+- **The sample plan has two years of trips (fix 2).** The chart needs two bars to be a trend, it
+  became the tab's first card the same day, and the sample had one trip — so the demo's Vacations
+  tab opened with its lead card missing, against the rule that sample data reaches every feature.
+  A settled trip the year before (fully paid, so it draws solid and gives the average line a
+  finished year to stand on) joins this year's still-forming one, so the key's two states are both
+  on show; the Sample data group's collection count moves from one trip to two. Left out on
+  purpose: the Spending table's "less back" wording (a row netted negative in both years) still
+  has no sample row — the sample's cash back is an INCOME row by its own comment's reasoning, and
+  a negative expense row would move every pinned sample total for one line of wording.
+
