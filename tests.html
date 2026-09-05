@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 977;
+const EXPECTED = 978;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1025,6 +1025,7 @@ t('a dangling, self-pointing or looping "claimed first by" is dropped at the bou
    10,000 + 2,894 = 12,894 and then flat, so its pace is 2,894 / 12 = 241.17. */
 const paceFixture = (goals) => {
   const s = overflowFixture();
+  s.years['2026'].monthCount = 12;   // the grid the app builds; the pace is over its span
   s.goals = goals;
   const st = H.coerceShape(s);
   return H.computeGoals(st, H.computeAll(st, '2026-01-15'), '2026-01-15');
@@ -1069,6 +1070,7 @@ t('the opening figure is the engine\'s own January rule: the prior December, els
   s.years['2025'] = { kind: 'grid', model: 'pinned', startMonth: '2025-01', monthCount: 12,
     enteredThrough: '2025-12', categories: [], cells: {}, paychecks: {}, seeds: {},
     overrides: { 'mid|2025-12': { v: 11000 } }, balAdjust: {} };
+  s.years['2026'].monthCount = 12;
   s.goals = [{ id: 'm', name: 'Mid', target: 20000, accounts: ['mid'], count: 'capped' }];
   const st = H.coerceShape(s);
   const [g] = H.computeGoals(st, H.computeAll(st, '2026-01-15'), '2026-01-15');
@@ -1236,6 +1238,25 @@ t('a months goal resolves from the spend of the year it was computed with, and t
   const t = overflowFixture();
   t.years['2026'].categories[1].section = 'expense';
   eq(H.coerceShape(t).years['2026'].categories[1].section, 'transfer', 'a sweep is a move, never spending');
+});
+t('the pace runs over the months the grid holds, and ahead/behind is read from the same month as the ETA (fix 4)', () => {
+  /* Two divisors were fixed twelves. A 24-month grid — the importer's shape —
+     read double the pace; and `aheadMonths` counted the months left from
+     TODAY while the ETA counted from `cur`, which clamps to the grid's last
+     month, so a January before the new grid was built read one month more
+     behind than its own landing date said. */
+  const s = overflowFixture();
+  s.years['2026'].monthCount = 24;
+  s.goals = [{ id: 'm', name: 'Mid', target: 20000, accounts: ['mid'], count: 'capped',
+               targetDate: '2028-06-15' }];
+  const st = H.coerceShape(s);
+  const [g] = H.computeGoals(st, H.computeAll(st, '2026-01-15'), '2026-01-15');
+  approx(g.paceMo, H.round2(2894 / 24), 'the 2,894 grew over twenty-four months, not twelve — it read 241.17');
+  /* today is past the grid's end and no 2027 grid exists: cur clamps to 2027-12 */
+  const late = H.computeGoals(st, H.computeAll(st, '2028-01-15'), '2028-01-15')[0];
+  eq(late.eta, H.monthAdd('2027-12', late.etaMonths), 'the landing month counts from the clamped month');
+  eq(late.aheadMonths, H.monthDiff(late.eta, '2028-06'),
+    'and ahead/behind is exactly the landing month against the target — it was one month more behind');
 });
 
 group('Sections & quarterly rule');

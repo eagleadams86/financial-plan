@@ -5721,3 +5721,16 @@ and proven red against the pre-fix page, README and this file in the commit.
   engine through that door alone — the efficiency finding), and `coerceShape`
   files an overflow row under Transfers, which the editor always did and a
   hand-edited file could dodge. `onMonthsGoal(g)` is the one predicate.
+- **`goalPace` divides by the grid's own span, and ahead/behind is read from
+  `cur` (fix 4).** `paceMo` was growth over a fixed 12 while `end` was the
+  grid's LAST month — a 24-month grid (the importer's shape, the one
+  `migrate_local_data.py` trims) doubled the pace and halved the ETA; it is
+  `months.length` now, twelve for every grid the app builds. And
+  `aheadMonths` was `monthsLeft − etaMonths` with `monthsLeft` counted from
+  TODAY and the ETA from `cur`, which clamps to the grid's last month: in a
+  January with no new grid built the line read a month more behind than its
+  own landing date. Both are counted from `cur` now, so `aheadMonths` is
+  exactly `monthDiff(eta, targetDate)`. `goalPace` takes `cur` in place of
+  `monthsLeft`; the tile's "(1 yr 2 mo)" still counts from today, which is
+  the question it answers. The pace fixtures set `monthCount: 12` so their
+  figures did not move.

@@ -6739,8 +6739,9 @@ function goalClaim(pred, accounts, goals, bal, seen = new Set()) {
    goals ahead of it still need — nothing reaches it until they are paid.
    `etaMonths` is the quotient (0 once the gap is closed), null when nothing
    is growing — a fact the tile states rather than a date it invents — and
-   `aheadMonths` sets it against a target date when there is one. Pure. */
-function goalPace(g, need, held, monthsLeft, c, yr, priorC) {
+   `aheadMonths` sets it against a target date when there is one, both
+   measured from `cur`. Pure. */
+function goalPace(g, need, held, cur, c, yr, priorC) {
   const months = yearMonths(yr);
   const last = months[months.length - 1], prevM = monthAdd(months[0], -1);
   let end = 0, open = 0, seen = false;
@@ -6752,11 +6753,21 @@ function goalPace(g, need, held, monthsLeft, c, yr, priorC) {
     const carried = priorC ? priorC.balances[`${id}|${prevM}`] : undefined;
     open += carried !== undefined ? carried : ((yr.seeds || {})[id] || 0);
   }
-  const paceMo = seen ? round2((end - open) / 12) : null;
+  /* Over the months the grid actually RUNS, not a fixed twelve (review fix
+     4): `end` is the grid's last month, so a 24-month grid — the shape the
+     importer writes and migrate_local_data.py exists to trim — read double
+     the pace and half the ETA. Twelve for every grid the app itself builds. */
+  const paceMo = seen ? round2((end - open) / months.length) : null;
   const gap = round2(Math.max(0, need - held));
   const etaMonths = gap === 0 ? 0
     : paceMo !== null && paceMo > 0 ? Math.ceil(gap / paceMo) : null;
-  const aheadMonths = g.targetDate && etaMonths !== null ? monthsLeft - etaMonths : null;
+  /* Ahead or behind is the landing month against the target month, both
+     counted from `cur` — the month `held` and the ETA are read at. Counting
+     the months left from TODAY instead (review fix 4) was off by one whenever
+     `cur` had clamped to the grid's last month: in a January with no new grid
+     built, the line read a month more behind than its own printed ETA. */
+  const aheadMonths = g.targetDate && etaMonths !== null
+    ? Math.max(0, monthDiff(cur, g.targetDate.slice(0, 7))) - etaMonths : null;
   return { paceMo, gap, etaMonths, aheadMonths };
 }
 
@@ -6797,7 +6808,7 @@ function computeGoals(st, computed, todayIso) {
     const monthsLeft = g.targetDate
       ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
     const need = goalNeed(g, goals, bal);
-    const pace = goalPace(g, need, held, monthsLeft, c, yr, priorC);
+    const pace = goalPace(g, need, held, cur, c, yr, priorC);
     return {
       ...g, saved, held, claimed,
       claimedBy: pred ? (pred.name || pred.id) : null,
