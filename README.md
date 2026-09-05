@@ -1488,6 +1488,13 @@ depended on how far down the Budget you had been, and changed again with the pin
 on. Pressing the tab you're already on does nothing, so it never throws the page
 about. A [Find](#find) result that only changes the view lands the same way.
 
+(Until September 2026 the page did move, and not because the app asked it to:
+with the strip pinned, every redraw of the Month page slid the reader about 15px
+further down — the browser's own *scroll anchoring* banking the momentary height
+of a page being rebuilt under a sticky bar. Six presses of ‹ left you 90px from
+where you started. The app now turns that adjustment off and keeps your place
+itself.)
+
 The **year rail, the month rail and the Year / Month switch are the exception,
 on purpose**: press 2025, then 2024, then Mar 26 and the page stays exactly
 where it is, because that is a comparison — you are reading the same rows while
