@@ -5581,3 +5581,36 @@ pre-fix `index.html` first, README and this file in the same commit.
   history year is the only way to demo that sentence, and that is a bigger change than a
   classification.
 
+## Fixes From the 2026-09-05 Accessibility Audit
+
+Charles asked for an accessibility check of this app, Sprint Predictability and Flow Metrics. The harness was the one
+`~/.claude/.../memory/axe-audit-harness.md` describes, run from a scratchpad and never from the
+repo: axe-core at WCAG 2.1 A/AA, 2.2 AA and best-practice over every tab and both budget lenses, all four themes,
+every `<dialog>` forced open AND every one opened for real from its own button so it was populated
+— 77 plus one per populated dialog axe runs, clean. Then the pass axe cannot do: a Tab through every view reading the ring's
+colour against both sides of it, every dialog opened from the keyboard (focus in, Esc, focus back),
+a name walk with the dialogs forced open, 2.5.3 visible-label-vs-name on every input, hover-only
+titles, 320px reflow, the 1.4.12 text-spacing overrides, `prefers-reduced-motion`, hover contrast
+on 1,412 controls, and a keyboard activation of every non-destructive control reading where the
+focus ended up. One finding, fixed:
+
+- **The cell editor's note box was the one placeholder still in the browser's grey.** `#757575`
+  at the UA's own opacity measured 3.84:1 on Midnight, 3.58 on Dark and 4.24 on Sepia (Light
+  passes at 4.61), while the Find box already drew its hint in `--text-hint` (5.05 / 5.17 / 5.17
+  / 5.33). One `::placeholder` rule in that token now, for every box, so a new field cannot
+  arrive at the grey again. **It is a family fault** — the theme pack carries no placeholder rule
+  and Sprint Predictability and Flow Metrics had the same grey on 8 and 17 boxes — flagged to
+  Charles as a pack decision. One test, the placeholder colour on every box on every theme.
+
+Recorded as PASSING so they are not re-audited: every stop on every tab has a visible ring that
+clears 3:1 on both sides; the Tab loop closes on every view with no trap; every dialog — header
+and in-view alike — takes the focus in, closes on Esc and returns it to its trigger; no unnamed
+control and no placeholder-only name; no hover-only title outside the actor list the 2026-08-26 audit above documents (59 row and cell titles walked, 0 dead ends); no horizontal scroll at 320px;
+nothing clipped under the text-spacing overrides; nothing animates under reduced motion; hover
+states all clear AA. Three harness traps worth knowing before trusting a re-run: a
+`<details>` that is closed hides its fields from Tab and from a naive visibility filter, so
+"3 of 39 unreached" was the collapsed forecast card, not a finding; Chromium's date input is
+four Tab stops with one id, so a loop keyed on element identity "closes" after four; and a
+regex helper read out of a template literal by `readFileSync` keeps its doubled backslashes,
+so every colour parsed as null and every backdrop came back white — 372 "failures" that were
+one bug in the harness.
