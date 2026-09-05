@@ -5564,8 +5564,20 @@ pre-fix `index.html` first, README and this file in the same commit.
   tab opened with its lead card missing, against the rule that sample data reaches every feature.
   A settled trip the year before (fully paid, so it draws solid and gives the average line a
   finished year to stand on) joins this year's still-forming one, so the key's two states are both
-  on show; the Sample data group's collection count moves from one trip to two. Left out on
-  purpose: the Spending table's "less back" wording (a row netted negative in both years) still
-  has no sample row — the sample's cash back is an INCOME row by its own comment's reasoning, and
-  a negative expense row would move every pinned sample total for one line of wording.
+  on show; the Sample data group's collection count moves from one trip to two.
+
+- **The sample's cash back is a refund, not income (fix 3, 2026-09-05).** The audit had left the
+  Spending table's "less back" wording without a sample row, on the reasoning that the sample's
+  cash back was an income row by its own comment. Charles: *"cash back isn't income though. isn't
+  that just showing a new user the incorrect way to classify it?"* — yes. A rebate on spending
+  is an expense row whose figures point the other way, which is what the README has said about
+  cash back since the Month page's refund line landed; the sample contradicted its own manual.
+  The row is `section: 'expense'` now with the SAME positive cells, so the demo shows all three
+  faces of a refund — the grid's line under Expenses, the Month page's "reduced the section",
+  and a negative row in Where the Money Goes — and it is still the row that stopped. Three checks
+  added to "the sample carries a row that STOPPED". What is still true: "less back" needs the
+  row in BOTH years, and the sample's history years are yearly summaries, which carry no section
+  and so cannot say a refund (`categorySpend` keeps only a summary's negative totals) — a grid
+  history year is the only way to demo that sentence, and that is a bigger change than a
+  classification.
 
