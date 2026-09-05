@@ -5767,3 +5767,14 @@ and proven red against the pre-fix page, README and this file in the commit.
   whole, returning the ids it dropped — so the delete path (fix 7) can run it.
   Also `uniqueId`, not `slugJs`, for a new goal's id: a second "Roof" took
   `roof` again, and every id-keyed reader found the first one.
+- **Deleting a goal prunes the claims that named it, and says so (fix 7).**
+  `EDITORS.goal.del` toasted only the budget rows whose `goalId`/`capGoalId`
+  named the deleted goal; a goal whose `overflowOf` named it was left dangling
+  until the next load, and `goalNeed` reads a missing predecessor as "nobody
+  ahead" — so its need, and any sweep threshold or cap tied to it, dropped by
+  the whole claim on the next render with nothing said. The delete runs
+  `pruneGoalLinks(state.goals)` now and names every goal it freed ("counts
+  from the first dollar now") beside the rows it already named. The figure
+  itself is unchanged — it was already what a reload produced — which is
+  what makes this the 2026-09-02 standard's case: a changed figure must be
+  shown.

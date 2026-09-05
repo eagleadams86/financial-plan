@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 982;
+const EXPECTED = 983;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -11060,6 +11060,29 @@ t('the goal editor refuses the loop, hides it from the picker, and never reuses 
   ok(/uniqueId\(state\.goals, v\.name, 'goal'\)/.test(body), 'a new goal takes an id nobody holds');
   ok(!/slugJs\(v\.name \|\| 'goal'\)/.test(body), 'slugJs alone is gone from here');
   ok(/pruneGoalLinks\(d\.goals\);/.test(src), 'coerceShape runs the shared rule');
+});
+t('deleting a goal frees the goals it was claimed first by, and the toast names them (fix 7)', () => {
+  /* `goalNeed` treats a missing predecessor as "nobody ahead", so a claim left
+     dangling changed the queued goal's need — and its sweep's threshold — on
+     the next render with no message. */
+  const goals = [
+    { id: 'emerg', name: 'Emergencies', target: 20000, accounts: ['cash'] },
+    { id: 'car', name: 'New Car', target: 5000, accounts: ['cash'], overflowOf: 'emerg' },
+    { id: 'boat', name: 'Boat', target: 9000, accounts: ['cash'], overflowOf: 'car' },
+  ];
+  eq(H.goalNeed(goals[1], goals, () => 0), 25000, 'fixture: New Car is full at 25,000');
+  const after = goals.slice(1).map(g => ({ ...g }));   // Emergencies deleted
+  eq(H.pruneGoalLinks(after), ['car'], 'the shared rule says which goal was freed');
+  eq(after[0].overflowOf, undefined, 'and drops the dangling claim');
+  eq(after[1].overflowOf, 'car', 'Boat still queues behind New Car');
+  eq(H.goalNeed(after[0], after, () => 0), 5000, 'New Car counts from the first dollar now — the figure the toast has to announce');
+  const src = stripComments(APP_SRC);
+  const start = src.indexOf("  goal: {\n    title: (ds, isNew) => isNew ? 'Add a Goal'");
+  const body = src.slice(start, src.indexOf('\n  holding: {', start));
+  const del = body.slice(body.indexOf('del(ds) {'), body.indexOf('move: (ds, dir)'));
+  ok(/const freed = pruneGoalLinks\(state\.goals\)/.test(del), 'delete runs the shared rule on the spot');
+  ok(/claimed first by/.test(del) && /from the first dollar now/.test(del),
+    'and says so, rather than leaving the figure to change on the next render');
 });
 t('the Progress tab no longer paces a goal off total liquidity', () => {
   const src = stripComments(APP_SRC);

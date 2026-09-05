@@ -788,6 +788,8 @@ would claim each other — and if a stale form names one anyway the save says so
 and leaves the claim empty.) A goal that holds part of its money in accounts you didn't tick
 here claims only its shortfall from the shared ones, so no dollar is counted by
 two goals and none is missed; the tile says what was claimed ahead of it.
+Deleting a goal frees the goals that were claimed first by it — they count
+from the first dollar from then on — and the toast names them.
 
 Plus progress, target dates, required monthly saving, and **when each goal
 lands at this pace** — worked out from the growth of the accounts that goal
