@@ -1442,6 +1442,23 @@ suite passed while the card was wrong.
     `overflowOf` as a plain capped goal and draw the claim away.
   - The sample carries `kitchen` queued behind `roof` on Mid-term, so the
     "after $X claimed first by" foot is in the demo.
+  - **A target can be `targetMonths` of expenses** (same day). Derived, never
+    stored: `goalTargetOf`/`resolveGoals` fill `target` in, and `computeYear`
+    is now a WRAPPER over `computeYearWith(st, y, prior, goals)` that runs the
+    year TWICE when any goal is on months — once with those goals at $0 to
+    learn the year's expense total (the loop resolves categories and balances
+    month by month, so January's sweep runs before December's rent exists;
+    expense cells never read a balance, so pass one's total is exact), then
+    with every target resolved. No months goal ⇒ one pass with `st.goals`
+    itself, pinned bit-identical. The computed year carries `goals` and
+    `monthlySpend`, and **every reader takes `c.goals`** — computeGoals, the
+    sweep step, the share freeze (`C[live].goals`), `liveGoals()` for the
+    sweep-row editor's labels and `ruleDesc` — because on `state.goals` a
+    months goal is $0. Each year resolves from ITS OWN expenses (clock-free;
+    a year built ahead from its projection); the Progress tab reads the live
+    year's. `coerceShape` reads months strictly and deletes `target` when
+    they are set. `SHARE_PAYLOAD_V` → 3. The sample's emergency fund is
+    `targetMonths: 6` — it was named "six months" already.
   - **`goalPace` is the pace check** (same day). Rate = the goal's OWN
     accounts' growth this year (last month less the engine's January opening:
     prior computed December, else the seed) over twelve; gap = `goalNeed −

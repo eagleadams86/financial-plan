@@ -4367,6 +4367,13 @@ function coerceShape(data) {
        Every load normalises it, so no schema bump and nothing to migrate. */
     if (g.count === 'overflow') g.count = 'all';
     if (!['all', 'capped'].includes(g.count)) g.count = 'capped';
+    /* A target can be N months of expenses (2026-09-05): read strictly — a
+       positive number or nothing — and when it is set the stored `target`
+       goes, since the figure is derived and a stale copy beside it would be
+       the one an older build read. */
+    const tm = rateOrNone(g.targetMonths);
+    if (typeof tm === 'number' && tm > 0) { g.targetMonths = tm; delete g.target; }
+    else delete g.targetMonths;
     /* Who the goal is for — a child, usually, for a college pot. Only ever a
        label and a target-date suggestion; `computeGoals` never reads it. */
     if (g.for && !peopleIds.has(g.for)) delete g.for;
@@ -5761,6 +5768,18 @@ function yearStarted(st, y, todayIso) {
 const startedGridYears = (st, todayIso) => Object.keys(st.years).sort()
   .filter(y => st.years[y].kind === 'grid' && yearStarted(st, y, todayIso));
 
+/* The goals as the live year RESOLVED them (a months-of-expenses target is a
+   figure there), and that year's monthly spend — for the editors, which draw
+   before/without computeGoals and must not read `state.goals` for a target.
+   Falls back to the plain list when nothing is computed yet. */
+function liveGoals() {
+  const y = latestGridYear();
+  return (y && C[y] && C[y].goals) || state.goals;
+}
+function liveMonthlySpend() {
+  const y = latestGridYear();
+  return (y && C[y] && C[y].monthlySpend) || 0;
+}
 function latestGridYear() {
   const ks = startedGridYears(state);
   return ks.length ? ks[ks.length - 1] : null;
@@ -6175,7 +6194,34 @@ function overflowOrder(categories, goals) {
 /* No `today`: what a year computes depends on what you have entered, not on
    what day it is. computeAll still takes one — the goal figures and the live
    year's own months are read as of a date — but the grid itself isn't. */
+/* The engine proper is `computeYearWith`, handed the GOALS it should read;
+   this wrapper decides which. A goal whose target is N months of expenses
+   needs the year's expense total, and the loop below resolves categories and
+   balances month by month — January's sweep runs before December's rent is
+   known. So when any goal is on months the year is computed TWICE: once with
+   those goals at $0 to learn what the year spends (expense cells never read a
+   balance — only a `dividends`-rule row does, and that is income — so pass
+   one's total is exact), then again with every target resolved. A plan with
+   no months goal runs once, with `st.goals` itself, and is bit-identical to
+   the engine before the wrapper existed; a test compares every cell and
+   balance. Each year resolves from ITS OWN expenses — a year built ahead
+   from its projection — which keeps the engine clock-free and each year
+   consistent with itself; the Progress tab reads the live year's. */
 function computeYear(st, yearKey, prior) {
+  const yr = st.years[yearKey];
+  const goals = st.goals || [];
+  const onMonths = goals.some(g => typeof g.targetMonths === 'number' && g.targetMonths > 0);
+  if (!onMonths) {
+    const c = computeYearWith(st, yearKey, prior, goals);
+    return { ...c, goals, monthlySpend: round2(yearSpending(yr, c, yearKey) / 12) };
+  }
+  const first = computeYearWith(st, yearKey, prior, resolveGoals(goals, 0));
+  const monthlySpend = round2(yearSpending(yr, first, yearKey) / 12);
+  const resolvedGoals = resolveGoals(goals, monthlySpend);
+  const c = computeYearWith(st, yearKey, prior, resolvedGoals);
+  return { ...c, goals: resolvedGoals, monthlySpend };
+}
+function computeYearWith(st, yearKey, prior, goals) {
   const yr = st.years[yearKey];
   const months = yearMonths(yr);
   const resolved = {};   // 'catId|m' -> {v, kind, note?}
@@ -6406,14 +6452,14 @@ function computeYear(st, yearKey, prior) {
         if (overflow.refused.has(cat.id)) continue;      // a loop has no answer
         if (!running[src] || !running[dst]) continue;    // both ends must be live
         const goal = cat.goalId
-          ? (st.goals || []).find(g => g.id === cat.goalId) : null;
+          ? (goals || []).find(g => g.id === cat.goalId) : null;
         /* A goal queued behind others is full only once the goals ahead of it
            are paid — `goalNeed`, read at THIS month's end-of-month figures,
            since what an earlier goal claims can depend on balances it holds
            elsewhere. A goal with nobody ahead of it needs exactly its target,
            which is what this line always read. */
         const balAt = (id) => running[id] ? endOf(id) : 0;
-        const threshold = goal ? goalNeed(goal, st.goals, balAt)
+        const threshold = goal ? goalNeed(goal, goals, balAt)
           : typeof cat.threshold === 'number' ? cat.threshold : undefined;
         if (threshold === undefined) continue;           // misconfigured — blank
         /* What the threshold is measured AGAINST: the goal's own account set
@@ -6427,7 +6473,7 @@ function computeYear(st, yearKey, prior) {
            and the destination must be OUT of it (filling a counted account
            moves nothing at all). Either way round the row is misconfigured
            and stays blank; the cell editor says which. */
-        const { measure, capMeasure } = overflowMeasure(cat, st.goals);
+        const { measure, capMeasure } = overflowMeasure(cat, goals);
         const sumEnd = (ids) =>
           ids.reduce((s, id) => running[id] ? s + endOf(id) : s, 0);
         if (!measure.includes(src) || measure.includes(dst)) continue;
@@ -6447,8 +6493,8 @@ function computeYear(st, yearKey, prior) {
            gets swept back out by the cap — and the mirror guards apply: the
            destination must be counted by the cap, the source must not be. */
         const capGoal = cat.capGoalId
-          ? (st.goals || []).find(g => g.id === cat.capGoalId) : null;
-        const cap = capGoal ? goalNeed(capGoal, st.goals, balAt)
+          ? (goals || []).find(g => g.id === cat.capGoalId) : null;
+        const cap = capGoal ? goalNeed(capGoal, goals, balAt)
           : typeof cat.capAmount === 'number' ? cat.capAmount : undefined;
         if (cap !== undefined) {
           if (!capMeasure.includes(dst) || capMeasure.includes(src)) continue;
@@ -6556,6 +6602,23 @@ function currentMonthOf(yr, todayIso) {
   return t;
 }
 
+/* ── A target that is N months of expenses ──────────────────────────────────
+   `goal.targetMonths` (2026-09-05) makes a goal's target DERIVED: that many
+   months of the year's expenses — the year's Expenses total over twelve, the
+   Runway tile's own divisor, so the two can never disagree. Never stored:
+   `resolveGoals` hands back copies with `target` filled in, `computeYear`
+   attaches the resolved list to the computed year as `goals`, and EVERY
+   reader takes that list rather than `state.goals` — computeGoals, the sweep
+   step, the share freeze, the sweep-row editor's labels, ruleDesc. A reader
+   that reaches for `state.goals` sees a months goal at $0. Pure. */
+function goalTargetOf(g, monthlySpend) {
+  return typeof g.targetMonths === 'number' && g.targetMonths > 0
+    ? round2(g.targetMonths * (monthlySpend || 0)) : (g.target || 0);
+}
+function resolveGoals(goals, monthlySpend) {
+  return (goals || []).map(g => ({ ...g, target: goalTargetOf(g, monthlySpend) }));
+}
+
 /* ── Goals that queue behind each other ─────────────────────────────────────
    `goalNeed(goal)` is the balance at which a goal is FULL on its own accounts:
    its target on top of what the goal named in `overflowOf` claims out of those
@@ -6643,25 +6706,29 @@ function computeGoals(st, computed, todayIso) {
   const c = computed[liveKey];
   const cur = currentMonthOf(yr, todayIso);
   const bal = (bid) => c.balances[`${bid}|${cur}`] || 0;
-  const byId = (id) => st.goals.find(g => g.id === id);
+  /* The RESOLVED goals — a months-of-expenses target is a figure here and $0
+     on `state.goals`. `c.goals` is absent only on a hand-built computed
+     fixture, where the plain list is the same thing. */
+  const goals = c.goals || st.goals;
+  const byId = (id) => goals.find(g => g.id === id);
   /* The computed year before the live one — where January's opening balance
      lives, exactly as the balance chain reads it. */
   const gridAll = Object.keys(st.years).filter(y => st.years[y].kind === 'grid').sort();
   const priorC = computed[gridAll[gridAll.indexOf(liveKey) - 1]] || null;
 
-  return st.goals.map(g => {
+  return goals.map(g => {
     /* An account named by a goal but since deleted contributes nothing rather
        than breaking the goal — splitting one account into several is normal,
        and the goal should keep working while you repoint it. */
     const held = round2((g.accounts || []).reduce((t, id) => t + bal(id), 0));
     const pred = g.overflowOf ? byId(g.overflowOf) : null;
-    const claimed = pred ? goalClaim(pred, g.accounts || [], st.goals, bal) : 0;
+    const claimed = pred ? goalClaim(pred, g.accounts || [], goals, bal) : 0;
     let saved = Math.max(0, held - claimed);
     if (g.count !== 'all') saved = Math.min(saved, g.target || 0);   // capped: never more than the goal
     saved = round2(saved);
     const monthsLeft = g.targetDate
       ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
-    const need = goalNeed(g, st.goals, bal);
+    const need = goalNeed(g, goals, bal);
     const pace = goalPace(g, need, held, monthsLeft, c, yr, priorC);
     return {
       ...g, saved, held, claimed,
@@ -7070,6 +7137,18 @@ const HELP = {
     ['Two rows sweeping into each other\'s accounts is a loop with no answer, so both stay '
       + 'blank until one is repointed. ', b('A number you type into a month always beats the '
       + 'rule.')],
+  ] },
+  sixMonths: { title: 'Six Months of Expenses', body: [
+    ['This year\'s Expenses total, projected months included, over twelve and times six \u2014 ',
+      b('the same monthly figure the runway tile divides by'), ', so the two agree by '
+      + 'construction. It moves as real months land.'],
+    ['Six months is the cushion most guides suggest for an emergency fund. It is a rule of '
+      + 'thumb, not advice; the right number for you may be more or less.'],
+    ['A goal can follow it: ', b('type a number into its Months of expenses box'), ' and its '
+      + 'target becomes that many months of the year\'s expenses, live, everywhere the target '
+      + 'is read \u2014 the tile, the pace check, and any sweep row tied to the goal (a year '
+      + 'built ahead measures its own projected expenses for the sweeps in it). The button '
+      + 'beside Target copies the figure once instead, as a plain number that stays put.'],
   ] },
   goalClaims: { title: 'Claimed First by Another Goal', body: [
     ['Two goals can save into one account. ', b('The goal named here takes its target first'),
@@ -7911,8 +7990,12 @@ function sampleState() {
       },
       people,
       goals: [
+        /* Named for six months, and since 2026-09-05 it IS six months: the
+           target follows the sample year's expenses live, which is what puts
+           the third Savings Rate tile and the "of this year's expenses" foot
+           in the demo. */
         { id: 'emergency-fund', name: 'Emergency fund — six months', count: 'capped',
-          accounts: ['emergency'], target: 21000, role: 'normal' },
+          accounts: ['emergency'], targetMonths: 6, role: 'normal' },
         { id: 'roof', name: 'Roof replacement', count: 'capped', accounts: ['mid'],
           target: 14000, targetDate: `${Y + 1}-09` },
         /* Queued behind the roof on the SAME account — the demo of "claimed
@@ -9434,7 +9517,7 @@ const RULE_LABEL = {
    row tooltips show, so a rule is never a mystery. Takes the state as an
    argument (defaulting to the live one) so the tests can pin the prose over a
    fixture instead of whatever the browser happens to hold. */
-function ruleDesc(cat, st = state) {
+function ruleDesc(cat, st = state, goals = st === state ? liveGoals() : st.goals) {
   const r = cat.rule || 'none';
   if (r === 'paycheck')
     return `${fmtMoney(cat.perCheck || 0)} per check × that month's paychecks`;
@@ -9479,7 +9562,7 @@ function ruleDesc(cat, st = state) {
   if (r === 'overflow') {
     const src = cat.overflowFrom && accountById(st, cat.overflowFrom);
     const dst = cat.transferTo && accountById(st, cat.transferTo);
-    const g = cat.goalId && (st.goals || []).find(x => x.id === cat.goalId);
+    const g = cat.goalId && (goals || []).find(x => x.id === cat.goalId);
     /* A goal queued behind others starts where THEY are paid, so naming its
        bare target would describe a line the row doesn't draw. */
     const queued = g && g.overflowOf;
@@ -9491,7 +9574,7 @@ function ruleDesc(cat, st = state) {
     if (!src || !dst || above === null)
       return 'sweeps an account’s overflow — pick the account, threshold '
            + 'and destination in Row settings';
-    const cg = cat.capGoalId && (st.goals || []).find(x => x.id === cat.capGoalId);
+    const cg = cat.capGoalId && (goals || []).find(x => x.id === cat.capGoalId);
     const upTo = cg ? `${cg.name || cg.id} (${fmtMoney(cg.target || 0)})`
       : typeof cat.capAmount === 'number' ? fmtMoney(cat.capAmount) : null;
     /* A goal that adds up several accounts is measured across the lot, and
@@ -11175,7 +11258,8 @@ function goalCard(g, idx) {
       ${!done && g.monthlyReq ? ` · needs ${fmtMoney(g.monthlyReq)}/mo` : ''}
       ${!done && g.etaMonths > 0 ? ` · at this pace about ${esc(monthLabel(g.eta))}` : ''}
       ${!done && g.gap > 0 && g.paceMo !== null && g.paceMo <= 0 ? ' · not growing this year' : ''}
-      ${g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}` : ''}</div>
+      ${g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}` : ''}
+      ${g.targetMonths > 0 ? ` · ${g.targetMonths} month${g.targetMonths === 1 ? '' : 's'} of this year's expenses` : ''}</div>
   </div>`;
 }
 
@@ -11626,7 +11710,7 @@ function renderGoals() {
 
   /* Total liquidity — the sheet's overall progress bar */
   const totalNow = c.balances[`total|${cur}`] || 0;
-  const totalTarget = state.goals.reduce((s, g) => s + (g.target || 0), 0);
+  const totalTarget = goals.reduce((s, g) => s + (g.target || 0), 0);   // resolved targets
   const totalPct = totalTarget ? Math.min(1, totalNow / totalTarget) : 0;
   /* The Net Worth card reads at a month of its own — the one the reader chose
      with its switch. Everything else on this tab keeps reading `cur`: this is
@@ -11640,6 +11724,10 @@ function renderGoals() {
      Skipped entirely on a year with nothing in it: two em-dash tiles would be
      the card demanding attention before it has anything to say. */
   const pulse = savingsPulse(yr, c, liveKey, totalNow);
+  /* The third tile is the figure Charles asked to SEE (2026-09-05): six months
+     of this year's expenses, the emergency-fund rule of thumb, read off the
+     same `spent` the runway divides by. It names the goals that follow it. */
+  const monthsGoals = goals.filter(g => typeof g.targetMonths === 'number' && g.targetMonths > 0);
   const pulseTile = (label, value, foot) => `<div class="goal">
     <div class="label">${label}</div>
     <div class="value">${value}</div>
@@ -11660,6 +11748,16 @@ function renderGoals() {
         pulse.runwayMonths === null ? 'No expenses recorded this year'
           : `${fmtMoney(totalNow)} liquid against ${fmtMoney(round2(pulse.spent / 12))}/mo —
              this year's Expenses total spread over twelve months`)}
+      ${pulse.spent > 0 ? pulseTile(`Six months of expenses${helpBtn('sixMonths', 'six months of expenses')}`,
+          /* Off the ROUNDED monthly figure the goals resolve from, not
+             spent/12×6 unrounded — the two differed by two cents on real data,
+             which is two answers to one question. */
+          fmtMoney(round2(c.monthlySpend * 6)),
+          `this year's Expenses total ÷ 12 × 6 — the cushion most guides suggest${
+            monthsGoals.length
+              ? `; ${monthsGoals.map(g => `${esc(g.name)} follows ${g.targetMonths} month${
+                  g.targetMonths === 1 ? '' : 's'} of it live`).join(', ')}`
+              : '; a goal can follow it live from its Months of expenses box'}`) : ''}
     </div>
   </div>`;
 
@@ -19882,7 +19980,7 @@ const EDITORS = {
             + 'holding above the threshold \u2014 worked out after its interest.' },
       { key: 'goalId', label: 'Above this goal\u2019s target', type: 'select',
         options: [['', 'A dollar amount instead'],
-          ...(state.goals || []).map(g => [g.id,
+          ...liveGoals().map(g => [g.id,
             `${g.name || g.id} \u2014 ${fmtMoney(g.target || 0)}`])],
         showIf: (v) => v.rule === 'overflow',
         hint: 'Reads the goal live \u2014 edit the goal and this row moves with it. For a '
@@ -19906,7 +20004,7 @@ const EDITORS = {
          the catch-all. */
       { key: 'capGoalId', label: 'Fill it only up to', type: 'select',
         options: [['', 'No cap — it takes all the overflow'],
-          ...(state.goals || []).map(g => [g.id,
+          ...liveGoals().map(g => [g.id,
             `${g.name || g.id} — ${fmtMoney(g.target || 0)}`]),
           ['amt', 'A dollar amount instead']],
         showIf: (v) => v.rule === 'overflow',
@@ -21171,7 +21269,22 @@ const EDITORS = {
     cols: 2,
     fields: (ds) => [
       { key: 'name', label: 'Name', type: 'text' },
-      { key: 'target', label: 'Target', type: 'money' },
+      /* The button copies the six-month figure ONCE, as a plain number that
+         stays put; the Months box beside it is the live tie. Both are Charles's
+         asks of 2026-09-05, and they are different asks. */
+      { key: 'target', label: 'Target', type: 'money',
+        action: { label: 'Use 6 months of expenses',
+          title: 'Fill the target with six months of this year\u2019s expenses, once',
+          run: (val, set) => {
+            const spend = liveMonthlySpend();
+            if (spend > 0) set('target', spend * 6);
+            else toast('No expenses recorded this year to work it out from');
+          } },
+        hint: 'Filled in for you while Months of expenses is set.' },
+      { key: 'targetMonths', label: 'Months of expenses', type: 'number', step: 0.5,
+        hint: 'Type a number here and the target follows this year\u2019s expenses live \u2014 '
+            + '6 is the usual emergency-fund rule of thumb. Leave it empty to keep the figure '
+            + 'in Target.' },
       { key: 'accounts', label: 'Saved adds up', type: 'checks', wide: true,
         options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
         hint: 'Every account whose balance counts toward this goal.' },
@@ -21209,13 +21322,24 @@ const EDITORS = {
        never touched: it was either typed or saved earlier, and both are
        answers this shouldn't overrule. */
     link(changed) {
+      /* Months typed → the Target box shows what that comes to today, form
+         only, so the figure is visible before it is committed. */
+      if (changed === 'targetMonths') {
+        const n = parseFloat(F('rf-targetMonths').value), spend = liveMonthlySpend();
+        if (n > 0 && spend > 0) F('rf-target').value = fmtMoney(round2(n * spend));
+        return;
+      }
       if (changed !== 'for') return;
       const box = F('rf-targetDate');
       if (!box || box.value) return;
       const suggested = suggestedTargetDate(personById(state, F('rf-for').value));
       if (suggested) box.value = suggested;
     },
+    /* The Target box opens on the RESOLVED figure for a months goal — the
+       stored record has no target, and an empty box under a live tie reads
+       as a goal with no target at all. */
     get: (ds) => ({ ...state.goals[+ds.idx],
+                    target: goalTargetOf(state.goals[+ds.idx], liveMonthlySpend()),
                     accounts: state.goals[+ds.idx].accounts || [] }),
     blank: () => ({ count: 'capped',
                     accounts: [hubAccount(state)?.id].filter(Boolean) }),
@@ -21223,8 +21347,12 @@ const EDITORS = {
       const g = ds.idx !== undefined ? state.goals[+ds.idx]
         : (state.goals.push({ id: slugJs(v.name || 'goal') }), state.goals[state.goals.length - 1]);
       Object.assign(g, { name: v.name, accounts: v.accounts || [],
-        count: v.count, target: v.target ?? 0,
-        targetDate: v.targetDate || null });
+        count: v.count, targetDate: v.targetDate || null });
+      /* One claim, never both: months set means the target is derived and the
+         stored figure goes; otherwise the figure stands and months goes. */
+      if (typeof v.targetMonths === 'number' && v.targetMonths > 0) {
+        g.targetMonths = v.targetMonths; delete g.target;
+      } else { g.target = v.target ?? 0; delete g.targetMonths; }
       if (v.overflowOf) g.overflowOf = v.overflowOf;
       else delete g.overflowOf;
       /* Only when the field was on the form — a goal filed under a child stays
@@ -25532,7 +25660,7 @@ const SHARE_FORMAT = 1;
    missing whatever their build added. Unlike SCHEMA there is no stored copy at
    stake, so nothing is written and nothing halts — the family pattern from
    Sprint Velocity. */
-const SHARE_PAYLOAD_V = 2;   // 2: goals carry count ∈ {capped, all} + overflowOf (2026-09-05)
+const SHARE_PAYLOAD_V = 3;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05)
 
 const b64urlEncode = (bytes) => {
   let s = '';
@@ -26080,7 +26208,7 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
     reseedShareYears(data);
     const live = latestGridYear();
     const at = live ? currentMonthOf(state.years[live], todayISO()) : null;
-    freezeOverflowThresholds(data, state.goals,
+    freezeOverflowThresholds(data, live ? C[live].goals : state.goals,
       live ? (id) => C[live].balances[`${id}|${at}`] || 0 : () => 0);
   }
   if (!includeNotes) stripNotes(data);
@@ -26608,7 +26736,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tintOf, BAR_TINT, BAR_TINT_SOLID,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  goalNeed, goalClaim, goalPace,
+  goalNeed, goalClaim, goalPace, goalTargetOf, resolveGoals, computeYearWith,
   enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals
