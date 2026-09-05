@@ -757,7 +757,14 @@ Where the whole plan stands and where it has been, on one tab.
 ### Savings Goals
 
 Goals add up whichever accounts you tick, so splitting an account is a matter
-of ticking the new ones. Each goal answers two questions: **how much of it
+of ticking the new ones. A target is a figure, or **a number of months of
+expenses**: type 6 into "Months of expenses" and the target becomes six months
+of this year's Expenses total, live, everywhere the target is read — the tile,
+the pace check, and any sweep row tied to the goal. The button beside Target
+copies that figure once instead, as a plain number that stays put. The Savings
+Rate & Runway card shows **six months of expenses** as its third tile, worked
+out from the same monthly figure the runway divides by. Each goal answers two
+questions: **how much of it
 counts** — up to the target, or all of it however far past — and **who is paid
 first**. Name another goal there and this one counts only what sits above that
 goal's claim: the earlier goal's target, plus whatever it in turn leaves to the

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 968;
+const EXPECTED = 974;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1074,6 +1074,86 @@ t('the opening figure is the engine\'s own January rule: the prior December, els
   const [g] = H.computeGoals(st, H.computeAll(st, '2026-01-15'), '2026-01-15');
   eq(g.held, 13894, 'the engine opened Savings on last December\'s stated 11,000, not the 10,000 seed');
   approx(g.paceMo, 241.17, 'and so does the pace: the year still grew 2,894 — read off the seed it would say 324.50');
+});
+/* ── A target that is N months of expenses (2026-09-05) ──────────────────
+   `targetMonths` makes the target derived: that many months of the year's
+   expenses, resolved by computeYear (which runs the year twice to learn what
+   it spends) and read off `computed.goals` everywhere. The sweep fixture has
+   no expense rows, so these give it one: $600 of groceries every month, i.e.
+   $7,200 a year, $600 a month, and six months of it is $3,600. */
+const spendFixture = () => {
+  const s = overflowFixture();
+  s.years['2026'].monthCount = 12;
+  s.years['2026'].categories.push(
+    { id: 'food', name: 'Groceries', role: 'normal', rule: 'carry', section: 'expense' });
+  s.years['2026'].cells['food|2026-01'] = { v: -600, kind: 'manual' };
+  return s;
+};
+t('resolveGoals fills a months target in and leaves a figure alone', () => {
+  const goals = [{ id: 'e', target: 21000, targetMonths: 6, accounts: ['cash'] },
+                 { id: 'r', target: 5000, accounts: ['cash'] }];
+  const out = H.resolveGoals(goals, 600);
+  eq(out[0].target, 3600, '6 × 600, whatever figure was lying beside it');
+  eq(out[0].targetMonths, 6, 'the tie is kept, for the tile to name');
+  eq(out[1].target, 5000, 'a plain figure is untouched');
+  eq(goals[0].target, 21000, 'copies — the stored goal is never written');
+  eq(H.goalTargetOf({ targetMonths: 0, target: 40 }, 600), 40, 'zero months is not a tie');
+  eq(H.goalTargetOf({ targetMonths: 6 }, 0), 0, 'nothing spent is a $0 target, said plainly');
+});
+t('a months goal is six months of the year\'s expenses everywhere the target is read', () => {
+  const s = spendFixture();
+  s.goals = [{ id: 'e', name: 'Emergencies', targetMonths: 6, accounts: ['cash'], count: 'capped' }];
+  const st = H.coerceShape(s);
+  const computed = H.computeAll(st, '2026-01-15');
+  const c = computed['2026'];
+  eq(c.monthlySpend, 600, 'the year spends 7,200, so 600 a month');
+  eq(c.goals[0].target, 3600, 'computed.goals carries the resolved target');
+  eq(H.yearSpending(st.years['2026'], c, '2026'), 7200, 'and it is exactly yearSpending, the runway\'s divisor');
+  const [g] = H.computeGoals(st, computed, '2026-01-15');
+  eq(g.target, 3600, 'the tile reads the same figure');
+  eq(g.targetMonths, 6, 'and knows why');
+  eq(g.saved, 3600, 'capped at it — cash holds far more');
+  eq(st.goals[0].target, undefined, 'and nothing was written back to the plan');
+});
+t('a sweep tied to a months goal starts at that resolved figure, queue included', () => {
+  const s = spendFixture();
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'r';
+  s.goals = [
+    { id: 'e', name: 'Emergencies', targetMonths: 6, accounts: ['cash'], count: 'capped' },
+    { id: 'r', name: 'Renovations', target: 10000, accounts: ['cash'], count: 'capped', overflowOf: 'e' },
+  ];
+  const c = H.computeAll(H.coerceShape(s), '2026-01-15')['2026'];
+  /* January: 17,000 + 894 − 600 groceries = 17,294 before the sweep */
+  eq(c.cells['tomid|2026-01'].v, -(17294 - 13600), 'above 13,600 — 3,600 of expenses cover plus 10,000');
+  approx(c.balances['cash|2026-01'], 13600, 'cash lands where Renovations is full');
+});
+t('a plan with no months goal computes in one pass and is bit-identical to the engine proper', () => {
+  const s = H.coerceShape(overflowFixture());
+  s.goals = [{ id: 'emerg', name: 'Emergencies', target: 15000, accounts: ['cash'], count: 'capped' }];
+  s.years['2026'].categories[1].goalId = 'emerg';
+  delete s.years['2026'].categories[1].threshold;
+  const wrapped = H.computeYear(s, '2026', null);
+  const direct = H.computeYearWith(s, '2026', null, s.goals);
+  eq(wrapped.cells, direct.cells, 'every cell');
+  eq(wrapped.balances, direct.balances, 'every balance');
+  eq(wrapped.balanceKinds, direct.balanceKinds);
+  ok(wrapped.goals === s.goals, 'the goals list is the plan\'s own object, not a copy');
+  eq(wrapped.monthlySpend, 0, 'the fixture spends nothing');
+});
+t('coerceShape reads months strictly and keeps one claim', () => {
+  const d = H.coerceShape({ goals: [
+    { id: 'a', accounts: [], target: 500, targetMonths: 6 },
+    { id: 'b', accounts: [], target: 500, targetMonths: 'six' },
+    { id: 'c', accounts: [], target: 500, targetMonths: 0 },
+    { id: 'd', accounts: [], target: 500, targetMonths: -2 },
+  ] });
+  const by = Object.fromEntries(d.goals.map(g => [g.id, [g.target, g.targetMonths]]));
+  eq(by.a, [undefined, 6], 'months win and the stale figure goes');
+  eq(by.b, [500, undefined], 'junk months delete, the figure stands');
+  eq(by.c, [500, undefined], 'zero months is no tie');
+  eq(by.d, [500, undefined], 'nor is a negative one');
 });
 
 group('Sections & quarterly rule');
@@ -4035,6 +4115,8 @@ t('every tab it fills has data behind it', () => {
   ok(d.goals.some(g => g.overflowOf && d.goals.some(p => p.id === g.overflowOf
        && p.accounts.some(a => g.accounts.includes(a)))),
     'progress: a goal claimed first by another on a shared account, so the tile\'s "after … claimed first by" foot is in the demo');
+  ok(d.goals.some(g => g.targetMonths > 0),
+    'progress: a goal whose target is months of expenses, so the live tie and the "of this year\'s expenses" foot are in the demo');
   ok(d.vacations.trips.length && d.vacations.pto[y], 'vacations: a trip and its PTO');
   ok(d.side.donations[y].length && d.side.daf.length, 'giving: donations and the fund');
   ok(d.side.portfolios[0].rows.length && Object.keys(d.side.targets).length,
@@ -9589,10 +9671,11 @@ t('a link from a newer build is refused, and marked as such', async () => {
   eq(back.sections, ['budget'], 'the current version still opens');
 });
 
-t('the payload version is 2: goals carry count ∈ {capped, all} plus claimed-first-by', () => {
-  /* A build at v1 would read `capped` + `overflowOf` as a plain capped goal and
-     draw the claim away — the silent misread the version exists to refuse. */
-  eq(H.SHARE_PAYLOAD_V, 2);
+t('the payload version is 3: goals carry claimed-first-by and a months-of-expenses target', () => {
+  /* v1 would read `capped` + `overflowOf` as a plain capped goal and draw the
+     claim away; v2 would read a months goal at $0 — each the silent misread
+     the version exists to refuse. */
+  eq(H.SHARE_PAYLOAD_V, 3);
 });
 
 t('an unknown tab in a link is dropped, not drawn', async () => {
@@ -10797,6 +10880,18 @@ t('every info dot has words behind it', () => {
     'every dot has an entry to open — a key with none opens an empty sheet');
   eq(Object.keys(H.HELP).filter(k => !used.includes(k)).join(', '), '',
     'and no entry sits unrendered, which is a second copy of an explanation waiting to drift');
+});
+t('the goal editor never stores both a figure and a months tie', () => {
+  const src = stripComments(APP_SRC);
+  const start = src.indexOf("  goal: {\n    title: (ds, isNew) => isNew ? 'Add a Goal'");
+  ok(start > 0, 'found the goal editor');
+  const body = src.slice(start, src.indexOf('\n  holding: {', start));
+  ok(/g\.targetMonths = v\.targetMonths; delete g\.target;/.test(body), 'months set: the figure goes');
+  ok(/g\.target = v\.target \?\? 0; delete g\.targetMonths;/.test(body), 'figure set: the months go');
+  ok(/key: 'target'[\s\S]{0,200}action: \{ label: 'Use 6 months of expenses'/.test(body),
+    'and Target carries the one-off button');
+  ok(/liveGoals\(\)/.test(src.slice(src.indexOf("key: 'goalId', label: 'Above this goal"), src.indexOf("key: 'capAmount'"))),
+    'the sweep-row editor labels read the RESOLVED goals');
 });
 t('the Progress tab no longer paces a goal off total liquidity', () => {
   const src = stripComments(APP_SRC);
