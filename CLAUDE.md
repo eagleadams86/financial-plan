@@ -1403,12 +1403,45 @@ suite passed while the card was wrong.
   keeps overlap manuals, seeds from computed December, and never touches the
   old year.
 - **Goals name the accounts they read.** `goal.accounts` is a list of account
-  ids and `goal.count` is `capped` / `all` / `overflow` (with `overflowOf`
-  naming the goal that claims the money first). The four fixed sources
-  (cashBank, midCapped, midOverflow, long) migrate once into that shape. An id
-  that no longer exists contributes nothing rather than breaking the goal —
-  splitting one account into several is normal, and the goal has to keep
-  working while you repoint it.
+  ids, `goal.count` is `capped` / `all` (how far the bar runs), and
+  `goal.overflowOf` — any goal, independent of `count` since 2026-09-05 — names
+  the goal paid first. The four fixed sources (cashBank, midCapped, midOverflow,
+  long) migrate once into that shape. An id that no longer exists contributes
+  nothing rather than breaking the goal — splitting one account into several is
+  normal, and the goal has to keep working while you repoint it.
+- **Goals queue behind each other, and `goalNeed` / `goalClaim` are the ONE
+  arithmetic for it** (2026-09-05, beside `computeGoals`; pure, in the hooks).
+  `count` used to be three-way — `overflow` meant "all of it above what
+  `overflowOf` claims", always uncapped — so a goal queued behind another could
+  never stop at its own target, and every reader took the predecessor's bare
+  `target` one level deep. Charles's three goals on one account (Emergencies →
+  Renovations → New Car) showed both faults: no capped option for the second,
+  and a sweep tied to the third starting at $50k instead of near $120k.
+  - `goalNeed(goal, goals, bal)` = target + `goalClaim(pred, goal.accounts)`;
+    `goalClaim(pred, accounts)` = max(0, need(pred) − what pred holds in accounts
+    OUTSIDE `accounts`). **The shortfall rule is Charles's own decision**: an
+    emergency fund counting cash and five bank accounts claims from cash only
+    what the bank accounts don't cover, so the goals PARTITION the money.
+    Where pred's accounts sit inside the set it reduces to the old arithmetic.
+  - **A claim is always by target, whatever pred's `count`** — "all of it" says
+    how far pred's own bar runs, never what it takes from the goals behind it.
+  - **Four readers, one function**: `computeGoals` (the tile's `saved`, plus
+    `claimed`/`claimedBy` so the foot says why a goal reads low), the engine's
+    sweep THRESHOLD and destination CAP (read at the month's `endOf` figures,
+    since a claim can depend on balances held elsewhere), and
+    `freezeOverflowThresholds`, which now takes `bal` and freezes a budget-only
+    link at the sender's figure TODAY. A `goalId` naming a goal with nobody
+    ahead of it needs exactly its target, so a plan with no queued goal
+    computes what it always did.
+  - **No schema bump**: `coerceShape` normalises a stored `overflow` to `all`
+    with its `overflowOf` kept (same figure, spelled the new way), drops a
+    dangling or self-pointing `overflowOf`, and breaks a loop by deleting the
+    link on the first goal in list order whose chain comes back to it. The
+    pure pair also terminates on a loop the boundary never saw.
+  - **`SHARE_PAYLOAD_V` went to 2**: a v1 build would read `capped` +
+    `overflowOf` as a plain capped goal and draw the claim away.
+  - The sample carries `kitchen` queued behind `roof` on Mid-term, so the
+    "after $X claimed first by" foot is in the demo.
 - **`accountShowsInYear(a, yr, c, months, accounts)` decides whether an account
   earns a ROW in a live year** — pure and pinned, and shared with the cell
   editor so the grid and the button that empties a cell cannot disagree about
