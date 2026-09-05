@@ -4354,17 +4354,42 @@ function coerceShape(data) {
     const from = { cashBank: ['cash', 'bank'], midCapped: ['mid'],
                    midOverflow: ['mid'], long: ['long'] }[g.source] || ['cash'];
     g.accounts = from;
-    g.count = g.source === 'long' ? 'all'
-      : g.source === 'midOverflow' ? 'overflow' : 'capped';
-    if (g.count === 'overflow' && capped) g.overflowOf = capped.id;
+    g.count = g.source === 'long' || g.source === 'midOverflow' ? 'all' : 'capped';
+    if (g.source === 'midOverflow' && capped) g.overflowOf = capped.id;
     delete g.source;
   }
   for (const g of d.goals) {
     if (!Array.isArray(g.accounts)) g.accounts = [];
-    if (!['all', 'capped', 'overflow'].includes(g.count)) g.count = 'capped';
+    /* `count` was a three-way field until 2026-09-05 — `overflow` meant "all of
+       it, after what `overflowOf` claims". The two questions are separate now
+       (how far the bar runs; who is paid first), so a stored `overflow` is
+       `all` with its `overflowOf` kept: the same figure, spelled the new way.
+       Every load normalises it, so no schema bump and nothing to migrate. */
+    if (g.count === 'overflow') g.count = 'all';
+    if (!['all', 'capped'].includes(g.count)) g.count = 'capped';
     /* Who the goal is for — a child, usually, for a college pot. Only ever a
        label and a target-date suggestion; `computeGoals` never reads it. */
     if (g.for && !peopleIds.has(g.for)) delete g.for;
+  }
+  /* "Claimed first by" must name another goal that exists, and the chain it
+     forms must end: a goal behind a goal behind itself has no first dollar.
+     A loop is broken deterministically — walked in list order, the first goal
+     whose chain comes back round to it loses ITS link — so two loads of one
+     file agree, and every other goal keeps the place it was given. */
+  {
+    const goalIds = new Set(d.goals.map(g => g.id));
+    const byGoalId = new Map(d.goals.map(g => [g.id, g]));
+    for (const g of d.goals)
+      if (g.overflowOf !== undefined
+          && (typeof g.overflowOf !== 'string' || !goalIds.has(g.overflowOf)
+              || g.overflowOf === g.id)) delete g.overflowOf;
+    for (const g of d.goals) {
+      let p = g.overflowOf ? byGoalId.get(g.overflowOf) : null, steps = 0;
+      while (p && steps++ <= d.goals.length) {
+        if (p === g) { delete g.overflowOf; break; }
+        p = p.overflowOf ? byGoalId.get(p.overflowOf) : null;
+      }
+    }
   }
   /* Overflow rows that tie their threshold to a goal — checked here, after
      the goals are settled, because the years loop above runs first. A deleted
@@ -6382,7 +6407,13 @@ function computeYear(st, yearKey, prior) {
         if (!running[src] || !running[dst]) continue;    // both ends must be live
         const goal = cat.goalId
           ? (st.goals || []).find(g => g.id === cat.goalId) : null;
-        const threshold = goal ? (goal.target || 0)
+        /* A goal queued behind others is full only once the goals ahead of it
+           are paid — `goalNeed`, read at THIS month's end-of-month figures,
+           since what an earlier goal claims can depend on balances it holds
+           elsewhere. A goal with nobody ahead of it needs exactly its target,
+           which is what this line always read. */
+        const balAt = (id) => running[id] ? endOf(id) : 0;
+        const threshold = goal ? goalNeed(goal, st.goals, balAt)
           : typeof cat.threshold === 'number' ? cat.threshold : undefined;
         if (threshold === undefined) continue;           // misconfigured — blank
         /* What the threshold is measured AGAINST: the goal's own account set
@@ -6417,7 +6448,7 @@ function computeYear(st, yearKey, prior) {
            destination must be counted by the cap, the source must not be. */
         const capGoal = cat.capGoalId
           ? (st.goals || []).find(g => g.id === cat.capGoalId) : null;
-        const cap = capGoal ? (capGoal.target || 0)
+        const cap = capGoal ? goalNeed(capGoal, st.goals, balAt)
           : typeof cat.capAmount === 'number' ? cat.capAmount : undefined;
         if (cap !== undefined) {
           if (!capMeasure.includes(dst) || capMeasure.includes(src)) continue;
@@ -6525,10 +6556,52 @@ function currentMonthOf(yr, todayIso) {
   return t;
 }
 
+/* ── Goals that queue behind each other ─────────────────────────────────────
+   `goalNeed(goal)` is the balance at which a goal is FULL on its own accounts:
+   its target on top of what the goal named in `overflowOf` claims out of those
+   accounts first — and that goal's own need is worked out the same way, so a
+   queue of three sums its targets. It is the figure a sweep row tied to the
+   goal starts at, the figure a destination cap fills to, and the figure the
+   goal's own bar is measured under.
+
+   `goalClaim(pred, accounts)` is what `pred` takes out of `accounts` before a
+   goal behind it sees a cent: pred's need LESS what pred already holds in
+   accounts outside that set — the SHORTFALL rule (2026-09-05, Charles's own
+   call). An emergency fund counting cash and five bank accounts claims from
+   cash only what the bank accounts don't already cover; without that, the
+   money in those accounts belongs to no goal at all, and a goal queued on
+   cash reads $5,000 low for ever. When pred's accounts sit inside the set
+   the claim is exactly pred's need, which is what the old one-level
+   `overflowOf.target` arithmetic was, so nothing already in a plan moved
+   except where it was wrong.
+
+   The claim is always by TARGET, whatever pred's `count`: "all of it" says how
+   far pred's own bar may run, never what it takes from the goals behind it.
+   `bal(id)` is injected — the month's balances in computeGoals, the month's
+   end-of-month figures in the engine's sweep step, the sender's current
+   balances when a share link freezes a threshold — and a goal not running
+   this month contributes 0. A goal already on the path claims nothing, so a
+   loop coerceShape missed still terminates. */
+function goalNeed(goal, goals, bal, seen = new Set()) {
+  if (!goal || seen.has(goal.id)) return 0;
+  seen.add(goal.id);
+  const pred = goal.overflowOf ? (goals || []).find(x => x.id === goal.overflowOf) : null;
+  return round2((goal.target || 0) + goalClaim(pred, goal.accounts || [], goals, bal, seen));
+}
+function goalClaim(pred, accounts, goals, bal, seen = new Set()) {
+  if (!pred || seen.has(pred.id)) return 0;
+  const need = goalNeed(pred, goals, bal, seen);
+  const outside = (pred.accounts || []).filter(id => !accounts.includes(id))
+    .reduce((t, id) => t + (bal(id) || 0), 0);
+  return round2(Math.max(0, need - outside));
+}
+
 /* Savings-goal figures, ported row for row from the sheet's Savings Goals
-   table. Sources: cashBank = cash + banks (capped at target), midCapped =
-   mid-term (capped), midOverflow = mid-term above the capped goal's target,
-   long = long-term holdings uncapped. */
+   table and generalised since: a goal adds up the accounts it names, counts
+   what sits above another goal's claim when it is queued behind one
+   (`overflowOf`, see goalClaim above), and either stops at its target
+   (`capped`) or keeps counting past it (`all`). `claimed` and `claimedBy`
+   ride out so the tile can say why a goal reads lower than its accounts. */
 function computeGoals(st, computed, todayIso) {
   const gridKeys = startedGridYears(st, todayIso);
   const liveKey = gridKeys[gridKeys.length - 1];
@@ -6544,21 +6617,16 @@ function computeGoals(st, computed, todayIso) {
        than breaking the goal — splitting one account into several is normal,
        and the goal should keep working while you repoint it. */
     const held = round2((g.accounts || []).reduce((t, id) => t + bal(id), 0));
-    let saved;
-    if (g.count === 'overflow') {
-      /* what these accounts hold beyond what another goal already claims */
-      const claimed = byId(g.overflowOf)?.target || 0;
-      saved = Math.max(0, held - claimed);
-    } else if (g.count === 'all') {
-      saved = held;
-    } else {
-      saved = Math.min(held, g.target || 0);   // capped: never more than the goal
-    }
+    const pred = g.overflowOf ? byId(g.overflowOf) : null;
+    const claimed = pred ? goalClaim(pred, g.accounts || [], st.goals, bal) : 0;
+    let saved = Math.max(0, held - claimed);
+    if (g.count !== 'all') saved = Math.min(saved, g.target || 0);   // capped: never more than the goal
     saved = round2(saved);
     const monthsLeft = g.targetDate
       ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
     return {
-      ...g, saved, held,
+      ...g, saved, held, claimed,
+      claimedBy: pred ? (pred.name || pred.id) : null,
       progress: g.target ? saved / g.target : 0,
       monthsLeft,
       monthlyReq: monthsLeft > 0 ? round2((g.target - saved) / monthsLeft) : 0,
@@ -6941,7 +7009,8 @@ const HELP = {
     ['A goal that adds up several accounts is measured across all of them: the sweep fires '
       + 'when those balances ', b('together'), ' would end the month above the target, and '
       + 'the transfer still leaves the one watched account, which must be among the ones the '
-      + 'goal counts.'],
+      + 'goal counts. A goal claimed first by another goal is full only once that one is '
+      + 'paid, so the sweep starts at its target on top of every claim ahead of it.'],
     ['It is worked out at the ', b('end of the month'), ', after the account\'s interest and '
       + 'dividends, so the account lands exactly on the threshold; the money arrives at the '
       + 'destination at month end too and earns nothing there until the month after. A month '
@@ -6956,6 +7025,19 @@ const HELP = {
     ['Two rows sweeping into each other\'s accounts is a loop with no answer, so both stay '
       + 'blank until one is repointed. ', b('A number you type into a month always beats the '
       + 'rule.')],
+  ] },
+  goalClaims: { title: 'Claimed First by Another Goal', body: [
+    ['Two goals can save into one account. ', b('The goal named here takes its target first'),
+      ' \u2014 plus whatever it in turn leaves to the goals ahead of it \u2014 and this goal counts '
+      + 'only what sits above that claim, up to its own target or all of it, whichever you '
+      + 'chose.'],
+    ['A goal that adds up several accounts ', b('claims only its shortfall'), ': money it '
+      + 'already holds in accounts you have not ticked here is covered, so it takes from the '
+      + 'shared accounts only what those do not. No dollar is counted by two goals, and none '
+      + 'is missed. The tile says what was claimed ahead of it.'],
+    ['"All of it" on the earlier goal changes how far its own bar runs, never what it claims '
+      + '\u2014 a claim is always the target. A sweep row tied to a queued goal starts where '
+      + 'that goal is full: its target on top of every claim ahead of it.'],
   ] },
   mixedCell: { title: 'Part Actual, Part Estimate', body: [
     ['A month can hold several amounts — two grocery runs and a delivery, or a bill you have '
@@ -7780,6 +7862,11 @@ function sampleState() {
           accounts: ['emergency'], target: 21000, role: 'normal' },
         { id: 'roof', name: 'Roof replacement', count: 'capped', accounts: ['mid'],
           target: 14000, targetDate: `${Y + 1}-09` },
+        /* Queued behind the roof on the SAME account — the demo of "claimed
+           first by": its bar counts only what Mid-term holds above $14,000,
+           and its tile says so. */
+        { id: 'kitchen', name: 'Kitchen refresh', count: 'capped', accounts: ['mid'],
+          overflowOf: 'roof', target: 6000, targetDate: `${Y + 2}-06` },
         { id: 'college-fund', name: "Mia's college", count: 'all', accounts: ['college'],
           for: 'mia', target: 90000, targetDate: '2033-09' },
       ],
@@ -9340,7 +9427,13 @@ function ruleDesc(cat, st = state) {
     const src = cat.overflowFrom && accountById(st, cat.overflowFrom);
     const dst = cat.transferTo && accountById(st, cat.transferTo);
     const g = cat.goalId && (st.goals || []).find(x => x.id === cat.goalId);
-    const above = g ? `${g.name || g.id} (${fmtMoney(g.target || 0)})`
+    /* A goal queued behind others starts where THEY are paid, so naming its
+       bare target would describe a line the row doesn't draw. */
+    const queued = g && g.overflowOf;
+    const above = g
+      ? (queued ? `the point ${g.name || g.id} is full (${fmtMoney(g.target || 0)} on top of `
+                  + 'what the goals ahead of it claim)'
+                : `${g.name || g.id} (${fmtMoney(g.target || 0)})`)
       : typeof cat.threshold === 'number' ? fmtMoney(cat.threshold) : null;
     if (!src || !dst || above === null)
       return 'sweeps an account’s overflow — pick the account, threshold '
@@ -9355,7 +9448,7 @@ function ruleDesc(cat, st = state) {
     const capGrouped = cg && Array.isArray(cg.accounts) && cg.accounts.length > 1;
     const head = grouped
       ? `whatever the ${g.name || g.id} accounts together end the month above ${
-          fmtMoney(g.target || 0)}, moved from ${src.name} to ${dst.name}`
+          queued ? 'the point it is full' : fmtMoney(g.target || 0)}, moved from ${src.name} to ${dst.name}`
       : `whatever ${src.name} ends the month above ${above}, moved to ${dst.name}`;
     return head + (upTo === null ? ''
       : capGrouped
@@ -11026,7 +11119,8 @@ function goalCard(g, idx) {
       <i style="width:${(pct * 100).toFixed(1)}%"></i></div>
     <div class="foot">${Math.round(g.progress * 100)}%
       ${g.targetDate ? ` · target ${esc(monthLabel(g.targetDate.slice(0, 7)))} (${fmtYrMo(g.monthsLeft)})` : ''}
-      ${!done && g.monthlyReq ? ` · needs ${fmtMoney(g.monthlyReq)}/mo` : ''}</div>
+      ${!done && g.monthlyReq ? ` · needs ${fmtMoney(g.monthlyReq)}/mo` : ''}
+      ${g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}` : ''}</div>
   </div>`;
 }
 
@@ -19738,10 +19832,11 @@ const EDITORS = {
           ...(state.goals || []).map(g => [g.id,
             `${g.name || g.id} \u2014 ${fmtMoney(g.target || 0)}`])],
         showIf: (v) => v.rule === 'overflow',
-        hint: 'Reads the goal\u2019s target live \u2014 edit the goal and this row moves with it. '
-            + 'A goal that adds up several accounts is measured across ALL of them; '
-            + 'the transfer still leaves the watched account, which must be one the '
-            + 'goal counts.' },
+        hint: 'Reads the goal live \u2014 edit the goal and this row moves with it. For a '
+            + 'goal claimed first by another, the line is where THAT goal is full: its own '
+            + 'target on top of what the goals ahead of it claim. A goal that adds up '
+            + 'several accounts is measured across ALL of them; the transfer still leaves '
+            + 'the watched account, which must be one the goal counts.' },
       { key: 'threshold', label: 'Above this amount', type: 'money',
         showIf: (v) => v.rule === 'overflow' && !v.goalId },
       { key: 'overflowTo', label: 'Sweeps into', type: 'select',
@@ -19765,7 +19860,8 @@ const EDITORS = {
         hint: 'Once the destination would end the month at this figure, the row stops '
             + 'and the rest of the overflow stays put — for the next sweep row, if '
             + 'there is one below it. A cap goal that adds up several accounts is '
-            + 'full when they TOGETHER reach its target; it must count the account '
+            + 'full when they TOGETHER reach its target, a goal claimed first by another '
+            + 'is full only once that one is paid too, and it must count the account '
             + 'this row fills.' },
       { key: 'capAmount', label: 'Up to this amount', type: 'money',
         showIf: (v) => v.rule === 'overflow' && v.capGoalId === 'amt' },
@@ -21026,17 +21122,23 @@ const EDITORS = {
       { key: 'accounts', label: 'Saved adds up', type: 'checks', wide: true,
         options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
         hint: 'Every account whose balance counts toward this goal.' },
+      /* Two questions, not one three-way list (2026-09-05): how far the bar
+         runs, and who is paid first. They used to be one field whose third
+         option ("only what another goal has not claimed") was always uncapped,
+         so a goal queued behind another could never stop at its own target. */
       { key: 'count', label: 'How much of it counts', type: 'select', options: [
         ['capped', 'Up to the target, no further'],
         ['all', 'All of it, however far past the target'],
-        ['overflow', 'Only what another goal has not claimed'],
-      ], hint: 'Two goals can share an account: cap the first, and let the second take '
-        + 'whatever sits above it.' },
-      { key: 'overflowOf', label: 'Claimed first by', type: 'select',
-        options: state.goals
-          .filter((g, i) => String(i) !== String(ds.idx))
-          .map(g => [g.id, g.name || g.id]),
-        showIf: (v) => v.count === 'overflow' },
+      ], hint: 'Whether the bar stops at the target or keeps counting past it.' },
+      { key: 'overflowOf', label: 'Claimed first by', type: 'select', help: 'goalClaims',
+        helpLabel: 'how a claim is worked out',
+        options: [['', 'Nobody \u2014 this goal counts from the first dollar'],
+          ...state.goals
+            .filter((g, i) => String(i) !== String(ds.idx))
+            .map(g => [g.id, g.name || g.id])],
+        hint: 'Two goals can share an account: name the one that fills first, and this '
+            + 'goal counts only what sits above its claim \u2014 up to its own target, or '
+            + 'all of it, whichever you chose above.' },
       { key: 'targetDate', label: 'Target date', type: 'date' },
       /* Offered only when there is a child to name. A college pot is the case
          this exists for, and picking someone fills the target date in below. */
@@ -21070,7 +21172,7 @@ const EDITORS = {
       Object.assign(g, { name: v.name, accounts: v.accounts || [],
         count: v.count, target: v.target ?? 0,
         targetDate: v.targetDate || null });
-      if (v.count === 'overflow' && v.overflowOf) g.overflowOf = v.overflowOf;
+      if (v.overflowOf) g.overflowOf = v.overflowOf;
       else delete g.overflowOf;
       /* Only when the field was on the form — a goal filed under a child stays
          filed under them when the dialog never asked the question. Only a
@@ -25377,7 +25479,7 @@ const SHARE_FORMAT = 1;
    missing whatever their build added. Unlike SCHEMA there is no stored copy at
    stake, so nothing is written and nothing halts — the family pattern from
    Sprint Velocity. */
-const SHARE_PAYLOAD_V = 1;
+const SHARE_PAYLOAD_V = 2;   // 2: goals carry count ∈ {capped, all} + overflowOf (2026-09-05)
 
 const b64urlEncode = (bytes) => {
   let s = '';
@@ -25804,7 +25906,7 @@ function reseedShareYears(data) {
    recipient loses is the live tie they couldn't have had anyway. A link that
    DOES carry the goals resolves the id and nothing is frozen. Pure over the
    payload, like reseedShareYears — it never touches the real state. */
-function freezeOverflowThresholds(data, goals) {
+function freezeOverflowThresholds(data, goals, bal = () => 0) {
   const kept = new Set((data.goals || []).map(g => g.id));
   for (const yr of Object.values(data.years || {})) {
     if (yr.kind !== 'grid') continue;
@@ -25818,8 +25920,14 @@ function freezeOverflowThresholds(data, goals) {
            is measured across the lot, and a frozen figure measured against
            the wrong pot would change the recipient's balances. Plain ids —
            the accounts themselves already travel with a budget link. */
+        /* The figure is the goal's NEED, not its bare target: a goal queued
+           behind others starts where they are paid. A claim that depends on
+           balances held elsewhere freezes at the sender's figure TODAY (`bal`
+           is the sender's current month) — the recipient's projection can
+           drift from the sender's by however much those balances move, which
+           is the one honest answer a plain number can give. */
         if (g) {
-          cat.threshold = round2(g.target || 0);
+          cat.threshold = goalNeed(g, goals, bal);
           if (Array.isArray(g.accounts) && g.accounts.length)
             cat.thresholdAccounts = [...g.accounts];
         } else delete cat.threshold;
@@ -25830,7 +25938,7 @@ function freezeOverflowThresholds(data, goals) {
       if (cat.capGoalId !== undefined && !kept.has(cat.capGoalId)) {
         const g = (goals || []).find(x => x.id === cat.capGoalId);
         if (g) {
-          cat.capAmount = round2(g.target || 0);
+          cat.capAmount = goalNeed(g, goals, bal);
           if (Array.isArray(g.accounts) && g.accounts.length)
             cat.capAccounts = [...g.accounts];
         } else delete cat.capAmount;
@@ -25915,7 +26023,13 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
      and shipping the names of somebody's accounts alongside a holdings table
      they didn't ask about is a leak with no upside. */
   if (!need.has('years')) data.settings.accounts = [];
-  else { reseedShareYears(data); freezeOverflowThresholds(data, state.goals); }
+  else {
+    reseedShareYears(data);
+    const live = latestGridYear();
+    const at = live ? currentMonthOf(state.years[live], todayISO()) : null;
+    freezeOverflowThresholds(data, state.goals,
+      live ? (id) => C[live].balances[`${id}|${at}`] || 0 : () => 0);
+  }
   if (!includeNotes) stripNotes(data);
   if (!includeNames) anonymisePeople(data);
 
@@ -26441,6 +26555,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tintOf, BAR_TINT, BAR_TINT_SOLID,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
+  goalNeed, goalClaim,
   enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the
      sign convention. A row named for a direction renders, computes and totals

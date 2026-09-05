@@ -438,6 +438,11 @@ moves with it — or a plain dollar amount.
   emergency fund living in cash plus two checking accounts is over its target
   when those balances together are. The transfer still leaves the one watched
   account, which must be among the ones the goal counts.
+- A goal **claimed first by another goal is full only once that one is paid**,
+  so a row tied to it starts at its target on top of every claim ahead of it —
+  third in a queue of $20k, $50k and $50k means the sweep begins near $120k,
+  not $50k. (A goal ahead of it that holds part of its money in accounts the
+  queued goal doesn't count claims only its shortfall — see Savings Goals.)
 - It is worked out **at the end of the month, after the accounts' interest**,
   so the measured pot lands exactly on the threshold. A month that ends under
   it stays blank — nothing to sweep is not a $0 transfer.
@@ -752,8 +757,14 @@ Where the whole plan stands and where it has been, on one tab.
 ### Savings Goals
 
 Goals add up whichever accounts you tick, so splitting an account is a matter
-of ticking the new ones. Each goal counts its accounts up to the target, in
-full, or only what another goal hasn't already claimed.
+of ticking the new ones. Each goal answers two questions: **how much of it
+counts** — up to the target, or all of it however far past — and **who is paid
+first**. Name another goal there and this one counts only what sits above that
+goal's claim: the earlier goal's target, plus whatever it in turn leaves to the
+goals ahead of it, so three goals can queue on one account and each stop at its
+own target. A goal that holds part of its money in accounts you didn't tick
+here claims only its shortfall from the shared ones, so no dollar is counted by
+two goals and none is missed; the tile says what was claimed ahead of it.
 
 Plus progress, target dates, required monthly saving, and a pace check that
 follows whichever goal is next — the soonest deadline you haven't met yet.

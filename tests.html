@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 954;
+const EXPECTED = 964;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -910,6 +910,110 @@ t('monthly requirement divides the gap by the months left', () => {
   const goals = H.computeGoals(s, H.computeAll(s, TODAY_FIX), TODAY_FIX);
   eq(goals[0].monthsLeft, 8, 'Apr 2030 → Dec 2030');
   approx(goals[0].monthlyReq, 0, 'already at target');
+});
+/* ── Goals that queue behind each other (2026-09-05) ──────────────────────
+   `count` used to be a three-way field whose third option, "only what another
+   goal has not claimed", was always uncapped — so a goal queued behind another
+   could never stop at its own target. Two questions now: how far the bar runs
+   (`count`: capped / all) and who is paid first (`overflowOf`, any goal). The
+   claim arithmetic is `goalNeed` / `goalClaim`, pure, and shared by the goal
+   tiles, the engine's sweep threshold and cap, and the share-link freeze. */
+t('an old three-way "overflow" goal arrives as all + claimed first by, same figure', () => {
+  const s = H.coerceShape(fixtureState());
+  eq(s.goals[2].count, 'all', 'the old overflow option is "all of it" behind a claim');
+  eq(s.goals[2].overflowOf, 'g2', 'still claimed first by the capped goal');
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const g = H.computeGoals(s, H.computeAll(s, TODAY_FIX), TODAY_FIX)[2];
+  approx(g.saved, c.balances['mid|2030-04'] - 1200, 'the same figure it always read');
+  approx(g.claimed, 1200, 'and it says what was claimed ahead of it');
+  eq(g.claimedBy, 'Renovations');
+  const d = H.coerceShape({ goals: [{ id: 'a', count: 'overflow', accounts: [], target: 1 }] });
+  eq(d.goals[0].count, 'all', 'a stored "overflow" with nobody named is simply "all"');
+  eq(H.coerceShape({ goals: [{ id: 'a', count: 'junk', accounts: [] }] }).goals[0].count,
+    'capped', 'anything else is capped');
+});
+t('a goal claimed first by another can stop at its own target', () => {
+  /* the option Charles could not find: after Renovations, but only up to $100 */
+  const s = H.coerceShape(fixtureState());
+  s.goals[2].count = 'capped';
+  s.goals[2].target = 100;
+  const computed = H.computeAll(s, TODAY_FIX);
+  const c = computed['2030'];
+  ok(c.balances['mid|2030-04'] - 1200 > 100, 'fixture: there is more than $100 above the claim');
+  const g = H.computeGoals(s, computed, TODAY_FIX)[2];
+  eq(g.saved, 100, 'min(target, held − claim)');
+  eq(g.progress, 1, 'and it reads as reached');
+});
+t('a queue of three is full at the sum of the targets ahead of it', () => {
+  const goals = [
+    { id: 'e', name: 'Emergencies', target: 20000, accounts: ['cash'], count: 'capped' },
+    { id: 'r', name: 'Renovations', target: 50000, accounts: ['cash'], count: 'capped', overflowOf: 'e' },
+    { id: 'n', name: 'New Car', target: 50000, accounts: ['cash'], count: 'capped', overflowOf: 'r' },
+  ];
+  const bal = () => 0;
+  eq(H.goalNeed(goals[0], goals, bal), 20000, 'nobody ahead: its own target');
+  eq(H.goalNeed(goals[1], goals, bal), 70000, 'behind Emergencies');
+  eq(H.goalNeed(goals[2], goals, bal), 120000, 'third in the queue — NOT its bare $50,000');
+  eq(H.goalClaim(goals[1], ['cash'], goals, bal), 70000,
+    'what Renovations claims from cash is its need, not just its target');
+  eq(H.goalClaim(null, ['cash'], goals, bal), 0, 'nobody claims nothing');
+});
+t('a claim is only the shortfall: money the earlier goal holds elsewhere covers it first', () => {
+  /* Charles's shape: Emergencies counts cash AND five bank accounts. Whatever
+     the bank accounts hold is already Emergencies' money, so it takes from
+     cash only the rest — otherwise those dollars belong to no goal at all and
+     Renovations reads low by exactly that much. */
+  const goals = [
+    { id: 'e', name: 'Emergencies', target: 20000, accounts: ['cash', 'bank'], count: 'capped' },
+    { id: 'r', name: 'Renovations', target: 50000, accounts: ['cash'], count: 'capped', overflowOf: 'e' },
+  ];
+  const held = (m) => (id) => m[id] || 0;
+  eq(H.goalClaim(goals[0], ['cash'], goals, held({ bank: 5270 })), 14730, '20,000 less the 5,270 in the bank');
+  eq(H.goalNeed(goals[1], goals, held({ bank: 5270 })), 64730, 'so Renovations is full at 64,730 of cash');
+  eq(H.goalClaim(goals[0], ['cash'], goals, held({ bank: 25000 })), 0, 'fully covered elsewhere claims nothing');
+  eq(H.goalClaim(goals[0], ['cash'], goals, held({})), 20000, 'nothing elsewhere: the whole target, as before');
+  eq(H.goalClaim(goals[0], ['cash', 'bank'], goals, held({ bank: 5270 })), 20000,
+    'a successor counting the same accounts sees the whole need — nothing is "elsewhere"');
+  /* and computeGoals partitions the money: no dollar twice, none missed */
+  const s = H.coerceShape(fixtureState());
+  s.goals = [{ ...goals[0], target: 5000 }, { ...goals[1], target: 6000 }];   // the fixture's scale
+  const computed = H.computeAll(s, TODAY_FIX);
+  const c = computed['2030'];
+  const [e, r] = H.computeGoals(s, computed, TODAY_FIX);
+  const cash = c.balances['cash|2030-04'], bank = c.balances['bank|2030-04'];
+  ok(bank > 0 && cash + bank > 5000, 'fixture: the fund is over target across both');
+  approx(e.saved + r.saved, Math.min(cash + bank, 5000) + Math.min(6000, cash + bank - 5000),
+    'together they hold exactly what the accounts hold, up to their targets');
+  approx(r.claimed, H.round2(Math.max(0, 5000 - bank)), 'the tile names the shortfall');
+});
+t('a claim is always by target, whatever the earlier goal counts', () => {
+  const goals = [
+    { id: 'a', name: 'A', target: 1000, accounts: ['cash'], count: 'all' },
+    { id: 'b', name: 'B', target: 500, accounts: ['cash'], count: 'capped', overflowOf: 'a' },
+  ];
+  eq(H.goalClaim(goals[0], ['cash'], goals, () => 0), 1000,
+    '"all of it" says how far A\'s own bar runs, not what it takes from B');
+});
+t('a dangling, self-pointing or looping "claimed first by" is dropped at the boundary', () => {
+  const d = H.coerceShape({ goals: [
+    { id: 'a', accounts: [], count: 'capped', overflowOf: 'b' },
+    { id: 'b', accounts: [], count: 'capped', overflowOf: 'c' },
+    { id: 'c', accounts: [], count: 'capped', overflowOf: 'a' },
+    { id: 'x', accounts: [], count: 'capped', overflowOf: 'gone' },
+    { id: 'y', accounts: [], count: 'capped', overflowOf: 'y' },
+    { id: 'z', accounts: [], count: 'capped', overflowOf: 'c' },
+  ] });
+  const by = Object.fromEntries(d.goals.map(g => [g.id, g.overflowOf]));
+  eq(by.a, undefined, 'the first goal in list order whose chain comes back round loses ITS link');
+  eq(by.b, 'c', 'the rest of the loop keeps its places');
+  eq(by.c, 'a');
+  eq(by.x, undefined, 'a goal that no longer exists');
+  eq(by.y, undefined, 'a goal cannot be claimed first by itself');
+  eq(by.z, 'c', 'a goal hanging off the loop is untouched once the loop is open');
+  /* and the pure functions terminate on a loop the boundary never saw */
+  const loop = [{ id: 'p', target: 1, accounts: ['cash'], overflowOf: 'q' },
+                { id: 'q', target: 2, accounts: ['cash'], overflowOf: 'p' }];
+  eq(H.goalNeed(loop[0], loop, () => 0), 3, 'p needs its target plus q\'s; q\'s path back to p claims nothing');
 });
 
 group('Sections & quarterly rule');
@@ -3853,7 +3957,7 @@ t('it survives the boundary intact — every collection still there', () => {
   const n = (v) => Array.isArray(v) ? v.length : Object.keys(v || {}).length;
   ok(n(d.people) === 3, 'three people');
   ok(n(d.settings.accounts) === 5, "five accounts — a sixth means something minted one");
-  ok(n(d.goals) === 3, 'three goals');
+  ok(n(d.goals) === 4, 'four goals — the kitchen queues behind the roof (2026-09-05)');
   ok(n(d.years) === 3, 'this year plus two of history');
   ok(n(d.side.retirementAccounts) === 4, 'four retirement accounts');
   ok(n(d.side.snapshots) === 3, 'three net-worth snapshots');
@@ -3868,6 +3972,9 @@ t('every tab it fills has data behind it', () => {
   ok(d.years[y].categories.length > 8, 'budget: rows');
   ok(Object.keys(d.years[y].cells).length > 50, 'budget: actual figures');
   ok(d.goals.length && d.side.snapshots.length, 'progress: goals and net worth');
+  ok(d.goals.some(g => g.overflowOf && d.goals.some(p => p.id === g.overflowOf
+       && p.accounts.some(a => g.accounts.includes(a)))),
+    'progress: a goal claimed first by another on a shared account, so the tile\'s "after … claimed first by" foot is in the demo');
   ok(d.vacations.trips.length && d.vacations.pto[y], 'vacations: a trip and its PTO');
   ok(d.side.donations[y].length && d.side.daf.length, 'giving: donations and the fund');
   ok(d.side.portfolios[0].rows.length && Object.keys(d.side.targets).length,
@@ -9422,6 +9529,12 @@ t('a link from a newer build is refused, and marked as such', async () => {
   eq(back.sections, ['budget'], 'the current version still opens');
 });
 
+t('the payload version is 2: goals carry count ∈ {capped, all} plus claimed-first-by', () => {
+  /* A build at v1 would read `capped` + `overflowOf` as a plain capped goal and
+     draw the claim away — the silent misread the version exists to refuse. */
+  eq(H.SHARE_PAYLOAD_V, 2);
+});
+
 t('an unknown tab in a link is dropped, not drawn', async () => {
   const back = await H.decodeShare('0.' + btoa(JSON.stringify(
     { sections: ['budget', 'nonsense', 'goals'], data: { years: {} } })));
@@ -9506,6 +9619,76 @@ t('a goal-tied threshold reads the goal’s target live', () => {
                 accounts: ['cash'], count: 'capped' }];
   eq(computeOverflow(s2)['2026'].cells['tomid|2026-01'].v, -1894,
     'edit the goal and the row moves with it');
+});
+t('a sweep tied to a goal queued behind another starts where THAT goal is full', () => {
+  /* Charles's 2027: the row read New Car's bare $50,000 and swept $50k+ early.
+     A goal claimed first by another is full at its target on top of the claim
+     ahead of it — and that claim is read at the month's own figures. */
+  const s = overflowFixture();
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'car';
+  s.goals = [
+    { id: 'emerg', name: 'Emergencies', target: 10000, accounts: ['cash'], count: 'capped' },
+    { id: 'car', name: 'New Car', target: 5000, accounts: ['cash'], count: 'capped', overflowOf: 'emerg' },
+  ];
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].v, -2894, 'above 15,000 — 10,000 claimed first plus 5,000 — not above 5,000');
+  approx(c.balances['cash|2026-01'], 15000, 'cash lands where New Car is full');
+  /* the shortfall rule, live in the engine: once Emergencies also counts the
+     destination account, what Savings holds covers it and the line drops */
+  const s2 = overflowFixture();
+  const row2 = s2.years['2026'].categories[1];
+  delete row2.threshold;
+  row2.goalId = 'car';
+  s2.goals = [
+    { id: 'emerg', name: 'Emergencies', target: 10000, accounts: ['cash', 'long'], count: 'capped' },
+    { id: 'car', name: 'New Car', target: 5000, accounts: ['cash'], count: 'capped', overflowOf: 'emerg' },
+  ];
+  s2.years['2026'].seeds.long = 4000;
+  const c2 = computeOverflow(s2)['2026'];
+  eq(c2.cells['tomid|2026-01'].v, -6894, 'Emergencies claims only 6,000 from cash, so the line is 11,000');
+  approx(c2.balances['cash|2026-01'], 11000);
+  /* a plan with no queued goal computes exactly what it did */
+  const s3 = overflowFixture();
+  const row3 = s3.years['2026'].categories[1];
+  delete row3.threshold;
+  row3.goalId = 'emerg';
+  s3.goals = [{ id: 'emerg', name: 'Emergencies', target: 15000, accounts: ['cash'], count: 'all' }];
+  eq(computeOverflow(s3)['2026'].cells['tomid|2026-01'].v, -2894, 'nobody ahead: the bare target, as before');
+});
+t('a destination cap tied to a queued goal fills to where it is full', () => {
+  const s = overflowFixture();
+  const row = s.years['2026'].categories[1];
+  row.capGoalId = 'kitchen';
+  s.goals = [
+    { id: 'roof', name: 'Roof', target: 11000, accounts: ['mid'], count: 'capped' },
+    { id: 'kitchen', name: 'Kitchen', target: 1500, accounts: ['mid'], count: 'capped', overflowOf: 'roof' },
+  ];
+  const c = computeOverflow(s)['2026'];
+  eq(c.cells['tomid|2026-01'].v, -2500, 'room up to 12,500 (11,000 + 1,500), not up to 1,500');
+  approx(c.balances['mid|2026-01'], 12500, 'Savings lands where the kitchen is full');
+  approx(c.balances['cash|2026-01'], 17894 - 2500, 'the rest stays put');
+});
+t('a budget-only link freezes a queued goal’s threshold at its need, not its bare target', () => {
+  const s = H.coerceShape(overflowFixture());
+  const row = s.years['2026'].categories[1];
+  delete row.threshold;
+  row.goalId = 'car';
+  s.goals = [
+    { id: 'emerg', name: 'Emergencies', target: 10000, accounts: ['cash', 'long'], count: 'capped' },
+    { id: 'car', name: 'New Car', target: 5000, accounts: ['cash'], count: 'capped', overflowOf: 'emerg' },
+  ];
+  const payload = JSON.parse(JSON.stringify({ years: s.years, goals: [] }));
+  H.freezeOverflowThresholds(payload, s.goals, (id) => ({ long: 4000 })[id] || 0);
+  const frozen = payload.years['2026'].categories[1];
+  eq(frozen.goalId, undefined, 'the tie is gone');
+  eq(frozen.threshold, 11000, '5,000 on top of the 6,000 Emergencies still needs from cash today');
+  eq(frozen.thresholdAccounts, ['cash'], "measured on the goal's own accounts");
+  const bare = JSON.parse(JSON.stringify({ years: s.years, goals: [] }));
+  H.freezeOverflowThresholds(bare, s.goals);
+  eq(bare.years['2026'].categories[1].threshold, 15000,
+    'with no balances handed in, nothing is covered elsewhere');
 });
 t('the sweep runs AFTER interest: the source keeps its full month of growth', () => {
   const s = overflowFixture();
