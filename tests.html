@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1011;
+const EXPECTED = 1012;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -15057,9 +15057,11 @@ t('one window is one undo, however many boxes it took', () => {
      times would spend eight of the twenty slots in the ring and ⌘Z would walk
      back a BOX at a time — the undo spent on the very thing it exists to cover.
      The first commit banks; the rest borrow the `undoing` latch. */
-  ok(/const wasUndoing = undoing;\s*if \(ctx\.banked\) undoing = true;\s*save\(\);\s*undoing = wasUndoing;/
+  ok(/const wasUndoing = undoing;\s*if \(ctx\.banked\) undoing = true;\s*const banked = save\(\);\s*undoing = wasUndoing;/
      .test(src), 'commitRow banks on the first write of a window and latches for the rest');
-  ok(/ctx\.banked = true;/.test(src), 'and every commit after the first is inside the latch');
+  ok(/if \(banked\) ctx\.banked = true;/.test(src),
+     'and the latch closes only once the ring actually grew — a refused first commit banks '
+     + 'nothing and must not spend the window\'s one step (2026-09-07 audit, fix 2)');
   ok(/const auto = !isNew && !ed\.action;\s*rowCtx = \{ section, ds, spec, auto, banked: false \}/.test(src),
      'a window opens with nothing banked, so its FIRST write is the one worth going back to '
      + '— and an action section is never auto-saving (2026-09-07 audit, fix 3)');
@@ -16218,6 +16220,77 @@ t('renaming an account onto another that shares a month is refused out loud', as
     ok(said.some((m) => /Kept "Emergency fund" separate/.test(m)),
        'the refused merge is said the moment the name is finished with', JSON.stringify(said));
     D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+
+/* ── Fix 2: "one window is one undo" only if the first commit actually banked ─
+   `commitRow` set `ctx.banked = true` after every save(), but save() banks
+   only when the core moved (`undoBankable`). A first commit that was refused
+   or normalised back banked nothing, every later commit in that window
+   borrowed the `undoing` latch, and the window's real change was never banked
+   — so ⌘Z skipped it and reverted an unrelated earlier window instead. The
+   flag now means "the ring grew": save() says whether it banked.
+   REAL save() here, with only the storage write stubbed — the ring is the
+   thing under test, and a stubbed save() has no ring to grow. */
+t('a window whose first commit banked nothing still gets its own undo step', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?undobank=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.Storage.prototype.setItem = () => {};   // the ring moves; the disk does not
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.toast = () => {};
+    W.loadSample();
+    const s = W.finGet();
+    const y = String(new Date().getFullYear());
+    s.years[y].overrides = s.years[y].overrides || {};
+    s.years[y].overrides[`mid|${y}-06`] = { v: 1234 };     // makes a March close refusable
+    W.save();                                             // banked as its own step, before window A
+    const fire = (id, v) => {
+      const el = D.getElementById(id);
+      el.value = v;
+      el.dispatchEvent(new W.Event('change', { bubbles: true }));
+    };
+    const shut = async () => {
+      D.getElementById('rowDialog').close();
+      await new Promise((r) => setTimeout(r, 0));   // `close` is a queued task
+    };
+    /* Window A: a goal renamed. One step. */
+    D.getElementById('tab-goals').click();
+    const card = D.querySelector('[data-edit="goal"]');
+    const gi = +card.dataset.idx;
+    const wasName = s.goals[gi].name;
+    card.click();
+    fire('rf-name', 'Renamed In Window A');
+    await shut();
+    eq(s.goals[gi].name, 'Renamed In Window A', 'window A wrote');
+    /* Window B: a REFUSED close first (banks nothing), then a real change. */
+    D.getElementById('tab-budget').click();
+    /* Read FRESH each time: undoLast replaces the state object, so a reference
+       taken before it would go on reporting the state it undid. */
+    const acct = () => W.finGet().settings.accounts.find((a) => a.id === 'mid');
+    const wasRate = acct().rate;
+    D.querySelector('[data-edit="account"][data-bal="mid"]').click();
+    fire('rf-until', `${y}-03`);
+    eq(acct().until, undefined, 'fixture: the close was refused, so nothing moved');
+    fire('rf-rate', '5.5');
+    await shut();
+    eq(acct().rate, 0.055, 'window B wrote the rate');
+    /* One undo takes back window B and ONLY window B. */
+    W.undoLast();
+    eq(acct().rate, wasRate, 'undo put the rate back');
+    eq(W.finGet().goals[gi].name, 'Renamed In Window A',
+       'and did NOT reach back into window A — the rate change had its own step');
+    W.undoLast();
+    eq(W.finGet().goals[gi].name, wasName, 'the next undo is window A');
   } finally { f.remove(); }
 });
 

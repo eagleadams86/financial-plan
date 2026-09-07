@@ -2340,9 +2340,10 @@ columns, and cut into blocks with a rule and a small heading between them.
   - **One window is one undo.** Every `save()` banks the state it replaces, so a window that
     writes eight times would spend eight of the twenty slots in the ring and ⌘Z would walk
     back a BOX at a time — the undo spent on the very thing it exists to cover. The first
-    commit banks; the rest borrow the `undoing` latch (`ctx.banked`). The ring still ends up
-    holding the finished state, because the next `save()` anywhere banks `undoSnapshot`,
-    which the latched writes kept current.
+    commit THAT BANKS closes the latch; the rest borrow `undoing` (`ctx.banked`, which
+    means "the ring grew" — `save()` returns whether it did; the 2026-09-07 audit's fix 2).
+    The ring still ends up holding the finished state, because the next `save()` anywhere
+    banks `undoSnapshot`, which the latched writes kept current.
   - **A dialog's `close` event is a QUEUED TASK, and the guard on it is not defensive.**
     Found in the browser while this was built, and the same hazard Sprint Velocity's Jira
     auto-save wrote down first: close one editor, open the next before that task runs, and
@@ -6095,3 +6096,20 @@ in the commit.
   on the sample's six-months goal toasts, keeps `targetMonths` 6 and the box
   reads 6 again; a rename onto an account sharing a stated month toasts
   "Kept … separate".
+- **`ctx.banked` means the ring grew, not that `save()` ran (fix 2).**
+  `commitRow` set it unconditionally after the first `save()`, but `save()`
+  banks only when `coreOf` moved (`undoBankable`) — so a window whose first
+  commit was refused (fix 1's cases) or normalised back to what was stored
+  banked nothing, every later commit sat inside the `undoing` latch, and the
+  window's real change was never banked: ⌘Z skipped it and reverted the
+  window BEFORE it. `save()` now returns `banked`, and `commitRow` does `if
+  (banked) ctx.banked = true;`. Nothing else reads the return. The test runs
+  the REAL `save()` in a frame with `Storage.prototype.setItem` stubbed (a
+  stubbed `save` has no ring to grow — the trap the "glance writes nothing"
+  test wrote down): rename a goal in window A, then in window B refuse a
+  close and change a rate, and one undo puts the rate back while the rename
+  stands; the next undo is window A. Two traps inside it: seed the override
+  and `save()` BEFORE window A, or the seed itself is what the first commit
+  banks; and read the state through `finGet()` on every assertion, because
+  `undoLast` replaces the object and a captured reference reports the state
+  it undid.

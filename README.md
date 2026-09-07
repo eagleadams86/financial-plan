@@ -1705,7 +1705,10 @@ choice actually uses.
   the time you could press one the change is already made. The window says so
   under its buttons. If you change your mind, **Undo** puts the whole window
   back in one press, however many boxes you touched in it — one window is one
-  step, not one step per box. **And a refusal is said the moment it happens**
+  step, not one step per box (fixed 2026-09-07: a window whose first change was
+  refused, or came to nothing, used to have no step of its own — Undo skipped
+  it and reached back into the window before). **And a refusal is said the
+  moment it happens**
   (fixed 2026-09-07): close an account from a month a later month still states
   a balance for, untick the only main account, type 0 months of expenses, or
   rename an account onto one it cannot merge with, and the message appears as
