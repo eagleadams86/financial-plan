@@ -1506,6 +1506,10 @@ Every change banks the state it replaced, up to twenty deep, and ⌘Z / Ctrl+Z
 straight back through them, one honest step at a time.
 
 - **The ring lives in memory for this sitting only** — a reload starts fresh.
+- **A row editor counts as ONE change, not one per box** (2026-09-07). Editing a
+  row writes each field as you finish with it, so without this a window you
+  changed six things in would have spent six of the twenty steps and ⌘Z would
+  walk back a box at a time. One press puts the whole window back.
 - **It clears when another device's changes arrive**, since undoing past
   somebody else's work would overwrite it — and stays clear until you change
   something (until 2026-09-01 the first tab click after a sync offered an undo
@@ -1694,7 +1698,25 @@ choice actually uses.
   are left alone by this — a press there steps the figure once and stops.
   (A note is the exception: those are written over several lines and added to,
   so they're left as they are.)
-- **Clicking outside any dialog closes it** without saving.
+- **Editing a row saves as you go** (2026-09-07). Finish with a box — tab out of
+  it, pick from a list, tick a tick — and the figure is in; the grid behind the
+  window keeps up as you work, and the way out is **Done**. There is no Save
+  button because there is nothing left for it to do, and no Cancel because by
+  the time you could press one the change is already made. The window says so
+  under its buttons. If you change your mind, **Undo** puts the whole window
+  back in one press, however many boxes you touched in it — one window is one
+  step, not one step per box.
+- **Adding a row still asks.** A brand-new row keeps Cancel and Save, because
+  Cancel there means *never create it*, which saving as you go has no way to
+  say — so a window opened by a mis-click leaves nothing behind.
+- **The cell editor still asks too.** A month's cell is not just a set of boxes:
+  it splits into several amounts, accepts the estimates, reverts to the computed
+  figure or clears itself outright, and Cancel there means *leave this month
+  alone* — a bigger promise than any single box, and one worth keeping a button
+  for.
+- **Clicking outside a dialog does whatever that window's own way out does** —
+  Cancel where there is one, Done where the window saves as you go. What it
+  never is, is a way to half-close something.
 - **A small ⓘ beside a figure explains the arithmetic** behind it — including
   on a chart that is filling the window: the explanation opens on top, Escape
   closes it first, and the chart is still there behind it. (Fixed 2026-09-04;

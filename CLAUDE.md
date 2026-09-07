@@ -2318,8 +2318,45 @@ columns, and cut into blocks with a rule and a small heading between them.
   is entirely bold, that a body over 450 characters has a break in it, and that every run is
   a string or a `{ b }`. Short entries are deliberately left whole: three sentences split
   into three paragraphs is its own kind of unreadable.
+- **THE ROW EDITOR SAVES AS YOU GO WHEN IT IS EDITING, AND STILL ASKS WHEN IT IS ADDING
+  (2026-09-07).** One `#rowDialog` serves thirty-two `EDITORS` sections and both modes, and
+  the mode is `!isNew` — read once in `openRowEditor`, onto `rowCtx.auto`, and never worked
+  out again. Editing hides Cancel, shows the "Saved as you go" note and labels the button
+  **Done**; adding is untouched, because *Cancel means never create it* and auto-save has no
+  way to say that. Four things about it are load-bearing:
+  - **`change`, not `input`.** `change` is "finished with this box"; `input` would commit 1,
+    18 and 180 on the way to 1,800 and re-render the whole plan at each. The listener is
+    delegated on `#rowFields`, which is emptied and rebuilt on every open.
+  - **`commitRow` is the ONE write**, reached by a finished field, by Save on a new row, and
+    by the window closing. It reads the whole form every time, so committing twice with
+    nothing changed in between writes the same thing twice — which is what lets Done and the
+    last field's `change` both fire without either needing to know about the other. `speak`
+    is the only difference: a per-field commit is silent and leaves the focus alone
+    (`refocusEditRow` would throw the cursor out of the window you are still typing in).
+  - **One window is one undo.** Every `save()` banks the state it replaces, so a window that
+    writes eight times would spend eight of the twenty slots in the ring and ⌘Z would walk
+    back a BOX at a time — the undo spent on the very thing it exists to cover. The first
+    commit banks; the rest borrow the `undoing` latch (`ctx.banked`). The ring still ends up
+    holding the finished state, because the next `save()` anywhere banks `undoSnapshot`,
+    which the latched writes kept current.
+  - **A dialog's `close` event is a QUEUED TASK, and the guard on it is not defensive.**
+    Found in the browser while this was built, and the same hazard Sprint Velocity's Jira
+    auto-save wrote down first: close one editor, open the next before that task runs, and
+    the first window's handler arrives to end a context that now belongs to the second —
+    leaving a window that looks exactly right and quietly saves nothing. `if
+    (rowDialog.open) return;` is the whole test for a stale event. For the same family of
+    reason, **`rowDeleteBtn` and `moveRow` clear `rowCtx` before they close**: both have
+    already rearranged the rows a closing commit would write back to, so a delete had the
+    row it just removed put straight back, and a move left `ds.idx` pointing at whichever
+    row took this one's place.
+  **`cellDialog` deliberately still asks**, and that is not an oversight: it hosts
+  transformations (split into amounts, accept the estimates, revert, clear) rather than a set
+  of independent boxes, so Cancel there means "leave this month alone" — a bigger promise
+  than any one field.
 - **EVERY dialog closes on a backdrop click, and `tests.html` enumerates them out of the
-  markup rather than from a list** (2026-08-23). `compareDialog` had been missing from the
+  markup rather than from a list** (2026-08-23). The rule is *the backdrop is the window's
+  dismiss button*, not *the backdrop cancels* — on a window that saves as you go it means
+  Done, and the figures are already in. `compareDialog` had been missing from the
   registration list — read-only, one Close button, nothing about it that wanted an exception
   — and a hand-written test would have gone on agreeing with the hand-written list. **The
   one documented exception is family-wide and it is `syncChoiceDialog`**: "which copy of

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1002;
+const EXPECTED = 1007;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14772,14 +14772,20 @@ t('a budget row and an account open wide, in three columns, in their blocks', as
 
     /* Saving still works, which is the one thing a section MARKER could break:
        it has no key, so anything reading `rf-${f.key}` off it finds nothing and
-       asking that for a `.value` would throw — taking the whole save with it. */
+       asking that for a `.value` would throw — taking the whole save with it.
+       The assertion got STRONGER when editing began saving as you go: the grid
+       has to catch up with nothing pressed at all, so a marker that threw would
+       show up before any button could be blamed for it. */
     D.querySelector('th[data-edit="category"]').click();
     const before = D.getElementById('rf-name').value;
     D.getElementById('rf-name').value = before + ' (edited)';
-    [...dlg().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save').click();
-    ok(!dlg(), 'the window closed, so the save ran instead of throwing inside it');
+    D.getElementById('rf-name').dispatchEvent(new W.Event('change', { bubbles: true }));
     eq(D.querySelector('th[data-edit="category"]').textContent, before + ' (edited)',
-       'and the edit reached the grid');
+       'the edit reached the grid with nothing pressed');
+    const done = [...dlg().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Done');
+    ok(done, 'and the way out of a window that saves as you go is Done, not Save');
+    done.click();
+    ok(!dlg(), 'the window closed, so the save ran instead of throwing inside it');
 
     /* The account window, whose two rate blocks are three questions each — which
        is the shape that settled on three columns in the first place. */
@@ -14802,6 +14808,264 @@ t('a budget row and an account open wide, in three columns, in their blocks', as
     f.remove();
   }
 });
+/* ── SAVING AS YOU GO ───────────────────────────────────────────────────────
+   The row editor stopped asking on 2026-09-07: EDITING a row writes each field
+   as you finish with it and closes on Done, while ADDING one still asks, since
+   Cancel on a new row means "never create it" and auto-save has no way to say
+   that. One dialog serves both modes and thirty-two sections, so the mode is
+   read off `isNew` in one place and everything below pins the consequences. */
+t('editing a row saves as you go, and adding one still asks', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?auto=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    const dlg = () => [...D.querySelectorAll('dialog')].find((d) => d.open);
+    const closing = () => ({
+      cancel: !D.getElementById('rowCancelBtn').hidden,
+      note: !D.getElementById('rowAutoNote').hidden,
+      label: D.getElementById('rowSaveBtn').textContent,
+    });
+    const fire = (id, v) => {
+      const el = D.getElementById(id);
+      el.value = v;
+      el.dispatchEvent(new W.Event('change', { bubbles: true }));
+    };
+    const goals = () => [...D.querySelectorAll('[data-edit="goal"]')]
+      .map((r) => r.textContent.trim().split('\n')[0]);
+    /* Goals live on Progress; the budget row is on the tab the app opens at.
+       Two tabs, because the two halves of this test need the two SHAPES — a
+       row that already exists, and a list you can add to. */
+    const tab = (name) => [...D.querySelectorAll('button, a')]
+      .find((e) => e.textContent.trim() === name).click();
+
+    /* EDITING. The closing row says which of the two windows this is, and it is
+       the only thing that does — so it is read before anything else. */
+    D.querySelector('th[data-edit="category"]').click();
+    eq(closing(), { cancel: false, note: true, label: 'Done' },
+       'editing offers Done and says it saves as you go — there is no Cancel, because '
+       + 'by the time you could press one the figure is already in');
+    const was = D.getElementById('rf-name').value;
+    fire('rf-name', 'Saved As You Go');
+    eq(D.querySelector('th[data-edit="category"]').textContent, 'Saved As You Go',
+       'and finishing with a box is what writes it — no button in between');
+    fire('rf-name', was);
+    dlg().close();
+
+    /* ADDING. The same dialog, the other way round, and the load-bearing half is
+       that typing into it creates NOTHING: a window opened by a mis-click must
+       not leave a row behind, which is the one promise auto-save cannot make. */
+    tab('Progress');
+    const had = goals().length;
+    D.querySelector('[data-add="goal"]').click();
+    eq(closing(), { cancel: true, note: false, label: 'Save' },
+       'adding still asks — Cancel on a new row means "never create it"');
+    fire('rf-name', 'Must Not Exist');
+    eq(goals().length, had, 'and finishing with a box in an ADD window writes nothing');
+    dlg().close();                            // Escape and the backdrop end here too
+    eq(goals().length, had, 'nor does closing one without pressing Save');
+
+    /* And Save on that same window still does create it, so the mode above is a
+       different way in rather than a way out. Every box is left exactly as it
+       came, which is the case the "nothing moved" rule below must NOT swallow:
+       on a new row, opening it IS the change. */
+    D.querySelector('[data-add="goal"]').click();
+    fire('rf-name', 'Made By Save');
+    D.getElementById('rowSaveBtn').click();
+    ok(goals().includes('Made By Save'), 'Save on an add window creates the row');
+    D.querySelector('[data-add="goal"]').click();
+    const blank = goals().length;
+    D.getElementById('rowSaveBtn').click();
+    eq(goals().length, blank + 1,
+       'and Save creates one even with every box left as it came — an add window that '
+       + 'wrote nothing because nothing moved would be a dead button');
+  } finally { f.remove(); }
+});
+
+/* OPENING A ROW TO LOOK AT IT MUST NOT CHANGE IT. Every section rebuilds its
+   record from the whole form, so once closing a window commits, a value that
+   does not round-trip exactly comes back changed by nothing but a glance — a
+   rate stored to more places than its box shows is the real case, and "a
+   changed figure must be shown" is the standing rule it would break. The window
+   remembers what it opened holding and compares. */
+t('a row editor opened and closed untouched writes nothing at all', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?glance=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    let writes = 0;
+    W.save = () => { writes += 1; };
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    writes = 0;
+
+    /* A rate carrying more precision than its box can show — exactly the value
+       a glance used to round off. Written straight into the state so the form
+       has to be the thing that preserves it. */
+    D.querySelector('th[data-edit="account"]').click();
+    const rateBox = D.getElementById('rf-rate');
+    const shown = rateBox ? rateBox.value : null;
+    D.getElementById('rowDialog').close();
+    await new Promise((r) => setTimeout(r, 0));   // `close` is a queued task
+    /* Counting save() calls rather than diffing the state, because the fault
+       this guards against is a write that puts back ALMOST the same thing: a
+       state comparison would pass on every field that happens to round-trip
+       cleanly and only fail on the one that does not. No save is no save.
+       (The undo ring is deliberately not asserted here — `save` is stubbed in
+       this frame, so the ring never moves and a check on it could not fail.) */
+    eq(writes, 0, 'a window opened and closed with nothing typed saved nothing');
+
+    /* The same window, one box moved, still writes — the rule above must not be
+       a way for a real edit to go missing. */
+    D.querySelector('th[data-edit="account"]').click();
+    if (rateBox && shown !== null) eq(D.getElementById('rf-rate').value, shown,
+      'and the rate reads back exactly as it did before the glance');
+    const name = D.getElementById('rf-name');
+    name.value = name.value + ' (moved)';
+    name.dispatchEvent(new W.Event('change', { bubbles: true }));
+    ok(writes > 0, 'but a box that actually moved still writes');
+    D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+
+/* Both of these are windows that have ALREADY rearranged the rows a closing
+   commit would write back to, and both were live faults while this was being
+   built: delete had the commit put the row it had just removed straight back,
+   and move left `ds.idx` pointing at whichever row took this one's place, so
+   the values landed in somebody else's. Each takes the context down before it
+   closes; this is what says so. */
+t('delete and move leave nothing behind for the close to write back', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?delmove=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    const dlg = () => [...D.querySelectorAll('dialog')].find((d) => d.open);
+    const goals = () => [...D.querySelectorAll('[data-edit="goal"]')]
+      .map((r) => r.textContent.trim().split('\n')[0]);
+    const openGoal = (name) => [...D.querySelectorAll('[data-edit="goal"]')]
+      .find((r) => r.textContent.includes(name)).click();
+    [...D.querySelectorAll('button, a')]
+      .find((e) => e.textContent.trim() === 'Progress').click();   // where the goals are
+
+    /* TYPED AND LEFT UNCOMMITTED — no `change` — which is the shape that makes
+       this a real hazard rather than a hypothetical one. A field already
+       committed leaves the form matching what is stored, so the "nothing moved"
+       rule would decline the closing write anyway and a test built that way
+       would pass with the guard taken out. Typing without finishing leaves the
+       form dirty, so the close has something to write and only clearing the
+       context stops it landing. Enter is the everyday way to arrive here. */
+    const doomed = goals()[0];
+    openGoal(doomed);
+    D.getElementById('rf-name').value = 'Typed But Not Committed';
+    ok(!goals().includes('Typed But Not Committed'),
+       'nothing is written while the box is still being typed in');
+    D.getElementById('rowDeleteBtn').click();
+    await new Promise((r) => setTimeout(r, 0));   // `close` is a queued task
+    ok(!dlg(), 'the window closed');
+    ok(!goals().includes('Typed But Not Committed'),
+       'and the deleted row did not come back — a delete that closes must not have the '
+       + 'half-typed form written in behind it');
+    ok(!goals().includes(doomed), 'the row it deleted is gone, under either name');
+
+    /* A move swaps two rows, so a commit against the OLD index writes this row's
+       values over its neighbour. Dirty for the same reason as the delete above:
+       a clean form would decline the write on its own and prove nothing. */
+    const pair = goals().slice(0, 2);
+    openGoal(pair[1]);
+    if (!D.getElementById('rowUpBtn').hidden) {
+      D.getElementById('rf-name').value = 'Landed In The Wrong Row';
+      D.getElementById('rowUpBtn').click();
+      await new Promise((r) => setTimeout(r, 0));
+      eq(goals().slice(0, 2), [pair[1], pair[0]],
+         'the two rows swapped and BOTH kept their own name — a commit against the stale '
+         + 'index would have put this row’s values into the one it passed');
+    } else {
+      ok(true, 'this section does not reorder, so there is no stale index to strand');
+    }
+  } finally { f.remove(); }
+});
+
+/* THE ONE THAT WAS A REAL BUG, found in the browser rather than reasoned about,
+   and the same hazard Sprint Velocity's Jira auto-save wrote down first: a
+   dialog's `close` event is dispatched as a QUEUED TASK. Close one editor,
+   open the next before that task runs, and the first window's close handler
+   arrives to end a context that now belongs to the second — leaving a window
+   that looks exactly right and quietly saves nothing. */
+t('a stale close event cannot silence the window that replaced it', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?stale=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    /* All three in ONE task, which is what makes the close event stale: it
+       cannot run until this stretch of code gives the browser a turn. */
+    D.querySelector('th[data-edit="category"]').click();
+    D.getElementById('rowDialog').close();
+    D.querySelector('th[data-edit="category"]').click();
+    await new Promise((r) => setTimeout(r, 0));   // now let the stale one land
+    const el = D.getElementById('rf-name');
+    el.value = 'Still Saving';
+    el.dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq(D.querySelector('th[data-edit="category"]').textContent, 'Still Saving',
+       'the reopened window kept its context and still writes');
+  } finally { f.remove(); }
+});
+
+t('one window is one undo, however many boxes it took', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  /* Every save() banks the state it replaces, so a window that writes eight
+     times would spend eight of the twenty slots in the ring and ⌘Z would walk
+     back a BOX at a time — the undo spent on the very thing it exists to cover.
+     The first commit banks; the rest borrow the `undoing` latch. */
+  ok(/const wasUndoing = undoing;\s*if \(ctx\.banked\) undoing = true;\s*save\(\);\s*undoing = wasUndoing;/
+     .test(src), 'commitRow banks on the first write of a window and latches for the rest');
+  ok(/ctx\.banked = true;/.test(src), 'and every commit after the first is inside the latch');
+  ok(/rowCtx = \{ section, ds, spec, auto: !isNew, banked: false \}/.test(src),
+     'a window opens with nothing banked, so its FIRST write is the one worth going back to');
+  ok(/rowDialog\.addEventListener\('close'[\s\S]{0,900}?if \(rowDialog\.open\) return;/.test(src),
+     'and the close handler steps over a stale event rather than ending the live window');
+});
+
 /* Cheap, and it catches the one thing the frame test above cannot: a spec that
    grows a section marker without the machinery that reads one. */
 t('a section heading is skipped everywhere a field would be read', () => {

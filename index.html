@@ -2698,9 +2698,17 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
         <button type="button" class="btn" id="rowDownBtn" hidden title="Move down"
           aria-label="Move down">↓</button>
       </div>
+      <!-- ── THE CLOSING ROW READS TWO WAYS ────────────────────────────────
+           Editing a row that already exists saves as you go, so there is
+           nothing left for a Save button to do and no half-typed state a
+           Cancel could throw away: the note states the contract and Done is
+           the only way out. ADDING one still asks — Cancel there means "never
+           create it", which auto-save cannot express. openRowEditor sets both
+           from `isNew`. -->
       <div class="row">
+        <p class="muted" id="rowAutoNote" style="margin:0" hidden>Saved as you go</p>
         <button type="button" class="btn" id="rowCancelBtn">Cancel</button>
-        <button type="submit" class="btn primary">Save</button>
+        <button type="submit" class="btn primary" id="rowSaveBtn" value="save">Save</button>
       </div>
     </div>
   </form>
@@ -19372,7 +19380,11 @@ async function refreshPrices(quiet, only) {
    data-add="<section>". One delegated listener on #views routes both. */
 
 const rowDialog = F('rowDialog');
-let rowCtx = null;   // { section, ds (the row's dataset), spec }
+/* { section, ds (the row's dataset), spec, auto, banked }
+   `auto` is "this window writes as you go" — true for every EDIT, false while
+   ADDING, which is the one thing auto-save cannot say (see the closing row in
+   the markup). `banked` is the undo bookkeeping: see commitRow. */
+let rowCtx = null;
 
 /* Field types: text · password · money · number · percent (shown ×100) · date ·
    month · check · select (options: [[value, label]]) · note (full-width textarea) */
@@ -19601,6 +19613,12 @@ function buildFields(fields, values, link) {
         const set = (k, n) => { F(`rf-${k}`).value = n === null ? '' : fmtMoney(round2(n)); };
         f.action.run(val, set);
         if (link) link(f.key);
+        /* Setting `.value` fires no `input` or `change` of its own, so an
+           auto-saving window would show the new figure in the box and leave
+           the grid behind it reading the old one until Done. Pressing the
+           button is as deliberate as finishing a field, so it commits like
+           one. */
+        if (rowCtx && rowCtx.auto && rowMoved(rowCtx)) commitRow(rowCtx, false);
       };
       row.appendChild(btn);
       cell.appendChild(row);
@@ -19935,7 +19953,7 @@ function openRowEditor(section, ds, isNew) {
   const ed = EDITORS[section];
   if (!ed) return;
   const spec = typeof ed.fields === 'function' ? ed.fields(ds, isNew) : ed.fields;
-  rowCtx = { section, ds, spec };
+  rowCtx = { section, ds, spec, auto: !isNew, banked: false };
   F('rowDialogTitle').textContent =
     (typeof ed.title === 'function' ? ed.title(ds, isNew) : ed.title) || 'Edit';
   F('rowDialogSub').textContent =
@@ -19988,22 +20006,136 @@ function openRowEditor(section, ds, isNew) {
      the row wouldn't move. Preferences is where that switches back. */
   const canMove = ed.move && !(section === 'category' && state.settings.rowSort === 'alpha');
   F('rowUpBtn').hidden = F('rowDownBtn').hidden = isNew || !canMove;
+  /* The closing row, both ways. Cleared every open rather than only when it
+     changes: one dialog serves thirty-two sections and both modes, so a label
+     left over from the last open is a lie about what the buttons do. */
+  F('rowCancelBtn').hidden = !isNew;
+  F('rowAutoNote').hidden = isNew;
+  F('rowSaveBtn').textContent = isNew ? 'Save' : 'Done';
+  /* `returnValue` outlives a close, and the submit button sets it to "save" —
+     so without this, a window opened after a Save would think it had been
+     saved before anybody pressed anything. */
+  rowDialog.returnValue = '';
+  /* THE FORM AS IT OPENED, so a window that saves as you go can tell whether
+     anything actually moved. Without it, opening a row to LOOK at it and
+     closing again would rewrite it: every section rebuilds its record from the
+     whole form, and a value that does not round-trip exactly — a rate stored to
+     more places than its box shows is the real case — would come back changed
+     by nothing but a glance. It also keeps the undo ring honest, since a write
+     that changed nothing would still spend a step. Captured after buildFields
+     and after `link` has primed the derived boxes, so it is what the reader is
+     actually looking at. */
+  rowCtx.opened = JSON.stringify(readFields(spec));
   openModal(rowDialog);
   /* Only now is the grid laid out and its columns measurable — see the guard
      in applyFieldSpans. */
   applyFieldSpans(spec);
 }
 
-/* A section that did something the reader can't see on the page in front of
-   them says so by returning the sentence to show; saving is otherwise silent,
-   because the change is right there in the grid. */
-F('rowForm').onsubmit = () => {
-  const { section, ds, spec } = rowCtx;
-  const said = EDITORS[section].save(ds, readFields(spec));
-  save(); render();
-  refocusEditRow(rowCtx);
+/* ── Writing the row ────────────────────────────────────────────────────────
+   Whether this window is holding anything different from what it opened with.
+   Only the auto-saving paths ask: pressing Save on a NEW row must create it
+   even if every box was left as it came. */
+function rowMoved(ctx) {
+  return JSON.stringify(readFields(ctx.spec)) !== ctx.opened;
+}
+
+/* THE ONE WRITE, whichever of the three things that reach it got here: a field
+   you finished with in an auto-saving window, the Save button on a new row, or
+   the window closing. It reads the whole form every time and hands it to the
+   section's own `save`, so committing twice with nothing changed in between
+   writes the same thing twice — which is what lets Done and the last field's
+   `change` both fire without anyone having to know which arrived first.
+
+   `speak` is the difference between the two kinds of caller. A per-field
+   commit is SILENT and leaves the focus alone: a toast per box would be noise,
+   and refocusEditRow would throw the cursor out of the window you are still
+   typing in. The closing commit does both, exactly as Save always did.
+
+   ONE UNDO STEP PER WINDOW, NOT ONE PER FIELD. Every save() banks the state it
+   replaces, so a window that saves eight times would fill eight of the twenty
+   slots in the ring and ⌘Z would walk back a box at a time — the undo spent on
+   the very thing it exists to cover. So the FIRST commit banks (that is the
+   pre-window state, the one worth going back to) and every one after it
+   borrows the `undoing` latch to bank nothing. The ring still ends up holding
+   the finished state, because the next save() anywhere banks `undoSnapshot`,
+   which these kept up to date. One ⌘Z, one window. */
+function commitRow(ctx, speak) {
+  const values = readFields(ctx.spec);
+  /* What is now written down, so a close that follows with nothing further
+     typed knows it has nothing to do. */
+  ctx.opened = JSON.stringify(values);
+  const said = EDITORS[ctx.section].save(ctx.ds, values);
+  const wasUndoing = undoing;
+  if (ctx.banked) undoing = true;
+  save();
+  undoing = wasUndoing;
+  ctx.banked = true;
+  render();
+  if (!speak) return;
+  refocusEditRow(ctx);
+  /* A section that did something the reader can't see on the page in front of
+     them says so by returning the sentence to show; saving is otherwise
+     silent, because the change is right there in the grid. */
   if (typeof said === 'string') toast(said);
+}
+
+/* Editing writes as you finish each box. `change` and NOT `input`: it is the
+   event that means "done with this one" — a select moved, a box tabbed out of,
+   a tick — where `input` would fire per keystroke and commit 1, 18 and 180 on
+   the way to 1,800, re-rendering the whole plan each time. Delegated on the
+   host, because #rowFields is emptied and rebuilt on every open and listeners
+   wired to the boxes themselves would be a fresh stack per window. */
+F('rowFields').addEventListener('change', () => {
+  if (rowCtx && rowCtx.auto && rowMoved(rowCtx)) commitRow(rowCtx, false);
+});
+
+/* Adding still commits here, unchanged: it is the one mode where the close
+   below writes nothing, so this must not depend on an event that may not
+   arrive. `rowCtx` is cleared so the close that follows knows the work is
+   done. An auto-saving window falls straight through — its figures are already
+   in, and `close` says the last word. */
+F('rowForm').onsubmit = () => {
+  const ctx = rowCtx;
+  if (!ctx || ctx.auto) return;
+  rowCtx = null;
+  commitRow(ctx, true);
 };
+
+/* THE LAST WORD FOR AN AUTO-SAVING WINDOW, and it hangs off `close` rather
+   than off Done because Done is only one of three ways out: Escape and a click
+   on the backdrop end the window too, and on a window that saves as you go all
+   three mean the same thing. That is a real change to what Escape means here —
+   it used to throw the edit away — and it is the trade the note in the closing
+   row states out loud. Nothing is lost if this never fires: every field
+   committed on its way past, so this is the toast, the focus and a backstop
+   for the box that was still under the cursor, not the save itself.
+   Delete and the two move buttons clear `rowCtx` before they close, because
+   both have already rearranged the very rows a commit would write back to. */
+rowDialog.addEventListener('close', () => {
+  /* THE GUARD IS NOT DEFENSIVE, IT IS LOAD-BEARING (found in the browser, and
+     the hazard Sprint Velocity's Jira auto-save wrote down first): `close` is
+     dispatched as a QUEUED TASK, not synchronously with close(). Delete a row
+     and open the next editor quickly enough and the FIRST window's close event
+     arrives after the SECOND one is already up — and this handler, which ends
+     the context it finds, would end that new window's instead. What was left
+     was a window that looked exactly right and quietly saved nothing.
+     A stale event is one where the dialog is open again; that is the whole
+     test. openRowEditor sets the context and calls showModal() with no await
+     between them, so there is no moment where a live context has a shut
+     dialog. */
+  if (rowDialog.open) return;
+  const ctx = rowCtx;
+  rowCtx = null;
+  if (!ctx || !ctx.auto) return;
+  /* Nothing moved — most often a window opened to READ a row — so there is
+     nothing to write, nothing to say and no undo step to spend. It still
+     catches the box that was under the cursor when the window ended: Enter
+     submits without blurring, so that field never fired a `change` of its own
+     and this comparison is the only thing that sees it. */
+  if (!rowMoved(ctx)) return;
+  commitRow(ctx, true);
+});
 F('rowCancelBtn').onclick = () => rowDialog.close();
 /* THE ROW EDITOR'S OWN INFO DOTS, and they need their own listener: the one
    that routes every other dot is on `#views`, and this dialog is not in it.
@@ -20023,8 +20155,14 @@ rowDialog.addEventListener('click', (e) => {
   e.stopPropagation();
   openHelp(dot.dataset.help);
 });
+/* Both of these take `rowCtx` down before closing, and it is load-bearing now
+   that closing an auto-saving window commits: a delete would have the commit
+   write the row it just removed straight back in, and a move leaves `ds.idx`
+   pointing at the row that took this one's place — so the commit would put
+   these values into somebody else's row. Read what is needed, then clear. */
 F('rowDeleteBtn').onclick = () => {
   const { section, ds } = rowCtx;
+  rowCtx = null;
   /* A section can refuse a delete (and say why itself) by returning false. */
   const said = EDITORS[section].del(ds);
   rowDialog.close();
@@ -20035,6 +20173,7 @@ F('rowUpBtn').onclick = () => moveRow(-1);
 F('rowDownBtn').onclick = () => moveRow(1);
 function moveRow(dir) {
   const { section, ds } = rowCtx;
+  rowCtx = null;
   if (EDITORS[section].move(ds, dir)) { save(); render(); }
   rowDialog.close();
 }
@@ -25701,8 +25840,13 @@ function openModal(dlg) {
 
 /* ── Clicking outside a dialog closes it ────────────────────────────────────
    A modal <dialog> ignores backdrop clicks by default, which reads as the app
-   being stuck. Clicking outside now cancels, exactly like Cancel and Escape —
-   the family pattern from Sprint Velocity, and nothing is saved on the way out.
+   being stuck. Clicking outside now does whatever the window's own way out
+   does, exactly like Escape — the family pattern from Sprint Velocity. On a
+   window that still asks (the cell editor, adding a row) that is Cancel, and
+   nothing is saved on the way out; on one that saves as you go (editing a row)
+   it is Done, and the figures are already in. The rule is "the backdrop is the
+   dismiss button", not "the backdrop cancels": what it never is, is a way to
+   half-close something.
    Two details are load-bearing:
      · the hit test is against the dialog's box, not `e.target === dialog` —
        the dialog has padding, and a click on that padding is still inside it;
