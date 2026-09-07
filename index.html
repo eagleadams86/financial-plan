@@ -6809,8 +6809,33 @@ function claimAccounts(goal, goals, seen = new Set()) {
   if (!pred) return [];
   return [...new Set([...(pred.accounts || []), ...claimAccounts(pred, goals, seen)])];
 }
+/* A GOAL CAN ONLY CLAIM OUT OF ACCOUNTS IT COUNTS (2026-09-07). Reported: an
+   account unticked from an earlier goal and left ticked on a later one, and
+   the later goal read $0. The shortfall rule reads what pred holds OUTSIDE
+   the set — so once pred stops counting the shared account, every dollar it
+   holds is outside, its whole unmet target becomes the claim, and it is
+   levied against accounts pred does not name and cannot reach. Emergencies,
+   $37,026, moved off Cash Mgmt: New Car went on counting $36,701 of its own
+   and reported nothing.
+   The test is STRUCTURAL, never a balance — the claim is also the threshold a
+   sweep row starts at, and a threshold that moved with the balances the sweep
+   is computing would be circular.
+   It asks PRED ALONE, not the chain, and the alternative was weighed: with
+   three queued and a middle goal sharing nothing with the last, testing the
+   whole chain lets the MIDDLE goal's own shortfall through on the strength of
+   the FIRST goal's overlap — a claim by a goal that still cannot reach the
+   account, which is the fault being fixed wearing a hat. Asking pred alone
+   can only ever claim too little, never too much, and it states the rule
+   exactly. The cost, written down rather than papered over: a queue whose
+   middle link shares no account with the last drops the first goal's real
+   claim on an account they do share. A one-level claim cannot express a
+   three-way partition, and inventing a number for it is what this is fixing.
+   Sharing one account is enough — from there the arithmetic is what it always
+   was, so nothing moves in a plan where the queue meets on an account, which
+   is every plan this was written for. */
 function goalClaim(pred, accounts, goals, bal, seen = new Set()) {
   if (!pred || seen.has(pred.id)) return 0;
+  if (!(pred.accounts || []).some(id => (accounts || []).includes(id))) return 0;
   const need = goalNeed(pred, goals, bal, seen);
   const outside = (pred.accounts || []).filter(id => !accounts.includes(id))
     .reduce((t, id) => t + (bal(id) || 0), 0);

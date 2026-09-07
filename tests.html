@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 994;
+const EXPECTED = 997;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -985,6 +985,58 @@ t('a claim is only the shortfall: money the earlier goal holds elsewhere covers 
   approx(e.saved + r.saved, Math.min(cash + bank, 5000) + Math.min(6000, cash + bank - 5000),
     'together they hold exactly what the accounts hold, up to their targets');
   approx(r.claimed, H.round2(Math.max(0, 5000 - bank)), 'the tile names the shortfall');
+});
+/* ── A goal can only claim out of accounts it counts (2026-09-07) ───────────
+   Reported: an account unticked from an earlier goal and left ticked on a
+   later one, and the later goal read $0. The shortfall rule measures what
+   pred holds OUTSIDE the successor's set — so the moment pred stops counting
+   the shared account, everything it holds is "elsewhere", its whole unmet
+   target becomes the claim, and it is charged against accounts pred does not
+   name and cannot reach. */
+t('an earlier goal that shares no account claims nothing (2026-09-07)', () => {
+  const held = (m) => (id) => m[id] || 0;
+  const bal = held({ cash: 36701, bank: 100 });
+  const car = { id: 'c', name: 'New Car', target: 20000, accounts: ['cash'],
+    count: 'capped', overflowOf: 'e' };
+  /* While they share cash, nothing about this changes — the reported figure
+     is the BEFORE, and it was right for a goal the emergency fund can reach. */
+  const shared = [{ id: 'e', name: 'Emergencies', target: 37026,
+    accounts: ['cash', 'bank'], count: 'capped' }, car];
+  eq(H.goalClaim(shared[0], ['cash'], shared, bal), 36926,
+     'sharing cash, the claim is the shortfall as before');
+  eq(H.goalNeed(shared[1], shared, bal), 56926, 'and New Car is full at both targets less the bank');
+  /* Untick cash from Emergencies. It now counts the bank alone, so it can
+     take nothing out of cash however far short it is. */
+  const split = [{ ...shared[0], accounts: ['bank'] }, car];
+  eq(H.goalClaim(split[0], ['cash'], split, bal), 0,
+     'counting the bank alone, it claims nothing out of cash');
+  eq(H.goalNeed(split[1], split, bal), 20000, 'so New Car is full at its own target');
+  /* The figure the report was about: $36,701 of its own, reported as $0. */
+  const s = H.coerceShape(fixtureState());
+  s.goals = [{ id: 'e', name: 'Emergencies', target: 5000, accounts: ['bank'], count: 'capped' },
+    { id: 'c', name: 'New Car', target: 900, accounts: ['cash'], count: 'capped', overflowOf: 'e' }];
+  const computed = H.computeAll(s, TODAY_FIX);
+  const cash = computed['2030'].balances['cash|2030-04'];
+  const [em, nc] = H.computeGoals(s, computed, TODAY_FIX);
+  ok(cash > 900, 'fixture: cash is over New Car\'s target on its own', cash);
+  ok(em.held < 5000, 'fixture: and the fund it sits behind is short', em.held);
+  eq(nc.claimed, 0, 'nothing is claimed off it');
+  eq(nc.saved, 900, 'so the tile reads its own money, not $0');
+  /* The foot only prints a claim above zero, so the tile stops saying it is
+     queued behind a goal that is taking nothing from it. */
+  ok(nc.claimedBy, 'the link itself is untouched — the goal is still queued');
+});
+/* The test is STRUCTURAL — never a balance — because the same claim is the
+   threshold a sweep row starts at, and a threshold that moved with the
+   balances the sweep is computing would be circular. */
+t('the shared-account test reads the account lists, never the balances (2026-09-07)', () => {
+  const goals = [
+    { id: 'a', name: 'A', target: 1000, accounts: ['bank'], count: 'capped' },
+    { id: 'b', name: 'B', target: 500, accounts: ['cash'], count: 'capped', overflowOf: 'a' },
+  ];
+  eq(H.goalClaim(goals[0], ['cash'], goals, () => 0), 0, 'empty accounts: still no claim');
+  eq(H.goalClaim(goals[0], ['cash'], goals, () => 999999), 0, 'full accounts: still no claim');
+  eq(H.goalClaim(goals[0], [], goals, () => 0), 0, 'a successor counting nothing can be claimed from by nobody');
 });
 t('a claim is always by target, whatever the earlier goal counts', () => {
   const goals = [
@@ -14375,6 +14427,22 @@ t('the select-all button is opt-in, and only the goal accounts field asks for it
    and because the live path would need a closed account in state: the frame
    shares this origin's `fin-state`, and seeding one would write over the real
    plan (the ambient-state trap, from the other direction). */
+/* The pure half of this lives up in the goal-queue group; the guard's SHAPE is
+   pinned here, where `APP_SRC` has been fetched. It has to come before the
+   need is worked out and read the account lists alone — the same claim is the
+   threshold a sweep row starts at, and a threshold that moved with the
+   balances the sweep is computing would be circular. */
+t('the shared-account guard reads the lists, and reads them first (2026-09-07)', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const fn = src.slice(src.indexOf('function goalClaim(')).slice(0, 500);
+  ok(/if \(!\(pred\.accounts \|\| \[\]\)\.some\(id => \(accounts \|\| \[\]\)\.includes\(id\)\)\) return 0;/
+     .test(fn), 'the guard is the two account lists and nothing else');
+  ok(!/bal\(/.test(fn.slice(0, fn.indexOf('const need'))),
+     'no balance is read before it');
+  ok(fn.indexOf('.some(id =>') < fn.indexOf('goalNeed('),
+     'and it comes before the need is worked out at all');
+});
 t('a goal is not offered an account that is already closed (2026-09-07)', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const src = stripComments(APP_SRC);

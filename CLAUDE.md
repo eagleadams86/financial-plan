@@ -1477,6 +1477,40 @@ suite passed while the card was wrong.
     Where pred's accounts sit inside the set it reduces to the old arithmetic.
   - **A claim is always by target, whatever pred's `count`** — "all of it" says
     how far pred's own bar runs, never what it takes from the goals behind it.
+  - **A GOAL CAN ONLY CLAIM OUT OF ACCOUNTS IT COUNTS** (2026-09-07). Reported:
+    an account unticked from an earlier goal and left ticked on a later one,
+    and the later goal read $0. The shortfall rule measures what pred holds
+    OUTSIDE the successor's set — so the moment pred stops counting the shared
+    account, every dollar it holds is "elsewhere", its whole unmet target
+    becomes the claim, and it is levied against an account pred does not name
+    and cannot reach. On Charles's own plan, moving Emergencies ($37,026) off
+    Cash Mgmt left Renovations reading $4,905 of the $36,701 sitting in an
+    account nothing ahead of it could touch. `goalClaim` returns 0 unless
+    pred's accounts and the successor's share one.
+    - **The test is STRUCTURAL, never a balance, and that is not style.** The
+      same claim is the threshold a sweep row starts at and the figure a
+      destination cap fills to; a threshold that moved with the balances the
+      sweep is computing would be circular. It sits ABOVE the `goalNeed` call
+      for the same reason, and a test pins both the shape and the order.
+    - **It asks PRED ALONE, not `claimAccounts`, and the chain was weighed.**
+      With three queued and a middle goal sharing nothing with the last,
+      testing the whole chain lets the MIDDLE goal's own shortfall through on
+      the strength of the FIRST goal's overlap — a claim by a goal that still
+      cannot reach the account, which is this fault in a hat. Pred alone can
+      only ever claim too little. **The cost is real and is written down
+      rather than papered over**: that queue drops the first goal's genuine
+      claim on an account they do share. A one-level claim cannot express a
+      three-way partition, and inventing a number for it is what this fixes.
+    - **Nothing moves where the queue meets on an account** — sharing one is
+      enough, and from there the arithmetic is untouched. Verified against the
+      real plan: with all three goals on Cash Mgmt the tiles read $37,026 /
+      $4,905 / $0 before and after, and the real-data cross-check passes.
+    - **A later goal may still read $0 for an honest reason**, and the two
+      look identical on the tile: on that plan, unticking Cash Mgmt from
+      Emergencies lifts Renovations to $36,701 and leaves New Car at $0,
+      because Renovations is directly ahead of it on the same account and
+      needs $50,000 out of $36,701. Check WHICH goal is doing the claiming
+      before calling a $0 wrong — the tile's foot names it.
   - **Four readers, one function**: `computeGoals` (the tile's `saved`, plus
     `claimed`/`claimedBy` so the foot says why a goal reads low), the engine's
     sweep THRESHOLD and destination CAP (read at the month's `endOf` figures,

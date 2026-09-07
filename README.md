@@ -804,7 +804,14 @@ own target. (A goal already queued behind this one is not offered — the two
 would claim each other — and if a stale form names one anyway the save says so
 and leaves the claim empty.) A goal that holds part of its money in accounts you didn't tick
 here claims only its shortfall from the shared ones, so no dollar is counted by
-two goals and none is missed; the tile says what was claimed ahead of it.
+two goals and none is missed; the tile says what was claimed ahead of it. **A
+goal can only claim out of accounts it counts**: untick the shared account from
+the earlier goal and it stops claiming anything from the later one, whatever it
+is still short of, because it can no longer reach that money. (The link itself
+is left alone — the goal is still queued, it is simply taking nothing.) Where
+three are queued and the middle one shares no account with the last, the first
+goal's claim on an account they do share is dropped rather than guessed at: a
+one-level claim cannot express a three-way split.
 Deleting a goal frees the goals that were claimed first by it — they count
 from the first dollar from then on — and the toast names them.
 
