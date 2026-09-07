@@ -6132,3 +6132,13 @@ in the commit.
   that is NOT a loss: `thresholdAccounts` goes on every save of the row
   editor by design — it is a share link's frozen measure, and "what you saved
   is what it showed" — so the test does not pin it.
+- **Select all / Clear all commits like the money action button (fix 6).**
+  Both buttons write the FORM and fire no `change` of their own; the money
+  action button was given a commit for exactly that reason when the editor
+  went auto-saving, and the checkset's button was not — so every box ticked
+  while the tile behind stayed on the old list until Done. The same one line
+  (`if (rowCtx && rowCtx.auto && rowMoved(rowCtx)) commitRow(rowCtx,
+  false)`) follows `sync()` and `link`. `reprimeRow` then sends the checkset
+  its non-bubbling `change`, so the button's word follows what was stored.
+  The test presses the button in the sample's first goal and reads
+  `state.goals[idx].accounts` before anything else happens, both ways.

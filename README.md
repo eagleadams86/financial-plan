@@ -778,7 +778,9 @@ Where the whole plan stands and where it has been, on one tab.
 
 Goals add up whichever accounts you tick, so splitting an account is a matter
 of ticking the new ones. **Select all** beside the list ticks the lot, and
-turns into **Clear all** once everything is ticked. An account you have
+turns into **Clear all** once everything is ticked — and the press is a change
+in its own right, so the goal behind the window counts the new list at once
+(fixed 2026-09-07: it used to wait for Done). An account you have
 **closed** is not offered — it holds nothing for a goal to count — so an old
 goal that named one drops it the next time you save, with a line saying so;
 no figure moves, because a closed account had no balance to be counting.
