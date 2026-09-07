@@ -5817,7 +5817,8 @@ function save() {
      undo (which must consume history, not mint it), and except when nothing
      outside `ui` moved: a tab switch is not a change anybody regrets. */
   const core = coreOf(state);
-  if (undoBankable(core, undoCore, undoing)) {
+  const banked = undoBankable(core, undoCore, undoing);
+  if (banked) {
     undoRing = pushSnapshot(undoRing, undoSnapshot, UNDO_CAP);
     updateUndoBtn();
   }
@@ -5835,6 +5836,9 @@ function save() {
   }
   /* The sync module (foot of the file) registers this when signed in. */
   if (window.cloudPush) window.cloudPush();
+  /* Whether THIS save minted history — commitRow's "one window, one undo"
+     bookkeeping needs the fact, not a guess (2026-09-07 audit, fix 2). */
+  return banked;
 }
 
 /* ── Domain helpers ─────────────────────────────────────────────────────── */
@@ -6854,19 +6858,35 @@ function goalDrawOrder(goal, order) {
   const known = (order || []).filter(id => want.includes(id));
   return [...known, ...want.filter(id => !known.includes(id))];
 }
-function goalRemaining(goal, goals, order, bal) {
-  if (!goal) return 0;
+/* `goalDraw` is the replay itself and says WHO took what out of this goal's
+   accounts, front of the queue first; `goalRemaining` is what it leaves. The
+   takers are what the tile's foot names (2026-09-07 audit, fix 4): it used to
+   name the goal this one is claimed first BY, which is the link, not the
+   taker — Roof ← Kitchen ← College with Roof and College on one account put
+   "claimed first by Kitchen" on College's tile while Kitchen had taken
+   nothing. A goal ahead that drew nothing from these accounts is not listed. */
+function goalDraw(goal, goals, order, bal) {
+  if (!goal) return { remaining: 0, taken: [] };
+  const mine = goal.accounts || [];
   const left = new Map();
   const at = (id) => (left.has(id) ? left.get(id) : (bal(id) || 0));
+  const taken = [];
   for (const ahead of goalChain(goal, goals)) {
-    let want = ahead.target || 0;
+    let want = ahead.target || 0, fromMine = 0;
     for (const id of goalDrawOrder(ahead, order)) {
       if (want <= 0) break;
       const take = Math.min(at(id), want);
-      if (take > 0) { left.set(id, at(id) - take); want -= take; }
+      if (take > 0) {
+        left.set(id, at(id) - take); want -= take;
+        if (mine.includes(id)) fromMine += take;
+      }
     }
+    if (fromMine > 0) taken.push({ id: ahead.id, name: ahead.name || ahead.id, amount: round2(fromMine) });
   }
-  return round2((goal.accounts || []).reduce((t, id) => t + at(id), 0));
+  return { remaining: round2(mine.reduce((t, id) => t + at(id), 0)), taken };
+}
+function goalRemaining(goal, goals, order, bal) {
+  return goalDraw(goal, goals, order, bal).remaining;
 }
 /* Every account a goal's claim chain reads: the accounts of the goal ahead
    of it, and of the goal ahead of THAT, and so on. What `goalClaim` measures
@@ -6903,6 +6923,26 @@ function claimAccounts(goal, goals, seen = new Set()) {
    Sharing one account is enough — from there the arithmetic is what it always
    was, so nothing moves in a plan where the queue meets on an account, which
    is every plan this was written for. */
+/* THE CLAIM WALKS THE WHOLE QUEUE, THE WAY THE TILE DOES (2026-09-07 audit,
+   fix 4 — and it SUPERSEDES the "pred alone" paragraph above). `goalRemaining`
+   replays every goal ahead, account by account; this read the immediate
+   predecessor alone and returned 0 when that one shared no account — so with
+   Roof (mid) ← Kitchen (emergency) ← College (mid), the tile took $14,000 off
+   College for Roof while `goalNeed(college)` was its bare target, and a sweep
+   tied to College stopped $14,000 short of where the tile said it was full.
+   Each goal ahead now draws its OWN target over its OWN accounts in the
+   reader's order, from balances the goals before it have already drawn down,
+   and only what lands on an account the successor counts is the claim. The
+   fault the pred-alone rule was written against cannot happen here: a middle
+   goal that shares nothing never reaches an account of the successor's, so
+   its shortfall — however large — lands nowhere. `held − remaining` on the
+   tile and this figure are the same replay, so they agree by construction;
+   the test pins both on the audit's fixture. The structural guard stands in
+   the same form: a goal that counts none of these accounts contributes
+   nothing whatever the balances say, and the successor's own accounts are
+   never read — bottomless, as before — so a sweep threshold cannot depend on
+   the account it is filling. `seen` carries the successor's id, so a loop
+   still ends at the goal itself. */
 /* THE SHORTFALL IS NO LONGER INFERRED — IT IS THE ORDER YOU LIST THE ACCOUNTS
    IN (2026-09-07, asked for). The rule was "pred takes from the shared
    accounts only what its OTHER accounts do not cover", which quietly assumed
@@ -6922,14 +6962,26 @@ function claimAccounts(goal, goals, seen = new Set()) {
    goal is full. */
 function goalClaim(pred, accounts, goals, bal, order, seen = new Set()) {
   if (!pred || seen.has(pred.id)) return 0;
-  if (!(pred.accounts || []).some(id => (accounts || []).includes(id))) return 0;
-  let want = goalNeed(pred, goals, bal, order, seen), claim = 0;
-  for (const id of goalDrawOrder(pred, order)) {
-    if (want <= 0) break;
-    /* Bottomless: whatever pred still needs when it reaches an account the
-       successor counts is what must be there for both of them. */
-    if ((accounts || []).includes(id)) { claim += want; want = 0; break; }
-    want -= Math.min(bal(id) || 0, want);
+  const set = accounts || [];
+  /* Front of the queue first, then pred itself — the goals ahead of pred draw
+     before pred does, off the same balances. A goal already on the path (the
+     successor itself, on a loop the boundary never saw) is left out, so the
+     walk ends at the goal whose need is being asked. */
+  const chain = [...goalChain(pred, goals, new Set(seen)), pred]
+    .filter(g => !seen.has(g.id));
+  const left = new Map();
+  const at = (id) => (left.has(id) ? left.get(id) : (bal(id) || 0));
+  let claim = 0;
+  for (const ahead of chain) {
+    let want = ahead.target || 0;
+    for (const id of goalDrawOrder(ahead, order)) {
+      if (want <= 0) break;
+      /* Bottomless: whatever this goal still needs when it reaches an account
+         the successor counts is what must be there for both of them. */
+      if (set.includes(id)) { claim += want; want = 0; break; }
+      const take = Math.min(at(id), want);
+      if (take > 0) { left.set(id, at(id) - take); want -= take; }
+    }
   }
   return round2(claim);
 }
@@ -7024,7 +7076,7 @@ function computeGoals(st, computed, todayIso) {
        on. The gap the pace check divides is still `need − held` for the same
        reason: money that ARRIVES lands in these accounts, where the goals
        ahead are waiting for it. */
-    const remaining = goalRemaining(g, goals, accountOrder, bal);
+    const { remaining, taken } = goalDraw(g, goals, accountOrder, bal);
     const claimed = round2(Math.max(0, held - remaining));
     let saved = remaining;
     if (g.count !== 'all') saved = Math.min(saved, g.target || 0);   // capped: never more than the goal
@@ -7035,7 +7087,11 @@ function computeGoals(st, computed, todayIso) {
     const pace = goalPace(g, need, held, cur, c, yr, priorC);
     return {
       ...g, saved, held, claimed,
-      claimedBy: pred ? (pred.name || pred.id) : null,
+      /* The goals that actually TOOK the money, front of the queue first —
+         or, when nothing was taken, the link itself, so a queued goal reading
+         its accounts in full still says it is queued (2026-09-07 audit, fix 4). */
+      claimedBy: taken.length ? andList(taken.map(t => t.name))
+        : pred ? (pred.name || pred.id) : null,
       progress: g.target ? saved / g.target : 0,
       monthsLeft,
       /* Over the GAP, not the goal's own shortfall — a goal queued behind
@@ -7475,6 +7531,10 @@ const HELP = {
     ['"All of it" on the earlier goal changes how far its own bar runs, never what it claims '
       + '\u2014 a claim is always the target. A sweep row tied to a queued goal starts where '
       + 'that goal is full: its target on top of every claim ahead of it.'],
+    ['The ', b('whole queue'), ' is walked, not only the goal named here: a goal two places '
+      + 'ahead that counts one of these accounts takes its share too, and the line under the '
+      + 'bar names whichever goals actually took money \u2014 a goal ahead that reached none '
+      + 'of these accounts took nothing, and is not named.'],
   ] },
   mixedCell: { title: 'Part Actual, Part Estimate', body: [
     ['A month can hold several amounts — two grocery runs and a delivery, or a bill you have '
@@ -19383,7 +19443,10 @@ const rowDialog = F('rowDialog');
 /* { section, ds (the row's dataset), spec, auto, banked }
    `auto` is "this window writes as you go" — true for every EDIT, false while
    ADDING, which is the one thing auto-save cannot say (see the closing row in
-   the markup). `banked` is the undo bookkeeping: see commitRow. */
+   the markup), and false for a section that declares `action: true`: a window
+   that DOES something rather than editing a record (folding accounts together
+   is the one) has no field-by-field meaning, so it keeps Cancel and Save and
+   commits once, on Save. `banked` is the undo bookkeeping: see commitRow. */
 let rowCtx = null;
 
 /* Field types: text · password · money · number · percent (shown ×100) · date ·
@@ -19393,6 +19456,73 @@ let rowCtx = null;
    with no marker `#rowFields` IS the grid, exactly as it was, which is why the
    other seventeen editors need no thought here. Where there are markers it
    becomes a plain block of `.fieldsec`s, each holding a grid of its own. */
+/* ONE PLACE PUTS A STORED VALUE INTO A BOX (2026-09-07 audit, fix 1). It was
+   inline in buildFields, one branch per type, and that was fine while opening
+   the window was the only time a box was primed from the state. It is not any
+   more: a window that saves as you go commits a field at a time, and a section
+   can REFUSE what it was handed — so after every commit the boxes are put back
+   to what the state actually holds, through this same setter, rather than left
+   showing a month that was never stored. Undefined and null are the empty box,
+   a percent is shown ×100 at the field's own places, money is formatted, a
+   select with nothing stored opens on its first option. */
+function setFieldValue(f, input, values) {
+  const v = values[f.key];
+  if (f.type === 'select') input.value = v ?? (f.options.length ? f.options[0][0] : '');
+  else if (f.type === 'checks') {
+    const chosen = new Set(v || []);
+    input.querySelectorAll('input[type="checkbox"]')
+      .forEach((b) => { b.checked = chosen.has(b.value); });
+  } else if (f.type === 'check') input.checked = !!v;
+  else if (f.type === 'readout') input.textContent = v ?? '';
+  else if (f.type === 'note') input.value = v ?? '';
+  else input.value = v === undefined || v === null ? ''
+    : f.type === 'percent' ? roundTo(v * 100, f.dp ?? 2)
+    : f.type === 'money' ? fmtMoney(v) : v;
+}
+
+/* THE WINDOW SHOWS WHAT IS STORED, AFTER EVERY COMMIT (2026-09-07 audit, fix
+   1). A per-field commit hands the whole form to the section's `save`, and a
+   section may keep only part of it — the account editor refuses a closing
+   month that a later month still states a balance for, refuses to untick the
+   only main account, refuses a rename that would merge two accounts sharing a
+   month; the goal editor refuses a months figure at zero and a claim that
+   would loop. Before this the box went on showing the refused value while the
+   state held the old one, and the closing commit — the only one that spoke —
+   saw a form that matched what it had "written" and said nothing at all.
+
+   So after each commit every box is set again from the section's own `get`,
+   exactly as `openRowEditor` primes them, `link('')` re-derives the boxes a
+   section works out from the others, and `opened` is re-read so the close
+   that follows knows there is nothing more to write. It is "close and reopen
+   the window" without losing the cursor. A field may say `transient: true` to
+   be left alone — the tax band's paste box is an instruction, not a value the
+   state holds, and clearing it after a refused paste would throw away the very
+   thing the reader is about to correct.
+
+   A checkset is told it changed (a NON-bubbling event, so the delegated commit
+   on #rowFields never hears it) because the "Select all" button under it reads
+   its word off the boxes and would otherwise offer to select what is already
+   selected. And a section whose `get` can no longer find its record — a
+   rename that merged this account INTO another — has nothing to prime from:
+   the window is ended, since every further commit would write into a record
+   the merge has already moved. */
+function reprimeRow(ctx) {
+  const ed = EDITORS[ctx.section];
+  let stored = null;
+  try { stored = ed.get(ctx.ds); } catch (e) { stored = null; }
+  if (!stored) { rowCtx = null; rowDialog.close(); return; }
+  for (const f of ctx.spec) {
+    if (!f || f.sec || f.transient) continue;
+    const el = F(`rf-${f.key}`);
+    if (!el) continue;
+    setFieldValue(f, el, stored);
+    if (f.type === 'checks') el.dispatchEvent(new Event('change'));
+  }
+  if (ed.link) ed.link('', ctx.ds);
+  applyFieldVisibility(ctx.spec);
+  ctx.opened = JSON.stringify(readFields(ctx.spec));
+}
+
 function buildFields(fields, values, link) {
   const host = F('rowFields');
   host.innerHTML = '';
@@ -19460,7 +19590,6 @@ function buildFields(fields, values, link) {
          threw on `f.options[0][0]`, and because buildFields runs before the
          dialog is shown, the throw took the whole dialog with it: the button
          did nothing at all. An empty select falls back to an empty value. */
-      input.value = values[f.key] ?? (f.options.length ? f.options[0][0] : '');
     } else if (f.type === 'checks') {
       /* One checkbox per option rather than a multi-select: picking several
          accounts out of a list is the whole point, and a multi-select hides
@@ -19469,14 +19598,12 @@ function buildFields(fields, values, link) {
       input.className = 'checkset';
       input.setAttribute('role', 'group');
       input.setAttribute('aria-labelledby', `rf-${f.key}-lbl`);
-      const chosen = new Set(values[f.key] || []);
       for (const [v, text] of f.options) {
         const line = document.createElement('label');
         line.className = 'checkline';
         const box = document.createElement('input');
         box.type = 'checkbox';
         box.value = v;
-        box.checked = chosen.has(v);
         line.appendChild(box);
         line.appendChild(document.createTextNode(' ' + text));
         input.appendChild(line);
@@ -19484,7 +19611,6 @@ function buildFields(fields, values, link) {
     } else if (f.type === 'check') {
       input = document.createElement('input');
       input.type = 'checkbox';
-      input.checked = !!values[f.key];
       /* Centred in the 40px an input would occupy, so a checkbox lines up with
          the boxes beside it. NOT `margin-top:auto` — that pinned it to the
          bottom of its cell, which made it drift up or down with however many
@@ -19498,13 +19624,11 @@ function buildFields(fields, values, link) {
       input = document.createElement('p');
       input.className = 'field-readout';
       input.setAttribute('aria-labelledby', `rf-${f.key}-lbl`);
-      input.textContent = values[f.key] ?? '';
     } else if (f.type === 'note') {
       input = document.createElement('textarea');
       /* Two lines suits a note; a pasted bracket schedule needs room to be
          recognisable as one, so a field may ask for more. */
       input.rows = f.rows || 2;
-      input.value = values[f.key] ?? '';
     } else {
       input = document.createElement('input');
       input.type = { number: 'number', percent: 'number',
@@ -19561,11 +19685,11 @@ function buildFields(fields, values, link) {
         if (f.min !== undefined) input.min = f.min;
         if (f.max !== undefined) input.max = f.max;
       }
-      const v = values[f.key];
-      input.value = v === undefined || v === null ? ''
-        : f.type === 'percent' ? roundTo(v * 100, f.dp ?? 2)
-        : f.type === 'money' ? fmtMoney(v) : v;
     }
+    /* The value goes in through the ONE setter, after the box is built — the
+       same call `reprimeRow` makes after each commit, so what a window shows
+       on opening and what it shows after a refusal cannot drift apart. */
+    setFieldValue(f, input, values);
     input.id = `rf-${f.key}`;
     /* A field that only matters for one choice re-evaluates whenever any
        select moves, so picking a rule reveals exactly that rule's setting. */
@@ -19695,7 +19819,11 @@ function buildFields(fields, values, link) {
        ONE button, and the word says what pressing it will DO next — the
        Show/Hide button's rule — because two buttons leaves one of them dead at
        either end of the range. Under its group like every other action button
-       here, and it works on the FORM, so nothing commits until Save. */
+       here. It works on the FORM, and then — in a window that saves as you go
+       — commits like a finished field, exactly as the money action button
+       does and for the same reason (2026-09-07 audit, fix 6): setting
+       `.checked` fires no `change`, so the boxes all ticked while the tile
+       behind kept the old list until Done. */
     if (f.type === 'checks' && f.selectAll && f.options.length) {
       const boxes = [...input.querySelectorAll('input[type="checkbox"]')];
       const btn = document.createElement('button');
@@ -19718,6 +19846,7 @@ function buildFields(fields, values, link) {
         boxes.forEach(b => { b.checked = on; });
         sync();
         if (link) link(f.key);
+        if (rowCtx && rowCtx.auto && rowMoved(rowCtx)) commitRow(rowCtx, false);
       };
       cell.appendChild(btn);
     }
@@ -19948,12 +20077,42 @@ function readFields(fields) {
   return out;
 }
 
+/* A NUMBER BOX HOLDING TEXT THAT IS NOT A NUMBER (2026-09-07 audit, fix 5).
+   `readFields` reads "abc" in a money box as null — the same null an EMPTIED
+   box hands over — and every section treats null as "clear this": a typo in
+   the sweep's threshold deleted the figure and the accounts it watches, the
+   row went blank, the box emptied itself on blur, and nothing was said. The
+   two are different statements. An empty box means "no figure", and still
+   clears; text that does not read as a number is REFUSED — said out loud, the
+   stored figure kept, the box put back. This is the question, asked once in
+   `commitRow` over every money, number and percent field, so no section has to
+   ask it. `parseMoney` reads "12abc" as 12, so only text with no figure in it
+   at all lands here; a number box's browser-side validation already refuses
+   most of this, and the money box is a text box on purpose (brackets, symbols,
+   the six minus signs), so it is the one this exists for. */
+function unreadableFields(fields) {
+  return fields.filter((f) => f && !f.sec
+    && ['money', 'number', 'percent'].includes(f.type)).filter((f) => {
+    const el = F(`rf-${f.key}`);
+    const raw = el ? el.value.trim() : '';
+    if (raw === '') return false;
+    return f.type === 'money' ? parseMoney(raw) === null : Number.isNaN(parseFloat(raw));
+  });
+}
+
 function openRowEditor(section, ds, isNew) {
   if (viewOnly) return;   // someone else's figures — nothing here is yours to change
   const ed = EDITORS[section];
   if (!ed) return;
   const spec = typeof ed.fields === 'function' ? ed.fields(ds, isNew) : ed.fields;
-  rowCtx = { section, ds, spec, auto: !isNew, banked: false };
+  /* Saving as you go is for EDITING A RECORD. Adding asks, because Cancel
+     there means "never create it"; an action window asks, because its boxes
+     are the arguments of one move and half of them is not a smaller move —
+     ticking the first account in "Combine Into One Account" used to fold it on
+     the spot, silently, with Cancel gone and the form still listing indexes
+     the fold had just shifted (2026-09-07 audit, fix 3). */
+  const auto = !isNew && !ed.action;
+  rowCtx = { section, ds, spec, auto, banked: false };
   F('rowDialogTitle').textContent =
     (typeof ed.title === 'function' ? ed.title(ds, isNew) : ed.title) || 'Edit';
   F('rowDialogSub').textContent =
@@ -20009,9 +20168,9 @@ function openRowEditor(section, ds, isNew) {
   /* The closing row, both ways. Cleared every open rather than only when it
      changes: one dialog serves thirty-two sections and both modes, so a label
      left over from the last open is a lie about what the buttons do. */
-  F('rowCancelBtn').hidden = !isNew;
-  F('rowAutoNote').hidden = isNew;
-  F('rowSaveBtn').textContent = isNew ? 'Save' : 'Done';
+  F('rowCancelBtn').hidden = auto;
+  F('rowAutoNote').hidden = !auto;
+  F('rowSaveBtn').textContent = auto ? 'Done' : 'Save';
   /* `returnValue` outlives a close, and the submit button sets it to "save" —
      so without this, a window opened after a Save would think it had been
      saved before anybody pressed anything. */
@@ -20047,37 +20206,73 @@ function rowMoved(ctx) {
    writes the same thing twice — which is what lets Done and the last field's
    `change` both fire without anyone having to know which arrived first.
 
-   `speak` is the difference between the two kinds of caller. A per-field
-   commit is SILENT and leaves the focus alone: a toast per box would be noise,
-   and refocusEditRow would throw the cursor out of the window you are still
-   typing in. The closing commit does both, exactly as Save always did.
+   `speak` is the difference between the two kinds of caller, and it is now
+   ONLY about the focus (2026-09-07 audit, fix 1): the closing commit hands the
+   focus back to the row on the page, and a per-field commit must not —
+   refocusEditRow would throw the cursor out of the window you are still typing
+   in. What the section SAID is toasted either way. It used to be swallowed on
+   a per-field commit, on the theory that a toast per box would be noise — but
+   the sentences a section returns are refusals and consequences ("Kept Savings
+   open — it still states a balance in Jun 2026", "A plan needs one main
+   account"), and hearing a refusal the moment it happens is the whole point of
+   saving as you go. Silence there was the worse noise: the box kept showing a
+   month the state had refused, and the closing commit, seeing a form that
+   matched what it had "written", never spoke either. A per-field commit ends
+   by putting the boxes back to what is stored (`reprimeRow`).
 
    ONE UNDO STEP PER WINDOW, NOT ONE PER FIELD. Every save() banks the state it
    replaces, so a window that saves eight times would fill eight of the twenty
    slots in the ring and ⌘Z would walk back a box at a time — the undo spent on
-   the very thing it exists to cover. So the FIRST commit banks (that is the
-   pre-window state, the one worth going back to) and every one after it
-   borrows the `undoing` latch to bank nothing. The ring still ends up holding
-   the finished state, because the next save() anywhere banks `undoSnapshot`,
-   which these kept up to date. One ⌘Z, one window. */
+   the very thing it exists to cover. So the FIRST commit THAT BANKS (that is
+   the pre-window state, the one worth going back to) closes the latch, and
+   every one after it borrows `undoing` to bank nothing. The ring still ends up
+   holding the finished state, because the next save() anywhere banks
+   `undoSnapshot`, which these kept up to date. One ⌘Z, one window.
+   `ctx.banked` MEANS THE RING GREW, and save() says whether it did (2026-09-07
+   audit, fix 2). It was set unconditionally after the first save(), but save()
+   banks only when the core moved — so a first commit that was refused, or
+   normalised back to what was stored, banked nothing, every later commit in
+   the window sat inside the latch, and the window's real change was never
+   banked at all: ⌘Z skipped it and reverted whatever window came before. */
 function commitRow(ctx, speak) {
   const values = readFields(ctx.spec);
+  /* Text that is not a number is refused, never read as "clear this" (fix 5):
+     the value the box HELD — what it opened with, or what the last commit
+     left — goes to `save` in its place, and the box is put back to it. One
+     sentence for all of them, joined ahead of whatever the section says,
+     because `toast` shows one message at a time. */
+  const bad = unreadableFields(ctx.spec);
+  let refused = '';
+  if (bad.length) {
+    const was = JSON.parse(ctx.opened);
+    const named = bad.map((f) => {
+      const el = F(`rf-${f.key}`);
+      const raw = el.value.trim();
+      values[f.key] = was[f.key];
+      setFieldValue(f, el, was);
+      return `“${raw.length > 40 ? raw.slice(0, 40) + '…' : raw}” in ${f.label}`;
+    });
+    refused = `${andList(named)} ${bad.length > 1 ? 'aren’t numbers' : 'isn’t a number'}`
+      + ` — left ${bad.length > 1 ? 'them as they were' : 'it as it was'}`;
+  }
   /* What is now written down, so a close that follows with nothing further
      typed knows it has nothing to do. */
   ctx.opened = JSON.stringify(values);
-  const said = EDITORS[ctx.section].save(ctx.ds, values);
+  let said = EDITORS[ctx.section].save(ctx.ds, values);
+  if (refused) said = typeof said === 'string' ? `${refused}. ${said}` : refused;
   const wasUndoing = undoing;
   if (ctx.banked) undoing = true;
-  save();
+  const banked = save();
   undoing = wasUndoing;
-  ctx.banked = true;
+  if (banked) ctx.banked = true;
   render();
-  if (!speak) return;
-  refocusEditRow(ctx);
   /* A section that did something the reader can't see on the page in front of
-     them says so by returning the sentence to show; saving is otherwise
-     silent, because the change is right there in the grid. */
+     them — or refused to do what it was asked — says so by returning the
+     sentence to show; saving is otherwise silent, because the change is right
+     there in the grid. */
   if (typeof said === 'string') toast(said);
+  if (speak) { refocusEditRow(ctx); return; }
+  reprimeRow(ctx);
 }
 
 /* Editing writes as you finish each box. `change` and NOT `input`: it is the
@@ -22419,6 +22614,12 @@ const EDITORS = {
      account would be inventing, and this is the moment you say they are. */
   foldAccounts: {
     title: 'Combine Into One Account',
+    /* An ACTION, not a record: the boxes are the arguments of one fold, so
+       the window keeps Cancel and Save and commits on Save alone (2026-09-07
+       audit, fix 3). The only section that says so — every other window edits
+       something that is stored, including `taxCheck`, whose one box IS the
+       stored record. */
+    action: true,
     sub: () => 'Each account you fold in becomes a contribution type inside the one you '
       + 'keep, with its name, its tax treatment and its balance. Nothing is added up or '
       + 'thrown away.',
@@ -22723,7 +22924,11 @@ const EDITORS = {
       { key: 'source', label: 'Where it came from', type: 'text',
         hint: 'For your own reference — “IRS Rev. Proc. 2025-32”, or the page you copied it '
           + 'from. Never sent anywhere.' },
+      /* `transient`: an instruction to the window, not a value the state
+         holds — `reprimeRow` leaves it alone, so a refused paste stays put
+         to be corrected (2026-09-07 audit, fix 1). */
       { key: 'paste', label: 'Paste a schedule (optional)', type: 'note', rows: 7, wide: true,
+        transient: true,
         hint: 'Paste the bracket table and it will be read and REPLACE the bands below. '
           + 'Most layouts work, including a wide table with a column per filing status — '
           + 'yours is picked out. Bullets, headings and citation links are ignored. It is '
@@ -27398,7 +27603,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tintOf, BAR_TINT, BAR_TINT_SOLID,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  goalNeed, goalClaim, claimAccounts, goalChain, goalDrawOrder, goalRemaining, goalPace, goalTargetOf, onMonthsGoal, resolveGoals, computeYearWith,
+  goalNeed, goalClaim, claimAccounts, goalChain, goalDrawOrder, goalRemaining, goalDraw, goalPace, goalTargetOf, onMonthsGoal, resolveGoals, computeYearWith,
   pruneGoalLinks, goalChainReaches, TARGET_MONTHS_MAX,
   enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the

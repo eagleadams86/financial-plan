@@ -1492,6 +1492,10 @@ suite passed while the card was wrong.
       destination cap fills to; a threshold that moved with the balances the
       sweep is computing would be circular. It sits ABOVE the `goalNeed` call
       for the same reason, and a test pins both the shape and the order.
+    - **SUPERSEDED by the 2026-09-07 audit's fix 4 (foot of this file): the
+      claim walks the WHOLE queue now, the way `goalRemaining` does. The
+      paragraph below is kept for the reasoning — its fear was real under the
+      set-difference formula and cannot arise under the ordered draw.**
     - **It asks PRED ALONE, not `claimAccounts`, and the chain was weighed.**
       With three queued and a middle goal sharing nothing with the last,
       testing the whole chain lets the MIDDLE goal's own shortfall through on
@@ -2320,8 +2324,9 @@ columns, and cut into blocks with a rule and a small heading between them.
   into three paragraphs is its own kind of unreadable.
 - **THE ROW EDITOR SAVES AS YOU GO WHEN IT IS EDITING, AND STILL ASKS WHEN IT IS ADDING
   (2026-09-07).** One `#rowDialog` serves thirty-two `EDITORS` sections and both modes, and
-  the mode is `!isNew` — read once in `openRowEditor`, onto `rowCtx.auto`, and never worked
-  out again. Editing hides Cancel, shows the "Saved as you go" note and labels the button
+  the mode is `!isNew && !ed.action` — read once in `openRowEditor`, onto `rowCtx.auto`, and
+  never worked out again (`action` is the one section flag that opts out; see the 2026-09-07
+  audit's fix 3 at the foot of this file). Editing hides Cancel, shows the "Saved as you go" note and labels the button
   **Done**; adding is untouched, because *Cancel means never create it* and auto-save has no
   way to say that. Four things about it are load-bearing:
   - **`change`, not `input`.** `change` is "finished with this box"; `input` would commit 1,
@@ -2331,14 +2336,18 @@ columns, and cut into blocks with a rule and a small heading between them.
     by the window closing. It reads the whole form every time, so committing twice with
     nothing changed in between writes the same thing twice — which is what lets Done and the
     last field's `change` both fire without either needing to know about the other. `speak`
-    is the only difference: a per-field commit is silent and leaves the focus alone
-    (`refocusEditRow` would throw the cursor out of the window you are still typing in).
+    is only about the FOCUS: the closing commit hands it back to the row on the page, a
+    per-field commit leaves it alone (`refocusEditRow` would throw the cursor out of the
+    window you are still typing in). Both toast what the section returned, and a per-field
+    commit ends by putting every box back to what is stored — see the 2026-09-07 audit's
+    fix 1 at the foot of this file.
   - **One window is one undo.** Every `save()` banks the state it replaces, so a window that
     writes eight times would spend eight of the twenty slots in the ring and ⌘Z would walk
     back a BOX at a time — the undo spent on the very thing it exists to cover. The first
-    commit banks; the rest borrow the `undoing` latch (`ctx.banked`). The ring still ends up
-    holding the finished state, because the next `save()` anywhere banks `undoSnapshot`,
-    which the latched writes kept current.
+    commit THAT BANKS closes the latch; the rest borrow `undoing` (`ctx.banked`, which
+    means "the ring grew" — `save()` returns whether it did; the 2026-09-07 audit's fix 2).
+    The ring still ends up holding the finished state, because the next `save()` anywhere
+    banks `undoSnapshot`, which the latched writes kept current.
   - **A dialog's `close` event is a QUEUED TASK, and the guard on it is not defensive.**
     Found in the browser while this was built, and the same hazard Sprint Velocity's Jira
     auto-save wrote down first: close one editor, open the next before that task runs, and
@@ -6025,3 +6034,157 @@ and proven red against the pre-fix page, README and this file in the commit.
   landing month, says which of the two reasons applies; the tile carries
   "no balance to pace it by this year" for the null case beside the
   existing "not growing this year".
+
+## Fixes From the 2026-09-07 Audit
+
+The row editor started saving as you go that morning, and the audit that
+afternoon drove every window that had changed. Six findings, all confirmed by
+driving the app headless; Charles asked for all six fixed. Same routine as the
+audits above: one commit per finding, a test written first and proven red
+against the pre-fix page (served from `git archive main` on a second port, the
+whole archive, with the new `tests.html` copied over it), README and this file
+in the commit.
+
+- **"Combine Into One Account" is an action window and does not auto-save
+  (fix 3, done first).** `rowCtx.auto` was `!isNew`, so every `data-edit`
+  window saved as you go — including `foldAccounts`, whose boxes are the
+  ARGUMENTS of one fold. Ticking the first account folded it on the spot and
+  silently, Cancel was gone, the form still listed the indexes the fold had
+  just shifted, a second tick sent `from=[1,2]` against the re-indexed list,
+  and "Nothing to fold" fired on the first select change. A section may now
+  declare `action: true`; `openRowEditor` reads `auto = !isNew && !ed.action`
+  and the closing row follows `auto` (Cancel shown, note hidden, button
+  "Save"), so the window commits once, through `onsubmit`, exactly as an add
+  window does. **The survey of all thirty-two sections found exactly one
+  action**: every other window, `taxCheck` included, edits something that is
+  stored — `taxCheck`'s one box IS `side.tax.check`, and its "Use this year"
+  button already commits like a finished field, so it stays auto-saving. The
+  test opens the fold window on the sample's four retirement accounts, reads
+  the closing row, ticks an account and pins that nothing folds until Save
+  and that Cancel folds nothing.
+- **A refusal is heard the moment it happens, and the box goes back to what is
+  stored (fix 1).** `commitRow` had `if (!speak) return;` ahead of
+  `toast(said)`, so a per-field commit swallowed every sentence a section
+  returned — and because that commit set `ctx.opened` to the values it had
+  just handed to `save`, the closing commit saw `rowMoved()` false and never
+  ran, so the speaking path never happened either. Every refusal an editor can
+  make went unheard: `closeBlockedNote`, the hub-untick refusal, the merge
+  refused, goal months ≤ 0 and the loop refusal, the snapshot's "needs its
+  date", the four `foldAccounts` results, and every "stopped after… /
+  updated to match / paid earnings into it" consequence. Worse, the box kept
+  showing the refused value while the state held the old one. Three things
+  changed:
+  - **`speak` is now only about the focus.** Both kinds of commit toast a
+    returned string; the closing commit alone calls `refocusEditRow`.
+  - **`setFieldValue(f, input, values)` is the ONE setter** — lifted out of
+    `buildFields`' per-type branches — and **`reprimeRow(ctx)`** runs it over
+    every field from the section's own `get` after each per-field commit,
+    re-runs `link('')` for the derived boxes, re-applies visibility and
+    re-reads `opened`. It is "close and reopen the window" without losing the
+    cursor, so the form can never show a value the state does not hold; a
+    normalisation the section makes (a trimmed name, a clamped months figure)
+    shows the same way. A field may say `transient: true` to be left alone —
+    the tax band's paste box is an instruction, not a stored value, and
+    clearing it after a refused paste would throw away the thing about to be
+    corrected. A checkset is sent a non-bubbling `change` so the "Select all"
+    button's word follows the boxes. And a `get` that throws (a rename that
+    merged this account INTO another — the merge survivor is the later
+    incarnation) means the record is gone: the window is ended rather than
+    left editing a ghost.
+  - **The renamed-onto-an-existing-name case is still a stored rename** with
+    the merge refused, as it was under Save; the finding was the silence, and
+    the sentence now names it.
+  Three tests drive the real `#rowDialog` in a 1280x900 frame with `W.toast`
+  captured: a refused `until` toasts "Kept Savings open — it still states a
+  balance in Jun…", leaves `until` unset and the box reads open; months = 0
+  on the sample's six-months goal toasts, keeps `targetMonths` 6 and the box
+  reads 6 again; a rename onto an account sharing a stated month toasts
+  "Kept … separate".
+- **`ctx.banked` means the ring grew, not that `save()` ran (fix 2).**
+  `commitRow` set it unconditionally after the first `save()`, but `save()`
+  banks only when `coreOf` moved (`undoBankable`) — so a window whose first
+  commit was refused (fix 1's cases) or normalised back to what was stored
+  banked nothing, every later commit sat inside the `undoing` latch, and the
+  window's real change was never banked: ⌘Z skipped it and reverted the
+  window BEFORE it. `save()` now returns `banked`, and `commitRow` does `if
+  (banked) ctx.banked = true;`. Nothing else reads the return. The test runs
+  the REAL `save()` in a frame with `Storage.prototype.setItem` stubbed (a
+  stubbed `save` has no ring to grow — the trap the "glance writes nothing"
+  test wrote down): rename a goal in window A, then in window B refuse a
+  close and change a rate, and one undo puts the rate back while the rename
+  stands; the next undo is window A. Two traps inside it: seed the override
+  and `save()` BEFORE window A, or the seed itself is what the first commit
+  banks; and read the state through `finGet()` on every assertion, because
+  `undoLast` replaces the object and a captured reference reports the state
+  it undid.
+- **Text that is not a number is refused, not read as "clear this" (fix 5).**
+  `parseMoney('abc')` is null — the same null an emptied box hands `save` —
+  and every section treats null as "delete the figure", so a typo in the
+  sweep's threshold deleted the figure, the row went blank, the box emptied
+  itself on blur (`asMoneyInput`) and nothing was said. `unreadableFields
+  (spec)` (beside `readFields`) lists the money, number and percent boxes
+  whose text is non-empty and reads as no number; `commitRow` swaps in the
+  value the box HELD (`JSON.parse(ctx.opened)` — what it opened with, or what
+  the last commit left — so an add window is covered too), puts the box back
+  through `setFieldValue`, and toasts "“abc” in Above this amount isn’t a
+  number — left it as it was", joined ahead of whatever the section returned
+  because `toast` shows one message at a time. An EMPTY box is a different
+  statement and still clears — the test pins both halves on the sample's
+  sweep row. `parseMoney` reads "12abc" as 12, so only text with no figure in
+  it lands here; a `type=number` box's own validation already refuses most of
+  it, and the money box is a text box on purpose. One thing the audit listed
+  that is NOT a loss: `thresholdAccounts` goes on every save of the row
+  editor by design — it is a share link's frozen measure, and "what you saved
+  is what it showed" — so the test does not pin it.
+- **Select all / Clear all commits like the money action button (fix 6).**
+  Both buttons write the FORM and fire no `change` of their own; the money
+  action button was given a commit for exactly that reason when the editor
+  went auto-saving, and the checkset's button was not — so every box ticked
+  while the tile behind stayed on the old list until Done. The same one line
+  (`if (rowCtx && rowCtx.auto && rowMoved(rowCtx)) commitRow(rowCtx,
+  false)`) follows `sync()` and `link`. `reprimeRow` then sends the checkset
+  its non-bubbling `change`, so the button's word follows what was stored.
+  The test presses the button in the sample's first goal and reads
+  `state.goals[idx].accounts` before anything else happens, both ways.
+- **The sweep line walks the same queue the tile does, and the foot names the
+  taker (fix 4, the judgement call, done last).** `goalRemaining` replayed
+  the WHOLE chain ahead of a goal; `goalClaim` read the immediate predecessor
+  alone and returned 0 when that one shared no account. Roof (mid) ← Kitchen
+  (emergency) ← College (mid): the tile took $14,000 off College for Roof and
+  said "claimed first by Kitchen", while `goalNeed(college)` was its bare
+  $90,000 — a sweep tied to College stopped $14,000 short of where the tile
+  said it was full, and this file claimed the two "agree where it matters".
+  - **The decision.** The 2026-09-05 "pred alone" rule was written against a
+    real fault of the SET-DIFFERENCE formula: testing the whole chain let a
+    middle goal's own shortfall through on the first goal's overlap. That
+    fault cannot arise under the ordered draw — each goal ahead draws its OWN
+    target over its OWN accounts, so a middle goal sharing nothing never
+    reaches an account of the successor's and its shortfall lands nowhere.
+    With the reason gone, the least surprising rule is the one the tile
+    already used: `goalClaim` walks `[...goalChain(pred), pred]` front first
+    with a `left` map, treating the successor's accounts as bottomless as
+    before, and the claim is what lands on them. `held − remaining` and
+    `goalNeed − target` are now the same replay and agree by construction.
+    Every previously pinned answer is unchanged (the one-account queue, the
+    shortfall-by-order cases, the structural no-shared-account zero, the
+    by-target rule, the loop — `seen` carries the successor's id into
+    `goalChain`, which is what keeps `goalNeed(p)` at 3 on a two-goal loop).
+    The engine's threshold and cap, `freezeOverflowThresholds` and
+    `computeGoals` all call `goalNeed` unchanged, so a shared link freezes the
+    walked figure.
+  - **`goalDraw(goal, goals, order, bal)`** (pure, hooked) is the replay and
+    returns `{ remaining, taken: [{ id, name, amount }] }`; `goalRemaining` is
+    its `remaining`. `computeGoals` sets `claimedBy` to `andList` of the
+    takers' names, front of the queue first — "claimed first by Roof and
+    Kitchen refresh" — and falls back to the link's name when nothing was
+    taken, because the tile foot is not shown then and the existing pin ("the
+    link itself is untouched — the goal is still queued") reads `claimedBy`
+    as truthy. `HELP.goalClaims` gained one paragraph saying the whole queue
+    is walked and the foot names who took money.
+  - **Two tests.** The pure one runs the audit's fixture through `goalClaim`,
+    `goalNeed` and `goalRemaining` and pins that need − target equals held −
+    remaining, that a starving middle goal still claims nothing, that two
+    goals ahead on one account both land, that a goal spending an unshared
+    account first takes that much less, and the unchanged answers. The tile
+    one runs `computeGoals` on `fixtureState()` and pins `claimedBy` for one
+    taker, two takers, and none, plus the rendered foot.

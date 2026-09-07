@@ -445,7 +445,10 @@ measures its own projected expenses).
   so a row tied to it starts at its target on top of every claim ahead of it —
   third in a queue of $20k, $50k and $50k means the sweep begins near $120k,
   not $50k. (A goal ahead of it that holds part of its money in accounts the
-  queued goal doesn't count claims only its shortfall — see Savings Goals.)
+  queued goal doesn't count claims only its shortfall — see Savings Goals —
+  and the whole queue is walked, so a goal two places ahead on the same
+  account counts too; fixed 2026-09-07, when the sweep read one goal back and
+  stopped short of where the Progress tile said the goal was full.)
   Because that claim reads balances in the earlier goal's accounts, the row
   waits for any sweep that deposits into one of them the same month, and it
   refuses (blank, with the cell editor saying why) to sweep INTO one — the
@@ -778,7 +781,9 @@ Where the whole plan stands and where it has been, on one tab.
 
 Goals add up whichever accounts you tick, so splitting an account is a matter
 of ticking the new ones. **Select all** beside the list ticks the lot, and
-turns into **Clear all** once everything is ticked. An account you have
+turns into **Clear all** once everything is ticked — and the press is a change
+in its own right, so the goal behind the window counts the new list at once
+(fixed 2026-09-07: it used to wait for Done). An account you have
 **closed** is not offered — it holds nothing for a goal to count — so an old
 goal that named one drops it the next time you save, with a line saying so;
 no figure moves, because a closed account had no balance to be counting.
@@ -819,10 +824,13 @@ queue at all, and both count the money in full.
 **A goal can only claim out of accounts it counts**: untick the shared account
 from the earlier goal and it stops claiming anything from the later one,
 whatever it is still short of. (The link itself is left alone — the goal is
-still queued, it is simply taking nothing.) Where three are queued and the
-middle one shares no account with the last, the first goal's claim on an
-account they do share is dropped rather than guessed at: a one-level claim
-cannot express a three-way split.
+still queued, it is simply taking nothing.) **The whole queue is walked**
+(fixed 2026-09-07): where three are queued and the middle one shares no
+account with the last, the first goal's claim on an account they do share is
+taken — on the tile, at the sweep line and in a shared link alike — and the
+line under the bar names whichever goals actually took money, not merely the
+one named as "claimed first by". Until that fix the tile and the sweep read
+different figures for that queue, and the foot named the wrong goal.
 Deleting a goal frees the goals that were claimed first by it — they count
 from the first dollar from then on — and the toast names them.
 
@@ -1691,7 +1699,12 @@ choice actually uses.
   row arrived as +200 and the money moved the other way. Both spellings read the
   same now, in a typed box and in an imported CSV alike. (A dash used as
   punctuation — "Rent — $500" — is still just punctuation; only the characters
-  that really are hyphens and minus signs count.)
+  that really are hyphens and minus signs count.) **And text that is not a
+  number is refused, not read as "clear this"** (fixed 2026-09-07): type
+  `abc` into a money box and leave it, and the box says so and goes back to
+  the figure it held — it used to delete the figure, and on a sweep row that
+  blanked the row without a word. An emptied box still clears: that is a
+  statement, and it is kept.
 - **Landing on a box selects what's in it**, so typing replaces the figure
   instead of running on to the end of it. Click a second time to place the
   cursor and edit normally. The up/down arrows a browser draws on a number box
@@ -1705,10 +1718,25 @@ choice actually uses.
   the time you could press one the change is already made. The window says so
   under its buttons. If you change your mind, **Undo** puts the whole window
   back in one press, however many boxes you touched in it — one window is one
-  step, not one step per box.
+  step, not one step per box (fixed 2026-09-07: a window whose first change was
+  refused, or came to nothing, used to have no step of its own — Undo skipped
+  it and reached back into the window before). **And a refusal is said the
+  moment it happens**
+  (fixed 2026-09-07): close an account from a month a later month still states
+  a balance for, untick the only main account, type 0 months of expenses, or
+  rename an account onto one it cannot merge with, and the message appears as
+  you leave the box — and the box goes back to what is actually stored, so the
+  window never shows a figure the plan does not hold. (Until that fix the
+  message was only ever shown on Done, and saving as you go had quietly stopped
+  it appearing at all.)
 - **Adding a row still asks.** A brand-new row keeps Cancel and Save, because
   Cancel there means *never create it*, which saving as you go has no way to
   say — so a window opened by a mis-click leaves nothing behind.
+- **So does a window that does something rather than editing something.**
+  *Combine Into One Account* on the Retirement tab folds accounts together, and
+  its boxes are the arguments of that one move — so it keeps Cancel and Save,
+  and nothing is folded until you press Save (fixed 2026-09-07: ticking the
+  first account used to fold it on the spot, with no Cancel left to undo it).
 - **The cell editor still asks too.** A month's cell is not just a set of boxes:
   it splits into several amounts, accepts the estimates, reverts to the computed
   figure or clears itself outright, and Cancel there means *leave this month

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1007;
+const EXPECTED = 1016;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14587,20 +14587,24 @@ t('the select-all button is opt-in, and only the goal accounts field asks for it
    shares this origin's `fin-state`, and seeding one would write over the real
    plan (the ambient-state trap, from the other direction). */
 /* The pure half of this lives up in the goal-queue group; the guard's SHAPE is
-   pinned here, where `APP_SRC` has been fetched. It has to come before the
-   need is worked out and read the account lists alone — the same claim is the
+   pinned here, where `APP_SRC` has been fetched. The same claim is the
    threshold a sweep row starts at, and a threshold that moved with the
-   balances the sweep is computing would be circular. */
+   balances the sweep is computing would be circular — so the successor's own
+   accounts must never be READ: the walk treats them as bottomless, and that
+   branch comes before any balance is looked at. Since the 2026-09-07 audit's
+   fix 4 the claim walks the whole queue itself rather than recursing through
+   `goalNeed`, which is the other half of the same shape. */
 t('the shared-account guard reads the lists, and reads them first (2026-09-07)', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const src = stripComments(APP_SRC);
-  const fn = src.slice(src.indexOf('function goalClaim(')).slice(0, 500);
-  ok(/if \(!\(pred\.accounts \|\| \[\]\)\.some\(id => \(accounts \|\| \[\]\)\.includes\(id\)\)\) return 0;/
-     .test(fn), 'the guard is the two account lists and nothing else');
-  ok(!/bal\(/.test(fn.slice(0, fn.indexOf('goalNeed('))),
-     'no balance is read before it');
-  ok(fn.indexOf('.some(id =>') < fn.indexOf('goalNeed('),
-     'and it comes before the need is worked out at all');
+  const fn = src.slice(src.indexOf('function goalClaim(')).slice(0, 1200);
+  ok(/const set = accounts \|\| \[\];/.test(fn), 'the successor\'s list is what the walk tests against');
+  const bottomless = fn.indexOf('if (set.includes(id)) { claim += want; want = 0; break; }');
+  const read = fn.indexOf('Math.min(at(id), want)');
+  ok(bottomless > 0 && read > 0 && bottomless < read,
+     'an account the successor counts is claimed on before any balance of it could be read');
+  ok(!/goalNeed\(/.test(fn),
+     'and the queue is walked here, not recursed through the need — one replay, the tile\'s');
 });
 t('a goal is not offered an account that is already closed (2026-09-07)', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
@@ -15057,11 +15061,14 @@ t('one window is one undo, however many boxes it took', () => {
      times would spend eight of the twenty slots in the ring and ⌘Z would walk
      back a BOX at a time — the undo spent on the very thing it exists to cover.
      The first commit banks; the rest borrow the `undoing` latch. */
-  ok(/const wasUndoing = undoing;\s*if \(ctx\.banked\) undoing = true;\s*save\(\);\s*undoing = wasUndoing;/
+  ok(/const wasUndoing = undoing;\s*if \(ctx\.banked\) undoing = true;\s*const banked = save\(\);\s*undoing = wasUndoing;/
      .test(src), 'commitRow banks on the first write of a window and latches for the rest');
-  ok(/ctx\.banked = true;/.test(src), 'and every commit after the first is inside the latch');
-  ok(/rowCtx = \{ section, ds, spec, auto: !isNew, banked: false \}/.test(src),
-     'a window opens with nothing banked, so its FIRST write is the one worth going back to');
+  ok(/if \(banked\) ctx\.banked = true;/.test(src),
+     'and the latch closes only once the ring actually grew — a refused first commit banks '
+     + 'nothing and must not spend the window\'s one step (2026-09-07 audit, fix 2)');
+  ok(/const auto = !isNew && !ed\.action;\s*rowCtx = \{ section, ds, spec, auto, banked: false \}/.test(src),
+     'a window opens with nothing banked, so its FIRST write is the one worth going back to '
+     + '— and an action section is never auto-saving (2026-09-07 audit, fix 3)');
   ok(/rowDialog\.addEventListener\('close'[\s\S]{0,900}?if \(rowDialog\.open\) return;/.test(src),
      'and the close handler steps over a stale event rather than ending the live window');
 });
@@ -16078,6 +16085,370 @@ t('a refusal counts the months it has no room to name', () => {
      'and the rest are counted rather than listed', said);
   ok(!said.includes('Jan 2026'),
      'so the sentence stays a sentence on an account with years of blanks behind it', said);
+});
+
+group('Fixes from the 2026-09-07 audit');
+/* Six things the 2026-09-07 audit reproduced by driving the app headless, all
+   in the row editor that had started saving as you go that morning or in the
+   goal arithmetic under it. Same routine as the groups above: every test here
+   was written first and proven red against the unfixed page. `auditFrame`
+   (above) is the frame; it stubs save(), so nothing here writes storage. */
+
+/* ── Fix 3: "Combine Into One Account" is an ACTION, not a record ────────────
+   Every `data-edit` window went auto-saving with the rest, and this one folds
+   accounts together: ticking the first box folded it on the spot — silently,
+   with Cancel gone, the form still listing the account it had just removed,
+   and a second tick sent stale indexes against the re-indexed list. A section
+   now says `action: true` and keeps Cancel/Save: nothing happens until Save. */
+t('the fold window keeps Cancel and Save, and folds nothing until Save is pressed', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'foldaction');
+  try {
+    const accts = () => W.finGet().side.retirementAccounts;
+    const closing = () => ({
+      cancel: !D.getElementById('rowCancelBtn').hidden,
+      note: !D.getElementById('rowAutoNote').hidden,
+      label: D.getElementById('rowSaveBtn').textContent,
+    });
+    D.getElementById('tab-retirement').click();
+    const open = () => {
+      const btn = D.querySelector('[data-edit="foldAccounts"]');
+      ok(btn, 'the sample has more than one retirement account, so the button is offered');
+      btn.click();
+      ok(D.getElementById('rowDialog').open, 'the fold window opened');
+    };
+    const tick = () => {
+      const box = D.querySelector('#rf-from input[value="1"]');
+      ok(box, 'the second account is offered to fold in');
+      box.checked = true;
+      box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    };
+    const had = accts().length;
+    ok(had > 2, 'fixture: several retirement accounts to fold', had);
+    open();
+    eq(closing(), { cancel: true, note: false, label: 'Save' },
+       'an action window asks — Cancel and Save, and no "saved as you go" note');
+    tick();
+    eq(accts().length, had, 'ticking an account folds nothing by itself');
+    D.getElementById('rowCancelBtn').click();
+    await new Promise((r) => setTimeout(r, 0));   // `close` is a queued task
+    eq(accts().length, had, 'and Cancel folds nothing');
+    ok(!D.getElementById('rowDialog').open, 'the window closed on Cancel');
+    open();
+    tick();
+    D.getElementById('rowSaveBtn').click();
+    await new Promise((r) => setTimeout(r, 0));
+    eq(accts().length, had - 1, 'Save is what folds');
+    ok((accts()[0].buckets || []).length >= 2,
+       'the kept account carries the folded one as a contribution type');
+  } finally { f.remove(); }
+});
+
+/* ── Fix 1: a refusal is heard the moment it happens, and the box goes back ──
+   `commitRow` toasted a section's returned sentence only on the CLOSING commit
+   — and a per-field commit set `ctx.opened` to what it had just written, so the
+   closing commit saw nothing moved and never spoke either. Every refusal an
+   editor can return went unheard: an account that would not close, a hub that
+   cannot be unticked, a months figure at zero, a merge refused — the box kept
+   showing the refused value while the state held the old one. A per-field
+   commit now toasts what the section said and puts every box back to what is
+   stored, the same way opening the window primes them. */
+t('a refused closing month is said at once, and the box goes back to open', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'refuseduntil');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    const s = W.finGet();
+    const y = String(new Date().getFullYear());
+    ok(s.years[y] && s.years[y].kind === 'grid', 'fixture: the sample has this year as a grid');
+    s.years[y].overrides = s.years[y].overrides || {};
+    s.years[y].overrides[`mid|${y}-06`] = { v: 1234 };     // a stated balance after March
+    W.render();
+    D.querySelector('[data-edit="account"][data-bal="mid"]').click();
+    ok(D.getElementById('rowDialog').open, 'the Savings window opened');
+    const until = D.getElementById('rf-until');
+    until.value = `${y}-03`;
+    until.dispatchEvent(new W.Event('change', { bubbles: true }));
+    const acct = s.settings.accounts.find((a) => a.id === 'mid');
+    eq(acct.until, undefined, 'the close was refused — nothing stored');
+    ok(said.some((m) => /Kept Savings open — it still states a balance in Jun/.test(m)),
+       'and the refusal was said the moment the box was finished with, not swallowed',
+       JSON.stringify(said));
+    eq(until.value, '', 'the box shows what is stored — open — not the month it refused');
+    ok(D.getElementById('rowDialog').open, 'and the window is still open to go on with');
+    D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+t('a months-of-expenses figure of zero is refused out loud, and the box is cleared', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'refusedmonths');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    D.getElementById('tab-goals').click();
+    const card = D.querySelector('[data-edit="goal"]');
+    ok(card, 'the sample has a goal');
+    card.click();
+    const idx = +card.dataset.idx;
+    const g = () => W.finGet().goals[idx];
+    /* The sample's first goal is the six-months one, so "keeps the target it
+       had" means the months figure stays and no plain target is minted. */
+    const hadMonths = g().targetMonths, hadTarget = g().target;
+    ok(hadMonths > 0, 'fixture: a months-of-expenses goal', hadMonths);
+    const months = D.getElementById('rf-targetMonths');
+    months.value = '0';
+    months.dispatchEvent(new W.Event('change', { bubbles: true }));
+    ok(said.some((m) => /Months of expenses has to be above zero/.test(m)),
+       'the refusal is said at once', JSON.stringify(said));
+    eq(g().targetMonths, hadMonths, 'and the goal keeps the months it had');
+    eq(g().target, hadTarget, 'and no plain target was minted in its place');
+    eq(months.value, String(hadMonths),
+       'the box shows the stored months again, not the 0 the state refused');
+    D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+t('renaming an account onto another that shares a month is refused out loud', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'refusedmerge');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    const s = W.finGet();
+    const y = String(new Date().getFullYear());
+    s.years[y].overrides = s.years[y].overrides || {};
+    /* Both state a balance in the same month, so the merge must refuse. */
+    s.years[y].overrides[`mid|${y}-05`] = { v: 1 };
+    s.years[y].overrides[`emergency|${y}-05`] = { v: 2 };
+    W.render();
+    D.querySelector('[data-edit="account"][data-bal="mid"]').click();
+    const name = D.getElementById('rf-name');
+    name.value = 'Emergency fund';
+    name.dispatchEvent(new W.Event('change', { bubbles: true }));
+    ok(said.some((m) => /Kept "Emergency fund" separate/.test(m)),
+       'the refused merge is said the moment the name is finished with', JSON.stringify(said));
+    D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+
+/* ── Fix 2: "one window is one undo" only if the first commit actually banked ─
+   `commitRow` set `ctx.banked = true` after every save(), but save() banks
+   only when the core moved (`undoBankable`). A first commit that was refused
+   or normalised back banked nothing, every later commit in that window
+   borrowed the `undoing` latch, and the window's real change was never banked
+   — so ⌘Z skipped it and reverted an unrelated earlier window instead. The
+   flag now means "the ring grew": save() says whether it banked.
+   REAL save() here, with only the storage write stubbed — the ring is the
+   thing under test, and a stubbed save() has no ring to grow. */
+t('a window whose first commit banked nothing still gets its own undo step', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?undobank=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.Storage.prototype.setItem = () => {};   // the ring moves; the disk does not
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.toast = () => {};
+    W.loadSample();
+    const s = W.finGet();
+    const y = String(new Date().getFullYear());
+    s.years[y].overrides = s.years[y].overrides || {};
+    s.years[y].overrides[`mid|${y}-06`] = { v: 1234 };     // makes a March close refusable
+    W.save();                                             // banked as its own step, before window A
+    const fire = (id, v) => {
+      const el = D.getElementById(id);
+      el.value = v;
+      el.dispatchEvent(new W.Event('change', { bubbles: true }));
+    };
+    const shut = async () => {
+      D.getElementById('rowDialog').close();
+      await new Promise((r) => setTimeout(r, 0));   // `close` is a queued task
+    };
+    /* Window A: a goal renamed. One step. */
+    D.getElementById('tab-goals').click();
+    const card = D.querySelector('[data-edit="goal"]');
+    const gi = +card.dataset.idx;
+    const wasName = s.goals[gi].name;
+    card.click();
+    fire('rf-name', 'Renamed In Window A');
+    await shut();
+    eq(s.goals[gi].name, 'Renamed In Window A', 'window A wrote');
+    /* Window B: a REFUSED close first (banks nothing), then a real change. */
+    D.getElementById('tab-budget').click();
+    /* Read FRESH each time: undoLast replaces the state object, so a reference
+       taken before it would go on reporting the state it undid. */
+    const acct = () => W.finGet().settings.accounts.find((a) => a.id === 'mid');
+    const wasRate = acct().rate;
+    D.querySelector('[data-edit="account"][data-bal="mid"]').click();
+    fire('rf-until', `${y}-03`);
+    eq(acct().until, undefined, 'fixture: the close was refused, so nothing moved');
+    fire('rf-rate', '5.5');
+    await shut();
+    eq(acct().rate, 0.055, 'window B wrote the rate');
+    /* One undo takes back window B and ONLY window B. */
+    W.undoLast();
+    eq(acct().rate, wasRate, 'undo put the rate back');
+    eq(W.finGet().goals[gi].name, 'Renamed In Window A',
+       'and did NOT reach back into window A — the rate change had its own step');
+    W.undoLast();
+    eq(W.finGet().goals[gi].name, wasName, 'the next undo is window A');
+  } finally { f.remove(); }
+});
+
+/* ── Fix 5: text that is not a number is refused, not read as "clear this" ──
+   `parseMoney('abc')` is null, and a null threshold is exactly what an EMPTIED
+   box hands `save` — so a typo in a money box deleted the figure (the sweep's
+   threshold and the accounts it watches), the row went blank, the box emptied
+   itself on blur and nothing was said. An empty box is a statement and still
+   clears; unreadable text is refused out loud and the stored figure kept. One
+   guard in `commitRow`, over every money, number and percent box. */
+t('unreadable text in a money box is refused out loud, and an empty box still clears', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'notanumber');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    const y = String(new Date().getFullYear());
+    const cat = () => W.finGet().years[y].categories.find((c) => c.id === 'sweep');
+    ok(cat() && cat().threshold === 6000, 'fixture: the sample sweep row starts at $6,000');
+    D.querySelector('th[data-edit="category"][data-id="sweep"]').click();
+    const box = D.getElementById('rf-threshold');
+    ok(box && !box.closest('[data-field]').hidden, 'the threshold box is showing');
+    box.value = 'abc';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq(cat().threshold, 6000, 'the figure is left as it was');
+    /* `thresholdAccounts` is NOT pinned: it is a share link's frozen measure,
+       and the editor drops it on every save by design. */
+    ok(said.some((m) => /isn.t a number/.test(m) && /abc/.test(m)),
+       'and the refusal is said, naming what was typed', JSON.stringify(said));
+    eq(box.value, '$6,000.00', 'the box shows the stored figure again');
+    /* An emptied box is a different thing: it SAYS "no threshold". */
+    box.value = '';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq(cat().threshold, undefined, 'an empty box still clears the figure — that is a statement');
+    D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+
+/* ── Fix 6: Select all / Clear all commits like the money button does ───────
+   Both buttons write the FORM and fire no `change` of their own, so in a
+   window that saves as you go the money action button was given a commit —
+   and the checkset's button was not: the boxes all ticked, the tile behind
+   stayed on the old list until Done, and Escape between the two lost nothing
+   only because Done happened to catch it. Pressing a button is as deliberate
+   as finishing a field, so it commits like one. */
+t('Select all and Clear all in the goal window write the goal at once', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'selectallcommit');
+  try {
+    W.toast = () => {};
+    D.getElementById('tab-goals').click();
+    const card = D.querySelector('[data-edit="goal"]');
+    const idx = +card.dataset.idx;
+    const stored = () => (W.finGet().goals[idx].accounts || []).slice().sort();
+    card.click();
+    const btn = D.querySelector('#rowFields .checkset-all');
+    ok(btn, 'the goal window offers the one button under its account list');
+    const offered = [...D.querySelectorAll('#rf-accounts input[type="checkbox"]')]
+      .map((b) => b.value).sort();
+    ok(offered.length > stored().length, 'fixture: the goal does not yet tick every account');
+    ok(btn.textContent === 'Select all', 'so the button offers to select all', btn.textContent);
+    btn.click();
+    eq(stored(), offered, 'one press, and the goal counts every offered account — no Done needed');
+    eq(btn.textContent, 'Clear all', 'and the button now offers the other direction');
+    btn.click();
+    eq(stored(), [], 'Clear all writes the empty list the same way');
+    D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+
+/* ── Fix 4: the sweep line walks the same queue the tile does, and the foot ──
+   names the goal that took the money. `goalRemaining` (the tile) replays the
+   WHOLE chain ahead of a goal, account by account; `goalClaim` (the sweep
+   threshold, the cap, a frozen share link) read the immediate predecessor
+   alone and returned 0 when that one shared no account — so Roof (mid) ←
+   Kitchen (emergency) ← College (mid) put "after $14,000 claimed first by
+   Kitchen" on College's tile while Kitchen had taken nothing and Roof had,
+   and a sweep tied to College stopped $14,000 short of where the tile said it
+   was full. The claim now walks the whole chain, each goal ahead drawing its
+   own target over its own accounts in the reader's order, and only what lands
+   on an account this goal counts is the claim — the tile's arithmetic exactly,
+   so the two agree by construction. The middle goal, sharing nothing, still
+   claims nothing: it never reaches an account of this goal's. */
+t('a claim walks the whole queue ahead, so the sweep line and the tile agree (2026-09-07)', () => {
+  const goals = [
+    { id: 'roof', name: 'Roof', target: 14000, accounts: ['mid'], count: 'capped' },
+    { id: 'kitchen', name: 'Kitchen refresh', target: 30000, accounts: ['emergency'],
+      count: 'capped', overflowOf: 'roof' },
+    { id: 'college', name: 'College', target: 90000, accounts: ['mid'],
+      count: 'capped', overflowOf: 'kitchen' },
+  ];
+  const bal = (id) => ({ mid: 50000, emergency: 10000 })[id] || 0;
+  const order = ['mid', 'emergency'];
+  eq(H.goalClaim(goals[1], ['mid'], goals, bal, order), 14000,
+    'Kitchen shares nothing with College, but Roof ahead of it does — the claim is Roof\'s');
+  eq(H.goalNeed(goals[2], goals, bal, order), 104000,
+    'so College is full at its own target on top of the 14,000 Roof takes out of mid');
+  eq(H.goalRemaining(goals[2], goals, order, bal), 36000,
+    'and the tile has 50,000 less that same 14,000: held − remaining IS the claim');
+  eq(H.goalNeed(goals[1], goals, bal, order), 30000,
+    'Kitchen itself counts no account Roof reaches, so it needs only its target');
+  /* The middle goal's own shortfall never leaks through on the first goal's
+     overlap — the fault the one-level rule was written to avoid. */
+  const starved = goals.map((g) => (g.id === 'kitchen' ? { ...g, target: 1e6 } : g));
+  eq(H.goalClaim(starved[1], ['mid'], starved, bal, order), 14000,
+    'however far short Kitchen is, it cannot take from an account it does not count');
+  /* Two goals ahead on the same account both land their draw on it. */
+  const both = [goals[0], { ...goals[1], accounts: ['mid'] }, goals[2]];
+  eq(H.goalClaim(both[1], ['mid'], both, bal, order), 44000, 'Roof\'s 14,000 and Kitchen\'s 30,000');
+  eq(H.goalRemaining(both[2], both, order, bal), 6000, 'and the tile agrees: 50,000 − 44,000');
+  /* The chain is walked from the balances as they stand, so a goal ahead that
+     spends an unshared account first takes that much less from the shared one. */
+  const spend = [{ ...goals[0], accounts: ['emergency', 'mid'] }, goals[1], goals[2]];
+  eq(H.goalClaim(spend[1], ['mid'], spend, bal, ['emergency', 'mid']), 4000,
+    'Roof spends the 10,000 in emergency first and takes 4,000 out of mid');
+  eq(H.goalRemaining(spend[2], spend, ['emergency', 'mid'], bal), 46000, 'tile: the same 4,000');
+  /* Unchanged answers: a queue on one account, and a loop, read as they did. */
+  const one = [
+    { id: 'e', target: 20000, accounts: ['cash'] },
+    { id: 'r', target: 50000, accounts: ['cash'], overflowOf: 'e' },
+    { id: 'n', target: 50000, accounts: ['cash'], overflowOf: 'r' },
+  ];
+  eq(H.goalNeed(one[2], one, () => 0), 120000, 'third in a queue of one account: the sum');
+  const loop = [{ id: 'p', target: 1, accounts: ['cash'], overflowOf: 'q' },
+                { id: 'q', target: 2, accounts: ['cash'], overflowOf: 'p' }];
+  eq(H.goalNeed(loop[0], loop, () => 0), 3, 'a loop still terminates at the goal itself');
+});
+t('the tile foot names the goal that actually took the money, not merely the one ahead', () => {
+  const s = H.coerceShape(fixtureState());
+  s.goals = [
+    { id: 'roof', name: 'Roof', target: 100, accounts: ['mid'], count: 'capped' },
+    { id: 'kitchen', name: 'Kitchen refresh', target: 100, accounts: ['bank'],
+      count: 'capped', overflowOf: 'roof' },
+    { id: 'college', name: 'College', target: 900, accounts: ['mid'],
+      count: 'capped', overflowOf: 'kitchen' },
+  ];
+  const computed = H.computeAll(s, TODAY_FIX);
+  ok(computed['2030'].balances['mid|2030-04'] > 200, 'fixture: mid holds more than both targets');
+  let g = H.computeGoals(s, computed, TODAY_FIX);
+  eq(g[2].claimed, 100, 'Roof took its 100 out of mid');
+  eq(g[2].claimedBy, 'Roof', 'and the foot says Roof — Kitchen, the goal named as ahead, took nothing');
+  eq(g[1].claimed, 0, 'Kitchen, on the bank alone, lost nothing to Roof');
+  /* Two takers are both named; a queue with nothing taken keeps the link's name. */
+  s.goals[1].accounts = ['mid'];
+  g = H.computeGoals(s, computed, TODAY_FIX);
+  eq(g[2].claimed, 200, 'both took from mid');
+  eq(g[2].claimedBy, 'Roof and Kitchen refresh', 'and both are named, in the order they drew');
+  s.goals[0].accounts = ['bank']; s.goals[1].accounts = ['bank'];
+  g = H.computeGoals(s, computed, TODAY_FIX);
+  eq(g[2].claimed, 0, 'nothing reaches mid now');
+  eq(g[2].claimedBy, 'Kitchen refresh', 'so the link itself is what is named — still queued, taking nothing');
+  const d = document.createElement('div');
+  d.innerHTML = w.goalCard({ ...g[2], claimed: 200, claimedBy: 'Roof and Kitchen refresh',
+    saved: 1, held: 201, monthsLeft: 0, monthlyReq: 0, progress: 0, gap: 1, paceMo: 1, etaMonths: null });
+  ok(/after \$200\.00 claimed first by Roof and Kitchen refresh/.test(d.textContent.replace(/\s+/g, ' ')),
+     'the foot prints the takers', d.textContent.replace(/\s+/g, ' ').trim());
 });
 
 async function run() {
