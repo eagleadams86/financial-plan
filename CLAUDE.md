@@ -6113,3 +6113,22 @@ in the commit.
   banks; and read the state through `finGet()` on every assertion, because
   `undoLast` replaces the object and a captured reference reports the state
   it undid.
+- **Text that is not a number is refused, not read as "clear this" (fix 5).**
+  `parseMoney('abc')` is null — the same null an emptied box hands `save` —
+  and every section treats null as "delete the figure", so a typo in the
+  sweep's threshold deleted the figure, the row went blank, the box emptied
+  itself on blur (`asMoneyInput`) and nothing was said. `unreadableFields
+  (spec)` (beside `readFields`) lists the money, number and percent boxes
+  whose text is non-empty and reads as no number; `commitRow` swaps in the
+  value the box HELD (`JSON.parse(ctx.opened)` — what it opened with, or what
+  the last commit left — so an add window is covered too), puts the box back
+  through `setFieldValue`, and toasts "“abc” in Above this amount isn’t a
+  number — left it as it was", joined ahead of whatever the section returned
+  because `toast` shows one message at a time. An EMPTY box is a different
+  statement and still clears — the test pins both halves on the sample's
+  sweep row. `parseMoney` reads "12abc" as 12, so only text with no figure in
+  it lands here; a `type=number` box's own validation already refuses most of
+  it, and the money box is a text box on purpose. One thing the audit listed
+  that is NOT a loss: `thresholdAccounts` goes on every save of the row
+  editor by design — it is a share link's frozen measure, and "what you saved
+  is what it showed" — so the test does not pin it.

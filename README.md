@@ -1691,7 +1691,12 @@ choice actually uses.
   row arrived as +200 and the money moved the other way. Both spellings read the
   same now, in a typed box and in an imported CSV alike. (A dash used as
   punctuation — "Rent — $500" — is still just punctuation; only the characters
-  that really are hyphens and minus signs count.)
+  that really are hyphens and minus signs count.) **And text that is not a
+  number is refused, not read as "clear this"** (fixed 2026-09-07): type
+  `abc` into a money box and leave it, and the box says so and goes back to
+  the figure it held — it used to delete the figure, and on a sweep row that
+  blanked the row without a word. An emptied box still clears: that is a
+  statement, and it is kept.
 - **Landing on a box selects what's in it**, so typing replaces the figure
   instead of running on to the end of it. Click a second time to place the
   cursor and edit normally. The up/down arrows a browser draws on a number box

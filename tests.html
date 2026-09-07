@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1012;
+const EXPECTED = 1013;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -16291,6 +16291,40 @@ t('a window whose first commit banked nothing still gets its own undo step', asy
        'and did NOT reach back into window A — the rate change had its own step');
     W.undoLast();
     eq(W.finGet().goals[gi].name, wasName, 'the next undo is window A');
+  } finally { f.remove(); }
+});
+
+/* ── Fix 5: text that is not a number is refused, not read as "clear this" ──
+   `parseMoney('abc')` is null, and a null threshold is exactly what an EMPTIED
+   box hands `save` — so a typo in a money box deleted the figure (the sweep's
+   threshold and the accounts it watches), the row went blank, the box emptied
+   itself on blur and nothing was said. An empty box is a statement and still
+   clears; unreadable text is refused out loud and the stored figure kept. One
+   guard in `commitRow`, over every money, number and percent box. */
+t('unreadable text in a money box is refused out loud, and an empty box still clears', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'notanumber');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    const y = String(new Date().getFullYear());
+    const cat = () => W.finGet().years[y].categories.find((c) => c.id === 'sweep');
+    ok(cat() && cat().threshold === 6000, 'fixture: the sample sweep row starts at $6,000');
+    D.querySelector('th[data-edit="category"][data-id="sweep"]').click();
+    const box = D.getElementById('rf-threshold');
+    ok(box && !box.closest('[data-field]').hidden, 'the threshold box is showing');
+    box.value = 'abc';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq(cat().threshold, 6000, 'the figure is left as it was');
+    /* `thresholdAccounts` is NOT pinned: it is a share link's frozen measure,
+       and the editor drops it on every save by design. */
+    ok(said.some((m) => /isn.t a number/.test(m) && /abc/.test(m)),
+       'and the refusal is said, naming what was typed', JSON.stringify(said));
+    eq(box.value, '$6,000.00', 'the box shows the stored figure again');
+    /* An emptied box is a different thing: it SAYS "no threshold". */
+    box.value = '';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq(cat().threshold, undefined, 'an empty box still clears the figure — that is a statement');
+    D.getElementById('rowDialog').close();
   } finally { f.remove(); }
 });
 

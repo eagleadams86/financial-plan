@@ -20016,6 +20016,29 @@ function readFields(fields) {
   return out;
 }
 
+/* A NUMBER BOX HOLDING TEXT THAT IS NOT A NUMBER (2026-09-07 audit, fix 5).
+   `readFields` reads "abc" in a money box as null — the same null an EMPTIED
+   box hands over — and every section treats null as "clear this": a typo in
+   the sweep's threshold deleted the figure and the accounts it watches, the
+   row went blank, the box emptied itself on blur, and nothing was said. The
+   two are different statements. An empty box means "no figure", and still
+   clears; text that does not read as a number is REFUSED — said out loud, the
+   stored figure kept, the box put back. This is the question, asked once in
+   `commitRow` over every money, number and percent field, so no section has to
+   ask it. `parseMoney` reads "12abc" as 12, so only text with no figure in it
+   at all lands here; a number box's browser-side validation already refuses
+   most of this, and the money box is a text box on purpose (brackets, symbols,
+   the six minus signs), so it is the one this exists for. */
+function unreadableFields(fields) {
+  return fields.filter((f) => f && !f.sec
+    && ['money', 'number', 'percent'].includes(f.type)).filter((f) => {
+    const el = F(`rf-${f.key}`);
+    const raw = el ? el.value.trim() : '';
+    if (raw === '') return false;
+    return f.type === 'money' ? parseMoney(raw) === null : Number.isNaN(parseFloat(raw));
+  });
+}
+
 function openRowEditor(section, ds, isNew) {
   if (viewOnly) return;   // someone else's figures — nothing here is yours to change
   const ed = EDITORS[section];
@@ -20152,10 +20175,30 @@ function rowMoved(ctx) {
    banked at all: ⌘Z skipped it and reverted whatever window came before. */
 function commitRow(ctx, speak) {
   const values = readFields(ctx.spec);
+  /* Text that is not a number is refused, never read as "clear this" (fix 5):
+     the value the box HELD — what it opened with, or what the last commit
+     left — goes to `save` in its place, and the box is put back to it. One
+     sentence for all of them, joined ahead of whatever the section says,
+     because `toast` shows one message at a time. */
+  const bad = unreadableFields(ctx.spec);
+  let refused = '';
+  if (bad.length) {
+    const was = JSON.parse(ctx.opened);
+    const named = bad.map((f) => {
+      const el = F(`rf-${f.key}`);
+      const raw = el.value.trim();
+      values[f.key] = was[f.key];
+      setFieldValue(f, el, was);
+      return `“${raw.length > 40 ? raw.slice(0, 40) + '…' : raw}” in ${f.label}`;
+    });
+    refused = `${andList(named)} ${bad.length > 1 ? 'aren’t numbers' : 'isn’t a number'}`
+      + ` — left ${bad.length > 1 ? 'them as they were' : 'it as it was'}`;
+  }
   /* What is now written down, so a close that follows with nothing further
      typed knows it has nothing to do. */
   ctx.opened = JSON.stringify(values);
-  const said = EDITORS[ctx.section].save(ctx.ds, values);
+  let said = EDITORS[ctx.section].save(ctx.ds, values);
+  if (refused) said = typeof said === 'string' ? `${refused}. ${said}` : refused;
   const wasUndoing = undoing;
   if (ctx.banked) undoing = true;
   const banked = save();
