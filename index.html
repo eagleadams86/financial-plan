@@ -1519,6 +1519,14 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
 #helpBody strong { color: var(--text-primary); }
 .checkset { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 4px 0; }
 .checkset .checkline { font-weight: 400; }
+/* Under its group, like the action fields' buttons — beside them it would sit
+   in the middle of the tick list and read as one more option.
+   `align-self` is not tidiness: `.grid-fields > div` is a flex COLUMN with no
+   `align-items`, so a bare button stretches to the whole cell — and this cell
+   is `wide`, so it drew a button the width of the dialog. `.field-row` gets
+   away with `flex: none` because that row sets `align-items: flex-start`
+   itself. */
+.checkset-all { margin-top: 6px; align-self: flex-start; }
 .field-hint { margin: 6px 0 0; font-size: var(--fs-xs); line-height: 1.45;
   color: var(--text-muted); }
 
@@ -19519,6 +19527,41 @@ function buildFields(fields, values, link) {
       row.appendChild(btn);
       cell.appendChild(row);
     } else cell.appendChild(input);
+    /* A checkset long enough to be tedious gets ONE button that ticks or
+       clears the lot — asked for 2026-09-07, for a goal whose "Saved adds up"
+       list is every account in the plan.
+       OPT-IN (`selectAll`), never free with the type: "Months it falls in" is
+       a shape you pick out, and a button that ticks all twelve of them offers
+       nothing but a wrong schedule one press away.
+       ONE button, and the word says what pressing it will DO next — the
+       Show/Hide button's rule — because two buttons leaves one of them dead at
+       either end of the range. Under its group like every other action button
+       here, and it works on the FORM, so nothing commits until Save. */
+    if (f.type === 'checks' && f.selectAll && f.options.length) {
+      const boxes = [...input.querySelectorAll('input[type="checkbox"]')];
+      const btn = document.createElement('button');
+      btn.type = 'button';                    // never submits the dialog
+      btn.className = 'btn small checkset-all';
+      const sync = () => {
+        btn.textContent = boxes.every(b => b.checked) ? 'Clear all' : 'Select all';
+        /* The visible word FIRST, so voice control still matches what it can
+           see, and the field named after it — "Select all" alone would be the
+           same accessible name on every checkset a dialog happens to hold. */
+        btn.setAttribute('aria-label', `${btn.textContent} — ${f.label}`);
+      };
+      sync();
+      /* Delegated, because ticking the last empty box by hand has to move the
+         button's word too — otherwise it offers to select what is already
+         selected. */
+      input.addEventListener('change', sync);
+      btn.onclick = () => {
+        const on = !boxes.every(b => b.checked);
+        boxes.forEach(b => { b.checked = on; });
+        sync();
+        if (link) link(f.key);
+      };
+      cell.appendChild(btn);
+    }
     /* A line under the input, for a field whose label can't carry the whole
        story — easier to read than one paragraph at the top explaining five
        fields at once. */
@@ -21473,9 +21516,29 @@ const EDITORS = {
         hint: 'Type a number here and the target follows this year\u2019s expenses live \u2014 '
             + '6 is the usual emergency-fund rule of thumb. Leave it empty to keep the figure '
             + 'in Target.' },
+      /* An account CLOSED BY NOW is left out, the way the transfer target and
+         the sweep's watched account leave closed accounts out — asked for
+         2026-09-07, about a Fidelity Go shut in 2020 still sitting in the
+         list. It is not clutter alone: a closed account has no balance in any
+         month after `until` (`computeYear` drops it from `running`), so a tick
+         against it adds nothing to the goal and never can, and after a history
+         import the closed ones outnumber the live ones here.
+         **`a.until <= thisMonth()`, NOT the dropdowns' bare `!a.until`.** An
+         account closing LATER this year still holds money today and its
+         balance is still in the goal, so hiding it would be dropping a real
+         figure; the dropdowns can be blunter because they choose where money
+         will go in future, which is nowhere for an account with an end date.
+         There is no "a goal already naming one keeps it" exemption, and that
+         is the difference from those two: this list writes back what it shows,
+         so keeping the tick would put the closed account straight back on the
+         page it was asked to leave. `save` says what it dropped instead. */
       { key: 'accounts', label: 'Saved adds up', type: 'checks', wide: true,
-        options: accountsOf(state).map(a => [a.id, accountOption(state, a)]),
-        hint: 'Every account whose balance counts toward this goal.' },
+        selectAll: true,
+        options: accountsOf(state)
+          .filter(a => !(a.until && a.until <= thisMonth()))
+          .map(a => [a.id, accountOption(state, a)]),
+        hint: 'Every account whose balance counts toward this goal. '
+            + 'An account you have closed is not offered — it holds nothing to count.' },
       /* Two questions, not one three-way list (2026-09-05): how far the bar
          runs, and who is paid first. They used to be one field whose third
          option ("only what another goal has not claimed") was always uncapped,
@@ -21550,6 +21613,18 @@ const EDITORS = {
       const g = ds.idx !== undefined ? state.goals[+ds.idx]
         : (state.goals.push({ id: uniqueId(state.goals, v.name, 'goal') }),
            state.goals[state.goals.length - 1]);
+      /* The list does not offer an account closed by now, and this writes back
+         what it showed — so saving an old goal drops those ticks. NAMED rather
+         than done quietly (2026-09-07): no figure moves (a closed account has
+         no balance for the goal to have been counting), but a claim the reader
+         made is being withdrawn, and a goal that silently lists one account
+         fewer than it did is the surprise the "say what changed" standard
+         exists for. Read off the STORED record before it is overwritten. */
+      const dropped = (g.accounts || [])
+        .filter(id => !(v.accounts || []).includes(id))
+        .map(id => accountById(state, id))
+        .filter(a => a && a.until && a.until <= thisMonth())
+        .map(a => a.name || a.id);
       Object.assign(g, { name: v.name, accounts: v.accounts || [],
         count: v.count, targetDate: v.targetDate || null });
       let said;
@@ -21588,6 +21663,14 @@ const EDITORS = {
         else delete g.for;
       }
       g.note = v.note || undefined;
+      /* Said LAST, and appended rather than assigned: the branches above own
+         `said` for a claim they REFUSED, and this is a claim that was carried
+         out — one message, both halves, in the order they happened. */
+      if (dropped.length)
+        said = (said ? said + '; ' : '')
+          + `${dropped.join(', ')} ${dropped.length > 1 ? 'are' : 'is'} closed, so `
+          + `${dropped.length > 1 ? 'they no longer count' : 'it no longer counts'} `
+          + 'toward this goal — the figure is unchanged';
       return said;
     },
     /* Deleting still deletes — dangling ids degrade, they don't block, the

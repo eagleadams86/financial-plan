@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 991;
+const EXPECTED = 994;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14293,6 +14293,111 @@ t('the Target box is read-only while Months of expenses is set, and the button c
     ok(!target.readOnly, 'and leaves the box editable');
     [...D.querySelectorAll('dialog')].filter((d) => d.open).forEach((d) => d.close());
   } finally { f.remove(); }
+});
+/* ── One button ticks or clears the whole account list (2026-09-07) ─────────
+   A goal's "Saved adds up" lists every account in the plan, and ticking them
+   one at a time is the tedium this answers. Driven through the real dialog:
+   the button is built by `buildFields` at open time, and its word is a
+   function of what is ticked at that moment — neither is reachable from the
+   hooks, and a source test could only ever say the code exists. */
+t('the goal window ticks or clears every account with one button (2026-09-07)', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?sel=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    D.getElementById('tab-goals').click();
+    const card = [...D.querySelectorAll('[data-edit="goal"]')]
+      .find((el) => /Emergency fund/.test(el.textContent));
+    ok(card, 'the sample\'s emergency fund is on the Progress tab');
+    card.click();
+    const set = D.getElementById('rf-accounts');
+    const boxes = [...set.querySelectorAll('input[type="checkbox"]')];
+    ok(boxes.length > 1, 'the goal lists every account', boxes.length);
+    const cell = set.closest('[data-field="accounts"]');
+    const btn = cell.querySelector('.checkset-all');
+    ok(btn, 'the account list carries a select-all button');
+    ok(btn.type === 'button', 'and it never submits the dialog');
+    /* The sample's emergency fund does not name every account, so the button
+       opens offering to take the rest — the state a reader meets it in. */
+    ok(boxes.some((b) => !b.checked), 'the sample goal leaves some unticked');
+    eq(btn.textContent, 'Select all', 'so the word says what pressing it will do');
+    btn.click();
+    ok(boxes.every((b) => b.checked), 'one press ticks the lot');
+    eq(btn.textContent, 'Clear all', 'and the word turns round rather than offering it again');
+    /* The accessible name carries the field, since a dialog may hold more than
+       one checkset; the visible word leads it, so voice control still matches. */
+    eq(btn.getAttribute('aria-label'), 'Clear all — Saved adds up',
+       'the accessible name names the group, visible word first');
+    btn.click();
+    ok(boxes.every((b) => !b.checked), 'and pressing it again clears them');
+    eq(btn.textContent, 'Select all', 'with the word back where it started');
+    /* Ticking the last empty box by hand has to move the word too, or the
+       button offers to select what is already selected. */
+    boxes.forEach((b) => { b.checked = true; });
+    boxes[0].dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq(btn.textContent, 'Clear all', 'a tick by hand moves the word as well');
+    /* Nothing commits until Save, the `link`/action rule — pressed here with
+       `save` stubbed out, so a write would be caught by the frame's own
+       fin-state check rather than asserted over a `state` a classic script's
+       top-level `let` never puts on the window. */
+    [...D.querySelectorAll('dialog')].filter((d) => d.open).forEach((d) => d.close());
+  } finally { f.remove(); }
+});
+/* ── Only the goal's account list asks for the button ───────────────────────
+   Opt-in, not free with the type: a due-months picker is a shape you pick out,
+   and one press filling in all twelve is a wrong schedule nobody typed. */
+t('the select-all button is opt-in, and only the goal accounts field asks for it', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const asks = src.match(/selectAll: true/g) || [];
+  eq(asks.length, 1, 'exactly one field asks for it');
+  ok(/label: 'Saved adds up', type: 'checks', wide: true,\s*\n?\s*selectAll: true/.test(src),
+     'and it is the goal\'s account list');
+  ok(/f\.type === 'checks' && f\.selectAll && f\.options\.length/.test(src),
+     'the renderer draws it only for a checks field that asked, and has options to offer');
+});
+/* ── A closed account is not offered to a goal (2026-09-07) ─────────────────
+   Asked for about a Fidelity Go shut in 2020 still sitting in the tick list —
+   and it matters more beside the button above, which would otherwise tick
+   every account the reader has ever had. Source, because the filter and the
+   drop both live inside the goal editor's spec, which is built at open time,
+   and because the live path would need a closed account in state: the frame
+   shares this origin's `fin-state`, and seeding one would write over the real
+   plan (the ambient-state trap, from the other direction). */
+t('a goal is not offered an account that is already closed (2026-09-07)', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const spec = src.slice(src.indexOf("label: 'Saved adds up'"));
+  ok(/\.filter\(a => !\(a\.until && a\.until <= thisMonth\(\)\)\)/.test(spec.slice(0, 400)),
+     'the account list drops one closed by now');
+  /* NOT the dropdowns' bare `!a.until`: an account closing later this year
+     still holds money the goal is counting today, and hiding it would be
+     dropping a real figure rather than an empty tick. */
+  ok(!/label: 'Saved adds up'[\s\S]{0,400}filter\(a => !a\.until\)/.test(src),
+     'and it is measured against this month, not against having an end date at all');
+  ok(/An account you have closed is not offered/.test(spec.slice(0, 900)),
+     'the hint says so, so an account missing from the list is not a mystery');
+  /* The list writes back what it showed, so an old goal loses those ticks on
+     save — no figure moves, but a claim is withdrawn, and the 2026-09-02
+     standard says a change the reader did not make has to be said. */
+  const save = src.slice(src.indexOf('const dropped = (g.accounts || [])'));
+  ok(save.indexOf('const dropped') < save.indexOf('Object.assign(g, { name: v.name'),
+     'the dropped ids are read off the STORED record, before it is overwritten');
+  ok(/a\.until && a\.until <= thisMonth\(\)/.test(save.slice(0, 400)),
+     'and only a closed one counts as dropped — unticking a live account is the reader\'s doing');
+  ok(/said = \(said \? said \+ '; ' : ''\)\s*\n?\s*\+ `\$\{dropped\.join/.test(save),
+     'the message is appended, so a refusal above it is not overwritten');
 });
 t('a budget row and an account open wide, in three columns, in their blocks', async () => {
   const f = document.createElement('iframe');

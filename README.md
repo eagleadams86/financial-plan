@@ -777,7 +777,12 @@ Where the whole plan stands and where it has been, on one tab.
 ### Savings Goals
 
 Goals add up whichever accounts you tick, so splitting an account is a matter
-of ticking the new ones. A target is a figure, or **a number of months of
+of ticking the new ones. **Select all** beside the list ticks the lot, and
+turns into **Clear all** once everything is ticked. An account you have
+**closed** is not offered — it holds nothing for a goal to count — so an old
+goal that named one drops it the next time you save, with a line saying so;
+no figure moves, because a closed account had no balance to be counting.
+A target is a figure, or **a number of months of
 expenses**: type 6 into "Months of expenses" (up to 120 — ten years; nothing
 at or below zero) and the target becomes six months
 of this year's Expenses total, live, everywhere the target is read — the tile,

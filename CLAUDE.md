@@ -1425,6 +1425,42 @@ suite passed while the card was wrong.
   long) migrate once into that shape. An id that no longer exists contributes
   nothing rather than breaking the goal — splitting one account into several is
   normal, and the goal has to keep working while you repoint it.
+- **The goal's account list is the one checkset with a SELECT ALL button, and
+  it does not offer an account closed by now** (2026-09-07). Two asks, one
+  window, and each is the other's reason for mattering.
+  - **`selectAll` is a field flag on the `checks` type, opt-in and read by
+    `buildFields`** — the `applyFieldSpans` bargain inverted, deliberately: an
+    automatic button on every checkset would put one under "Months it falls
+    in", where a single press fills in a schedule nobody typed. ONE button
+    whose word says what pressing it will DO next (the Show/Hide rule), so
+    neither end of the range leaves a dead control; a delegated `change`
+    listener moves the word when the last box is ticked by hand. It edits the
+    FORM, like `link` and the action buttons — nothing commits until Save.
+    **`align-self: flex-start` is load-bearing**: `.grid-fields > div` is a
+    flex column with no `align-items`, so a bare button stretches to the cell,
+    and this cell is `wide` — it drew a button the width of the dialog.
+    `.field-row`'s `flex: none` gets away without it because that row sets
+    `align-items` itself.
+  - **The filter is `a.until && a.until <= thisMonth()`, NOT the transfer
+    target's bare `!a.until`.** Those two dropdowns choose where money will go
+    in future, which is nowhere for an account with an end date; this list is
+    read at THIS month, and an account closing later this year still holds
+    money the goal is counting. Hiding that one would drop a real figure.
+  - **There is no "a goal already naming one keeps it" exemption**, which is
+    the other difference from the dropdowns: this list writes back what it
+    showed, so an exemption would put the closed account straight back on the
+    page it was asked to leave. `save` reads the dropped ids off the STORED
+    record before `Object.assign` overwrites it and NAMES them — no figure
+    moves (a closed account has no balance after `until`; `computeYear` drops
+    it from `running`), but a claim the reader made is being withdrawn, which
+    is the 2026-09-02 standard's case. Appended to `said`, never assigned over
+    it: the branches above own that variable for a claim they REFUSED.
+  - **The closed-account half is pinned as SOURCE, and that is a constraint
+    rather than a preference.** Both halves live inside the editor's spec,
+    built at open time; and the live path would need a closed account in
+    state, which on this origin means writing over the real plan through the
+    frame's shared `fin-state` — the ambient-state trap from the other
+    direction. The BUTTON is driven through the real dialog off the sample.
 - **Goals queue behind each other, and `goalNeed` / `goalClaim` are the ONE
   arithmetic for it** (2026-09-05, beside `computeGoals`; pure, in the hooks).
   `count` used to be three-way — `overflow` meant "all of it above what
