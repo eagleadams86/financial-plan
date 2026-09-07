@@ -1709,6 +1709,11 @@ choice actually uses.
 - **Adding a row still asks.** A brand-new row keeps Cancel and Save, because
   Cancel there means *never create it*, which saving as you go has no way to
   say — so a window opened by a mis-click leaves nothing behind.
+- **So does a window that does something rather than editing something.**
+  *Combine Into One Account* on the Retirement tab folds accounts together, and
+  its boxes are the arguments of that one move — so it keeps Cancel and Save,
+  and nothing is folded until you press Save (fixed 2026-09-07: ticking the
+  first account used to fold it on the spot, with no Cancel left to undo it).
 - **The cell editor still asks too.** A month's cell is not just a set of boxes:
   it splits into several amounts, accepts the estimates, reverts to the computed
   figure or clears itself outright, and Cancel there means *leave this month

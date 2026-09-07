@@ -2320,8 +2320,9 @@ columns, and cut into blocks with a rule and a small heading between them.
   into three paragraphs is its own kind of unreadable.
 - **THE ROW EDITOR SAVES AS YOU GO WHEN IT IS EDITING, AND STILL ASKS WHEN IT IS ADDING
   (2026-09-07).** One `#rowDialog` serves thirty-two `EDITORS` sections and both modes, and
-  the mode is `!isNew` — read once in `openRowEditor`, onto `rowCtx.auto`, and never worked
-  out again. Editing hides Cancel, shows the "Saved as you go" note and labels the button
+  the mode is `!isNew && !ed.action` — read once in `openRowEditor`, onto `rowCtx.auto`, and
+  never worked out again (`action` is the one section flag that opts out; see the 2026-09-07
+  audit's fix 3 at the foot of this file). Editing hides Cancel, shows the "Saved as you go" note and labels the button
   **Done**; adding is untouched, because *Cancel means never create it* and auto-save has no
   way to say that. Four things about it are load-bearing:
   - **`change`, not `input`.** `change` is "finished with this box"; `input` would commit 1,
@@ -6025,3 +6026,31 @@ and proven red against the pre-fix page, README and this file in the commit.
   landing month, says which of the two reasons applies; the tile carries
   "no balance to pace it by this year" for the null case beside the
   existing "not growing this year".
+
+## Fixes From the 2026-09-07 Audit
+
+The row editor started saving as you go that morning, and the audit that
+afternoon drove every window that had changed. Six findings, all confirmed by
+driving the app headless; Charles asked for all six fixed. Same routine as the
+audits above: one commit per finding, a test written first and proven red
+against the pre-fix page (served from `git archive main` on a second port, the
+whole archive, with the new `tests.html` copied over it), README and this file
+in the commit.
+
+- **"Combine Into One Account" is an action window and does not auto-save
+  (fix 3, done first).** `rowCtx.auto` was `!isNew`, so every `data-edit`
+  window saved as you go — including `foldAccounts`, whose boxes are the
+  ARGUMENTS of one fold. Ticking the first account folded it on the spot and
+  silently, Cancel was gone, the form still listed the indexes the fold had
+  just shifted, a second tick sent `from=[1,2]` against the re-indexed list,
+  and "Nothing to fold" fired on the first select change. A section may now
+  declare `action: true`; `openRowEditor` reads `auto = !isNew && !ed.action`
+  and the closing row follows `auto` (Cancel shown, note hidden, button
+  "Save"), so the window commits once, through `onsubmit`, exactly as an add
+  window does. **The survey of all thirty-two sections found exactly one
+  action**: every other window, `taxCheck` included, edits something that is
+  stored — `taxCheck`'s one box IS `side.tax.check`, and its "Use this year"
+  button already commits like a finished field, so it stays auto-saving. The
+  test opens the fold window on the sample's four retirement accounts, reads
+  the closing row, ticks an account and pins that nothing folds until Save
+  and that Cancel folds nothing.

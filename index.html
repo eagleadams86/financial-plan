@@ -19383,7 +19383,10 @@ const rowDialog = F('rowDialog');
 /* { section, ds (the row's dataset), spec, auto, banked }
    `auto` is "this window writes as you go" — true for every EDIT, false while
    ADDING, which is the one thing auto-save cannot say (see the closing row in
-   the markup). `banked` is the undo bookkeeping: see commitRow. */
+   the markup), and false for a section that declares `action: true`: a window
+   that DOES something rather than editing a record (folding accounts together
+   is the one) has no field-by-field meaning, so it keeps Cancel and Save and
+   commits once, on Save. `banked` is the undo bookkeeping: see commitRow. */
 let rowCtx = null;
 
 /* Field types: text · password · money · number · percent (shown ×100) · date ·
@@ -19953,7 +19956,14 @@ function openRowEditor(section, ds, isNew) {
   const ed = EDITORS[section];
   if (!ed) return;
   const spec = typeof ed.fields === 'function' ? ed.fields(ds, isNew) : ed.fields;
-  rowCtx = { section, ds, spec, auto: !isNew, banked: false };
+  /* Saving as you go is for EDITING A RECORD. Adding asks, because Cancel
+     there means "never create it"; an action window asks, because its boxes
+     are the arguments of one move and half of them is not a smaller move —
+     ticking the first account in "Combine Into One Account" used to fold it on
+     the spot, silently, with Cancel gone and the form still listing indexes
+     the fold had just shifted (2026-09-07 audit, fix 3). */
+  const auto = !isNew && !ed.action;
+  rowCtx = { section, ds, spec, auto, banked: false };
   F('rowDialogTitle').textContent =
     (typeof ed.title === 'function' ? ed.title(ds, isNew) : ed.title) || 'Edit';
   F('rowDialogSub').textContent =
@@ -20009,9 +20019,9 @@ function openRowEditor(section, ds, isNew) {
   /* The closing row, both ways. Cleared every open rather than only when it
      changes: one dialog serves thirty-two sections and both modes, so a label
      left over from the last open is a lie about what the buttons do. */
-  F('rowCancelBtn').hidden = !isNew;
-  F('rowAutoNote').hidden = isNew;
-  F('rowSaveBtn').textContent = isNew ? 'Save' : 'Done';
+  F('rowCancelBtn').hidden = auto;
+  F('rowAutoNote').hidden = !auto;
+  F('rowSaveBtn').textContent = auto ? 'Done' : 'Save';
   /* `returnValue` outlives a close, and the submit button sets it to "save" —
      so without this, a window opened after a Save would think it had been
      saved before anybody pressed anything. */
@@ -22419,6 +22429,12 @@ const EDITORS = {
      account would be inventing, and this is the moment you say they are. */
   foldAccounts: {
     title: 'Combine Into One Account',
+    /* An ACTION, not a record: the boxes are the arguments of one fold, so
+       the window keeps Cancel and Save and commits on Save alone (2026-09-07
+       audit, fix 3). The only section that says so — every other window edits
+       something that is stored, including `taxCheck`, whose one box IS the
+       stored record. */
+    action: true,
     sub: () => 'Each account you fold in becomes a contribution type inside the one you '
       + 'keep, with its name, its tax treatment and its balance. Nothing is added up or '
       + 'thrown away.',
