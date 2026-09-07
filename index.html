@@ -19396,6 +19396,73 @@ let rowCtx = null;
    with no marker `#rowFields` IS the grid, exactly as it was, which is why the
    other seventeen editors need no thought here. Where there are markers it
    becomes a plain block of `.fieldsec`s, each holding a grid of its own. */
+/* ONE PLACE PUTS A STORED VALUE INTO A BOX (2026-09-07 audit, fix 1). It was
+   inline in buildFields, one branch per type, and that was fine while opening
+   the window was the only time a box was primed from the state. It is not any
+   more: a window that saves as you go commits a field at a time, and a section
+   can REFUSE what it was handed — so after every commit the boxes are put back
+   to what the state actually holds, through this same setter, rather than left
+   showing a month that was never stored. Undefined and null are the empty box,
+   a percent is shown ×100 at the field's own places, money is formatted, a
+   select with nothing stored opens on its first option. */
+function setFieldValue(f, input, values) {
+  const v = values[f.key];
+  if (f.type === 'select') input.value = v ?? (f.options.length ? f.options[0][0] : '');
+  else if (f.type === 'checks') {
+    const chosen = new Set(v || []);
+    input.querySelectorAll('input[type="checkbox"]')
+      .forEach((b) => { b.checked = chosen.has(b.value); });
+  } else if (f.type === 'check') input.checked = !!v;
+  else if (f.type === 'readout') input.textContent = v ?? '';
+  else if (f.type === 'note') input.value = v ?? '';
+  else input.value = v === undefined || v === null ? ''
+    : f.type === 'percent' ? roundTo(v * 100, f.dp ?? 2)
+    : f.type === 'money' ? fmtMoney(v) : v;
+}
+
+/* THE WINDOW SHOWS WHAT IS STORED, AFTER EVERY COMMIT (2026-09-07 audit, fix
+   1). A per-field commit hands the whole form to the section's `save`, and a
+   section may keep only part of it — the account editor refuses a closing
+   month that a later month still states a balance for, refuses to untick the
+   only main account, refuses a rename that would merge two accounts sharing a
+   month; the goal editor refuses a months figure at zero and a claim that
+   would loop. Before this the box went on showing the refused value while the
+   state held the old one, and the closing commit — the only one that spoke —
+   saw a form that matched what it had "written" and said nothing at all.
+
+   So after each commit every box is set again from the section's own `get`,
+   exactly as `openRowEditor` primes them, `link('')` re-derives the boxes a
+   section works out from the others, and `opened` is re-read so the close
+   that follows knows there is nothing more to write. It is "close and reopen
+   the window" without losing the cursor. A field may say `transient: true` to
+   be left alone — the tax band's paste box is an instruction, not a value the
+   state holds, and clearing it after a refused paste would throw away the very
+   thing the reader is about to correct.
+
+   A checkset is told it changed (a NON-bubbling event, so the delegated commit
+   on #rowFields never hears it) because the "Select all" button under it reads
+   its word off the boxes and would otherwise offer to select what is already
+   selected. And a section whose `get` can no longer find its record — a
+   rename that merged this account INTO another — has nothing to prime from:
+   the window is ended, since every further commit would write into a record
+   the merge has already moved. */
+function reprimeRow(ctx) {
+  const ed = EDITORS[ctx.section];
+  let stored = null;
+  try { stored = ed.get(ctx.ds); } catch (e) { stored = null; }
+  if (!stored) { rowCtx = null; rowDialog.close(); return; }
+  for (const f of ctx.spec) {
+    if (!f || f.sec || f.transient) continue;
+    const el = F(`rf-${f.key}`);
+    if (!el) continue;
+    setFieldValue(f, el, stored);
+    if (f.type === 'checks') el.dispatchEvent(new Event('change'));
+  }
+  if (ed.link) ed.link('', ctx.ds);
+  applyFieldVisibility(ctx.spec);
+  ctx.opened = JSON.stringify(readFields(ctx.spec));
+}
+
 function buildFields(fields, values, link) {
   const host = F('rowFields');
   host.innerHTML = '';
@@ -19463,7 +19530,6 @@ function buildFields(fields, values, link) {
          threw on `f.options[0][0]`, and because buildFields runs before the
          dialog is shown, the throw took the whole dialog with it: the button
          did nothing at all. An empty select falls back to an empty value. */
-      input.value = values[f.key] ?? (f.options.length ? f.options[0][0] : '');
     } else if (f.type === 'checks') {
       /* One checkbox per option rather than a multi-select: picking several
          accounts out of a list is the whole point, and a multi-select hides
@@ -19472,14 +19538,12 @@ function buildFields(fields, values, link) {
       input.className = 'checkset';
       input.setAttribute('role', 'group');
       input.setAttribute('aria-labelledby', `rf-${f.key}-lbl`);
-      const chosen = new Set(values[f.key] || []);
       for (const [v, text] of f.options) {
         const line = document.createElement('label');
         line.className = 'checkline';
         const box = document.createElement('input');
         box.type = 'checkbox';
         box.value = v;
-        box.checked = chosen.has(v);
         line.appendChild(box);
         line.appendChild(document.createTextNode(' ' + text));
         input.appendChild(line);
@@ -19487,7 +19551,6 @@ function buildFields(fields, values, link) {
     } else if (f.type === 'check') {
       input = document.createElement('input');
       input.type = 'checkbox';
-      input.checked = !!values[f.key];
       /* Centred in the 40px an input would occupy, so a checkbox lines up with
          the boxes beside it. NOT `margin-top:auto` — that pinned it to the
          bottom of its cell, which made it drift up or down with however many
@@ -19501,13 +19564,11 @@ function buildFields(fields, values, link) {
       input = document.createElement('p');
       input.className = 'field-readout';
       input.setAttribute('aria-labelledby', `rf-${f.key}-lbl`);
-      input.textContent = values[f.key] ?? '';
     } else if (f.type === 'note') {
       input = document.createElement('textarea');
       /* Two lines suits a note; a pasted bracket schedule needs room to be
          recognisable as one, so a field may ask for more. */
       input.rows = f.rows || 2;
-      input.value = values[f.key] ?? '';
     } else {
       input = document.createElement('input');
       input.type = { number: 'number', percent: 'number',
@@ -19564,11 +19625,11 @@ function buildFields(fields, values, link) {
         if (f.min !== undefined) input.min = f.min;
         if (f.max !== undefined) input.max = f.max;
       }
-      const v = values[f.key];
-      input.value = v === undefined || v === null ? ''
-        : f.type === 'percent' ? roundTo(v * 100, f.dp ?? 2)
-        : f.type === 'money' ? fmtMoney(v) : v;
     }
+    /* The value goes in through the ONE setter, after the box is built — the
+       same call `reprimeRow` makes after each commit, so what a window shows
+       on opening and what it shows after a refusal cannot drift apart. */
+    setFieldValue(f, input, values);
     input.id = `rf-${f.key}`;
     /* A field that only matters for one choice re-evaluates whenever any
        select moves, so picking a rule reveals exactly that rule's setting. */
@@ -20057,10 +20118,19 @@ function rowMoved(ctx) {
    writes the same thing twice — which is what lets Done and the last field's
    `change` both fire without anyone having to know which arrived first.
 
-   `speak` is the difference between the two kinds of caller. A per-field
-   commit is SILENT and leaves the focus alone: a toast per box would be noise,
-   and refocusEditRow would throw the cursor out of the window you are still
-   typing in. The closing commit does both, exactly as Save always did.
+   `speak` is the difference between the two kinds of caller, and it is now
+   ONLY about the focus (2026-09-07 audit, fix 1): the closing commit hands the
+   focus back to the row on the page, and a per-field commit must not —
+   refocusEditRow would throw the cursor out of the window you are still typing
+   in. What the section SAID is toasted either way. It used to be swallowed on
+   a per-field commit, on the theory that a toast per box would be noise — but
+   the sentences a section returns are refusals and consequences ("Kept Savings
+   open — it still states a balance in Jun 2026", "A plan needs one main
+   account"), and hearing a refusal the moment it happens is the whole point of
+   saving as you go. Silence there was the worse noise: the box kept showing a
+   month the state had refused, and the closing commit, seeing a form that
+   matched what it had "written", never spoke either. A per-field commit ends
+   by putting the boxes back to what is stored (`reprimeRow`).
 
    ONE UNDO STEP PER WINDOW, NOT ONE PER FIELD. Every save() banks the state it
    replaces, so a window that saves eight times would fill eight of the twenty
@@ -20082,12 +20152,13 @@ function commitRow(ctx, speak) {
   undoing = wasUndoing;
   ctx.banked = true;
   render();
-  if (!speak) return;
-  refocusEditRow(ctx);
   /* A section that did something the reader can't see on the page in front of
-     them says so by returning the sentence to show; saving is otherwise
-     silent, because the change is right there in the grid. */
+     them — or refused to do what it was asked — says so by returning the
+     sentence to show; saving is otherwise silent, because the change is right
+     there in the grid. */
   if (typeof said === 'string') toast(said);
+  if (speak) { refocusEditRow(ctx); return; }
+  reprimeRow(ctx);
 }
 
 /* Editing writes as you finish each box. `change` and NOT `input`: it is the
@@ -22739,7 +22810,11 @@ const EDITORS = {
       { key: 'source', label: 'Where it came from', type: 'text',
         hint: 'For your own reference — “IRS Rev. Proc. 2025-32”, or the page you copied it '
           + 'from. Never sent anywhere.' },
+      /* `transient`: an instruction to the window, not a value the state
+         holds — `reprimeRow` leaves it alone, so a refused paste stays put
+         to be corrected (2026-09-07 audit, fix 1). */
       { key: 'paste', label: 'Paste a schedule (optional)', type: 'note', rows: 7, wide: true,
+        transient: true,
         hint: 'Paste the bracket table and it will be read and REPLACE the bands below. '
           + 'Most layouts work, including a wide table with a column per filing status — '
           + 'yours is picked out. Bullets, headings and citation links are ignored. It is '

@@ -2332,8 +2332,11 @@ columns, and cut into blocks with a rule and a small heading between them.
     by the window closing. It reads the whole form every time, so committing twice with
     nothing changed in between writes the same thing twice — which is what lets Done and the
     last field's `change` both fire without either needing to know about the other. `speak`
-    is the only difference: a per-field commit is silent and leaves the focus alone
-    (`refocusEditRow` would throw the cursor out of the window you are still typing in).
+    is only about the FOCUS: the closing commit hands it back to the row on the page, a
+    per-field commit leaves it alone (`refocusEditRow` would throw the cursor out of the
+    window you are still typing in). Both toast what the section returned, and a per-field
+    commit ends by putting every box back to what is stored — see the 2026-09-07 audit's
+    fix 1 at the foot of this file.
   - **One window is one undo.** Every `save()` banks the state it replaces, so a window that
     writes eight times would spend eight of the twenty slots in the ring and ⌘Z would walk
     back a BOX at a time — the undo spent on the very thing it exists to cover. The first
@@ -6054,3 +6057,41 @@ in the commit.
   test opens the fold window on the sample's four retirement accounts, reads
   the closing row, ticks an account and pins that nothing folds until Save
   and that Cancel folds nothing.
+- **A refusal is heard the moment it happens, and the box goes back to what is
+  stored (fix 1).** `commitRow` had `if (!speak) return;` ahead of
+  `toast(said)`, so a per-field commit swallowed every sentence a section
+  returned — and because that commit set `ctx.opened` to the values it had
+  just handed to `save`, the closing commit saw `rowMoved()` false and never
+  ran, so the speaking path never happened either. Every refusal an editor can
+  make went unheard: `closeBlockedNote`, the hub-untick refusal, the merge
+  refused, goal months ≤ 0 and the loop refusal, the snapshot's "needs its
+  date", the four `foldAccounts` results, and every "stopped after… /
+  updated to match / paid earnings into it" consequence. Worse, the box kept
+  showing the refused value while the state held the old one. Three things
+  changed:
+  - **`speak` is now only about the focus.** Both kinds of commit toast a
+    returned string; the closing commit alone calls `refocusEditRow`.
+  - **`setFieldValue(f, input, values)` is the ONE setter** — lifted out of
+    `buildFields`' per-type branches — and **`reprimeRow(ctx)`** runs it over
+    every field from the section's own `get` after each per-field commit,
+    re-runs `link('')` for the derived boxes, re-applies visibility and
+    re-reads `opened`. It is "close and reopen the window" without losing the
+    cursor, so the form can never show a value the state does not hold; a
+    normalisation the section makes (a trimmed name, a clamped months figure)
+    shows the same way. A field may say `transient: true` to be left alone —
+    the tax band's paste box is an instruction, not a stored value, and
+    clearing it after a refused paste would throw away the thing about to be
+    corrected. A checkset is sent a non-bubbling `change` so the "Select all"
+    button's word follows the boxes. And a `get` that throws (a rename that
+    merged this account INTO another — the merge survivor is the later
+    incarnation) means the record is gone: the window is ended rather than
+    left editing a ghost.
+  - **The renamed-onto-an-existing-name case is still a stored rename** with
+    the merge refused, as it was under Save; the finding was the silence, and
+    the sentence now names it.
+  Three tests drive the real `#rowDialog` in a 1280x900 frame with `W.toast`
+  captured: a refused `until` toasts "Kept Savings open — it still states a
+  balance in Jun…", leaves `until` unset and the box reads open; months = 0
+  on the sample's six-months goal toasts, keeps `targetMonths` 6 and the box
+  reads 6 again; a rename onto an account sharing a stated month toasts
+  "Kept … separate".

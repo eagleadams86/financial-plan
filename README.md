@@ -1705,7 +1705,14 @@ choice actually uses.
   the time you could press one the change is already made. The window says so
   under its buttons. If you change your mind, **Undo** puts the whole window
   back in one press, however many boxes you touched in it — one window is one
-  step, not one step per box.
+  step, not one step per box. **And a refusal is said the moment it happens**
+  (fixed 2026-09-07): close an account from a month a later month still states
+  a balance for, untick the only main account, type 0 months of expenses, or
+  rename an account onto one it cannot merge with, and the message appears as
+  you leave the box — and the box goes back to what is actually stored, so the
+  window never shows a figure the plan does not hold. (Until that fix the
+  message was only ever shown on Done, and saving as you go had quietly stopped
+  it appearing at all.)
 - **Adding a row still asks.** A brand-new row keeps Cancel and Save, because
   Cancel there means *never create it*, which saving as you go has no way to
   say — so a window opened by a mis-click leaves nothing behind.

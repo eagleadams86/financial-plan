@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1008;
+const EXPECTED = 1011;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -16134,6 +16134,90 @@ t('the fold window keeps Cancel and Save, and folds nothing until Save is presse
     eq(accts().length, had - 1, 'Save is what folds');
     ok((accts()[0].buckets || []).length >= 2,
        'the kept account carries the folded one as a contribution type');
+  } finally { f.remove(); }
+});
+
+/* ── Fix 1: a refusal is heard the moment it happens, and the box goes back ──
+   `commitRow` toasted a section's returned sentence only on the CLOSING commit
+   — and a per-field commit set `ctx.opened` to what it had just written, so the
+   closing commit saw nothing moved and never spoke either. Every refusal an
+   editor can return went unheard: an account that would not close, a hub that
+   cannot be unticked, a months figure at zero, a merge refused — the box kept
+   showing the refused value while the state held the old one. A per-field
+   commit now toasts what the section said and puts every box back to what is
+   stored, the same way opening the window primes them. */
+t('a refused closing month is said at once, and the box goes back to open', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'refuseduntil');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    const s = W.finGet();
+    const y = String(new Date().getFullYear());
+    ok(s.years[y] && s.years[y].kind === 'grid', 'fixture: the sample has this year as a grid');
+    s.years[y].overrides = s.years[y].overrides || {};
+    s.years[y].overrides[`mid|${y}-06`] = { v: 1234 };     // a stated balance after March
+    W.render();
+    D.querySelector('[data-edit="account"][data-bal="mid"]').click();
+    ok(D.getElementById('rowDialog').open, 'the Savings window opened');
+    const until = D.getElementById('rf-until');
+    until.value = `${y}-03`;
+    until.dispatchEvent(new W.Event('change', { bubbles: true }));
+    const acct = s.settings.accounts.find((a) => a.id === 'mid');
+    eq(acct.until, undefined, 'the close was refused — nothing stored');
+    ok(said.some((m) => /Kept Savings open — it still states a balance in Jun/.test(m)),
+       'and the refusal was said the moment the box was finished with, not swallowed',
+       JSON.stringify(said));
+    eq(until.value, '', 'the box shows what is stored — open — not the month it refused');
+    ok(D.getElementById('rowDialog').open, 'and the window is still open to go on with');
+    D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+t('a months-of-expenses figure of zero is refused out loud, and the box is cleared', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'refusedmonths');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    D.getElementById('tab-goals').click();
+    const card = D.querySelector('[data-edit="goal"]');
+    ok(card, 'the sample has a goal');
+    card.click();
+    const idx = +card.dataset.idx;
+    const g = () => W.finGet().goals[idx];
+    /* The sample's first goal is the six-months one, so "keeps the target it
+       had" means the months figure stays and no plain target is minted. */
+    const hadMonths = g().targetMonths, hadTarget = g().target;
+    ok(hadMonths > 0, 'fixture: a months-of-expenses goal', hadMonths);
+    const months = D.getElementById('rf-targetMonths');
+    months.value = '0';
+    months.dispatchEvent(new W.Event('change', { bubbles: true }));
+    ok(said.some((m) => /Months of expenses has to be above zero/.test(m)),
+       'the refusal is said at once', JSON.stringify(said));
+    eq(g().targetMonths, hadMonths, 'and the goal keeps the months it had');
+    eq(g().target, hadTarget, 'and no plain target was minted in its place');
+    eq(months.value, String(hadMonths),
+       'the box shows the stored months again, not the 0 the state refused');
+    D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+t('renaming an account onto another that shares a month is refused out loud', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'refusedmerge');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    const s = W.finGet();
+    const y = String(new Date().getFullYear());
+    s.years[y].overrides = s.years[y].overrides || {};
+    /* Both state a balance in the same month, so the merge must refuse. */
+    s.years[y].overrides[`mid|${y}-05`] = { v: 1 };
+    s.years[y].overrides[`emergency|${y}-05`] = { v: 2 };
+    W.render();
+    D.querySelector('[data-edit="account"][data-bal="mid"]').click();
+    const name = D.getElementById('rf-name');
+    name.value = 'Emergency fund';
+    name.dispatchEvent(new W.Event('change', { bubbles: true }));
+    ok(said.some((m) => /Kept "Emergency fund" separate/.test(m)),
+       'the refused merge is said the moment the name is finished with', JSON.stringify(said));
+    D.getElementById('rowDialog').close();
   } finally { f.remove(); }
 });
 
