@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1001;
+const EXPECTED = 1002;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14629,6 +14629,78 @@ t('a goal is not offered an account that is already closed (2026-09-07)', () => 
      'and only a closed one counts as dropped — unticking a live account is the reader\'s doing');
   ok(/said = \(said \? said \+ '; ' : ''\)\s*\n?\s*\+ `\$\{dropped\.join/.test(save),
      'the message is appended, so a refusal above it is not overwritten');
+});
+/* ── The goal window is the family's shape too (2026-09-07) ─────────────────
+   Asked for: "time to change the goals window to match preferences in size and
+   shape". It was `cols: 2` and therefore 700px, with nine fields and five
+   hints stacked in a column and a half. Measured in a real frame, because
+   every figure here — the width, how many columns a block resolved to, which
+   block a field landed in — exists only once the window is laid out. */
+t('the goal window opens at the common width, in three blocks (2026-09-07)', async () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?goalsec=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    D.getElementById('tab-goals').click();
+    [...D.querySelectorAll('[data-edit="goal"]')][0].click();
+    const dlg = [...D.querySelectorAll('dialog')].find((d) => d.open);
+    ok(dlg, 'a goal card opens the window');
+    eq(Math.round(dlg.getBoundingClientRect().width), 1100,
+       'the common width, the one Preferences and the budget row open at');
+    eq(W.getComputedStyle(dlg).padding, '20px', 'on the same padding as Preferences');
+    ok(!dlg.classList.contains('twoup'),
+       'and never two-up — a sectioned window has several grids, so no one of them '
+       + 'can be asked what the window should be');
+    const blocks = [...D.querySelectorAll('#rowFields .fieldsec')]
+      .filter((sec) => !sec.hidden)
+      .map((sec) => ({
+        head: sec.querySelector('.fieldsec-head').textContent,
+        cols: W.getComputedStyle(sec.querySelector('.grid-fields'))
+          .gridTemplateColumns.split(' ').filter((t) => parseFloat(t) > 0).length,
+        fields: [...sec.querySelectorAll('[data-field]')].filter((c) => !c.hidden)
+          .map((c) => c.dataset.field),
+      }));
+    eq(blocks.map((b) => b.head), ['What It Is', 'The Target', 'What Counts Toward It'],
+       'three subjects, and none of them repeats the window\'s own title');
+    /* THREE columns, not Preferences' four: the options here are whole
+       sentences and a quarter of 1100px cuts them mid-word, where a third is
+       wider than the 320px cap every box is held to. */
+    ok(blocks.every((b) => b.cols === 3), 'three columns in every block',
+       blocks.map((b) => b.cols).join(','));
+    /* The two fields that MOVED, pinned where they moved to: between them the
+       date and the child say what the goal IS and when it is wanted. */
+    for (const key of ['name', 'targetDate', 'for', 'note'])
+      ok(blocks[0].fields.includes(key), key + ' belongs with what the goal IS');
+    eq(blocks[1].fields, ['target', 'targetMonths'], 'the two ways of stating a target, together');
+    eq(blocks[2].fields, ['accounts', 'count', 'overflowOf'],
+       'the accounts, how far the bar runs, and who is paid first');
+    /* A wide field ends the row it is in, so one belongs at the top or the
+       bottom of its own block — never stranding what follows it. */
+    const cell = (k) => D.querySelector(`[data-field="${k}"]`);
+    ok(cell('note').classList.contains('wide'), 'the note is wide, and last in its block');
+    ok(cell('accounts').classList.contains('wide'), 'so is the account list, and first in its');
+    /* Shorter than the window it was made to match, not merely wider. Read
+       BEFORE Preferences is opened: both are `#rowDialog`, so the two are one
+       element and the second open overwrites the first's measurement. */
+    const goalTall = dlg.scrollHeight;
+    D.querySelectorAll('dialog').forEach((d) => { if (d.open) d.close(); });
+    D.getElementById('prefsBtn').click();
+    const prefs = [...D.querySelectorAll('dialog')].find((d) => d.open);
+    ok(goalTall < prefs.scrollHeight,
+       'and it is shorter than Preferences', `${goalTall} vs ${prefs.scrollHeight}`);
+    D.querySelectorAll('dialog').forEach((d) => { if (d.open) d.close(); });
+  } finally { f.remove(); }
 });
 t('a budget row and an account open wide, in three columns, in their blocks', async () => {
   const f = document.createElement('iframe');

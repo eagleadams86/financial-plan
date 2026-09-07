@@ -826,6 +826,11 @@ cannot express a three-way split.
 Deleting a goal frees the goals that were claimed first by it — they count
 from the first dollar from then on — and the toast names them.
 
+The goal window opens at the same width as Preferences and is cut into the
+same ruled blocks — **What It Is · The Target · What Counts Toward It** — in
+three columns rather than Preferences' four, because the options here are
+whole sentences and a quarter of the window cuts them mid-word.
+
 Plus progress, target dates, required monthly saving, and **when each goal
 lands at this pace** — worked out from the growth of the accounts that goal
 counts over the months this year's grid runs, over the whole gap still to arrive (a goal queued behind

@@ -2237,6 +2237,25 @@ columns, and cut into blocks with a rule and a small heading between them.
   Dividends*. The account's two rate blocks are three questions each — a rate,
   what that rate is, where it goes; then a rate, where it goes, how often — and
   that pair filling a row exactly is what settled on three columns.
+- **THE GOAL WINDOW JOINED THEM ON 2026-09-07** — asked for as "time to change the
+  goals window to match preferences in size and shape". It was `cols: 2` and
+  therefore 700px, holding nine fields, five of them with a hint and one of them
+  the whole account list with a button under it. Now the common 1100px, three
+  ruled blocks: *What It Is · The Target · What Counts Toward It*.
+  - **THREE columns, not Preferences' four**, and it is the budget row's reason
+    verbatim: the options are whole sentences ("All of it, however far past the
+    target"), a quarter of 1100px cuts them mid-word, and a third is wider than
+    the 320px cap every box is held to — so nothing reads worse than it did.
+  - **Two fields moved and it is the only rearrangement**: `targetDate` and
+    `for` join `name`, because between them they say what the goal IS and when
+    it is wanted — the subject the note belongs to, which is where the budget
+    row keeps its note too. Everything else is the order it was in.
+  - **The width is the whole gain; the HEIGHT is unchanged** (1,084px before,
+    1,095px after) and that is not a failure to fix. Every arrangement needs
+    the same five rows — two wide fields end their own rows — and the height is
+    set by the hints, not by how many columns a row uses. An empty column costs
+    nothing vertically. It is still the shortest of the three sectioned
+    windows, which the test pins against Preferences.
 - **PREFERENCES WAS MISSED BY THAT PASS AND TOOK THE SAME TREATMENT A DAY LATER
   (2026-09-03).** Charles asked why the family's preference windows were ruled
   and this one wasn't; it wasn't, and it is the window that needed it most —
