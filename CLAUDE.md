@@ -1492,6 +1492,10 @@ suite passed while the card was wrong.
       destination cap fills to; a threshold that moved with the balances the
       sweep is computing would be circular. It sits ABOVE the `goalNeed` call
       for the same reason, and a test pins both the shape and the order.
+    - **SUPERSEDED by the 2026-09-07 audit's fix 4 (foot of this file): the
+      claim walks the WHOLE queue now, the way `goalRemaining` does. The
+      paragraph below is kept for the reasoning — its fear was real under the
+      set-difference formula and cannot arise under the ordered draw.**
     - **It asks PRED ALONE, not `claimAccounts`, and the chain was weighed.**
       With three queued and a middle goal sharing nothing with the last,
       testing the whole chain lets the MIDDLE goal's own shortfall through on
@@ -6142,3 +6146,45 @@ in the commit.
   its non-bubbling `change`, so the button's word follows what was stored.
   The test presses the button in the sample's first goal and reads
   `state.goals[idx].accounts` before anything else happens, both ways.
+- **The sweep line walks the same queue the tile does, and the foot names the
+  taker (fix 4, the judgement call, done last).** `goalRemaining` replayed
+  the WHOLE chain ahead of a goal; `goalClaim` read the immediate predecessor
+  alone and returned 0 when that one shared no account. Roof (mid) ← Kitchen
+  (emergency) ← College (mid): the tile took $14,000 off College for Roof and
+  said "claimed first by Kitchen", while `goalNeed(college)` was its bare
+  $90,000 — a sweep tied to College stopped $14,000 short of where the tile
+  said it was full, and this file claimed the two "agree where it matters".
+  - **The decision.** The 2026-09-05 "pred alone" rule was written against a
+    real fault of the SET-DIFFERENCE formula: testing the whole chain let a
+    middle goal's own shortfall through on the first goal's overlap. That
+    fault cannot arise under the ordered draw — each goal ahead draws its OWN
+    target over its OWN accounts, so a middle goal sharing nothing never
+    reaches an account of the successor's and its shortfall lands nowhere.
+    With the reason gone, the least surprising rule is the one the tile
+    already used: `goalClaim` walks `[...goalChain(pred), pred]` front first
+    with a `left` map, treating the successor's accounts as bottomless as
+    before, and the claim is what lands on them. `held − remaining` and
+    `goalNeed − target` are now the same replay and agree by construction.
+    Every previously pinned answer is unchanged (the one-account queue, the
+    shortfall-by-order cases, the structural no-shared-account zero, the
+    by-target rule, the loop — `seen` carries the successor's id into
+    `goalChain`, which is what keeps `goalNeed(p)` at 3 on a two-goal loop).
+    The engine's threshold and cap, `freezeOverflowThresholds` and
+    `computeGoals` all call `goalNeed` unchanged, so a shared link freezes the
+    walked figure.
+  - **`goalDraw(goal, goals, order, bal)`** (pure, hooked) is the replay and
+    returns `{ remaining, taken: [{ id, name, amount }] }`; `goalRemaining` is
+    its `remaining`. `computeGoals` sets `claimedBy` to `andList` of the
+    takers' names, front of the queue first — "claimed first by Roof and
+    Kitchen refresh" — and falls back to the link's name when nothing was
+    taken, because the tile foot is not shown then and the existing pin ("the
+    link itself is untouched — the goal is still queued") reads `claimedBy`
+    as truthy. `HELP.goalClaims` gained one paragraph saying the whole queue
+    is walked and the foot names who took money.
+  - **Two tests.** The pure one runs the audit's fixture through `goalClaim`,
+    `goalNeed` and `goalRemaining` and pins that need − target equals held −
+    remaining, that a starving middle goal still claims nothing, that two
+    goals ahead on one account both land, that a goal spending an unshared
+    account first takes that much less, and the unchanged answers. The tile
+    one runs `computeGoals` on `fixtureState()` and pins `claimedBy` for one
+    taker, two takers, and none, plus the rendered foot.

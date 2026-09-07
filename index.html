@@ -6858,19 +6858,35 @@ function goalDrawOrder(goal, order) {
   const known = (order || []).filter(id => want.includes(id));
   return [...known, ...want.filter(id => !known.includes(id))];
 }
-function goalRemaining(goal, goals, order, bal) {
-  if (!goal) return 0;
+/* `goalDraw` is the replay itself and says WHO took what out of this goal's
+   accounts, front of the queue first; `goalRemaining` is what it leaves. The
+   takers are what the tile's foot names (2026-09-07 audit, fix 4): it used to
+   name the goal this one is claimed first BY, which is the link, not the
+   taker — Roof ← Kitchen ← College with Roof and College on one account put
+   "claimed first by Kitchen" on College's tile while Kitchen had taken
+   nothing. A goal ahead that drew nothing from these accounts is not listed. */
+function goalDraw(goal, goals, order, bal) {
+  if (!goal) return { remaining: 0, taken: [] };
+  const mine = goal.accounts || [];
   const left = new Map();
   const at = (id) => (left.has(id) ? left.get(id) : (bal(id) || 0));
+  const taken = [];
   for (const ahead of goalChain(goal, goals)) {
-    let want = ahead.target || 0;
+    let want = ahead.target || 0, fromMine = 0;
     for (const id of goalDrawOrder(ahead, order)) {
       if (want <= 0) break;
       const take = Math.min(at(id), want);
-      if (take > 0) { left.set(id, at(id) - take); want -= take; }
+      if (take > 0) {
+        left.set(id, at(id) - take); want -= take;
+        if (mine.includes(id)) fromMine += take;
+      }
     }
+    if (fromMine > 0) taken.push({ id: ahead.id, name: ahead.name || ahead.id, amount: round2(fromMine) });
   }
-  return round2((goal.accounts || []).reduce((t, id) => t + at(id), 0));
+  return { remaining: round2(mine.reduce((t, id) => t + at(id), 0)), taken };
+}
+function goalRemaining(goal, goals, order, bal) {
+  return goalDraw(goal, goals, order, bal).remaining;
 }
 /* Every account a goal's claim chain reads: the accounts of the goal ahead
    of it, and of the goal ahead of THAT, and so on. What `goalClaim` measures
@@ -6907,6 +6923,26 @@ function claimAccounts(goal, goals, seen = new Set()) {
    Sharing one account is enough — from there the arithmetic is what it always
    was, so nothing moves in a plan where the queue meets on an account, which
    is every plan this was written for. */
+/* THE CLAIM WALKS THE WHOLE QUEUE, THE WAY THE TILE DOES (2026-09-07 audit,
+   fix 4 — and it SUPERSEDES the "pred alone" paragraph above). `goalRemaining`
+   replays every goal ahead, account by account; this read the immediate
+   predecessor alone and returned 0 when that one shared no account — so with
+   Roof (mid) ← Kitchen (emergency) ← College (mid), the tile took $14,000 off
+   College for Roof while `goalNeed(college)` was its bare target, and a sweep
+   tied to College stopped $14,000 short of where the tile said it was full.
+   Each goal ahead now draws its OWN target over its OWN accounts in the
+   reader's order, from balances the goals before it have already drawn down,
+   and only what lands on an account the successor counts is the claim. The
+   fault the pred-alone rule was written against cannot happen here: a middle
+   goal that shares nothing never reaches an account of the successor's, so
+   its shortfall — however large — lands nowhere. `held − remaining` on the
+   tile and this figure are the same replay, so they agree by construction;
+   the test pins both on the audit's fixture. The structural guard stands in
+   the same form: a goal that counts none of these accounts contributes
+   nothing whatever the balances say, and the successor's own accounts are
+   never read — bottomless, as before — so a sweep threshold cannot depend on
+   the account it is filling. `seen` carries the successor's id, so a loop
+   still ends at the goal itself. */
 /* THE SHORTFALL IS NO LONGER INFERRED — IT IS THE ORDER YOU LIST THE ACCOUNTS
    IN (2026-09-07, asked for). The rule was "pred takes from the shared
    accounts only what its OTHER accounts do not cover", which quietly assumed
@@ -6926,14 +6962,26 @@ function claimAccounts(goal, goals, seen = new Set()) {
    goal is full. */
 function goalClaim(pred, accounts, goals, bal, order, seen = new Set()) {
   if (!pred || seen.has(pred.id)) return 0;
-  if (!(pred.accounts || []).some(id => (accounts || []).includes(id))) return 0;
-  let want = goalNeed(pred, goals, bal, order, seen), claim = 0;
-  for (const id of goalDrawOrder(pred, order)) {
-    if (want <= 0) break;
-    /* Bottomless: whatever pred still needs when it reaches an account the
-       successor counts is what must be there for both of them. */
-    if ((accounts || []).includes(id)) { claim += want; want = 0; break; }
-    want -= Math.min(bal(id) || 0, want);
+  const set = accounts || [];
+  /* Front of the queue first, then pred itself — the goals ahead of pred draw
+     before pred does, off the same balances. A goal already on the path (the
+     successor itself, on a loop the boundary never saw) is left out, so the
+     walk ends at the goal whose need is being asked. */
+  const chain = [...goalChain(pred, goals, new Set(seen)), pred]
+    .filter(g => !seen.has(g.id));
+  const left = new Map();
+  const at = (id) => (left.has(id) ? left.get(id) : (bal(id) || 0));
+  let claim = 0;
+  for (const ahead of chain) {
+    let want = ahead.target || 0;
+    for (const id of goalDrawOrder(ahead, order)) {
+      if (want <= 0) break;
+      /* Bottomless: whatever this goal still needs when it reaches an account
+         the successor counts is what must be there for both of them. */
+      if (set.includes(id)) { claim += want; want = 0; break; }
+      const take = Math.min(at(id), want);
+      if (take > 0) { left.set(id, at(id) - take); want -= take; }
+    }
   }
   return round2(claim);
 }
@@ -7028,7 +7076,7 @@ function computeGoals(st, computed, todayIso) {
        on. The gap the pace check divides is still `need − held` for the same
        reason: money that ARRIVES lands in these accounts, where the goals
        ahead are waiting for it. */
-    const remaining = goalRemaining(g, goals, accountOrder, bal);
+    const { remaining, taken } = goalDraw(g, goals, accountOrder, bal);
     const claimed = round2(Math.max(0, held - remaining));
     let saved = remaining;
     if (g.count !== 'all') saved = Math.min(saved, g.target || 0);   // capped: never more than the goal
@@ -7039,7 +7087,11 @@ function computeGoals(st, computed, todayIso) {
     const pace = goalPace(g, need, held, cur, c, yr, priorC);
     return {
       ...g, saved, held, claimed,
-      claimedBy: pred ? (pred.name || pred.id) : null,
+      /* The goals that actually TOOK the money, front of the queue first —
+         or, when nothing was taken, the link itself, so a queued goal reading
+         its accounts in full still says it is queued (2026-09-07 audit, fix 4). */
+      claimedBy: taken.length ? andList(taken.map(t => t.name))
+        : pred ? (pred.name || pred.id) : null,
       progress: g.target ? saved / g.target : 0,
       monthsLeft,
       /* Over the GAP, not the goal's own shortfall — a goal queued behind
@@ -7479,6 +7531,10 @@ const HELP = {
     ['"All of it" on the earlier goal changes how far its own bar runs, never what it claims '
       + '\u2014 a claim is always the target. A sweep row tied to a queued goal starts where '
       + 'that goal is full: its target on top of every claim ahead of it.'],
+    ['The ', b('whole queue'), ' is walked, not only the goal named here: a goal two places '
+      + 'ahead that counts one of these accounts takes its share too, and the line under the '
+      + 'bar names whichever goals actually took money \u2014 a goal ahead that reached none '
+      + 'of these accounts took nothing, and is not named.'],
   ] },
   mixedCell: { title: 'Part Actual, Part Estimate', body: [
     ['A month can hold several amounts — two grocery runs and a delivery, or a bill you have '
@@ -27547,7 +27603,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tintOf, BAR_TINT, BAR_TINT_SOLID,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  goalNeed, goalClaim, claimAccounts, goalChain, goalDrawOrder, goalRemaining, goalPace, goalTargetOf, onMonthsGoal, resolveGoals, computeYearWith,
+  goalNeed, goalClaim, claimAccounts, goalChain, goalDrawOrder, goalRemaining, goalDraw, goalPace, goalTargetOf, onMonthsGoal, resolveGoals, computeYearWith,
   pruneGoalLinks, goalChainReaches, TARGET_MONTHS_MAX,
   enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the

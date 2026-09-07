@@ -445,7 +445,10 @@ measures its own projected expenses).
   so a row tied to it starts at its target on top of every claim ahead of it —
   third in a queue of $20k, $50k and $50k means the sweep begins near $120k,
   not $50k. (A goal ahead of it that holds part of its money in accounts the
-  queued goal doesn't count claims only its shortfall — see Savings Goals.)
+  queued goal doesn't count claims only its shortfall — see Savings Goals —
+  and the whole queue is walked, so a goal two places ahead on the same
+  account counts too; fixed 2026-09-07, when the sweep read one goal back and
+  stopped short of where the Progress tile said the goal was full.)
   Because that claim reads balances in the earlier goal's accounts, the row
   waits for any sweep that deposits into one of them the same month, and it
   refuses (blank, with the cell editor saying why) to sweep INTO one — the
@@ -821,10 +824,13 @@ queue at all, and both count the money in full.
 **A goal can only claim out of accounts it counts**: untick the shared account
 from the earlier goal and it stops claiming anything from the later one,
 whatever it is still short of. (The link itself is left alone — the goal is
-still queued, it is simply taking nothing.) Where three are queued and the
-middle one shares no account with the last, the first goal's claim on an
-account they do share is dropped rather than guessed at: a one-level claim
-cannot express a three-way split.
+still queued, it is simply taking nothing.) **The whole queue is walked**
+(fixed 2026-09-07): where three are queued and the middle one shares no
+account with the last, the first goal's claim on an account they do share is
+taken — on the tile, at the sweep line and in a shared link alike — and the
+line under the bar names whichever goals actually took money, not merely the
+one named as "claimed first by". Until that fix the tile and the sweep read
+different figures for that queue, and the foot named the wrong goal.
 Deleting a goal frees the goals that were claimed first by it — they count
 from the first dollar from then on — and the toast names them.
 

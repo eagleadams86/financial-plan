@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1014;
+const EXPECTED = 1016;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14587,20 +14587,24 @@ t('the select-all button is opt-in, and only the goal accounts field asks for it
    shares this origin's `fin-state`, and seeding one would write over the real
    plan (the ambient-state trap, from the other direction). */
 /* The pure half of this lives up in the goal-queue group; the guard's SHAPE is
-   pinned here, where `APP_SRC` has been fetched. It has to come before the
-   need is worked out and read the account lists alone — the same claim is the
+   pinned here, where `APP_SRC` has been fetched. The same claim is the
    threshold a sweep row starts at, and a threshold that moved with the
-   balances the sweep is computing would be circular. */
+   balances the sweep is computing would be circular — so the successor's own
+   accounts must never be READ: the walk treats them as bottomless, and that
+   branch comes before any balance is looked at. Since the 2026-09-07 audit's
+   fix 4 the claim walks the whole queue itself rather than recursing through
+   `goalNeed`, which is the other half of the same shape. */
 t('the shared-account guard reads the lists, and reads them first (2026-09-07)', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const src = stripComments(APP_SRC);
-  const fn = src.slice(src.indexOf('function goalClaim(')).slice(0, 500);
-  ok(/if \(!\(pred\.accounts \|\| \[\]\)\.some\(id => \(accounts \|\| \[\]\)\.includes\(id\)\)\) return 0;/
-     .test(fn), 'the guard is the two account lists and nothing else');
-  ok(!/bal\(/.test(fn.slice(0, fn.indexOf('goalNeed('))),
-     'no balance is read before it');
-  ok(fn.indexOf('.some(id =>') < fn.indexOf('goalNeed('),
-     'and it comes before the need is worked out at all');
+  const fn = src.slice(src.indexOf('function goalClaim(')).slice(0, 1200);
+  ok(/const set = accounts \|\| \[\];/.test(fn), 'the successor\'s list is what the walk tests against');
+  const bottomless = fn.indexOf('if (set.includes(id)) { claim += want; want = 0; break; }');
+  const read = fn.indexOf('Math.min(at(id), want)');
+  ok(bottomless > 0 && read > 0 && bottomless < read,
+     'an account the successor counts is claimed on before any balance of it could be read');
+  ok(!/goalNeed\(/.test(fn),
+     'and the queue is walked here, not recursed through the need — one replay, the tile\'s');
 });
 t('a goal is not offered an account that is already closed (2026-09-07)', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
@@ -16357,6 +16361,94 @@ t('Select all and Clear all in the goal window write the goal at once', async ()
     eq(stored(), [], 'Clear all writes the empty list the same way');
     D.getElementById('rowDialog').close();
   } finally { f.remove(); }
+});
+
+/* ── Fix 4: the sweep line walks the same queue the tile does, and the foot ──
+   names the goal that took the money. `goalRemaining` (the tile) replays the
+   WHOLE chain ahead of a goal, account by account; `goalClaim` (the sweep
+   threshold, the cap, a frozen share link) read the immediate predecessor
+   alone and returned 0 when that one shared no account — so Roof (mid) ←
+   Kitchen (emergency) ← College (mid) put "after $14,000 claimed first by
+   Kitchen" on College's tile while Kitchen had taken nothing and Roof had,
+   and a sweep tied to College stopped $14,000 short of where the tile said it
+   was full. The claim now walks the whole chain, each goal ahead drawing its
+   own target over its own accounts in the reader's order, and only what lands
+   on an account this goal counts is the claim — the tile's arithmetic exactly,
+   so the two agree by construction. The middle goal, sharing nothing, still
+   claims nothing: it never reaches an account of this goal's. */
+t('a claim walks the whole queue ahead, so the sweep line and the tile agree (2026-09-07)', () => {
+  const goals = [
+    { id: 'roof', name: 'Roof', target: 14000, accounts: ['mid'], count: 'capped' },
+    { id: 'kitchen', name: 'Kitchen refresh', target: 30000, accounts: ['emergency'],
+      count: 'capped', overflowOf: 'roof' },
+    { id: 'college', name: 'College', target: 90000, accounts: ['mid'],
+      count: 'capped', overflowOf: 'kitchen' },
+  ];
+  const bal = (id) => ({ mid: 50000, emergency: 10000 })[id] || 0;
+  const order = ['mid', 'emergency'];
+  eq(H.goalClaim(goals[1], ['mid'], goals, bal, order), 14000,
+    'Kitchen shares nothing with College, but Roof ahead of it does — the claim is Roof\'s');
+  eq(H.goalNeed(goals[2], goals, bal, order), 104000,
+    'so College is full at its own target on top of the 14,000 Roof takes out of mid');
+  eq(H.goalRemaining(goals[2], goals, order, bal), 36000,
+    'and the tile has 50,000 less that same 14,000: held − remaining IS the claim');
+  eq(H.goalNeed(goals[1], goals, bal, order), 30000,
+    'Kitchen itself counts no account Roof reaches, so it needs only its target');
+  /* The middle goal's own shortfall never leaks through on the first goal's
+     overlap — the fault the one-level rule was written to avoid. */
+  const starved = goals.map((g) => (g.id === 'kitchen' ? { ...g, target: 1e6 } : g));
+  eq(H.goalClaim(starved[1], ['mid'], starved, bal, order), 14000,
+    'however far short Kitchen is, it cannot take from an account it does not count');
+  /* Two goals ahead on the same account both land their draw on it. */
+  const both = [goals[0], { ...goals[1], accounts: ['mid'] }, goals[2]];
+  eq(H.goalClaim(both[1], ['mid'], both, bal, order), 44000, 'Roof\'s 14,000 and Kitchen\'s 30,000');
+  eq(H.goalRemaining(both[2], both, order, bal), 6000, 'and the tile agrees: 50,000 − 44,000');
+  /* The chain is walked from the balances as they stand, so a goal ahead that
+     spends an unshared account first takes that much less from the shared one. */
+  const spend = [{ ...goals[0], accounts: ['emergency', 'mid'] }, goals[1], goals[2]];
+  eq(H.goalClaim(spend[1], ['mid'], spend, bal, ['emergency', 'mid']), 4000,
+    'Roof spends the 10,000 in emergency first and takes 4,000 out of mid');
+  eq(H.goalRemaining(spend[2], spend, ['emergency', 'mid'], bal), 46000, 'tile: the same 4,000');
+  /* Unchanged answers: a queue on one account, and a loop, read as they did. */
+  const one = [
+    { id: 'e', target: 20000, accounts: ['cash'] },
+    { id: 'r', target: 50000, accounts: ['cash'], overflowOf: 'e' },
+    { id: 'n', target: 50000, accounts: ['cash'], overflowOf: 'r' },
+  ];
+  eq(H.goalNeed(one[2], one, () => 0), 120000, 'third in a queue of one account: the sum');
+  const loop = [{ id: 'p', target: 1, accounts: ['cash'], overflowOf: 'q' },
+                { id: 'q', target: 2, accounts: ['cash'], overflowOf: 'p' }];
+  eq(H.goalNeed(loop[0], loop, () => 0), 3, 'a loop still terminates at the goal itself');
+});
+t('the tile foot names the goal that actually took the money, not merely the one ahead', () => {
+  const s = H.coerceShape(fixtureState());
+  s.goals = [
+    { id: 'roof', name: 'Roof', target: 100, accounts: ['mid'], count: 'capped' },
+    { id: 'kitchen', name: 'Kitchen refresh', target: 100, accounts: ['bank'],
+      count: 'capped', overflowOf: 'roof' },
+    { id: 'college', name: 'College', target: 900, accounts: ['mid'],
+      count: 'capped', overflowOf: 'kitchen' },
+  ];
+  const computed = H.computeAll(s, TODAY_FIX);
+  ok(computed['2030'].balances['mid|2030-04'] > 200, 'fixture: mid holds more than both targets');
+  let g = H.computeGoals(s, computed, TODAY_FIX);
+  eq(g[2].claimed, 100, 'Roof took its 100 out of mid');
+  eq(g[2].claimedBy, 'Roof', 'and the foot says Roof — Kitchen, the goal named as ahead, took nothing');
+  eq(g[1].claimed, 0, 'Kitchen, on the bank alone, lost nothing to Roof');
+  /* Two takers are both named; a queue with nothing taken keeps the link's name. */
+  s.goals[1].accounts = ['mid'];
+  g = H.computeGoals(s, computed, TODAY_FIX);
+  eq(g[2].claimed, 200, 'both took from mid');
+  eq(g[2].claimedBy, 'Roof and Kitchen refresh', 'and both are named, in the order they drew');
+  s.goals[0].accounts = ['bank']; s.goals[1].accounts = ['bank'];
+  g = H.computeGoals(s, computed, TODAY_FIX);
+  eq(g[2].claimed, 0, 'nothing reaches mid now');
+  eq(g[2].claimedBy, 'Kitchen refresh', 'so the link itself is what is named — still queued, taking nothing');
+  const d = document.createElement('div');
+  d.innerHTML = w.goalCard({ ...g[2], claimed: 200, claimedBy: 'Roof and Kitchen refresh',
+    saved: 1, held: 201, monthsLeft: 0, monthlyReq: 0, progress: 0, gap: 1, paceMo: 1, etaMonths: null });
+  ok(/after \$200\.00 claimed first by Roof and Kitchen refresh/.test(d.textContent.replace(/\s+/g, ' ')),
+     'the foot prints the takers', d.textContent.replace(/\s+/g, ' ').trim());
 });
 
 async function run() {
