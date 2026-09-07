@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 988;
+const EXPECTED = 991;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -15353,6 +15353,60 @@ t('a switch that re-renders puts the focus back without moving the page', async 
   } finally { f.remove(); }
 });
 
+
+/* ── Closing an account names EVERY month in the way ────────────────────────
+   Reported 2026-09-07: a savings account emptied years ago refused to close at
+   Dec 2022, and the refusal said "it still states a balance in Sep 2026" —
+   about a month stating $0.00. The refusal is right; the sentence was wrong
+   twice. It named only the LAST month in the way, so a reader who cleared it
+   came straight back for the one before. And "states a balance" is exactly the
+   wording that hides the distinction the whole app is built on: a stated $0.00
+   is a month somebody CHECKED, not a month left blank, which is why it blocks
+   the close at all. Pure, so the sentence is pinned rather than read off a
+   toast — statedAfter beside it decides WHICH months, and is pinned above. */
+t('a refusal to close names every month in the way, newest first', () => {
+  const st = { years: { 2026: { overrides: {
+    'sv|2026-03': { v: 0 }, 'sv|2026-06': { v: 0 }, 'sv|2026-09': { v: 0 },
+  } } } };
+  const a = { id: 'sv', name: 'M&T Savings' };
+  const said = H.closeBlockedNote(st, a, H.statedAfter(st, 'sv', '2022-12'));
+  ok(said.includes('Sep 2026') && said.includes('Jun 2026') && said.includes('Mar 2026'),
+     'all three blocking months are named, not just the last', said);
+  ok(said.indexOf('Sep 2026') < said.indexOf('Mar 2026'),
+     'newest first, since that is the one to clear first', said);
+  ok(said.includes('M&T Savings') && !said.includes('&amp;'),
+     'the account is named as the reader typed it — the toast goes through textContent',
+     said);
+});
+t('a refusal says a stated $0.00 is a month you checked, and only when it is', () => {
+  const a = { id: 'sv', name: 'Savings' };
+  const zeros = { years: { 2026: { overrides: {
+    'sv|2026-03': { v: 0 }, 'sv|2026-09': { v: 0 },
+  } } } };
+  ok(H.closeBlockedNote(zeros, a, H.statedAfter(zeros, 'sv', '2022-12'))
+      .includes('A stated $0.00 is a month you checked'),
+     'a month reading nothing still blocks the close, and the refusal says why');
+
+  const real = { years: { 2026: { overrides: {
+    'sv|2026-03': { v: 0 }, 'sv|2026-09': { v: 1200 },
+  } } } };
+  ok(!H.closeBlockedNote(real, a, H.statedAfter(real, 'sv', '2022-12'))
+      .includes('A stated $0.00'),
+     'a real balance in the way explains itself and gets no extra sentence');
+});
+t('a refusal counts the months it has no room to name', () => {
+  const overrides = {};
+  for (const m of ['01', '02', '03', '04', '05', '06']) overrides[`sv|2026-${m}`] = { v: 0 };
+  const st = { years: { 2026: { overrides } } };
+  const said = H.closeBlockedNote(st, { id: 'sv', name: 'Savings' },
+                                  H.statedAfter(st, 'sv', '2022-12'));
+  ok(said.includes('Jun 2026') && said.includes('Mar 2026'),
+     'the four newest are named', said);
+  ok(said.includes('2 months before that'),
+     'and the rest are counted rather than listed', said);
+  ok(!said.includes('Jan 2026'),
+     'so the sentence stays a sentence on an account with years of blanks behind it', said);
+});
 
 async function run() {
   w = document.getElementById('app').contentWindow;

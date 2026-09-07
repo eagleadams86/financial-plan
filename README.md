@@ -506,6 +506,15 @@ on a budget row.
   into it, those earnings stay in the account that made them from the closing
   month on — and closing it says so, because money that quietly changed where
   it compounds is exactly what a plan is read to catch.
+  It **refuses if any month after the closing month still states a balance**,
+  and names them — newest first, counting the rest if there are more than four.
+  Closing takes the account out of Total, so those figures would leave the
+  screen while staying in the file. **A stated $0.00 is one of them**, and the
+  refusal says so: a month reading nothing is a month you checked, not a blank
+  one, which is the same distinction the [Month page](#year-or-month) makes when
+  it decides which empty rows to hide. Clear those months first — open each cell
+  and empty it, rather than typing a zero — or close the account from a later
+  month.
 - **Two accounts with exactly the same name are the same account** under
   different labels. Years of history imported under drifting names fold into
   one row, carrying every balance with them. It refuses if both hold a figure

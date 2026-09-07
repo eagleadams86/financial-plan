@@ -966,7 +966,23 @@ suite passed while the card was wrong.
   of the edit: the **hub can't be closed** (everything ordinary lands there),
   and an account that **still states a balance after that month** can't be,
   because closing takes it out of Total and the figure would vanish from the
-  screen while staying in the file. `statedAfter()` is the pure test.
+  screen while staying in the file. `statedAfter()` is the pure test and
+  **`closeBlockedNote()` is the pure sentence** (2026-09-07) — the refusal was
+  a string built inline, and it was wrong twice about a savings account emptied
+  years ago that would not close at Dec 2022. It named only the LAST month in
+  the way, so clearing that one brought the reader straight back for the one
+  before; it names every month now, newest first, the last four with a count
+  for the rest. And it said "it still states a balance" about a month stating
+  **$0.00** — the wording that hides the distinction this whole file is built
+  on. A stated $0.00 is a month somebody CHECKED, which is exactly why it
+  blocks: the claim would leave the screen and stay in the file. Where every
+  blocking month reads nothing the sentence says so; where a real figure is in
+  the way it is left off, because a figure explains itself. It is pure so the
+  sentence is pinned rather than read off a toast, and it sits beside
+  `statedAfter` — one decides WHICH months, the other what to say about them.
+  It returns the name unescaped, like everything else this `save` returns: a
+  toast goes through `textContent`, and escaping here would put
+  "M&amp;T Savings" on screen.
   `since` deliberately stays uneditable — see above.
 - **A budget row can declare itself pay** (`cat.isPay`, income rows only).
   `isPayRow(name, rule, isPay)` believes a stored boolean in BOTH directions and
