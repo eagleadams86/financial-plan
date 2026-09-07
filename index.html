@@ -6358,6 +6358,10 @@ function computeYearWith(st, yearKey, prior, goals) {
   const resolved = {};   // 'catId|m' -> {v, kind, note?}
   const balances = {};   // 'bid|m'   -> dollars
   const balanceKinds = {};
+  /* The reader's account order, which is the order the goals ahead of a
+     queued one draw in — so a sweep tied to that goal stops exactly where the
+     Progress tab says it is full. One list for the whole plan, read once. */
+  const acctOrder = accountsOf(st).map(a => a.id);
   /* THREE earnings maps, and the split between the first two is the whole
      point of them. Interest and dividends are money: they arrive in an account
      the way a paycheck does, and every figure that counts income counts them.
@@ -6597,7 +6601,7 @@ function computeYearWith(st, yearKey, prior, goals) {
            elsewhere. A goal with nobody ahead of it needs exactly its target,
            which is what this line always read. */
         const balAt = (id) => running[id] ? endOf(id) : 0;
-        const threshold = goal ? goalNeed(goal, goals, balAt)
+        const threshold = goal ? goalNeed(goal, goals, balAt, acctOrder)
           : typeof cat.threshold === 'number' ? cat.threshold : undefined;
         if (threshold === undefined) continue;           // misconfigured — blank
         /* What the threshold is measured AGAINST: the goal's own account set
@@ -6638,7 +6642,7 @@ function computeYearWith(st, yearKey, prior, goals) {
            destination must be counted by the cap, the source must not be. */
         const capGoal = cat.capGoalId
           ? (goals || []).find(g => g.id === cat.capGoalId) : null;
-        const cap = capGoal ? goalNeed(capGoal, goals, balAt)
+        const cap = capGoal ? goalNeed(capGoal, goals, balAt, acctOrder)
           : typeof cat.capAmount === 'number' ? cat.capAmount : undefined;
         if (cap !== undefined) {
           if (!capMeasure.includes(dst) || capMeasure.includes(src)) continue;
@@ -6792,11 +6796,69 @@ function resolveGoals(goals, monthlySpend) {
    balances when a share link freezes a threshold — and a goal not running
    this month contributes 0. A goal already on the path claims nothing, so a
    loop coerceShape missed still terminates. */
-function goalNeed(goal, goals, bal, seen = new Set()) {
+function goalNeed(goal, goals, bal, order, seen = new Set()) {
   if (!goal || seen.has(goal.id)) return 0;
   seen.add(goal.id);
   const pred = goal.overflowOf ? (goals || []).find(x => x.id === goal.overflowOf) : null;
-  return round2((goal.target || 0) + goalClaim(pred, goal.accounts || [], goals, bal, seen));
+  return round2((goal.target || 0)
+    + goalClaim(pred, goal.accounts || [], goals, bal, order, seen));
+}
+/* ── THE GOALS AHEAD ACTUALLY DRAW, IN THE ORDER YOU LIST THE ACCOUNTS ──────
+   (2026-09-07, asked for.) The claim above is one lump figure taken off a
+   goal's whole balance, which cannot say WHICH account it came out of — so a
+   fund with plenty in cash still swallowed the Long-term Savings sitting
+   under it, and the goal behind that counted Long-term alone read $0.00.
+   `goalChain` is the queue in front of a goal, front first. `goalRemaining`
+   replays it: each goal ahead takes up to its own TARGET, account by account,
+   in the reader's own account order — the Household list, which is
+   draggable, so the order is set by hand rather than inferred. What is left
+   in this goal's accounts is what it has.
+
+   Three things this settles that the lump claim could not:
+   - **An account nothing ahead reaches is untouched by construction.** There
+     is no set arithmetic to get wrong; a goal that never draws from Long-term
+     simply never takes anything out of it.
+   - **The tile ADDS UP.** `claimed` is `held − remaining`, the money actually
+     taken, so held less claimed is what the bar shows. The lump claim could
+     exceed the balance and left the two unreconcilable.
+   - **The shortfall rule is now the reader's to state.** It used to be
+     inferred — a goal took from the shared account only what its other
+     accounts did not cover — which is exactly "draw from the others first",
+     and is what you get by putting those accounts above the shared one.
+
+   A goal ahead takes its TARGET, never more, whatever its `count`: "all of
+   it" says how far its own bar runs, not what it takes from the goals behind.
+   Each goal replays its OWN chain from the untouched balances, so two goals
+   with no link between them both count the money in full, exactly as before.
+   Pure, and it terminates on a loop like its siblings. */
+function goalChain(goal, goals, seen = new Set()) {
+  if (!goal || seen.has(goal.id)) return [];
+  seen.add(goal.id);
+  const pred = goal.overflowOf ? (goals || []).find(x => x.id === goal.overflowOf) : null;
+  return pred ? [...goalChain(pred, goals, seen), pred] : [];
+}
+/* The goal's accounts in the reader's order. An id the list has never heard
+   of — an account deleted since, or one a share link froze — goes last rather
+   than being dropped: it contributes whatever `bal` says, which is normally
+   nothing, and dropping it would silently change which accounts a goal reads. */
+function goalDrawOrder(goal, order) {
+  const want = goal.accounts || [];
+  const known = (order || []).filter(id => want.includes(id));
+  return [...known, ...want.filter(id => !known.includes(id))];
+}
+function goalRemaining(goal, goals, order, bal) {
+  if (!goal) return 0;
+  const left = new Map();
+  const at = (id) => (left.has(id) ? left.get(id) : (bal(id) || 0));
+  for (const ahead of goalChain(goal, goals)) {
+    let want = ahead.target || 0;
+    for (const id of goalDrawOrder(ahead, order)) {
+      if (want <= 0) break;
+      const take = Math.min(at(id), want);
+      if (take > 0) { left.set(id, at(id) - take); want -= take; }
+    }
+  }
+  return round2((goal.accounts || []).reduce((t, id) => t + at(id), 0));
 }
 /* Every account a goal's claim chain reads: the accounts of the goal ahead
    of it, and of the goal ahead of THAT, and so on. What `goalClaim` measures
@@ -6833,13 +6895,35 @@ function claimAccounts(goal, goals, seen = new Set()) {
    Sharing one account is enough — from there the arithmetic is what it always
    was, so nothing moves in a plan where the queue meets on an account, which
    is every plan this was written for. */
-function goalClaim(pred, accounts, goals, bal, seen = new Set()) {
+/* THE SHORTFALL IS NO LONGER INFERRED — IT IS THE ORDER YOU LIST THE ACCOUNTS
+   IN (2026-09-07, asked for). The rule was "pred takes from the shared
+   accounts only what its OTHER accounts do not cover", which quietly assumed
+   pred spends everything elsewhere before touching the shared pot. That is
+   one particular order, and it is the wrong one as often as it is right: an
+   emergency fund counting cash and a long-term savings account was assumed to
+   empty the savings first, so a goal behind it on savings alone read $0.00
+   while the fund sat on plenty of cash.
+   `pred` draws its need over its OWN accounts, in the reader's order, and an
+   account the successor also counts is BOTTOMLESS here — the question is how
+   much must be sitting there, not how much is today. What lands on the shared
+   accounts is the claim.
+   It reduces to the old rule exactly when the accounts pred should spend
+   first are listed above the shared one, which is how the rule is stated now:
+   drag them there. `goalRemaining` replays the same draw against real
+   balances for the tile, so the sweep stops precisely where the tile says the
+   goal is full. */
+function goalClaim(pred, accounts, goals, bal, order, seen = new Set()) {
   if (!pred || seen.has(pred.id)) return 0;
   if (!(pred.accounts || []).some(id => (accounts || []).includes(id))) return 0;
-  const need = goalNeed(pred, goals, bal, seen);
-  const outside = (pred.accounts || []).filter(id => !accounts.includes(id))
-    .reduce((t, id) => t + (bal(id) || 0), 0);
-  return round2(Math.max(0, need - outside));
+  let want = goalNeed(pred, goals, bal, order, seen), claim = 0;
+  for (const id of goalDrawOrder(pred, order)) {
+    if (want <= 0) break;
+    /* Bottomless: whatever pred still needs when it reaches an account the
+       successor counts is what must be there for both of them. */
+    if ((accounts || []).includes(id)) { claim += want; want = 0; break; }
+    want -= Math.min(bal(id) || 0, want);
+  }
+  return round2(claim);
 }
 
 /* How fast a goal's OWN accounts are growing this year, and what that says
@@ -6905,6 +6989,9 @@ function computeGoals(st, computed, todayIso) {
      fixture, where the plain list is the same thing. */
   const goals = c.goals || st.goals;
   const byId = (id) => goals.find(g => g.id === id);
+  /* The reader's own account order, which is the order the goals ahead draw
+     in — the Household list, dragged into whatever order they want. */
+  const accountOrder = accountsOf(st).map(a => a.id);
   /* The computed year before the live one — where January's opening balance
      lives, exactly as the balance chain reads it. */
   const gridAll = Object.keys(st.years).filter(y => st.years[y].kind === 'grid').sort();
@@ -6916,43 +7003,30 @@ function computeGoals(st, computed, todayIso) {
        and the goal should keep working while you repoint it. */
     const held = round2((g.accounts || []).reduce((t, id) => t + bal(id), 0));
     const pred = g.overflowOf ? byId(g.overflowOf) : null;
-    const claimed = pred ? goalClaim(pred, g.accounts || [], goals, bal) : 0;
-    /* THE CLAIM IS TAKEN OUT OF THE SHARED POT, NOT OFF THE WHOLE GOAL
-       (2026-09-07, the same fault as the reach guard one level along).
-       `claimed` was subtracted from everything the goal holds — including
-       accounts NO goal ahead of it counts, which those goals cannot reach and
-       can never spend. Reported: Retire Early, counting Long-term Savings on
-       top of the six accounts the three goals ahead of it share, read $0.00
-       while $13,555.98 sat in Long-term that nothing else had a claim on.
-       `claimAccounts` is the chain's own account list, so what is left is
-       money this goal alone counts, and it is the goal's from the first
-       dollar. Where the goals ahead count everything this one does — the
-       ordinary queue on one account — `mine` is 0 and this is exactly the
-       subtraction it always was.
-       Only the TILE splits. `goalNeed` stays one number over the goal's whole
-       set, because it is also the threshold a sweep row starts at and a cap
-       fills to: bounding it by what a pot holds today would make the
-       threshold rise as the sweep fills the account it is measuring. The gap
-       the pace check divides is still `need − held` for the same reason —
-       money that ARRIVES lands in the swept accounts, where the goals ahead
-       are waiting for it. */
-    const chain = new Set(claimAccounts(g, goals));
-    const shared = (g.accounts || []).filter(id => chain.has(id))
-      .reduce((t, id) => t + bal(id), 0);
-    const mine = held - shared;                 // accounts nothing ahead counts
-    let saved = mine + Math.max(0, shared - claimed);
+    /* What is left after the goals ahead have drawn, account by account, in
+       the reader's own order — see `goalRemaining`. `claimed` is therefore
+       the money actually TAKEN out of this goal's accounts, so the tile adds
+       up: held less claimed is the bar.
+       Only the TILE draws. `goalNeed` stays one figure over the goal's whole
+       set, because it is also the threshold a sweep row starts at and the cap
+       a destination fills to: a threshold worked out from what the accounts
+       hold TODAY would rise as the sweep fills the very account it measures.
+       The two agree where it matters — at the point the goal is full, the
+       goals ahead have taken their whole targets, which is what `need` adds
+       on. The gap the pace check divides is still `need − held` for the same
+       reason: money that ARRIVES lands in these accounts, where the goals
+       ahead are waiting for it. */
+    const remaining = goalRemaining(g, goals, accountOrder, bal);
+    const claimed = round2(Math.max(0, held - remaining));
+    let saved = remaining;
     if (g.count !== 'all') saved = Math.min(saved, g.target || 0);   // capped: never more than the goal
     saved = round2(Math.max(0, saved));
     const monthsLeft = g.targetDate
       ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
-    const need = goalNeed(g, goals, bal);
+    const need = goalNeed(g, goals, bal, accountOrder);
     const pace = goalPace(g, need, held, cur, c, yr, priorC);
     return {
       ...g, saved, held, claimed,
-      /* What this goal holds where nothing ahead of it can reach — 0 for the
-         ordinary queue on one account, and what the foot's "out of the
-         accounts they share" is drawn on. */
-      mine: round2(mine),
       claimedBy: pred ? (pred.name || pred.id) : null,
       progress: g.target ? saved / g.target : 0,
       monthsLeft,
@@ -7376,15 +7450,20 @@ const HELP = {
       ' \u2014 plus whatever it in turn leaves to the goals ahead of it \u2014 and this goal counts '
       + 'only what sits above that claim, up to its own target or all of it, whichever you '
       + 'chose.'],
-    ['A goal that adds up several accounts ', b('claims only its shortfall'), ': money it '
-      + 'already holds in accounts you have not ticked here is covered, so it takes from the '
-      + 'shared accounts only what those do not. No dollar is counted by two goals, and none '
-      + 'is missed. The tile says what was claimed ahead of it.'],
+    ['The goals ahead take what they need ', b('account by account, in the order the '
+      + 'accounts are listed'), ' on the Household tab \u2014 so a fund with plenty in your '
+      + 'current account fills itself from that and leaves the savings account under it '
+      + 'alone. Drag the accounts into the order you want them spent, and put the ones a '
+      + 'goal should reach for last at the bottom.'],
     ['A claim only ever reaches ', b('accounts the earlier goal counts'), '. Money this goal '
       + 'holds somewhere none of the goals ahead of it have ticked is its own from the first '
       + 'dollar, however far short they are \u2014 they cannot spend what they do not count. '
       + 'Untick the shared account from the earlier goal and it stops claiming anything here, '
       + 'though it stays named above: it is queued, and taking nothing.'],
+    ['No dollar is counted by two goals in a queue, and none is missed: the figure on the '
+      + 'tile is ', b('what those accounts hold less what was taken'), '. Two goals with no '
+      + '"claimed first by" between them are not in a queue at all, and both count the '
+      + 'money in full.'],
     ['"All of it" on the earlier goal changes how far its own bar runs, never what it claims '
       + '\u2014 a claim is always the target. A sweep row tied to a queued goal starts where '
       + 'that goal is full: its target on top of every claim ahead of it.'],
@@ -11487,15 +11566,12 @@ function goalCard(g, idx) {
       ${!done && g.etaMonths > 0 ? ` · at this pace about ${esc(monthLabel(g.eta))}` : ''}
       ${!done && g.gap > 0 && g.paceMo !== null && g.paceMo <= 0 ? ' · not growing this year' : ''}
       ${!done && g.gap > 0 && g.paceMo === null ? ' · no balance to pace it by this year' : ''}
-      ${g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}`
-        /* Only out of the accounts they SHARE, said out loud when this goal has
-           money elsewhere (2026-09-07). Without the clause the tile cannot be
-           added up: Retire Early holds $55,486.92, reads $13,555.98, and the
-           foot names a claim of $137,026.00 — three figures that only make
-           sense once it says the claim never reached Long-term Savings. Where
-           the goals ahead count everything this one does, `mine` is 0 and the
-           foot is exactly the sentence it always was. */
-        + (g.mine > 0 ? ', out of the accounts they share' : '') : ''}
+      ${/* The money actually TAKEN out of this goal's accounts, so held less
+             this is the bar. It briefly carried an ", out of the accounts they
+             share" clause, which was the lump claim apologising for not adding
+             up; the goals ahead draw account by account now, so there is
+             nothing left to explain away. */
+        g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}` : ''}
       ${g.targetMonths > 0 ? ` · ${g.targetMonths} month${g.targetMonths === 1 ? '' : 's'} of this year's expenses` : ''}</div>
   </div>`;
 }
@@ -21602,8 +21678,10 @@ const EDITORS = {
         options: accountsOf(state)
           .filter(a => !(a.until && a.until <= thisMonth()))
           .map(a => [a.id, accountOption(state, a)]),
-        hint: 'Every account whose balance counts toward this goal. '
-            + 'An account you have closed is not offered — it holds nothing to count.' },
+        hint: 'Every account whose balance counts toward this goal. A goal ahead of this one '
+            + 'takes what it needs in the order the accounts are listed on the Household tab, '
+            + 'so drag the ones to spend first to the top. An account you have closed is not '
+            + 'offered — it holds nothing to count.' },
       /* Two questions, not one three-way list (2026-09-05): how far the bar
          runs, and who is paid first. They used to be one field whose third
          option ("only what another goal has not claimed") was always uncapped,
@@ -26486,8 +26564,11 @@ function reseedShareYears(data) {
    recipient loses is the live tie they couldn't have had anyway. A link that
    DOES carry the goals resolves the id and nothing is frozen. Pure over the
    payload, like reseedShareYears — it never touches the real state. */
-function freezeOverflowThresholds(data, goalsIn, bal = () => 0) {
+function freezeOverflowThresholds(data, goalsIn, bal = () => 0, order) {
   const kept = new Set((data.goals || []).map(g => g.id));
+  /* The sender's account order travels with the figure, because the
+     goals ahead draw in it — freezing at the recipient's order (or at
+     none) would hand them a threshold their own engine never computed. */
   /* A list, or a function of the YEAR KEY (review fix 5): a months goal
      resolves to a different figure in each year, so the sender's rows are
      frozen at the figure their own year's engine used — one list for every
@@ -26513,7 +26594,7 @@ function freezeOverflowThresholds(data, goalsIn, bal = () => 0) {
            drift from the sender's by however much those balances move, which
            is the one honest answer a plain number can give. */
         if (g) {
-          cat.threshold = goalNeed(g, goals, bal);
+          cat.threshold = goalNeed(g, goals, bal, order);
           if (Array.isArray(g.accounts) && g.accounts.length)
             cat.thresholdAccounts = [...g.accounts];
         } else delete cat.threshold;
@@ -26524,7 +26605,7 @@ function freezeOverflowThresholds(data, goalsIn, bal = () => 0) {
       if (cat.capGoalId !== undefined && !kept.has(cat.capGoalId)) {
         const g = (goals || []).find(x => x.id === cat.capGoalId);
         if (g) {
-          cat.capAmount = goalNeed(g, goals, bal);
+          cat.capAmount = goalNeed(g, goals, bal, order);
           if (Array.isArray(g.accounts) && g.accounts.length)
             cat.capAccounts = [...g.accounts];
         } else delete cat.capAmount;
@@ -26617,7 +26698,8 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
     const live = latestGridYear() || newestGridYear();
     const at = live ? currentMonthOf(state.years[live], todayISO()) : null;
     freezeOverflowThresholds(data, (y) => goalsOfYear(y),
-      live && C[live] ? (id) => C[live].balances[`${id}|${at}`] || 0 : () => 0);
+      live && C[live] ? (id) => C[live].balances[`${id}|${at}`] || 0 : () => 0,
+      accountsOf(state).map(a => a.id));
   }
   if (!includeNotes) stripNotes(data);
   if (!includeNames) anonymisePeople(data);
@@ -27144,7 +27226,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tintOf, BAR_TINT, BAR_TINT_SOLID,
   monthActionsFor, ADD_ROW_WORD,
   blankState, newPlanState, coerceShape, migrate, computeYear, computeAll, computeGoals,
-  goalNeed, goalClaim, claimAccounts, goalPace, goalTargetOf, onMonthsGoal, resolveGoals, computeYearWith,
+  goalNeed, goalClaim, claimAccounts, goalChain, goalDrawOrder, goalRemaining, goalPace, goalTargetOf, onMonthsGoal, resolveGoals, computeYearWith,
   pruneGoalLinks, goalChainReaches, TARGET_MONTHS_MAX,
   enteredCellFor,
   /* The starter budget's rows, so the suite can hold their NAMES against the

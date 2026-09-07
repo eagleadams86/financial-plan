@@ -1505,6 +1505,57 @@ suite passed while the card was wrong.
       enough, and from there the arithmetic is untouched. Verified against the
       real plan: with all three goals on Cash Mgmt the tiles read $37,026 /
       $4,905 / $0 before and after, and the real-data cross-check passes.
+  - **THE GOALS AHEAD DRAW, ACCOUNT BY ACCOUNT, IN THE READER'S ORDER
+    (2026-09-07, asked for — and it SUPERSEDES the inferred shortfall rule
+    above).** Charles: *"i want the goals to take the order into account or
+    let me set the order manually … there's plenty of other money to satisfy
+    emergencies without having to touch long-term savings."* The lump claim
+    could not say which account it came out of, so a fund sitting on plenty of
+    cash still swallowed the Long-term Savings under it.
+    - **`goalChain` / `goalDrawOrder` / `goalRemaining`** (pure, hooked). A
+      goal ahead takes up to its own TARGET, walking its accounts in
+      `accountsOf(st)` order — the Household list, which is draggable, so the
+      order is stated rather than inferred. `computeGoals` reads `remaining`
+      and sets `claimed = held − remaining`, so **the tile adds up**; the
+      brief `mine` field and the ", out of the accounts they share" clause
+      were the lump claim apologising for exceeding its own subtrahend and are
+      both gone.
+    - **`goalClaim` IS ORDER-AWARE TOO, and it had to be.** `computeGoals`
+      alone would have left a sweep tied to a goal stopping where the engine
+      thought the goal was full while the tile said otherwise — the
+      "tile agrees with the grid" test caught exactly that. It now walks
+      pred's accounts in the same order, treating an account the successor
+      counts as BOTTOMLESS (the question is how much must be there, not how
+      much is today), and the claim is what lands on those. **It reduces to
+      the old shortfall rule exactly when the accounts to spend first are
+      listed above the shared one** — which is now how the rule is stated.
+    - **`order` is a 4th argument, before `seen`**, so the pinned three-argument
+      calls still work (the `limitsFor` discipline); it defaults to the goal's
+      own `accounts` order. Every real caller passes the list: the engine
+      (`acctOrder` in `computeYearWith`), `computeGoals`, and
+      `freezeOverflowThresholds` — **the SENDER's order travels with a frozen
+      threshold**, or the recipient gets a figure the sender's engine never
+      computed.
+    - **`goalNeed` is still one figure over the whole set and is NOT bounded by
+      what a pot holds today** — it is the sweep threshold, and a threshold
+      worked out from the accounts being filled would rise as the sweep fills
+      them. The tile's `claimed` (money actually taken) and `need` (what must
+      be there) answer different questions and are both right; at the point a
+      goal is full they agree, which is what the sweep tests pin.
+    - **This CHANGES figures for a plan whose queue meets on a shared account
+      listed above the goal's other accounts** — four suite tests had to state
+      an order to keep their old answers, and each now tests both orders. On
+      Charles's plan the tiles read $37,026 / $4,904.94 / $0 / $13,555.98,
+      which is what he asked for.
+    - **A per-GOAL order was considered and not built.** One list for the plan
+      is what he asked for ("or let me set the order manually" — the Household
+      list already is manual), and a second ordering UI inside every goal is a
+      bigger thing to get wrong. Expect it to be asked for if two goals ever
+      want opposite priorities.
+    - **SUPERSEDED, kept for the reasoning:** the note below describes the
+      shared-pot split that shipped an hour earlier the same day. It was the
+      right diagnosis of the wrong layer — the money never needed splitting
+      once the goals ahead stopped taking it.
     - **AND THE CLAIM COMES OUT OF THE SHARED POT, NOT OFF THE WHOLE GOAL**
       (2026-09-07, the same fault one step along, reported the same day).
       `computeGoals` subtracted `claimed` from everything the goal held,

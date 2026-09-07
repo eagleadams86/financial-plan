@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1000;
+const EXPECTED = 1001;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -958,22 +958,32 @@ t('a queue of three is full at the sum of the targets ahead of it', () => {
     'what Renovations claims from cash is its need, not just its target');
   eq(H.goalClaim(null, ['cash'], goals, bal), 0, 'nobody claims nothing');
 });
-t('a claim is only the shortfall: money the earlier goal holds elsewhere covers it first', () => {
-  /* Charles's shape: Emergencies counts cash AND five bank accounts. Whatever
-     the bank accounts hold is already Emergencies' money, so it takes from
-     cash only the rest — otherwise those dollars belong to no goal at all and
-     Renovations reads low by exactly that much. */
+t('the shortfall is the ORDER the accounts are listed in (2026-09-07)', () => {
+  /* Charles's shape: Emergencies counts cash AND a bank account, Renovations
+     counts cash alone. It used to be INFERRED that the fund spends the bank
+     first and takes from cash only the rest — one particular order, and the
+     wrong one as often as the right one. It is stated now: whatever is listed
+     above the shared account is spent first. */
   const goals = [
     { id: 'e', name: 'Emergencies', target: 20000, accounts: ['cash', 'bank'], count: 'capped' },
     { id: 'r', name: 'Renovations', target: 50000, accounts: ['cash'], count: 'capped', overflowOf: 'e' },
   ];
   const held = (m) => (id) => m[id] || 0;
-  eq(H.goalClaim(goals[0], ['cash'], goals, held({ bank: 5270 })), 14730, '20,000 less the 5,270 in the bank');
-  eq(H.goalNeed(goals[1], goals, held({ bank: 5270 })), 64730, 'so Renovations is full at 64,730 of cash');
-  eq(H.goalClaim(goals[0], ['cash'], goals, held({ bank: 25000 })), 0, 'fully covered elsewhere claims nothing');
-  eq(H.goalClaim(goals[0], ['cash'], goals, held({})), 20000, 'nothing elsewhere: the whole target, as before');
-  eq(H.goalClaim(goals[0], ['cash', 'bank'], goals, held({ bank: 5270 })), 20000,
-    'a successor counting the same accounts sees the whole need — nothing is "elsewhere"');
+  const bankFirst = ['bank', 'cash'], cashFirst = ['cash', 'bank'];
+  eq(H.goalClaim(goals[0], ['cash'], goals, held({ bank: 5270 }), bankFirst), 14730,
+    'bank above cash: 20,000 less the 5,270 there — the old inferred rule, now said');
+  eq(H.goalNeed(goals[1], goals, held({ bank: 5270 }), bankFirst), 64730,
+    'so Renovations is full at 64,730 of cash');
+  eq(H.goalClaim(goals[0], ['cash'], goals, held({ bank: 25000 }), bankFirst), 0,
+    'fully covered by what is spent first: it claims nothing');
+  eq(H.goalClaim(goals[0], ['cash'], goals, held({ bank: 5270 }), cashFirst), 20000,
+    'cash above bank: the fund fills from cash and the bank is left alone');
+  eq(H.goalNeed(goals[1], goals, held({ bank: 5270 }), cashFirst), 70000,
+    'and Renovations needs the whole 20,000 on top of its own');
+  eq(H.goalClaim(goals[0], ['cash'], goals, held({}), bankFirst), 20000,
+    'nothing elsewhere: the whole target, whatever the order');
+  eq(H.goalClaim(goals[0], ['cash', 'bank'], goals, held({ bank: 5270 }), bankFirst), 20000,
+    'a successor counting the same accounts sees the whole need — nothing is spent "first"');
   /* and computeGoals partitions the money: no dollar twice, none missed */
   const s = H.coerceShape(fixtureState());
   s.goals = [{ ...goals[0], target: 5000 }, { ...goals[1], target: 6000 }];   // the fixture's scale
@@ -981,10 +991,14 @@ t('a claim is only the shortfall: money the earlier goal holds elsewhere covers 
   const c = computed['2030'];
   const [e, r] = H.computeGoals(s, computed, TODAY_FIX);
   const cash = c.balances['cash|2030-04'], bank = c.balances['bank|2030-04'];
+  const order = s.settings.accounts.map((a) => a.id);
   ok(bank > 0 && cash + bank > 5000, 'fixture: the fund is over target across both');
-  approx(e.saved + r.saved, Math.min(cash + bank, 5000) + Math.min(6000, cash + bank - 5000),
-    'together they hold exactly what the accounts hold, up to their targets');
-  approx(r.claimed, H.round2(Math.max(0, 5000 - bank)), 'the tile names the shortfall');
+  ok(order.indexOf('cash') < order.indexOf('bank'), 'fixture: cash is listed above bank', order.join(','));
+  approx(e.saved, 5000, 'the fund fills from cash, which is listed first');
+  approx(r.claimed, 5000, 'so the whole of it came out of the account they share');
+  approx(r.saved, H.round2(Math.min(6000, cash - 5000)), 'and Renovations has what is left of cash');
+  approx(e.saved + r.saved, H.round2(Math.min(cash + bank, 5000) + Math.min(6000, cash - 5000)),
+    'no dollar counted twice, and the bank is nobody\'s but the fund\'s');
 });
 /* ── A goal can only claim out of accounts it counts (2026-09-07) ───────────
    Reported: an account unticked from an earlier goal and left ticked on a
@@ -996,21 +1010,23 @@ t('a claim is only the shortfall: money the earlier goal holds elsewhere covers 
 t('an earlier goal that shares no account claims nothing (2026-09-07)', () => {
   const held = (m) => (id) => m[id] || 0;
   const bal = held({ cash: 36701, bank: 100 });
+  const order = ['bank', 'cash'];             // the bank is spent first
   const car = { id: 'c', name: 'New Car', target: 20000, accounts: ['cash'],
     count: 'capped', overflowOf: 'e' };
   /* While they share cash, nothing about this changes — the reported figure
      is the BEFORE, and it was right for a goal the emergency fund can reach. */
   const shared = [{ id: 'e', name: 'Emergencies', target: 37026,
     accounts: ['cash', 'bank'], count: 'capped' }, car];
-  eq(H.goalClaim(shared[0], ['cash'], shared, bal), 36926,
-     'sharing cash, the claim is the shortfall as before');
-  eq(H.goalNeed(shared[1], shared, bal), 56926, 'and New Car is full at both targets less the bank');
+  eq(H.goalClaim(shared[0], ['cash'], shared, bal, order), 36926,
+     'sharing cash, and spending the bank first, it claims the rest');
+  eq(H.goalNeed(shared[1], shared, bal, order), 56926,
+     'and New Car is full at both targets less the bank');
   /* Untick cash from Emergencies. It now counts the bank alone, so it can
      take nothing out of cash however far short it is. */
   const split = [{ ...shared[0], accounts: ['bank'] }, car];
-  eq(H.goalClaim(split[0], ['cash'], split, bal), 0,
+  eq(H.goalClaim(split[0], ['cash'], split, bal, order), 0,
      'counting the bank alone, it claims nothing out of cash');
-  eq(H.goalNeed(split[1], split, bal), 20000, 'so New Car is full at its own target');
+  eq(H.goalNeed(split[1], split, bal, order), 20000, 'so New Car is full at its own target');
   /* The figure the report was about: $36,701 of its own, reported as $0. */
   const s = H.coerceShape(fixtureState());
   s.goals = [{ id: 'e', name: 'Emergencies', target: 5000, accounts: ['bank'], count: 'capped' },
@@ -1020,7 +1036,7 @@ t('an earlier goal that shares no account claims nothing (2026-09-07)', () => {
   const [em, nc] = H.computeGoals(s, computed, TODAY_FIX);
   ok(cash > 900, 'fixture: cash is over New Car\'s target on its own', cash);
   ok(em.held < 5000, 'fixture: and the fund it sits behind is short', em.held);
-  eq(nc.claimed, 0, 'nothing is claimed off it');
+  eq(nc.claimed, 0, 'nothing is taken off it');
   eq(nc.saved, 900, 'so the tile reads its own money, not $0');
   /* The foot only prints a claim above zero, so the tile stops saying it is
      queued behind a goal that is taking nothing from it. */
@@ -1046,8 +1062,9 @@ t('a claim cannot take money out of an account no goal ahead counts (2026-09-07)
   ok(cash < 20000, 'fixture: and the goal ahead is short, so it claims the whole shared pot', cash);
   const [em, re] = H.computeGoals(s, computed, TODAY_FIX);
   approx(re.held, H.round2(cash + long), 'it still HOLDS both accounts');
-  approx(re.claimed, 20000, 'the claim ahead of it is unchanged — its target');
-  approx(re.mine, H.round2(long), 'the part nothing ahead of it counts is its own');
+  approx(re.claimed, H.round2(cash), 'the goal ahead drained the shared account and stopped');
+  approx(H.round2(re.held - re.claimed), H.round2(long),
+    'what is left after the goal ahead has drawn is the account it never touched');
   approx(re.saved, H.round2(long), 'so it reads that, where it used to read $0.00');
   approx(em.saved, H.round2(Math.min(cash, 20000)), 'and the goal ahead is untouched');
   /* No dollar twice: the two together still hold exactly what the accounts do. */
@@ -1057,7 +1074,11 @@ t('a claim cannot take money out of an account no goal ahead counts (2026-09-07)
    a smaller figure saved, and a claim larger than either. The clause is drawn
    only where the goal has money outside the claim's reach, so the ordinary
    queue's sentence is untouched. */
-t('the tile says a claim came out of the shared accounts only (2026-09-07)', () => {
+t('the tile adds up: held, less what was taken, is the bar (2026-09-07)', () => {
+  /* `claimed` is the money actually drawn out of this goal's accounts by the
+     goals ahead, so the foot explains the figure beside it. It briefly needed
+     an ", out of the accounts they share" clause — that was the old lump
+     claim apologising for exceeding the balance it was subtracted from. */
   const W = document.getElementById('app').contentWindow;
   ok(typeof W.goalCard === 'function', 'the app must expose goalCard to the frame');
   const read = (o) => {
@@ -1068,36 +1089,79 @@ t('the tile says a claim came out of the shared accounts only (2026-09-07)', () 
   const base = { id: 'x', target: 400000, count: 'all', monthsLeft: 0, monthlyReq: 0,
     etaMonths: null, gap: 1, paceMo: 1, progress: 0.03, claimedBy: 'New Car' };
   const own = read({ ...base, name: 'Retire Early', saved: 13555.98, held: 55486.92,
-    claimed: 137026, mine: 13555.98 });
-  ok(/\$137,026\.00 claimed first by New Car, out of the accounts they share/.test(own),
-     'with money of its own, the foot says where the claim reached', own);
-  const queued = read({ ...base, name: 'New Car', saved: 0, held: 41930.94,
-    claimed: 87026, mine: 0, claimedBy: 'Renovations' });
-  ok(/\$87,026\.00 claimed first by Renovations$/.test(queued),
-     'and the ordinary queue reads exactly as it always did', queued);
-  /* A name is escaped on the way in, clause or no clause. */
-  const nasty = read({ ...base, name: 'G', saved: 1, held: 2, claimed: 3, mine: 1,
-    claimedBy: '<img src=x onerror=alert(1)>' });
-  ok(!/<img/i.test(W.goalCard({ ...base, name: 'G', saved: 1, held: 2, claimed: 3, mine: 1,
+    claimed: 41930.94 });
+  ok(/\$41,930\.94 claimed first by New Car$/.test(own), 'the foot names what was taken', own);
+  ok(!/out of the accounts they share/.test(own), 'and needs no clause to make sense of it');
+  ok(/\$13,555\.98 of \$400,000\.00/.test(own), 'held 55,486.92 less 41,930.94 is the bar');
+  const clear = read({ ...base, name: 'Retire Early', saved: 55486.92, held: 55486.92,
+    claimed: 0, claimedBy: null });
+  ok(!/claimed first by/.test(clear), 'nothing taken, nothing said');
+  /* A name is escaped on the way in. */
+  ok(!/<img/i.test(W.goalCard({ ...base, name: 'G', saved: 1, held: 2, claimed: 1,
     claimedBy: '<img src=x onerror=alert(1)>' })), 'the claiming goal\'s name is escaped');
-  ok(/out of the accounts they share/.test(nasty), 'and the clause still follows it');
 });
-t('the ordinary queue on one account is exactly what it was (2026-09-07)', () => {
-  /* Where the goals ahead count everything this one does, the shared pot IS
-     the goal, `mine` is 0, and the subtraction is the one it always was. */
-  const s = H.coerceShape(fixtureState());
-  s.goals = [
-    { id: 'e', name: 'Emergencies', target: 5000, accounts: ['cash', 'bank'], count: 'capped' },
-    { id: 'r', name: 'Renovations', target: 6000, accounts: ['cash'], count: 'capped', overflowOf: 'e' },
+t('the order the accounts are listed in decides what a queued goal gets (2026-09-07)', () => {
+  /* The report: Long-term Savings sat at the bottom of the list and the fund
+     above still swallowed it, so the only other goal that counted it read
+     $0.00. Driven through the real engine, both ways round, so the ORDER is
+     what changes the answer and nothing else. */
+  const build = (order) => {
+    const s = H.coerceShape(fixtureState());
+    s.settings.accounts = order.map((id) => s.settings.accounts.find((a) => a.id === id))
+      .concat(s.settings.accounts.filter((a) => !order.includes(a.id)));
+    s.goals = [
+      { id: 'e', name: 'Emergencies', target: 5000, accounts: ['cash', 'bank'], count: 'capped' },
+      { id: 'x', name: 'Retire Early', target: 400000, accounts: ['bank'], count: 'all',
+        overflowOf: 'e' },
+    ];
+    const computed = H.computeAll(s, TODAY_FIX);
+    return { c: computed['2030'], goals: H.computeGoals(s, computed, TODAY_FIX) };
+  };
+  const cashFirst = build(['cash', 'bank']);
+  const cash = cashFirst.c.balances['cash|2030-04'], bank = cashFirst.c.balances['bank|2030-04'];
+  ok(cash > 5000 && bank > 0, 'fixture: cash covers the fund on its own, and the bank holds money',
+    `${cash} / ${bank}`);
+  approx(cashFirst.goals[1].saved, H.round2(bank),
+    'cash listed first: the fund fills from it and the bank is left for the goal behind');
+  eq(cashFirst.goals[1].claimed, 0, 'nothing was taken out of the bank');
+  const bankFirst = build(['bank', 'cash']);
+  approx(bankFirst.goals[1].saved, 0, 'bank listed first: the fund spends it and the goal behind gets nothing');
+  approx(bankFirst.goals[1].claimed, H.round2(bank), 'the whole of it was taken');
+  approx(bankFirst.goals[0].saved, 5000, 'either way the fund itself is full');
+});
+t('the goals ahead draw account by account, in the reader\'s order (2026-09-07)', () => {
+  /* The pure draw, stated on its own. A goal ahead takes up to its TARGET,
+     walking its accounts in the account list's order, and stops. */
+  const bal = (id) => ({ a: 100, b: 50, c: 25 })[id] || 0;
+  const goals = [
+    { id: 'e', name: 'Earlier', target: 120, accounts: ['a', 'b', 'c'], count: 'capped' },
+    { id: 'l', name: 'Later', target: 999, accounts: ['a', 'b', 'c'], count: 'all', overflowOf: 'e' },
   ];
-  const computed = H.computeAll(s, TODAY_FIX);
-  const cash = computed['2030'].balances['cash|2030-04'];
-  const bank = computed['2030'].balances['bank|2030-04'];
-  const [, r] = H.computeGoals(s, computed, TODAY_FIX);
-  eq(r.mine, 0, 'nothing of it sits outside the accounts the fund counts');
-  approx(r.claimed, H.round2(Math.max(0, 5000 - bank)), 'the shortfall claim, as before');
-  approx(r.saved, H.round2(Math.min(6000, Math.max(0, cash - Math.max(0, 5000 - bank)))),
-    'and saved is held less the claim, exactly as it always was');
+  eq(H.goalDrawOrder(goals[0], ['c', 'b', 'a']), ['c', 'b', 'a'], 'the reader\'s order wins');
+  eq(H.goalDrawOrder(goals[0], ['c', 'zz']), ['c', 'a', 'b'],
+    'an account the list has never heard of goes last rather than being dropped');
+  eq(H.goalRemaining(goals[1], goals, ['a', 'b', 'c'], bal), 55,
+    'a first: 100 and 20 of b, so 30 of b and all of c are left');
+  eq(H.goalRemaining(goals[1], goals, ['c', 'b', 'a'], bal), 55,
+    'c first: 25, 50, and 45 of a — the same total left, in different accounts');
+  eq(H.goalRemaining(goals[0], goals, ['a', 'b', 'c'], bal), 175,
+    'the goal at the front of the queue draws from nothing');
+  /* Which accounts it is left IN is what matters to a goal counting only one. */
+  const one = [goals[0], { ...goals[1], accounts: ['c'] }];
+  eq(H.goalRemaining(one[1], one, ['a', 'b', 'c'], bal), 25, 'a first leaves c untouched');
+  eq(H.goalRemaining(one[1], one, ['c', 'b', 'a'], bal), 0, 'c first empties it');
+  /* A goal ahead takes its TARGET however far its own bar runs. */
+  const all = [{ ...goals[0], count: 'all' }, goals[1]];
+  eq(H.goalRemaining(all[1], all, ['a', 'b', 'c'], bal), 55, '"all of it" claims by target still');
+  /* No link, no queue: both count the money in full. */
+  const apart = [goals[0], { ...goals[1], overflowOf: undefined }];
+  eq(H.goalRemaining(apart[1], apart, ['a', 'b', 'c'], bal), 175, 'an unqueued goal draws from nothing');
+  eq(H.goalChain(goals[1], goals).map((g) => g.id), ['e'], 'the chain is the queue in front, front first');
+  /* A loop the boundary missed terminates rather than hanging. */
+  const loop = [{ id: 'p', target: 1, accounts: ['a'], overflowOf: 'q' },
+    { id: 'q', target: 1, accounts: ['a'], overflowOf: 'p' }];
+  eq(H.goalChain(loop[0], loop).map((g) => g.id), ['p', 'q'], 'a loop stops at the goal it started from');
+  ok(H.goalRemaining(loop[0], loop, ['a'], bal) >= 0, 'and the draw terminates');
 });
 /* The test is STRUCTURAL — never a balance — because the same claim is the
    threshold a sweep row starts at, and a threshold that moved with the
@@ -1325,6 +1389,9 @@ t('a sweep waits for the deposits a queued goal\'s claim reads, and never fills 
      into one of them and read a threshold the month-end figures — and the
      Progress tab — did not agree with. */
   const s = overflowFixture();
+  /* Investments above Cash, which is what says EF spends it first — the
+     deposit into it is only an ordering input because of that (2026-09-07). */
+  s.settings.accounts = [s.settings.accounts[2], ...s.settings.accounts.slice(0, 2)];
   s.settings.accounts.push({ id: 'chk', name: 'Checking', rate: 0, creditTo: 'chk' });
   s.years['2026'].seeds.chk = 5000;
   const [, tied] = s.years['2026'].categories;
@@ -10081,9 +10148,19 @@ t('a sweep tied to a goal queued behind another starts where THAT goal is full',
     { id: 'car', name: 'New Car', target: 5000, accounts: ['cash'], count: 'capped', overflowOf: 'emerg' },
   ];
   s2.years['2026'].seeds.long = 4000;
+  /* The shortfall is the ORDER now (2026-09-07): Investments above Cash is
+     what says Emergencies spends that first, so it claims only 6,000 here.
+     Listed the other way round it fills from cash and claims the lot — the
+     same two answers this test used to get by inference alone. */
+  s2.settings.accounts = [s2.settings.accounts[2], ...s2.settings.accounts.slice(0, 2)];
   const c2 = computeOverflow(s2)['2026'];
   eq(c2.cells['tomid|2026-01'].v, -6894, 'Emergencies claims only 6,000 from cash, so the line is 11,000');
   approx(c2.balances['cash|2026-01'], 11000);
+  const s2b = JSON.parse(JSON.stringify(s2));
+  s2b.settings.accounts = [...s2b.settings.accounts.slice(1), s2b.settings.accounts[0]];
+  const c2b = computeOverflow(s2b)['2026'];
+  eq(c2b.cells['tomid|2026-01'].v, -2894,
+    'cash listed first: Emergencies fills from cash, claims 10,000, and the line is back at 15,000');
   /* a plan with no queued goal computes exactly what it did */
   const s3 = overflowFixture();
   const row3 = s3.years['2026'].categories[1];
@@ -10115,15 +10192,24 @@ t('a budget-only link freezes a queued goal’s threshold at its need, not its b
     { id: 'car', name: 'New Car', target: 5000, accounts: ['cash'], count: 'capped', overflowOf: 'emerg' },
   ];
   const payload = JSON.parse(JSON.stringify({ years: s.years, goals: [] }));
-  H.freezeOverflowThresholds(payload, s.goals, (id) => ({ long: 4000 })[id] || 0);
+  /* THE SENDER'S ACCOUNT ORDER TRAVELS WITH THE FIGURE (2026-09-07): the
+     goals ahead draw in it, so freezing without it would hand the recipient a
+     threshold the sender's own engine never computed. */
+  H.freezeOverflowThresholds(payload, s.goals, (id) => ({ long: 4000 })[id] || 0,
+    ['long', 'cash', 'mid']);
   const frozen = payload.years['2026'].categories[1];
   eq(frozen.goalId, undefined, 'the tie is gone');
   eq(frozen.threshold, 11000, '5,000 on top of the 6,000 Emergencies still needs from cash today');
   eq(frozen.thresholdAccounts, ['cash'], "measured on the goal's own accounts");
+  const other = JSON.parse(JSON.stringify({ years: s.years, goals: [] }));
+  H.freezeOverflowThresholds(other, s.goals, (id) => ({ long: 4000 })[id] || 0,
+    ['cash', 'long', 'mid']);
+  eq(other.years['2026'].categories[1].threshold, 15000,
+    'cash listed first: Emergencies fills from cash and claims the whole 10,000');
   const bare = JSON.parse(JSON.stringify({ years: s.years, goals: [] }));
   H.freezeOverflowThresholds(bare, s.goals);
   eq(bare.years['2026'].categories[1].threshold, 15000,
-    'with no balances handed in, nothing is covered elsewhere');
+    'with no balances handed in, nothing is spent first');
 });
 t('the sweep runs AFTER interest: the source keeps its full month of growth', () => {
   const s = overflowFixture();
@@ -14511,7 +14597,7 @@ t('the shared-account guard reads the lists, and reads them first (2026-09-07)',
   const fn = src.slice(src.indexOf('function goalClaim(')).slice(0, 500);
   ok(/if \(!\(pred\.accounts \|\| \[\]\)\.some\(id => \(accounts \|\| \[\]\)\.includes\(id\)\)\) return 0;/
      .test(fn), 'the guard is the two account lists and nothing else');
-  ok(!/bal\(/.test(fn.slice(0, fn.indexOf('const need'))),
+  ok(!/bal\(/.test(fn.slice(0, fn.indexOf('goalNeed('))),
      'no balance is read before it');
   ok(fn.indexOf('.some(id =>') < fn.indexOf('goalNeed('),
      'and it comes before the need is worked out at all');
@@ -14527,8 +14613,12 @@ t('a goal is not offered an account that is already closed (2026-09-07)', () => 
      dropping a real figure rather than an empty tick. */
   ok(!/label: 'Saved adds up'[\s\S]{0,400}filter\(a => !a\.until\)/.test(src),
      'and it is measured against this month, not against having an end date at all');
-  ok(/An account you have closed is not offered/.test(spec.slice(0, 900)),
+  /* The phrase is matched WITHIN one string literal: the hint is built by
+     concatenation, so a longer phrase straddles a quote, a newline and a `+`. */
+  ok(/An account you have closed is not/.test(spec.slice(0, 1400)),
      'the hint says so, so an account missing from the list is not a mystery');
+  ok(/in the order the accounts are listed/.test(spec.slice(0, 1400)),
+     'and it says the goals ahead draw in the account list\'s order');
   /* The list writes back what it showed, so an old goal loses those ticks on
      save — no figure moves, but a claim is withdrawn, and the 2026-09-02
      standard says a change the reader did not make has to be said. */

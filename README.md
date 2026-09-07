@@ -802,19 +802,27 @@ goal's claim: the earlier goal's target, plus whatever it in turn leaves to the
 goals ahead of it, so three goals can queue on one account and each stop at its
 own target. (A goal already queued behind this one is not offered — the two
 would claim each other — and if a stale form names one anyway the save says so
-and leaves the claim empty.) A goal that holds part of its money in accounts you didn't tick
-here claims only its shortfall from the shared ones, so no dollar is counted by
-two goals and none is missed; the tile says what was claimed ahead of it. **A
-goal can only claim out of accounts it counts**: untick the shared account from
-the earlier goal and it stops claiming anything from the later one, whatever it
-is still short of, because it can no longer reach that money. For the same
-reason **a claim comes out of the shared accounts only** — money a goal holds
-somewhere none of the goals ahead of it have ticked is its own from the first
-dollar, and the tile says "out of the accounts they share" when that applies. (The link itself
-is left alone — the goal is still queued, it is simply taking nothing.) Where
-three are queued and the middle one shares no account with the last, the first
-goal's claim on an account they do share is dropped rather than guessed at: a
-one-level claim cannot express a three-way split.
+and leaves the claim empty.)
+
+**The goals ahead take what they need account by account, in the order the
+accounts are listed on the Household tab** — so a fund with plenty in the
+current account fills itself from that and leaves the savings account under it
+for the goal behind. Drag the accounts into the order you want them spent, and
+put the ones a goal should reach for last at the bottom. Until 2026-09-07 that
+order was inferred — a goal was assumed to empty its other accounts before
+touching a shared one, which is one particular order and the wrong one as
+often as the right one. The figure on the tile is what those accounts hold
+less what was taken, so no dollar is counted by two goals in a queue and none
+is missed; two goals with no "claimed first by" between them are not in a
+queue at all, and both count the money in full.
+
+**A goal can only claim out of accounts it counts**: untick the shared account
+from the earlier goal and it stops claiming anything from the later one,
+whatever it is still short of. (The link itself is left alone — the goal is
+still queued, it is simply taking nothing.) Where three are queued and the
+middle one shares no account with the last, the first goal's claim on an
+account they do share is dropped rather than guessed at: a one-level claim
+cannot express a three-way split.
 Deleting a goal frees the goals that were claimed first by it — they count
 from the first dollar from then on — and the toast names them.
 
