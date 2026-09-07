@@ -1505,6 +1505,28 @@ suite passed while the card was wrong.
       enough, and from there the arithmetic is untouched. Verified against the
       real plan: with all three goals on Cash Mgmt the tiles read $37,026 /
       $4,905 / $0 before and after, and the real-data cross-check passes.
+    - **AND THE CLAIM COMES OUT OF THE SHARED POT, NOT OFF THE WHOLE GOAL**
+      (2026-09-07, the same fault one step along, reported the same day).
+      `computeGoals` subtracted `claimed` from everything the goal held,
+      including accounts NO goal ahead of it counts. Retire Early — counting
+      Long-term Savings on top of the six accounts the three goals ahead of it
+      share — read $0.00 with $13,555.98 sitting in Long-term that nothing
+      else had a claim on. `saved` is now `mine + max(0, shared − claimed)`,
+      where `shared` is the goal's balances in `claimAccounts(g, goals)` and
+      `mine` is the rest. `mine` is 0 for the ordinary queue on one account,
+      so that case is byte-for-byte the subtraction it always was.
+      - **ONLY THE TILE SPLITS.** `goalNeed` stays one number over the goal's
+        whole set, because it is also the sweep threshold and the destination
+        cap: bounding it by what a pot holds today would make the threshold
+        RISE as the sweep fills the very account it measures. The gap the pace
+        check divides is still `need − held` for the same reason — money that
+        ARRIVES lands in the swept accounts, where the goals ahead are waiting
+        for it. The consequence is that `saved + gap ≠ target` for a queued
+        goal, which was already true and is deliberate.
+      - **The FOOT had to say so or the tile cannot be added up**: $55,486.92
+        held, $13,555.98 saved, a claim of $137,026.00. `mine > 0` appends
+        ", out of the accounts they share"; the ordinary queue's sentence is
+        untouched, and `HELP.goalClaims` carries the same rule in words.
     - **A later goal may still read $0 for an honest reason**, and the two
       look identical on the tile: on that plan, unticking Cash Mgmt from
       Emergencies lifts Renovations to $36,701 and leaves New Car at $0,

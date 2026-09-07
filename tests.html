@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 997;
+const EXPECTED = 1000;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1025,6 +1025,79 @@ t('an earlier goal that shares no account claims nothing (2026-09-07)', () => {
   /* The foot only prints a claim above zero, so the tile stops saying it is
      queued behind a goal that is taking nothing from it. */
   ok(nc.claimedBy, 'the link itself is untouched — the goal is still queued');
+});
+/* ── A claim comes out of the shared pot, not off the whole goal (2026-09-07) ─
+   The same fault one step along, reported the same day: Retire Early counted
+   Long-term Savings on top of the six accounts the three goals ahead of it
+   share, and read $0.00 while $13,555.98 sat in Long-term that nothing else
+   had a claim on. `claimed` was subtracted from everything the goal held. */
+t('a claim cannot take money out of an account no goal ahead counts (2026-09-07)', () => {
+  const s = H.coerceShape(fixtureState());
+  /* Two on the shared account, and the second also counting one of its own. */
+  s.goals = [
+    { id: 'e', name: 'Emergencies', target: 20000, accounts: ['cash'], count: 'capped' },
+    { id: 'x', name: 'Retire Early', target: 400000, accounts: ['cash', 'long'], count: 'all',
+      overflowOf: 'e' },
+  ];
+  const computed = H.computeAll(s, TODAY_FIX);
+  const cash = computed['2030'].balances['cash|2030-04'];
+  const long = computed['2030'].balances['long|2030-04'];
+  ok(long > 0, 'fixture: there is money in the account only the later goal counts', long);
+  ok(cash < 20000, 'fixture: and the goal ahead is short, so it claims the whole shared pot', cash);
+  const [em, re] = H.computeGoals(s, computed, TODAY_FIX);
+  approx(re.held, H.round2(cash + long), 'it still HOLDS both accounts');
+  approx(re.claimed, 20000, 'the claim ahead of it is unchanged — its target');
+  approx(re.mine, H.round2(long), 'the part nothing ahead of it counts is its own');
+  approx(re.saved, H.round2(long), 'so it reads that, where it used to read $0.00');
+  approx(em.saved, H.round2(Math.min(cash, 20000)), 'and the goal ahead is untouched');
+  /* No dollar twice: the two together still hold exactly what the accounts do. */
+  approx(em.saved + re.saved, H.round2(cash + long), 'the money is partitioned, none invented');
+});
+/* And the TILE says so, or its three figures cannot be reconciled: money held,
+   a smaller figure saved, and a claim larger than either. The clause is drawn
+   only where the goal has money outside the claim's reach, so the ordinary
+   queue's sentence is untouched. */
+t('the tile says a claim came out of the shared accounts only (2026-09-07)', () => {
+  const W = document.getElementById('app').contentWindow;
+  ok(typeof W.goalCard === 'function', 'the app must expose goalCard to the frame');
+  const read = (o) => {
+    const d = document.createElement('div');
+    d.innerHTML = W.goalCard(o);
+    return d.textContent.replace(/\s+/g, ' ').trim();
+  };
+  const base = { id: 'x', target: 400000, count: 'all', monthsLeft: 0, monthlyReq: 0,
+    etaMonths: null, gap: 1, paceMo: 1, progress: 0.03, claimedBy: 'New Car' };
+  const own = read({ ...base, name: 'Retire Early', saved: 13555.98, held: 55486.92,
+    claimed: 137026, mine: 13555.98 });
+  ok(/\$137,026\.00 claimed first by New Car, out of the accounts they share/.test(own),
+     'with money of its own, the foot says where the claim reached', own);
+  const queued = read({ ...base, name: 'New Car', saved: 0, held: 41930.94,
+    claimed: 87026, mine: 0, claimedBy: 'Renovations' });
+  ok(/\$87,026\.00 claimed first by Renovations$/.test(queued),
+     'and the ordinary queue reads exactly as it always did', queued);
+  /* A name is escaped on the way in, clause or no clause. */
+  const nasty = read({ ...base, name: 'G', saved: 1, held: 2, claimed: 3, mine: 1,
+    claimedBy: '<img src=x onerror=alert(1)>' });
+  ok(!/<img/i.test(W.goalCard({ ...base, name: 'G', saved: 1, held: 2, claimed: 3, mine: 1,
+    claimedBy: '<img src=x onerror=alert(1)>' })), 'the claiming goal\'s name is escaped');
+  ok(/out of the accounts they share/.test(nasty), 'and the clause still follows it');
+});
+t('the ordinary queue on one account is exactly what it was (2026-09-07)', () => {
+  /* Where the goals ahead count everything this one does, the shared pot IS
+     the goal, `mine` is 0, and the subtraction is the one it always was. */
+  const s = H.coerceShape(fixtureState());
+  s.goals = [
+    { id: 'e', name: 'Emergencies', target: 5000, accounts: ['cash', 'bank'], count: 'capped' },
+    { id: 'r', name: 'Renovations', target: 6000, accounts: ['cash'], count: 'capped', overflowOf: 'e' },
+  ];
+  const computed = H.computeAll(s, TODAY_FIX);
+  const cash = computed['2030'].balances['cash|2030-04'];
+  const bank = computed['2030'].balances['bank|2030-04'];
+  const [, r] = H.computeGoals(s, computed, TODAY_FIX);
+  eq(r.mine, 0, 'nothing of it sits outside the accounts the fund counts');
+  approx(r.claimed, H.round2(Math.max(0, 5000 - bank)), 'the shortfall claim, as before');
+  approx(r.saved, H.round2(Math.min(6000, Math.max(0, cash - Math.max(0, 5000 - bank)))),
+    'and saved is held less the claim, exactly as it always was');
 });
 /* The test is STRUCTURAL — never a balance — because the same claim is the
    threshold a sweep row starts at, and a threshold that moved with the

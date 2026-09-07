@@ -807,7 +807,10 @@ here claims only its shortfall from the shared ones, so no dollar is counted by
 two goals and none is missed; the tile says what was claimed ahead of it. **A
 goal can only claim out of accounts it counts**: untick the shared account from
 the earlier goal and it stops claiming anything from the later one, whatever it
-is still short of, because it can no longer reach that money. (The link itself
+is still short of, because it can no longer reach that money. For the same
+reason **a claim comes out of the shared accounts only** — money a goal holds
+somewhere none of the goals ahead of it have ticked is its own from the first
+dollar, and the tile says "out of the accounts they share" when that applies. (The link itself
 is left alone — the goal is still queued, it is simply taking nothing.) Where
 three are queued and the middle one shares no account with the last, the first
 goal's claim on an account they do share is dropped rather than guessed at: a

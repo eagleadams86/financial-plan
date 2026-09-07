@@ -6917,15 +6917,42 @@ function computeGoals(st, computed, todayIso) {
     const held = round2((g.accounts || []).reduce((t, id) => t + bal(id), 0));
     const pred = g.overflowOf ? byId(g.overflowOf) : null;
     const claimed = pred ? goalClaim(pred, g.accounts || [], goals, bal) : 0;
-    let saved = Math.max(0, held - claimed);
+    /* THE CLAIM IS TAKEN OUT OF THE SHARED POT, NOT OFF THE WHOLE GOAL
+       (2026-09-07, the same fault as the reach guard one level along).
+       `claimed` was subtracted from everything the goal holds — including
+       accounts NO goal ahead of it counts, which those goals cannot reach and
+       can never spend. Reported: Retire Early, counting Long-term Savings on
+       top of the six accounts the three goals ahead of it share, read $0.00
+       while $13,555.98 sat in Long-term that nothing else had a claim on.
+       `claimAccounts` is the chain's own account list, so what is left is
+       money this goal alone counts, and it is the goal's from the first
+       dollar. Where the goals ahead count everything this one does — the
+       ordinary queue on one account — `mine` is 0 and this is exactly the
+       subtraction it always was.
+       Only the TILE splits. `goalNeed` stays one number over the goal's whole
+       set, because it is also the threshold a sweep row starts at and a cap
+       fills to: bounding it by what a pot holds today would make the
+       threshold rise as the sweep fills the account it is measuring. The gap
+       the pace check divides is still `need − held` for the same reason —
+       money that ARRIVES lands in the swept accounts, where the goals ahead
+       are waiting for it. */
+    const chain = new Set(claimAccounts(g, goals));
+    const shared = (g.accounts || []).filter(id => chain.has(id))
+      .reduce((t, id) => t + bal(id), 0);
+    const mine = held - shared;                 // accounts nothing ahead counts
+    let saved = mine + Math.max(0, shared - claimed);
     if (g.count !== 'all') saved = Math.min(saved, g.target || 0);   // capped: never more than the goal
-    saved = round2(saved);
+    saved = round2(Math.max(0, saved));
     const monthsLeft = g.targetDate
       ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
     const need = goalNeed(g, goals, bal);
     const pace = goalPace(g, need, held, cur, c, yr, priorC);
     return {
       ...g, saved, held, claimed,
+      /* What this goal holds where nothing ahead of it can reach — 0 for the
+         ordinary queue on one account, and what the foot's "out of the
+         accounts they share" is drawn on. */
+      mine: round2(mine),
       claimedBy: pred ? (pred.name || pred.id) : null,
       progress: g.target ? saved / g.target : 0,
       monthsLeft,
@@ -7353,6 +7380,11 @@ const HELP = {
       + 'already holds in accounts you have not ticked here is covered, so it takes from the '
       + 'shared accounts only what those do not. No dollar is counted by two goals, and none '
       + 'is missed. The tile says what was claimed ahead of it.'],
+    ['A claim only ever reaches ', b('accounts the earlier goal counts'), '. Money this goal '
+      + 'holds somewhere none of the goals ahead of it have ticked is its own from the first '
+      + 'dollar, however far short they are \u2014 they cannot spend what they do not count. '
+      + 'Untick the shared account from the earlier goal and it stops claiming anything here, '
+      + 'though it stays named above: it is queued, and taking nothing.'],
     ['"All of it" on the earlier goal changes how far its own bar runs, never what it claims '
       + '\u2014 a claim is always the target. A sweep row tied to a queued goal starts where '
       + 'that goal is full: its target on top of every claim ahead of it.'],
@@ -11455,7 +11487,15 @@ function goalCard(g, idx) {
       ${!done && g.etaMonths > 0 ? ` · at this pace about ${esc(monthLabel(g.eta))}` : ''}
       ${!done && g.gap > 0 && g.paceMo !== null && g.paceMo <= 0 ? ' · not growing this year' : ''}
       ${!done && g.gap > 0 && g.paceMo === null ? ' · no balance to pace it by this year' : ''}
-      ${g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}` : ''}
+      ${g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}`
+        /* Only out of the accounts they SHARE, said out loud when this goal has
+           money elsewhere (2026-09-07). Without the clause the tile cannot be
+           added up: Retire Early holds $55,486.92, reads $13,555.98, and the
+           foot names a claim of $137,026.00 — three figures that only make
+           sense once it says the claim never reached Long-term Savings. Where
+           the goals ahead count everything this one does, `mine` is 0 and the
+           foot is exactly the sentence it always was. */
+        + (g.mine > 0 ? ', out of the accounts they share' : '') : ''}
       ${g.targetMonths > 0 ? ` · ${g.targetMonths} month${g.targetMonths === 1 ? '' : 's'} of this year's expenses` : ''}</div>
   </div>`;
 }
