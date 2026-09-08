@@ -4669,6 +4669,40 @@ backwards. Anything that walks the whole plan's months has to ask each year's
 own copy what it says, not assume the row it started from speaks for all of
 them.
 
+## The waiting line opens the period it is about (2026-09-08)
+
+Charles, of the "Waiting on the bill" line: **"this should probably be
+clickable."** It was the one row on the Due and Waiting card that answered a
+press with silence — on a card whose whole reason for appearing is that there
+is something to go and DO.
+
+**The reason it was left out is real and is not a reason to leave it out.**
+Every other row there is about ONE month and opens that month; this line is
+about a row across several, and the figure beside it is a total. So it opens
+`out.months[0]` — **the oldest period still unpaid**, the one you would go and
+fill in — and filling that in drops it out of the count, so the next press
+lands on the period behind it. With nothing outstanding (the row is on the page
+because this month is one of its own) it opens THIS month, like the rows above
+it.
+
+- **The month is NAMED whenever it is not the one you are reading**, which is
+  `dueRow`'s rule and matters more here: a line that opens April from the
+  September page must say so BEFORE it does it, and the total in the column
+  cannot say it, being nobody's month in particular. The sentence reads "The
+  oldest unpaid period is Apr 2026." — or "The unpaid period is…" when there is
+  only one.
+- **The year comes from `lookIn`, never from the page.** January's previous
+  quarter is last year's cell and `outstandingDues` already spans years; a
+  `data-year` taken from the page would open the wrong grid.
+- **No wiring of its own.** `wireMonthRows` reads the same three attributes off
+  this row as off any other, and `stripEditAffordances` takes them off in a
+  shared view — the card is not drawn there at all, so that is belt and braces.
+- **The `derived` class had to go with it.** That class is what gives a line the
+  default cursor and no hover, which is the markup contract `tipOpensEditor`
+  reads: a `.mrow` that opens an editor shows no tooltip on a tap, because the
+  dialog is the answer. Its `data-tip` (the schedule words) is still there for a
+  mouse, and Row Settings inside the cell editor is where the pause itself lives.
+
 ## A note with no figure (2026-08-26)
 
 **`kind: 'missing'` is a legal STORED cell now — a note on a month where

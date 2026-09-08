@@ -397,6 +397,11 @@ Marking a month as entered **leaves a paused row blank** rather than stamping it
 estimate as paid — it tells you how many rows it left alone — because that's the
 whole point of having said you're still waiting.
 
+When the bill does finally arrive, **the waiting line opens the oldest period
+still unpaid** — it names that month first, since it is usually not the month
+you are reading — so the figure is recorded where the money should have left.
+Fill it in and the line moves on to the period behind it.
+
 ### A Row That Stopped
 
 Some rows are only true for part of the plan. You change credit cards and stop

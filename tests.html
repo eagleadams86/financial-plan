@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1016;
+const EXPECTED = 1019;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -16449,6 +16449,104 @@ t('the tile foot names the goal that actually took the money, not merely the one
     saved: 1, held: 201, monthsLeft: 0, monthlyReq: 0, progress: 0, gap: 1, paceMo: 1, etaMonths: null });
   ok(/after \$200\.00 claimed first by Roof and Kitchen refresh/.test(d.textContent.replace(/\s+/g, ' ')),
      'the foot prints the takers', d.textContent.replace(/\s+/g, ' ').trim());
+});
+
+group('The waiting line opens the period it is about (2026-09-08)');
+/* ── The one row on the card that answered a press with silence ─────────────
+   Charles, of the "Waiting on the bill" line: "this should probably be
+   clickable." It opened nothing, on a card whose whole reason for appearing is
+   that there is something to go and DO. The reason it was left out is real and
+   is not a reason to leave it out: every other row there is about ONE month and
+   opens that month, while this line is about a row across several and the
+   figure beside it is a total.
+
+   It opens the OLDEST period still unpaid — the one you would go and fill in —
+   and it NAMES that month before it does, because a line that opens April from
+   the September page has to say so first and a total cannot say it, being
+   nobody's month in particular. Both frame tests were proven red against the
+   unclickable line. */
+t('the waiting line opens the oldest period still unpaid, and names it first', async () => {
+  const { f, W, D } = await auditFrame(1280, 1200, 'heldopen');
+  try {
+    D.getElementById('tab-budget').click();
+    D.querySelector('.vswitch[data-mode="month"]').click();
+    const line = [...D.querySelectorAll('.mrow')]
+      .find(r => /Waiting on the bill/.test(r.textContent));
+    ok(line, 'the sample plan keeps a water bill whose reminders are paused');
+    eq(line.getAttribute('role'), 'button', 'the line says it is pressable');
+    eq(line.tabIndex, 0, 'and a keyboard can reach it');
+    const month = line.dataset.m;
+    ok(line.dataset.cat && line.dataset.year && /^\d{4}-\d{2}$/.test(month || ''),
+       'it carries the three attributes wireMonthRows reads off any other row',
+       line.outerHTML.slice(0, 160));
+    ok(month < D.querySelector('[data-month][aria-checked="true"]').dataset.month,
+       'and it is an EARLIER month than the page — the periods behind a paused row '
+       + 'are what the line is about', month);
+    const words = line.textContent.replace(/\s+/g, ' ');
+    ok(words.includes('unpaid period is ' + W.monthLabelFull(month) + '.'),
+       'which the line says in words before it opens it', words.trim());
+    /* Pressed where a finger lands — on the name — so the delegate's own
+       `closest` is what has to find the row. */
+    line.querySelector('.mname').dispatchEvent(new W.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    ok(D.getElementById('cellDialog').open, 'the cell editor opened');
+    eq(D.getElementById('cellDialogTitle').textContent,
+       'Water — ' + W.monthLabel(month), 'on the month the line named, not on the page\u2019s');
+    eq(D.getElementById('cellRowBtn').hidden, false,
+       'and Row Settings is one press further, which is where the pause itself lives');
+    D.getElementById('cellCancelBtn').click();
+    /* The keyboard is the same door: role=button without Enter is a lie. */
+    line.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    ok(D.getElementById('cellDialog').open, 'Enter opens it too');
+    eq(D.getElementById('cellDialogTitle').textContent, 'Water — ' + W.monthLabel(month));
+    D.getElementById('cellCancelBtn').click();
+  } finally { f.remove(); }
+});
+t('recording that bill moves the line on to the period behind it', async () => {
+  const { f, W, D } = await auditFrame(1280, 1200, 'heldnext');
+  try {
+    D.getElementById('tab-budget').click();
+    D.querySelector('.vswitch[data-mode="month"]').click();
+    const line = () => [...D.querySelectorAll('.mrow')]
+      .find(r => /Waiting on the bill/.test(r.textContent));
+    const first = line();
+    ok(first, 'the paused row is on the page');
+    const was = first.dataset.m;
+    ok(/2 periods still unpaid/.test(first.textContent),
+       'fixture: the sample has two quarters stacked up behind it',
+       first.textContent.replace(/\s+/g, ' ').trim());
+    first.querySelector('.mname').dispatchEvent(new W.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    D.getElementById('cellValue').value = '-95';
+    D.querySelectorAll('input[name=cellKind]').forEach((r) => { r.checked = r.value === 'actual'; });
+    D.getElementById('cellSaveBtn').click();
+    await new Promise((r) => setTimeout(r, 250));
+    const next = line();
+    ok(next, 'the line is still there — one quarter is settled, not the backlog');
+    ok(next.dataset.m > was, 'and it now opens the period behind the one just paid',
+       was + ' \u2192 ' + next.dataset.m);
+    const words = next.textContent.replace(/\s+/g, ' ');
+    ok(/1 period still unpaid/.test(words), 'the count came down with it', words.trim());
+    ok(words.includes('unpaid period is ' + W.monthLabelFull(next.dataset.m) + '.'),
+       'and the new month is named, like the last one was', words.trim());
+  } finally { f.remove(); }
+});
+t('the month it opens is worked out, never assumed to be the page you are on', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const at = src.indexOf('const heldLine = ');
+  ok(at > -1, 'heldLine is still where the waiting line is built');
+  const fn = src.slice(at, src.indexOf('const heldShown', at));
+  ok(/const target = out\.months\[0\] \|\| m;/.test(fn),
+     'the oldest outstanding period, and this month only when nothing is outstanding — '
+     + 'a line that always opened `m` would record a quarterly bill in the wrong month');
+  ok(/data-year="\$\{esc\(at \? at\.y : y\)\}"/.test(fn),
+     'and the YEAR is looked up rather than taken from the page: January\u2019s previous '
+     + 'quarter is last year\u2019s cell, and outstandingDues already spans years');
+  ok(!/class="mrow derived"/.test(fn),
+     'the row is no longer marked derived — that class is what gives a line the '
+     + 'default cursor, and it now opens an editor like the rows above it');
 });
 
 async function run() {
