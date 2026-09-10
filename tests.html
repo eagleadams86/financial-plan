@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1019;
+const EXPECTED = 1020;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -5241,6 +5241,20 @@ t('the year column says it is a closing balance, not a sum', () => {
   eq(H.balanceYearTip({}, { m: '2030-03', v: 500 }, 'closing balance'),
     '$500.00 · closing balance, Mar 30',
     'a row with no earnings to report says only what it is');
+});
+t('a year total says what it averages a month', () => {
+  eq(H.avgTipLine(1274.54, 12), 'Averages $106.21/mo over 12 months',
+    'the figure and the divisor, since the divisor is the half you cannot check');
+  eq(H.avgTipLine(-63441.38, 12), 'Averages -$5,286.78/mo over 12 months',
+    'an expense averages negative, like every other figure in its column');
+  eq(H.avgTipLine(1200, 3), 'Averages $400.00/mo over 3 months',
+    'a row that stopped is divided by the months it ran, not by the year');
+  eq(H.avgTipLine(1200, 1), '',
+    'one month wide is no average — it would print the total twice');
+  eq(H.avgTipLine(1200, 0), '', 'and a row with no months at all says nothing');
+  /* Rounded, not merely formatted: the string is what a test can read, and a
+     third of a cent left in it would show up as a wrong-looking cent. */
+  eq(H.avgTipLine(100, 3), 'Averages $33.33/mo over 3 months');
 });
 t('the tooltip and the cell editor read the same arrivals', () => {
   /* One reader, so the hover and the dialog cannot tell different stories
@@ -12468,6 +12482,25 @@ t('the app actually runs — every tab drawn, both budget lenses, every window o
       drawn['window:cellEditor'] = ed ? ed.textContent.trim().length : 0;
       if (ed) { try { ed.close(); } catch (e) { /* already shut */ } }
     }
+
+    /* THE YEAR COLUMN'S AVERAGE, read off the rendered grid rather than off the
+       source. Which totals get one is a decision taken per call site, and a
+       grep for the helper's name would report every one of them compliant — the
+       compliance-is-not-greppable rule. A CATEGORY row is a sum and says what
+       it averages a month; the ACCOUNTS TOTAL is a closing balance and must
+       not, because a balance divided by twelve is a rate of nothing. */
+    const totTip = (sel) => {
+      const td = df.querySelector(sel);
+      return td ? String(td.dataset.tip || '') : null;
+    };
+    const catTip = totTip('.grid tr[data-move]:not(.balance) td.rowtot[data-tip]');
+    ok(catTip !== null, 'the sample grid drew a budget row with a year total');
+    ok(/\nAverages -?\$[\d,]+\.\d\d\/mo over \d+ months/.test(catTip),
+      'a category row’s year total says what it averages a month', catTip);
+    const balTip = totTip('.grid tr.total td.rowtot[data-tip]');
+    ok(balTip !== null, 'the sample grid drew the accounts Total row');
+    ok(balTip !== null && balTip.indexOf('Averages') === -1,
+      'and the closing total is not averaged over the year', balTip);
 
     /* Every button the app is showing, except the ones that destroy something.
        This is what opens the windows through their REAL openers — a dialog

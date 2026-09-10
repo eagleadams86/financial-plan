@@ -630,6 +630,15 @@ together would be the same money counted twelve times. Hovering one gives
 that year's interest and dividends, which is what the account actually made
 you; the CSV export carries the same figure.
 
+Hovering a total that *is* a sum — a row, a section subtotal, the interest
+line — also gives **what it averages a month**, with the number of months it
+was divided by, since that is the half of an average you can't check by
+looking. A row that says it stopped is averaged over the months up to the
+stop rather than over the whole year; months with nothing in them still
+count, so a bill paid four times a year reads as what it costs monthly
+rather than as the size of one payment. Account rows get no average — a
+balance divided by twelve is a rate of nothing.
+
 ### Editing a Month
 
 Click any cell to edit it. Beyond typing a figure:

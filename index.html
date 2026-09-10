@@ -7457,12 +7457,20 @@ const HELP = {
       + 'alike. A live grid can run past its own December to project the next year; those '
       + 'months are deliberately left out, because a total spanning two years would not mean '
       + 'anything.'],
+    ['Hovering a total — or tapping it on a phone — also gives ',
+      b('what it averages a month'), ', with the number of months it was divided by, since '
+      + 'that is the half of an average you cannot check by looking. A row that states it '
+      + 'stopped is averaged over the months up to the stop rather than the whole year; '
+      + 'months with nothing in them still count, so a bill paid four times a year reads as '
+      + 'what it costs monthly rather than what one payment was.'],
     ['An ', b('account row'), ' is the exception: a balance is what the account holds, not '
       + 'something that happened that month, so adding twelve of them up would be the same '
       + 'money counted twelve times. Those rows show where the year ended instead — the last '
       + 'month that states a balance — and hovering one, or tapping it on a phone, gives '
       + 'the year\'s interest, growth and dividends, which is what the account really made. '
-      + 'The growth is named as such, because it is the part that is not income.'],
+      + 'The growth is named as such, because it is the part that is not income. There is '
+      + 'no monthly average on those rows either — a balance divided by twelve is a rate of '
+      + 'nothing.'],
   ] },
   transferSign: { title: 'Which Way a Transfer Went', body: [
     ['A transfer row is written as ', b('what it did to the account the money moves through'),
@@ -9005,12 +9013,28 @@ function gridCard(y, yr) {
      would mean nothing — so this column sums THIS year's months only, which
      is also what the History charts count. */
   const ownMonths = months.filter(m => m.startsWith(y));
-  const rowTotalTd = (v, plain, kind, tip) => v === undefined
-    ? '<td class="rowtot"></td>'
-    : `<td class="rowtot ${kind ? `c-${kind}` : ''}"${
-        tip ? ` data-tip="${esc(tip)}"`
-          : kind ? ` data-tip="${esc(`${fmtMoney(v)} · ${KIND_LABEL[kind]}`)}"` : ''
+  /* `avgOver` is how many months this total is spread across, and passing it
+     is what earns the average line — see avgTipLine. It is a per-call decision
+     rather than something worked out here, because only the CALLER knows
+     whether its figure is a sum at all: a balance row's year figure is a
+     closing balance, and dividing one by twelve is a rate of nothing.
+     The average sits directly UNDER the head figure, ahead of any breakdown
+     the caller passed in: it is a second reading of that figure, so an
+     earnings line printed between them would leave it looking like an average
+     of the breakdown instead. */
+  const rowTotalTd = (v, plain, kind, tip, avgOver) => {
+    if (v === undefined) return '<td class="rowtot"></td>';
+    const lines = (tip || (kind ? `${fmtMoney(v)} · ${KIND_LABEL[kind]}` : ''))
+      .split('\n').filter(Boolean);
+    /* NOTHING RECORDED IS NOT A ZERO, here as everywhere: averaging an absence
+       across twelve months produces "$0.00/mo", which reads as a rate somebody
+       measured. An empty row says only what it says. */
+    const avg = lines.length && kind !== 'missing' ? avgTipLine(v, avgOver || 0) : '';
+    if (avg) lines.splice(1, 0, avg);
+    return `<td class="rowtot ${kind ? `c-${kind}` : ''}"${
+      lines.length ? ` data-tip="${esc(lines.join('\n'))}"` : ''
       }>${plain ? esc(String(v)) : fmtCell(v)}</td>`;
+  };
   /* A BALANCE row's year figure is where it ENDED, not a sum — adding twelve
      monthly balances together is the same money counted twelve times. The last
      month of this calendar year that states one, so a pinned history year
@@ -9033,6 +9057,22 @@ function gridCard(y, yr) {
   /* A year total spans entered months and projected ones, so it is the figure
      most often part-and-part — and it was the one saying nothing about it. */
   const catTotalKind = (cat) => sumKind(ownMonths.map(m => cellOf(cat.id, m).kind));
+  /* HOW MANY MONTHS A ROW'S YEAR IS SPREAD ACROSS — the divisor behind its
+     average, and the one figure in it that is a judgement rather than
+     arithmetic. It is every month the column adds up, minus the ones after the
+     row STATED that it stopped: a car payment that ended in March, averaged
+     over twelve, reports a monthly figure the row never had for a single
+     month. A stated stop is the only thing that shortens it — `rowEnded` reads
+     `cat.until`, which is typed, never inferred — except that a figure sitting
+     in a month past the stop still counts, exactly as it does in the total and
+     on the Month page: a charge that turned up after you stopped is a fact.
+     MONTHS WITH NO MONEY IN THEM ARE NOT DROPPED, which is the tempting
+     version and the wrong one. A quarterly bill has four figures in twelve
+     months; over four, its year reads as the size of a PAYMENT while calling
+     itself a monthly rate. The row costs what it costs every month of the
+     year, and that is the number a budget is read for. */
+  const rowSpan = (cat) => ownMonths.filter(m =>
+    !rowEnded(cat, m) || cellOf(cat.id, m).v !== 0).length;
 
   const head = `<tr><th class="lbl">Category</th>${months.map(m =>
     `<th ${m === thisM ? 'class="now"' : ''}>${esc(monthLabel(m))}</th>`).join('')
@@ -9119,7 +9159,11 @@ function gridCard(y, yr) {
       round2(cats.reduce((s, cat) => s + catTotal(cat), 0) + (extra ? extra.year.v : 0)),
       false,
       sumKind(cats.flatMap(cat => ownMonths.map(m => cellOf(cat.id, m).kind))
-        .concat(extra ? [extra.year.kind] : [])))}</tr>`;
+        .concat(extra ? [extra.year.kind] : [])),
+      /* A SUBTOTAL AVERAGES OVER THE WHOLE COLUMN, never over its rows' own
+         spans: it adds up rows that started and stopped at different points,
+         so the only span the sum belongs to is the year's. */
+      '', ownMonths.length)}</tr>`;
 
   /* The accounts' own earnings, as a line inside Income — interest and
      dividends are money in, and every other figure that counts them (money in
@@ -9152,7 +9196,8 @@ function gridCard(y, yr) {
       data-tip="${esc(earnTitle)}">Interest &amp; Dividends</th>${
     months.map((m, i) => `<td class="c-${earnMonths[i].kind} ${m === thisM ? 'now' : ''}"
       data-tip="${esc(earningsTip(earnMonths[i]))}">${fmtCell(earnMonths[i].v)}</td>`).join('')
-    }${rowTotalTd(earnYear.v, false, earnYear.kind, earningsTip(earnYear))}</tr>`;
+    }${rowTotalTd(earnYear.v, false, earnYear.kind, earningsTip(earnYear),
+      ownMonths.length)}</tr>`;
 
   const catRows = ['income', 'expense', 'transfer'].map(sec => {
     let cats = yr.categories.filter(cat => (cat.section || 'expense') === sec);
@@ -9179,7 +9224,7 @@ function gridCard(y, yr) {
         sec === 'transfer' ? helpBtn('transferSign', 'which way a transfer went') : '')
       + cats.map(cat => `<tr data-move="${esc(cat.id)}"${drag}>${catTh(cat)}${
           months.map(m => cellTd(cat, m)).join('')}${
-          rowTotalTd(catTotal(cat), false, catTotalKind(cat))}</tr>`).join('')
+          rowTotalTd(catTotal(cat), false, catTotalKind(cat), '', rowSpan(cat))}</tr>`).join('')
       + (extra ? earnRow() : '')
       /* One row is its own subtotal — repeating it just adds a line to read.
          The earnings line counts towards that: one income row beside it makes
@@ -9629,6 +9674,20 @@ function cellTip(r) {
   if (r.note) blocks.push(r.note);
   return blocks.join('\n\n');
 }
+
+/* THE MONTHLY AVERAGE, for the year-total figures that are a SUM — pure, so
+   both the wording and the divisor are pinned by tests. A year total is the
+   figure the eye lands on in this grid, and the question it raises ("is that a
+   lot?") is answered per month rather than per year: it is the same reading
+   every other pace figure in the app is stated at — a goal's "needs $X/mo",
+   the pulse's spending pace — and until now the year column was the one place
+   the reader had to do the division in their head.
+   THE DIVISOR IS SAID OUT LOUD, because it is the half of an average that
+   cannot be checked by looking. It is the months the column actually adds up,
+   and one month wide is no average at all — that would print the total twice
+   and call the second one a rate. */
+const avgTipLine = (v, span) => span < 2 ? ''
+  : `Averages ${fmtMoney(round2(v / span))}/mo over ${span} months`;
 
 /* The hover text for an ACCOUNT's balance — pure, so its wording is pinned by
    tests. The balance first, then what the month EARNED on it: interest and
@@ -27664,7 +27723,8 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   amortize, liabilityAt, payoffMonth, LIABILITY_KINDS, SECURED_KINDS,
   planRate, inPlanCurrency,
   SNAPSHOT_PARTS, SNAPSHOT_ASSETS, uniqueId, cellTip, balanceTip,
-  receivedInto, earningsOver, earningLines, balanceYearTip, flowTransferNote, internalRows,
+  receivedInto, earningsOver, earningLines, balanceYearTip, avgTipLine,
+  flowTransferNote, internalRows,
   raisesKeyboard,
   accountEarnings, earningsTip,
   /* The month view: which months the plan holds, which year a month is read
