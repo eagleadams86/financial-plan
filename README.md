@@ -2278,9 +2278,12 @@ python3 migrate_local_data.py financial-plan-data.json
 
 The spreadsheet ran 24 months so it could see a year ahead; the app ends a
 year at December and starts the next with "Build ⟨year⟩". So the hand-typed
-next-year months go and the grid comes back to twelve — while next year's
-paycheck counts are kept, because the rollover carries them into the new year.
-It writes a new file beside the input and never modifies the original.
+next-year months go and the grid comes back to twelve — next year's paycheck
+counts included. They were kept once, on the reasoning that the rollover picks
+them up; but a twelve-month grid never shows them, so they could not be read
+or corrected and came back every time the next year was rebuilt. Starting the
+new year repeats the same month of the old one instead, three-check months and
+all. It writes a new file beside the input and never modifies the original.
 
 (Folding a year into a summary is a per-year decision with a button on the
 year itself — the script never does it for you.)

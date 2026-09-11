@@ -476,7 +476,11 @@ family names as well as balances.
   strictly (rateOrNone, not num): an override PINS a balance, and a corrupt
   field must be dropped rather than become a deliberate-looking $0. A live
   year is also guaranteed an `enteredThrough` (the month before startMonth
-  when absent) because gridCard calls monthAdd on it unguarded.
+  when absent) because gridCard calls monthAdd on it unguarded. **Paycheck
+  counts are also held to the year's own span** (`yearMonths`) — a count for a
+  month the grid does not render is dropped, because nothing can show it and
+  nothing can correct it; see the paycheck bullet under the engine for the
+  failure that rule closes.
 - **`settings`' free scalars are held to a type too, and that was the branch
   nothing checked** (fixed 2026-08-21). Everything else in `settings` is a
   whitelisted vocabulary (`rowSort`, `filingStatus`) or a boolean, and those were
@@ -585,9 +589,22 @@ family names as well as balances.
   is typed over. The Paychecks row renders the RESOLVED count (italic `c-auto`
   when inherited, never a colour) — showing `·` beside three checks' worth of
   pay was the real bug — and the cell editor offers it as a placeholder, never
-  a value, same rule as the balance branch. Charlie's own import happens to
-  carry 2027 counts inside the 2026 grid, which `rolloverYear` copies, so this
-  path was invisible in his data and only bit a fresh customer.
+  a value, same rule as the balance branch.
+- **A count belongs to the year that SHOWS it, and until 2026-09-11 nothing
+  said so.** `rolloverYear` seeds a new year by reading the OLD year's
+  `paychecks` map at the NEW year's months. That is right for a grid that
+  genuinely runs long — an 18-month year holds next January in its own span,
+  on screen and editable, which is the shape the rollover's test builds. It
+  was wrong for Charlie's plan, where the import left twelve 2027 counts
+  inside a twelve-month 2026: no grid rendered them, no cell editor reached
+  them, and every rebuild of 2027 copied them back in. He deleted and
+  recreated the year many times to shift a 3.5 in February and was fixing the
+  copy each time. `coerceShape` now drops counts outside `yearMonths(yr)`, so
+  the block goes on the next load and a rebuilt year falls through to the same
+  month last year — which for that plan gives February 2 and the year 26, a
+  fortnightly total, instead of 27.5. `migrate_local_data.py` used to KEEP
+  those counts deliberately while shortening the grid to twelve; it now takes
+  them out with the rest of next year, which is what made them unreachable.
 - **The backward-looking rules reach over the year boundary**, through the one
   shared helper `priorYearRun()` (the prior year's recorded months for a row,
   oldest first). A year built ahead has no cells of its own, so without it

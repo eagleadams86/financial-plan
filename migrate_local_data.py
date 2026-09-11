@@ -7,9 +7,14 @@ it could see a year ahead; the app ends the year at December and starts the
 next one with "Start <year>" instead. So the hand-typed next-year months go,
 and the grid comes back to twelve.
 
-Paycheck counts for that next year are KEPT even though nothing reads them
-yet: they're a real schedule (three-check months and all), and the rollover
-carries them into the new year the day you start it.
+Paycheck counts for that next year go with the rest of it. They were kept
+once, on the reasoning that they're a real schedule and the rollover picks
+them up — but the rollover reads them out of a grid that, after this script
+runs, is twelve months long and renders none of them. That made them a
+schedule nobody could see or correct: rebuilding next year copied them back
+in every time, so a wrong count survived the year being deleted (financial-
+plan, 2026-09-11). The app's boundary now drops counts a year doesn't show,
+and a year built ahead repeats last year's pattern on its own.
 
 It does NOT convert any year to a summary. That is a per-year decision, it is
 permanent, and the app has a button for it on the year you actually want it.
@@ -36,11 +41,12 @@ def live_year_key(state):
 def strip_future_months(state):
     """Cut the live grid back to its own twelve months.
 
-    Every stored figure belonging to a later year goes — cells, and the typed
+    Every stored figure belonging to a later year goes — cells, the typed
     balance overrides/adjustments beside them (statedAfter and the same-name
-    merge still read those maps, so an orphan past December is not inert) —
-    and monthCount comes down to 12, so the grid ends at December. Returns
-    (year key, entries removed, previous month count).
+    merge still read those maps, so an orphan past December is not inert) and
+    the paycheck counts, which are keyed by month on their own rather than by
+    row — and monthCount comes down to 12, so the grid ends at December.
+    Returns (year key, entries removed, previous month count).
     """
     key = live_year_key(state)
     if not key:
@@ -54,6 +60,12 @@ def strip_future_months(state):
         doomed = [k for k in table if k.split("|")[1][:4] > key]
         for k in doomed:
             del table[k]
+        removed += len(doomed)
+    pay = yr.get("paychecks")
+    if isinstance(pay, dict):
+        doomed = [m for m in pay if m[:4] > key]
+        for m in doomed:
+            del pay[m]
         removed += len(doomed)
     was = yr.get("monthCount", 12)
     yr["monthCount"] = 12
@@ -70,12 +82,11 @@ def main(argv):
 
     key, removed, was = strip_future_months(state)
     if key:
-        kept = sum(1 for m in state["years"][key].get("paychecks", {})
-                   if m[:4] > key)
         print(f"{key}: removed {removed} stored figure(s) beyond {key} and shortened "
               f"the grid from {was} months to 12")
-        print(f"  Kept {kept} paycheck count(s) for next year — the rollover picks "
-              f"them up when you press \u2295 Start {int(key) + 1}.")
+        print(f"  Next year's paycheck counts went with them. Press \u2295 Start "
+              f"{int(key) + 1} and each month repeats the same month of {key} — "
+              f"three-check months included.")
         # A row with no rule now has nothing to say about next year. Name those
         # rows rather than leaving them to be noticed as gaps in the grid.
         ruleless = [cat["name"] for cat in state["years"][key]["categories"]

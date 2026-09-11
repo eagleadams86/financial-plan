@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1020;
+const EXPECTED = 1023;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -203,6 +203,53 @@ t('coerceShape repairs a damaged grid year without dropping it', () => {
   eq(typeof y.cells, 'object');
   eq(y.monthCount, 36, 'month count clamps');
   eq(y.startMonth, '2026-01', 'missing start month defaults to January');
+});
+/* ── A year stores counts only for the months it shows ──────────────────────
+   2026-09-11. Charlie's Money Map showed 3.5 paychecks in February 2027 and it
+   would not go away: he deleted the year and rebuilt it many times over, and
+   every rebuild put it straight back. The figure he kept fixing was a COPY.
+   The original was twelve counts for 2027 living inside 2026 — brought in by
+   an import whose Paychecks row ran 24 columns wide — in a year whose grid is
+   twelve months long and renders none of them. `rolloverYear` reads the old
+   year's map at the NEW year's months, so the hidden block re-seeded the new
+   year every time, and no screen in the app could be opened to see it. */
+t('a year drops paycheck counts for months outside its own span', () => {
+  const d = H.coerceShape({ years: { '2026': { kind: 'grid', model: 'live',
+    startMonth: '2026-01', monthCount: 12, enteredThrough: '2026-08',
+    paychecks: { '2026-02': 2, '2027-02': 3.5, '2027-10': 3 } } } });
+  const p = d.years['2026'].paychecks;
+  eq(p['2026-02'], 2, 'its own month stays');
+  eq(p['2027-02'], undefined, 'a count no grid renders is not a count');
+  eq(p['2027-10'], undefined);
+});
+t('a year whose grid reaches into the next one keeps those counts', () => {
+  /* The carry-forward is not the bug and does not go. An 18-month year holds
+     the next year's first six months in its OWN span, which is the shape
+     `rolloverYear`'s test builds, and they are on screen and editable. */
+  const d = H.coerceShape({ years: { '2030': { kind: 'grid', model: 'live',
+    startMonth: '2030-01', monthCount: 18, enteredThrough: '2030-08',
+    paychecks: { '2031-03': 3, '2031-09': 3 } } } });
+  const p = d.years['2030'].paychecks;
+  eq(p['2031-03'], 3, 'inside the 18-month span, so it is a figure the reader has');
+  eq(p['2031-09'], undefined, 'past the end of the grid, so it is not');
+});
+t('a rebuilt year is not re-seeded from a block nobody can see', () => {
+  /* The whole failure, start to finish: the hidden counts go at the boundary,
+     so the rollover has nothing out-of-span left to copy, and the new year
+     answers February the way it always could have — from last February. */
+  const s = H.coerceShape(fixtureState());
+  s.years['2030'].paychecks['2030-02'] = 2;
+  s.years['2031'] = undefined; delete s.years['2031'];
+  const dirty = H.coerceShape(JSON.parse(JSON.stringify({ ...s,
+    years: { ...s.years, '2030': { ...s.years['2030'],
+      paychecks: { ...s.years['2030'].paychecks, '2031-02': 3.5 } } } })));
+  eq(dirty.years['2030'].paychecks['2031-02'], undefined, 'dropped on the way in');
+  H.rolloverYear(dirty, H.computeAll(dirty, TODAY_FIX), '2030');
+  eq(dirty.years['2031'].paychecks['2031-02'], undefined, 'nothing to carry');
+  const r = H.resolvePaychecks(dirty.years['2031'], ['2031-02'],
+    { paychecks: dirty.years['2030'].paychecks, paycheckSource: { '2030-02': 'entered' } });
+  eq(r.counts['2031-02'], 2, 'February comes from last February, not from a ghost');
+  eq(r.source['2031-02'], 'lastyear');
 });
 t('an unknown year kind falls back to summary', () => {
   const d = H.coerceShape({ years: { '2014': { kind: 'wat' } } });
