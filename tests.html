@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1024;
+const EXPECTED = 1027;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1274,8 +1274,15 @@ t('a goal is paced by its OWN accounts\' growth, not total liquidity\'s', () => 
   ]);
   approx(mid.paceMo, 241.17, 'Savings: (12,894 − 10,000) / 12');
   eq(mid.gap, 7106, '20,000 less the 12,894 it holds');
-  eq(mid.etaMonths, 30, 'ceil(7,106 / 241.17)');
-  eq(mid.eta, '2028-07', 'thirty months on from Jan 2026');
+  /* ELEVEN MONTHS OF PLAN, THEN THE RATE (2026-09-11). It read 30 — the gap
+     divided by the pace, from January, as if the money arrived monthly. It
+     does not: Savings jumps once in January and is flat for the rest of the
+     year, so the plan's own December still leaves the whole 7,106 open. The
+     walk counts those eleven months for what the plan says they are, and only
+     then divides. The rate is unchanged; where it starts from is not. */
+  eq(mid.etaMonths, 41, 'eleven months to the end of the built plan, then ceil(7,106 / 241.17)');
+  eq(mid.etaFrom, 'extrapolated', 'the plan does not reach it, so a rate had to finish the job');
+  eq(mid.eta, '2029-06', 'forty-one months on from Jan 2026');
   eq(mid.aheadMonths, null, 'no date, no verdict — the tile carries the ETA');
   eq(long.paceMo, 0, 'Investments opened and closed the year at 0, whatever cash did');
   eq(long.etaMonths, null, 'nothing growing is no date, not a date at infinity');
@@ -1292,14 +1299,85 @@ t('a queued goal\'s gap, pace and monthly need count the goals ahead of it', () 
   eq(behind.gap, 9106, '22,000 to be full, less the 12,894 Savings holds — NOT its own 2,000');
   eq(behind.monthsLeft, 12);
   approx(behind.monthlyReq, 758.83, '9,106 / 12; the old shortfall arithmetic said 166.67');
-  eq(behind.etaMonths, 38, 'ceil(9,106 / 241.17)');
-  eq(behind.aheadMonths, 12 - 38, 'twenty-six months behind its Jan 2027 date');
+  eq(behind.etaMonths, 49, 'the same eleven months of built plan, then ceil(9,106 / 241.17)');
+  eq(behind.aheadMonths, 12 - 49, 'thirty-seven months behind its Jan 2027 date');
   /* a goal with nobody ahead of it is exactly what it always was */
   const [alone] = paceFixture([
     { id: 'a', name: 'A', target: 14000, accounts: ['mid'], count: 'capped', targetDate: '2027-01-15' },
   ]);
   approx(alone.monthlyReq, H.round2((14000 - 12894) / 12), 'target − saved, as before');
-  eq(alone.aheadMonths, 12 - 5, 'ceil(1,106 / 241.17) = 5 months against 12 left');
+  /* And it moved for the same reason the two above did: the 1,106 is still
+     open in the plan's own December, so the five months of rate start there
+     rather than in January. A goal with nobody ahead of it is still exactly
+     what every other goal is — it just no longer gets eleven months of growth
+     the plan does not say it has. */
+  eq(alone.aheadMonths, 12 - 16, 'eleven months of built plan, then ceil(1,106 / 241.17) = 5');
+});
+/* ── The pace check reads the years you have BUILT (2026-09-11) ────────────
+   Charlie: "this pill ignores projected years and only considers the current
+   year's growth." It did: one division, this year's rate held flat forever,
+   answering a 2032 target with six years of "2026 again" — while the goal
+   chart beside the sentence was already drawing 2027 off the plan's own
+   figures and labelling it "year built ahead" in its tooltip. One card, two
+   futures.
+
+   The fixture pins balances outright so the arithmetic is arguable from the
+   test alone: `mid` climbs $100 a month through 2026 and $500 a month through
+   2027, which is exactly the case the old rule could not see. */
+function builtAheadFixture(goals) {
+  const yr = (y, from, step, seedMid) => {
+    const overrides = {};
+    for (let i = 1; i <= 12; i++)
+      overrides[`mid|${y}-${String(i).padStart(2, '0')}`] = { v: from + step * i };
+    return { kind: 'grid', model: 'live', startMonth: `${y}-01`, monthCount: 12,
+      enteredThrough: '2025-12', categories: [], cells: {}, paychecks: {},
+      seeds: { cash: 0, mid: seedMid }, overrides, balAdjust: {}, extraNotes: [] };
+  };
+  return {
+    schema: 5,
+    settings: { accounts: [
+      { id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true },
+      { id: 'mid', name: 'Savings', rate: 0, creditTo: 'mid' },
+    ], currency: 'USD' },
+    years: { '2026': yr('2026', 0, 100, 0), '2027': yr('2027', 1200, 500, 1200) },
+    goals, people: [], side: {}, vacations: { trips: [], pto: {} }, ui: {},
+  };
+}
+const builtAhead = (goals, drop2027) => {
+  const s = builtAheadFixture(goals);
+  if (drop2027) delete s.years['2027'];
+  const st = H.coerceShape(s);
+  return H.computeGoals(st, H.computeAll(st, '2026-01-15'), '2026-01-15');
+};
+t('a goal the built years reach is answered by the month, not by a rate', () => {
+  const [g] = builtAhead([{ id: 'g', name: 'G', target: 5000, accounts: ['mid'],
+    count: 'capped', targetDate: '2032-11-27' }]);
+  /* 1,200 + 500 × 8 = 5,200 — August 2027 is the first month the PLAN says it
+     is there, and no division comes into it. The old rule read January's 100
+     against this year's 100/mo and said 2030-02, three and a half years late,
+     about a goal its own chart drew arriving in 2027. */
+  eq(g.etaFrom, 'projected', 'the plan reaches it, so the plan answers');
+  eq(g.eta, '2027-08');
+  eq(g.etaMonths, 19, 'nineteen months on from January 2026');
+  ok(g.aheadMonths > 0, 'and it is ahead of a 2032 date', String(g.aheadMonths));
+});
+t('past the end of the plan it extrapolates from the LAST built year, not the live one', () => {
+  const [g] = builtAhead([{ id: 'g', name: 'G', target: 30000, accounts: ['mid'],
+    count: 'capped', targetDate: '2032-11-27' }]);
+  eq(g.etaFrom, 'extrapolated', '30,000 is past the end of what is built');
+  approx(g.paceMo, 500, '2027 grew 6,000 over twelve months — NOT 2026\'s 100/mo');
+  eq(g.paceYear, '2027', 'and it says which year that was, so the sentence can too');
+  /* 23 months to December 2027, where 22,800 is still open, then 46 of them. */
+  eq(g.etaMonths, 69, 'the built months counted once, then the rate');
+  eq(g.eta, '2031-10');
+});
+t('with nothing built ahead it is the live year, exactly as it always was', () => {
+  const [g] = builtAhead([{ id: 'g', name: 'G', target: 5000, accounts: ['mid'],
+    count: 'capped', targetDate: '2032-11-27' }], true);
+  eq(g.paceYear, '2026', 'the live year IS the last built year until you press Build');
+  approx(g.paceMo, 100, 'its own growth, unchanged');
+  eq(g.etaFrom, 'extrapolated', 'nothing reaches 5,000 inside one year of plan');
+  eq(g.eta, '2030-02', 'eleven months to December, then ceil(3,800 / 100)');
 });
 t('the opening figure is the engine\'s own January rule: the prior December, else the seed', () => {
   const s = overflowFixture();
@@ -11447,7 +11525,7 @@ t('the pace line takes the soonest dated unmet goal whatever its pace, and the t
     'the line takes the soonest dated unmet goal whatever its pace — it skipped a flat one for the next');
   ok(/no pace to land it by/.test(body) && /never lands/.test(body), 'and says which of the two reasons it has none');
   const card = src.slice(src.indexOf('function goalCard('), src.indexOf('\nfunction ', src.indexOf('function goalCard(') + 1));
-  ok(/g\.paceMo === null \? ' · no balance to pace it by this year'/.test(card), 'the tile says so too');
+  ok(/no balance to pace it by \$\{esc\(paceWhen\(g\)\)\}/.test(card), 'the tile says so too');
 });
 t('the Progress tab no longer paces a goal off total liquidity', () => {
   const src = stripComments(APP_SRC);

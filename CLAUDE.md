@@ -1648,16 +1648,39 @@ suite passed while the card was wrong.
     year's. `coerceShape` reads months strictly and deletes `target` when
     they are set. `SHARE_PAYLOAD_V` → 3. The sample's emergency fund is
     `targetMonths: 6` — it was named "six months" already.
-  - **`goalPace` is the pace check** (same day). Rate = the goal's OWN
-    accounts' growth this year (last month less the engine's January opening:
-    prior computed December, else the seed) over twelve; gap = `goalNeed −
-    held`, so a queued goal counts the goals ahead of it; `monthlyReq` divides
-    THAT gap. `renderGoals` reads `aheadMonths`/`eta` off the goal and no
-    longer touches `eoyCash` (the long-run chart still does). Total liquidity
-    was the rate before and flattered every cash goal with brokerage growth;
-    New Car read "4 yr 7 mo ahead" with Renovations still unfilled ahead of
-    it. An undated goal's answer is "at this pace about …" on its tile; an
+  - **`goalPace` is the pace check** (same day). gap = `goalNeed − held`, so a
+    queued goal counts the goals ahead of it; `monthlyReq` divides THAT gap, at
+    `cur`. `renderGoals` reads `aheadMonths`/`eta` off the goal and no longer
+    touches `eoyCash` (the long-run chart still does). Total liquidity was the
+    rate before and flattered every cash goal with brokerage growth; New Car
+    read "4 yr 7 mo ahead" with Renovations still unfilled ahead of it. An
     account that is not growing says so rather than dating the goal.
+  - **It WALKS the built years before it extrapolates** (2026-09-11, Charlie:
+    "this pill ignores projected years and only considers the current year's
+    growth"). It took a context object that day — `{need, held, cur, computed,
+    keys, priorC, years, goals, order}` — because it now needs the whole span.
+    `keys` is the live year plus every grid year after it, the SAME span
+    `goalChartPoints` draws from: the card was printing one future in words and
+    drawing another in the curve beside it, tooltip and all. Step 1 asks
+    `goalNeed − held ≤ 0` at each month from `cur` to the end of the last built
+    year, off that month's own balances — a goal the plan reaches is answered
+    EXACTLY, `etaFrom: 'projected'`. Step 2, only past that end, divides the gap
+    AS IT STANDS THERE by the LAST built year's rate (`paceMo`, `paceYear`),
+    `etaFrom: 'extrapolated'`.
+    Three things that are easy to get wrong here:
+    (1) **the gap must be NEED-less-held throughout, never the goal's own
+    share** — a queued goal's share is flat at zero until the goal in front
+    fills, so extrapolating that says "never" for every goal with a predecessor
+    still filling, while the pot it waits on is plainly still growing;
+    (2) **the months of the walk are counted once** — the old arithmetic
+    divided today's gap by a monthly rate from January, which double-counted
+    every month whose growth the plan had already stated (three fixture ETAs
+    moved on this alone, all later, all correct);
+    (3) **`etaFrom` reaches the sentence.** "growing $X/mo this year, so it
+    lands about …" describes a division that never happened for a projected
+    answer, and `paceWhen(g)` exists so no sentence calls 2027 "this year" —
+    same discipline as `PAYCHECK_SOURCE_TIP`. With nothing built ahead,
+    `paceYear` IS the live year and every figure is what it always was.
 - **`accountShowsInYear(a, yr, c, months, accounts)` decides whether an account
   earns a ROW in a live year** — pure and pinned, and shared with the cell
   editor so the grid and the button that empties a cell cannot disagree about

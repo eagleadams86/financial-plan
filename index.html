@@ -7006,40 +7006,123 @@ function goalClaim(pred, accounts, goals, bal, order, seen = new Set()) {
   return round2(claim);
 }
 
-/* How fast a goal's OWN accounts are growing this year, and what that says
-   about when it lands (2026-09-05). `paceMo` is this year's projected last
-   month less the accounts' opening figure — the engine's own January rule:
-   the prior computed year's December, else the year's seed — over twelve
-   months, so the pace is what the year's rows and sweeps actually leave in
-   those accounts. Total liquidity was the rate until this date, and it
-   flattered every cash goal with growth that lives in the brokerage and can
-   never reach them. `gap` is the money still to ARRIVE: the goal's need less
-   what its accounts hold, so a goal queued behind another counts what the
-   goals ahead of it still need — nothing reaches it until they are paid.
-   `etaMonths` is the quotient (0 once the gap is closed), null when nothing
-   is growing — a fact the tile states rather than a date it invents — and
-   `aheadMonths` sets it against a target date when there is one, both
-   measured from `cur`. Pure. */
-function goalPace(g, need, held, cur, c, yr, priorC) {
-  const months = yearMonths(yr);
-  const last = months[months.length - 1], prevM = monthAdd(months[0], -1);
-  let end = 0, open = 0, seen = false;
-  for (const id of g.accounts || []) {
-    const e = c.balances[`${id}|${last}`];
-    if (e === undefined) continue;
-    seen = true;
-    end += e;
-    const carried = priorC ? priorC.balances[`${id}|${prevM}`] : undefined;
-    open += carried !== undefined ? carried : ((yr.seeds || {})[id] || 0);
-  }
-  /* Over the months the grid actually RUNS, not a fixed twelve (review fix
-     4): `end` is the grid's last month, so a 24-month grid — the shape the
-     importer writes and migrate_local_data.py exists to trim — read double
-     the pace and half the ETA. Twelve for every grid the app itself builds. */
-  const paceMo = seen ? round2((end - open) / months.length) : null;
+/* WHEN A GOAL LANDS — read off the years you have actually BUILT first, and
+   only extrapolated past the end of them (2026-09-11).
+
+   It used to be one division: this year's growth in the goal's own accounts,
+   held flat forever, against the gap. That answered a 2032 target with six
+   years of "2026 again" — and the goal chart directly beside the sentence was
+   already drawing 2027 from the plan's own figures, marking that stretch "year
+   built ahead" in its tooltip. One card, two different futures, and the one in
+   words is the one people read. Charlie: "this pill ignores projected years and
+   only considers the current year's growth."
+
+   So: **walk the built months, then extrapolate.**
+   1. From `cur` to the end of the last built year, ask the same question the
+      tiles ask — is the gap closed? — at each month, off that month's own
+      computed balances. A goal the plan reaches is answered EXACTLY, by the
+      month the plan reaches it, with no rate involved at all.
+   2. Only past that end is a rate needed, and it is the LAST BUILT year's, not
+      the live one's: it is the year nearest the stretch being guessed at, and
+      the one where next year's raise, paycheck pattern and sweep rows have
+      already been applied. The gap it divides is the gap AT THE END of the
+      built span, not today's — the months in between have already been counted
+      by the walk, and counting them twice was the old arithmetic's other error
+      whenever a goal's growth was front-loaded in the year.
+
+   `etaFrom` says which of the two answered, and that is not bookkeeping: the
+   sentence used to state its method as fact ("growing $X/mo this year"), which
+   is untrue for any goal the projection itself reaches, and a reader cannot
+   tell the difference from the date alone. `resolvePaychecks` carries its
+   source for the same reason.
+
+   The gap is measured as NEED less held throughout — the goal's target plus
+   what the goals ahead of it still want, against what its accounts hold. That
+   is the one definition the tail can also use: a queued goal's own share is
+   flat at zero until the goal in front fills, so extrapolating THAT would say
+   "never" for every goal with a predecessor still filling, while the pot it
+   waits on is plainly still growing.
+
+   `paceMo` is the last built year's projected December less the accounts'
+   opening figure — the engine's own January rule: the prior computed year's
+   December, else the year's seed — over the months that year runs. Total
+   liquidity was the rate until 2026-09-05, and it flattered every cash goal
+   with growth that lives in the brokerage and can never reach them. `gap`
+   stays measured at `cur`, because `monthlyReq` is "what to put aside from
+   here". `etaMonths` is null when nothing is growing — a fact the tile states
+   rather than a date it invents — and `aheadMonths` sets the landing against a
+   target date when there is one, both measured from `cur`. Pure. */
+function goalPace(g, ctx) {
+  const { need, held, cur, computed, keys, priorC, years, goals, order } = ctx;
+  const ids = g.accounts || [];
+  /* null, not 0, when not one of the goal's accounts has a balance that month:
+     "nothing to pace by" and "flat" are different answers and the tile says so. */
+  const heldAt = (c, m) => {
+    let t = 0, seen = false;
+    for (const id of ids) {
+      const v = c.balances[`${id}|${m}`];
+      if (v !== undefined) { seen = true; t += v; }
+    }
+    return seen ? t : null;
+  };
+  const gapAt = (c, m) => {
+    const h = heldAt(c, m);
+    if (h === null) return null;
+    const bal = (id) => c.balances[`${id}|${m}`] || 0;
+    return round2(Math.max(0, goalNeed(g, c.goals || goals, bal, order) - h));
+  };
   const gap = round2(Math.max(0, need - held));
-  const etaMonths = gap === 0 ? 0
-    : paceMo !== null && paceMo > 0 ? Math.ceil(gap / paceMo) : null;
+
+  /* 1. The months the plan actually states. `cur` itself is answered by the
+     caller's own `need`/`held`, so the two cannot disagree about today. */
+  let etaMonths = gap === 0 ? 0 : null;
+  let etaFrom = gap === 0 ? 'projected' : null;
+  if (etaMonths === null) {
+    for (const key of keys) {
+      const c = computed[key];
+      if (!c) continue;
+      for (const m of c.months) {
+        if (m <= cur) continue;
+        if (gapAt(c, m) === 0) { etaMonths = monthDiff(cur, m); etaFrom = 'projected'; break; }
+      }
+      if (etaMonths !== null) break;
+    }
+  }
+
+  /* 2. The rate, from the last year there is one for. Computed whatever the
+     walk found: the tile says "not growing" off it, and a goal the plan
+     reaches inside the span is still a goal whose accounts may be flat after. */
+  const lastKey = keys[keys.length - 1];
+  const lc = computed[lastKey];
+  const lms = lc ? lc.months : [];
+  const spanEnd = lms[lms.length - 1];
+  let paceMo = null;
+  if (lc && spanEnd) {
+    const prevM = monthAdd(lms[0], -1);
+    const i = keys.indexOf(lastKey);
+    const pc = i > 0 ? computed[keys[i - 1]] : priorC;
+    let end = 0, open = 0, seen = false;
+    for (const id of ids) {
+      const e = lc.balances[`${id}|${spanEnd}`];
+      if (e === undefined) continue;
+      seen = true;
+      end += e;
+      const carried = pc ? pc.balances[`${id}|${prevM}`] : undefined;
+      open += carried !== undefined ? carried
+        : (((years && years[lastKey] || {}).seeds || {})[id] || 0);
+    }
+    paceMo = seen ? round2((end - open) / lms.length) : null;
+  }
+
+  /* 3. Past the end of what is built. */
+  if (etaMonths === null && spanEnd) {
+    const gapEnd = gapAt(lc, spanEnd);
+    const toEnd = Math.max(0, monthDiff(cur, spanEnd));
+    etaMonths = gapEnd === null || paceMo === null || paceMo <= 0 ? null
+      : toEnd + Math.ceil(gapEnd / paceMo);
+    if (etaMonths !== null) etaFrom = 'extrapolated';
+  }
+
   /* Ahead or behind is the landing month against the target month, both
      counted from `cur` — the month `held` and the ETA are read at. Counting
      the months left from TODAY instead (review fix 4) was off by one whenever
@@ -7047,7 +7130,7 @@ function goalPace(g, need, held, cur, c, yr, priorC) {
      built, the line read a month more behind than its own printed ETA. */
   const aheadMonths = g.targetDate && etaMonths !== null
     ? Math.max(0, monthDiff(cur, g.targetDate.slice(0, 7))) - etaMonths : null;
-  return { paceMo, gap, etaMonths, aheadMonths };
+  return { paceMo, paceYear: lastKey || null, gap, etaMonths, etaFrom, aheadMonths };
 }
 
 /* Savings-goal figures, ported row for row from the sheet's Savings Goals
@@ -7076,6 +7159,11 @@ function computeGoals(st, computed, todayIso) {
      lives, exactly as the balance chain reads it. */
   const gridAll = Object.keys(st.years).filter(y => st.years[y].kind === 'grid').sort();
   const priorC = computed[gridAll[gridAll.indexOf(liveKey) - 1]] || null;
+  /* The live year AND every year built after it — the same span the goal chart
+     draws from, so the sentence under the chart and the curve itself read one
+     future. `previewYears()` is this list minus its head; it reads `state`, and
+     everything in here works off the `st` it was handed. */
+  const paceKeys = gridAll.slice(gridAll.indexOf(liveKey));
 
   return goals.map(g => {
     /* An account named by a goal but since deleted contributes nothing rather
@@ -7104,7 +7192,8 @@ function computeGoals(st, computed, todayIso) {
     const monthsLeft = g.targetDate
       ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
     const need = goalNeed(g, goals, bal, accountOrder);
-    const pace = goalPace(g, need, held, cur, c, yr, priorC);
+    const pace = goalPace(g, { need, held, cur, computed, keys: paceKeys,
+      priorC, years: st.years, goals, order: accountOrder });
     return {
       ...g, saved, held, claimed,
       /* The goals that actually TOOK the money, front of the queue first —
@@ -7602,21 +7691,27 @@ const HELP = {
      option labels are already whole sentences. An explanation nothing renders
      is not help; it is a second copy waiting to drift. */
   paceCheck: { title: 'The Pace Check', body: [
-    ['It takes ', b('this year\'s projected growth of the accounts the goal counts'),
-      ' — their December figure less what they opened the year with — spreads it over '
-      + 'twelve months, and asks how many months of that it takes to close the gap. Money '
-      + 'growing in an account the goal does not count, or swept out of one it does, '
-      + 'is not in it.'],
+    [b('It reads the years you have built before it guesses at anything'), '. Month by '
+      + 'month, from this one to the end of the last year in your plan, it asks whether '
+      + 'the accounts the goal counts have reached what it needs. If they do, that month '
+      + 'is the answer and no rate comes into it — the line says "your plan reaches it '
+      + 'about …" rather than "at this pace".'],
+    ['Only past the end of what you have built does it need a rate, and it uses ',
+      b('the last built year\'s growth in the accounts the goal counts'),
+      ' — their December figure less what they opened that year with, spread over twelve '
+      + 'months — against whatever gap is still open at that point. The nearest year is '
+      + 'the one where next year\'s pay, raises and sweeps have already been applied. '
+      + 'Money growing in an account the goal does not count, or swept out of one it '
+      + 'does, is not in it.'],
     ['The gap is ', b('everything still to arrive'), ': for a goal claimed first by '
       + 'another, that includes what the goals ahead of it still need, since nothing '
-      + 'reaches it until they are paid. "Needs $X/mo" on the tile divides the same gap by '
-      + 'the months left.'],
+      + 'reaches it until they are paid. "Needs $X/mo" on the tile divides the gap as it '
+      + 'stands today by the months left.'],
     ['The line follows the soonest-dated goal you have not met and sets its landing month '
-      + 'against its target — or says why it has no landing month: its accounts are not '
-      + 'growing this year, or none of them holds a balance yet. ',
-      b('A goal with no date gets the same sum on its own tile'),
-      ' — "at this pace about …" — and a goal that cannot be paced says so there too, '
-      + 'rather than guessing a date.'],
+      + 'against its target — or says why it has no landing month: the accounts are not '
+      + 'growing in the last year you built, or none of them holds a balance yet. ',
+      b('A goal with no date gets the same answer on its own tile'),
+      ', and a goal that cannot be paced says so there too, rather than guessing a date.'],
   ] },
   k401Limit: { title: 'The 401(k) Limit Check', body: [
     ['Your own contributions are salary × the salary percentage, plus bonus × the bonus '
@@ -11737,6 +11832,14 @@ function wireMonthRows() {
 const fmtYrMo = (months) =>
   `${Math.floor(months / 12)} yr ${months % 12} mo`;
 
+/* WHICH YEAR A PACE CAME FROM, in words. `goalPace` takes its rate from the
+   last year you have BUILT, which is the live year until you press Build —
+   and after that it is 2027, which must not be called "this year". Every
+   sentence that quotes a pace goes through here, so none of them can drift
+   apart from the figure they are quoting. */
+const paceWhen = (g) => g.paceYear && g.paceYear !== latestGridYear()
+  ? `in ${g.paceYear}, the last year you have built` : 'this year';
+
 /* One goal's progress card. At module scope rather than inside `renderGoals`
    because the Household tab draws a child's goals with it too — the same
    figures in two places have to come out of the same code, the `afterRaise`
@@ -11755,9 +11858,15 @@ function goalCard(g, idx) {
     <div class="foot">${Math.round(g.progress * 100)}%
       ${g.targetDate ? ` · target ${esc(monthLabel(g.targetDate.slice(0, 7)))} (${fmtYrMo(g.monthsLeft)})` : ''}
       ${!done && g.monthlyReq ? ` · needs ${fmtMoney(g.monthlyReq)}/mo` : ''}
-      ${!done && g.etaMonths > 0 ? ` · at this pace about ${esc(monthLabel(g.eta))}` : ''}
-      ${!done && g.gap > 0 && g.paceMo !== null && g.paceMo <= 0 ? ' · not growing this year' : ''}
-      ${!done && g.gap > 0 && g.paceMo === null ? ' · no balance to pace it by this year' : ''}
+      ${/* "At this pace" only when a pace is what answered it. A goal the built
+             years actually REACH has a month off the plan itself, and calling
+             that a pace would describe a division that never happened. */''}
+      ${!done && g.etaMonths > 0 ? ` · ${g.etaFrom === 'projected' ? 'your plan reaches it'
+        : 'at this pace'} about ${esc(monthLabel(g.eta))}` : ''}
+      ${!done && g.etaMonths === null && g.gap > 0 && g.paceMo !== null && g.paceMo <= 0
+        ? ` · not growing ${esc(paceWhen(g))}` : ''}
+      ${!done && g.etaMonths === null && g.gap > 0 && g.paceMo === null
+        ? ` · no balance to pace it by ${esc(paceWhen(g))}` : ''}
       ${/* The money actually TAKEN out of this goal's accounts, so held less
              this is the bar. It briefly carried an ", out of the accounts they
              share" clause, which was the lump claim apologising for not adding
@@ -12284,9 +12393,10 @@ function renderGoals() {
   let paceHtml = '';
   if (next && next.aheadMonths === null) {
     const why = next.paceMo === null
-      ? 'none of its accounts holds a balance this year, so there is no pace to land it by'
-      : `its own accounts are not growing this year (${fmtMoney(next.paceMo)}/mo), so at this
-         pace it never lands`;
+      ? `none of its accounts holds a balance ${esc(paceWhen(next))} —
+         no pace to land it by`
+      : `its own accounts are not growing ${esc(paceWhen(next))}
+         (${fmtMoney(next.paceMo)}/mo), so at this pace it never lands`;
     paceHtml = `<p class="sub" style="margin-top:12px">Next dated goal — ${esc(next.name)}${
       helpBtn('paceCheck', 'the pace check')}: ${why} —
       <span class="pill warn">! ${next.paceMo === null ? 'no balance to pace by' : 'not growing'}</span>
@@ -12295,9 +12405,17 @@ function renderGoals() {
     const behind = next.aheadMonths < 0;
     const verdict = next.aheadMonths === 0 ? '✓ on time'
       : `${behind ? '!' : '✓'} ${fmtYrMo(Math.abs(next.aheadMonths))} ${behind ? 'behind' : 'ahead'}`;
+    /* WHICH OF THE TWO ANSWERED IT, in the sentence rather than only in the
+       data. A goal the built years reach is a date the plan STATES, and saying
+       "growing $X/mo, so it lands about…" about one would be describing a
+       method that was never used — the same over-claim the paycheck row's
+       hover was fixed for. */
+    const how = next.etaFrom === 'projected'
+      ? `the years you have built reach it in ${esc(monthLabel(next.eta))}`
+      : `its own accounts are growing ${fmtMoney(next.paceMo)}/mo ${esc(paceWhen(next))},
+         so it lands about ${esc(monthLabel(next.eta))}`;
     paceHtml = `<p class="sub" style="margin-top:12px">Next dated goal — ${esc(next.name)}${
-      helpBtn('paceCheck', 'the pace check')}: its own accounts are growing
-      ${fmtMoney(next.paceMo)}/mo this year, so it lands about ${esc(monthLabel(next.eta))}
+      helpBtn('paceCheck', 'the pace check')}: ${how}
       against a target of ${esc(monthLabel(next.targetDate.slice(0, 7)))} —
       <span class="pill ${behind ? 'warn' : 'good'}">${verdict}</span></p>`;
   }

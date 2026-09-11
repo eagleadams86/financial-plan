@@ -854,13 +854,25 @@ three columns rather than Preferences' four, because the options here are
 whole sentences and a quarter of the window cuts them mid-word.
 
 Plus progress, target dates, required monthly saving, and **when each goal
-lands at this pace** — worked out from the growth of the accounts that goal
-counts over the months this year's grid runs, over the whole gap still to arrive (a goal queued behind
-another counts what the goals ahead of it still need). A goal with no date
-gets that on its tile; the pace line follows the soonest-dated goal you
-haven't met and sets its landing month against its target — or, when that
-goal's accounts are flat or hold no balance yet, says so instead of moving on
-to a later goal.
+lands** — which **reads the years you've built before it guesses at anything**.
+Month by month, from this one to the end of the last year in your plan, it asks
+whether the accounts that goal counts have reached what it needs; if they do,
+that month is the answer and no rate comes into it, and the tile says "your plan
+reaches it about …" rather than "at this pace". Only past the end of what you've
+built does it need a rate, and it uses the **last built year's** growth in those
+accounts against whatever gap is still open at that point — the nearest year is
+the one where next year's pay, raises and sweeps have already been applied, and
+it says which year it took: "growing $X/mo in 2027, the last year you have
+built". The gap is the whole amount still to arrive, so a goal queued behind
+another counts what the goals ahead of it still need. A goal with no date gets
+the answer on its tile; the pace line follows the soonest-dated goal you haven't
+met and sets its landing month against its target — or, when the accounts are
+flat or hold no balance yet, says so instead of moving on to a later goal.
+
+Before September 2026 it was one division — this year's rate, held flat forever
+— so a 2032 target was answered with six years of "this year again", and a
+single good year (a bonus, a windfall) was projected into every year after it.
+Build another year and every one of these answers sharpens.
 
 **Where the Total Is Heading** goes **dashed the moment it passes the month
 you've entered through**, so a month the plan has merely worked out never
