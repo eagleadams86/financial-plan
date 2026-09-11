@@ -10703,6 +10703,19 @@ let SW_SRC = null, KILL_SRC = null, APP_SRC = null;
    (Written without quoting the character pair it is about, for the obvious
    reason: an earlier draft of this very comment embedded one and ended itself
    four lines early, turning its own remaining prose into live code.) */
+/* ── A CSS SELECTOR, MADE SAFE TO PUT IN A RegExp ──────────────────────────
+   Four copies of this lived inline, each escaping a slightly different set —
+   `[.[\]]` here, `[.#[\]]` there, `[.#]` in the fourth — and NONE of them
+   escaped a backslash, which is what CodeQL flagged four times over
+   (js/incomplete-sanitization). It could not bite today: every selector passed
+   in is a literal in this file, like 'html[data-pin] .tabrow'. It is still the
+   wrong shape — an escape that handles some metacharacters reads as one that
+   handles them, and the next selector to arrive with a `+` or a `(` in it would
+   build a regex that quietly matched the wrong rule, or none.
+
+   The full set, backslash FIRST so it cannot re-escape its own output. */
+const reEscape = (s) => String(s).replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+
 const stripComments = (s) => {
   let out = s, prev;
   do { prev = out; out = out.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''); }
@@ -11054,7 +11067,7 @@ t('the year strip offers "This year" on the same terms the month strip does', ()
    press. The test that pinned the old hiding went with the behaviour it
    described — deliberately, and this is the note that says so. */
 t('the year arrows step one year a press, like the month strip\'s', async () => {
-  const { f, W, D } = await auditFrame(1280, 900, 'yearstep');
+  const { f, D } = await auditFrame(1280, 900, 'yearstep');
   try {
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     D.getElementById('tab-budget').click();
@@ -13060,7 +13073,7 @@ t('the two bars pin one under the other, each told where by a measured number', 
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const css = stripComments(APP_SRC);
   const rule = (sel) => {
-    const m = css.match(new RegExp(sel.replace(/[.[\]]/g, '\\$&') + '\\s*\\{([^}]*)\\}'));
+    const m = css.match(new RegExp(reEscape(sel) + '\\s*\\{([^}]*)\\}'));
     return m ? m[1] : '';
   };
   const row = rule('html[data-pin] .tabrow'), strip = rule('html[data-pin] .yearstrip');
@@ -13080,7 +13093,7 @@ t('the two bars pin one under the other, each told where by a measured number', 
 t('a pinned bar is painted UNDER the chart overlay and OVER the grid heading', () => {
   const css = stripComments(APP_SRC);
   const z = (sel) => {
-    const m = css.match(new RegExp(sel.replace(/[.#[\]]/g, '\\$&') + '\\s*\\{([^}]*)\\}'));
+    const m = css.match(new RegExp(reEscape(sel) + '\\s*\\{([^}]*)\\}'));
     const n = m && m[1].match(/z-index:\s*(\d+)/);
     return n ? +n[1] : null;
   };
@@ -13108,7 +13121,7 @@ t('a pinned bar is painted UNDER the chart overlay and OVER the grid heading', (
 t('a pinned bar paints, in a pack colour, over the band it used to leak through', () => {
   const css = stripComments(APP_SRC);
   const rule = (sel) => {
-    const m = css.match(new RegExp(sel.replace(/[.[\]]/g, '\\$&') + '\\s*\\{([^}]*)\\}'));
+    const m = css.match(new RegExp(reEscape(sel) + '\\s*\\{([^}]*)\\}'));
     return m ? m[1] : '';
   };
   const row = rule('html[data-pin] .tabrow'), strip = rule('html[data-pin] .yearstrip');
@@ -13145,7 +13158,7 @@ t('nothing between the year strip and the window clips it', () => {
      ever written a rule for it. This is the test that keeps it that way. */
   const hazard = /(^|[\s;])(overflow|overflow-x|overflow-y|contain|transform|filter|perspective)\s*:/;
   for (const sel of ['.wrap', 'main', '#views', '.tipzone']) {
-    const re = new RegExp('(^|\\})\\s*' + sel.replace(/[.#]/g, '\\$&') + '\\s*\\{([^}]*)\\}', 'm');
+    const re = new RegExp('(^|\\})\\s*' + reEscape(sel) + '\\s*\\{([^}]*)\\}', 'm');
     const m = css.match(re);
     const body = m ? m[2] : '';
     ok(!hazard.test(body),
