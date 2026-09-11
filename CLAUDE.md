@@ -140,7 +140,16 @@ family names as well as balances.
   `--unit-active-bg`, hairlines instead of gaps. Fill AND weight carry the
   choice, and the two unusual years are typography, not hue — italics for a
   summary, a dotted underline for one built before it started, with the words
-  in `title` and `aria-label`. Four things it must keep doing:
+  in `title` and `aria-label`. **It runs OLDEST FIRST** (plain `yearKeys()`,
+  no reverse) since 2026-09-11: it ran newest first, carried over from the
+  spreadsheet's tabs, which forced ‹ to be labelled "the year after" — the chip
+  to its left WAS the later year — so ‹ stepped forward a year in this lens and
+  back a month in the month strip, two strips built to stay on the same place,
+  while every year chart on the page drew oldest-left. The flip is one line and
+  two swapped labels; `wireYearStrip` is order-agnostic (it steps the DOM chip
+  list) and needed nothing. Don't reintroduce the reverse for the scrolling it
+  used to buy — `settle()` centres the chosen year and the app opens on the live
+  one. Four things it must keep doing:
   (1) a **radiogroup**, not a nested tablist — these buttons redraw the panel
   the view tab already labels rather than revealing one of their own;
   (2) **scroll the chosen year into view only when it's off an end**, measured
@@ -149,7 +158,7 @@ family names as well as balances.
   that was in plain sight;
   (3) **wait for the rail to have a width** before doing either job — the first
   layout after a reload can measure zero, and a zero-wide rail says every year
-  is off the end, parking the strip against its right edge;
+  is off the end, parking the strip against one edge;
   (4) **no smooth scrolling** — an animated scroll is a silent no-op in some
   engines (it was in the pane this was built in), and the arrows must land.
   (5) **the CURRENT year wears `chip-now`** — an accent underscore under the

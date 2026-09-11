@@ -1546,18 +1546,23 @@ straight back through them, one honest step at a time.
 
 ### The Years Strip
 
-The years run across the top, the way the sheet tabs did in Numbers — newest
-first, with the one you're reading drawn as a filled pill.
+The years run across the top, oldest on the left and the newest on the right,
+with the one you're reading drawn as a filled pill. They ran the other way round
+until September 2026 — the way the sheet tabs did in Numbers — and were turned
+round to match the rest of the app: the month strip below, the twelve columns of
+the grid and every year chart on the page all read left to right in time, and the
+years were the one place that didn't. The app still opens on the year you're
+living in, so what moved is where the old years sit, not where you land.
 
 Click a year to open it, or **step one year at a press with the ‹ › arrows** at
 the strip's right end — the month strip's arrows, in this lens since September
 2026, where they used to scroll the rail sideways and hide themselves whenever
-every year already fitted. They follow the strip rather than the calendar: the
-chip to the left is the year *after* the one you're reading, because the years
-run newest first, so ‹ moves one to the left and › one to the right, and each
-one greys out at its end rather than wrapping round. The strip still drags and
-swipes sideways. From the keyboard, one Tab lands on the strip and the left and
-right arrow keys walk along it (Home for the newest year, End for the oldest).
+every year already fitted. **‹ is the year before and › the year after**, which
+is what those arrows mean in the month strip too, so one habit carries between
+the two lenses; each greys out at its end rather than wrapping round. The strip
+still drags and swipes sideways. From the keyboard, one Tab lands on the strip
+and the left and right arrow keys walk along it (Home for the oldest year, End
+for the newest).
 
 The tabs above the strip, and the strip itself, can be **pinned** to the top of
 the page: press the pin at the right-hand end of the tab row and both stay put

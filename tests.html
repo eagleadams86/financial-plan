@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1023;
+const EXPECTED = 1024;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -11112,7 +11112,16 @@ t('the year strip offers "This year" on the same terms the month strip does', ()
    different control wearing the same glyphs. They are now the month strip's
    arrows in the other lens: always rendered, only ever disabled, one chip a
    press. The test that pinned the old hiding went with the behaviour it
-   described — deliberately, and this is the note that says so. */
+   described — deliberately, and this is the note that says so.
+
+   AND SINCE 2026-09-11 THEY POINT THE SAME WAY. The rail ran newest first,
+   carried over from the tabs along the top of the spreadsheet the plan came
+   from, which forced ‹ to be labelled "the year after" — the chip to its left
+   was the later year. So ‹ stepped forward a year in one lens and back a month
+   in the other, in two strips built to stay on the same place, while every
+   chart on the same page drew its years oldest-left. Charles: "flip years so it
+   aligns with the rest of the app." What this test pins now is the agreement,
+   not just the stepping. */
 t('the year arrows step one year a press, like the month strip\'s', async () => {
   const { f, D } = await auditFrame(1280, 900, 'yearstep');
   try {
@@ -11122,32 +11131,34 @@ t('the year arrows step one year a press, like the month strip\'s', async () => 
     const rail = () => [...D.querySelectorAll('#yearRail .yearchip')].map(c => c.dataset.year);
     const on = () => D.querySelector('#yearRail .yearchip[aria-checked="true"]').dataset.year;
     const order = rail();
+    const last = order.length - 1;
     ok(order.length > 2, 'the sample plan has years to walk', order.join(','));
-    /* NEWEST FIRST, which is what makes the direction worth pinning: the chip to
-       the LEFT is the year AFTER, the opposite way round from the month rail. */
-    ok(+order[0] > +order[order.length - 1], 'and they run newest first', order.join(','));
-    eq(on(), order[0], 'the sample opens on the newest year');
-    eq(D.getElementById('yearPrev').disabled, true,
-       'so ‹ — one chip to the left — has nowhere to go and is disabled');
-    eq(D.getElementById('yearNext').disabled, false, 'and › is live');
+    /* OLDEST FIRST, which is what makes the direction worth pinning: the chip to
+       the LEFT is the year BEFORE, the same way round as the month rail and as
+       every year chart further down the page. */
+    ok(+order[0] < +order[last], 'and they run oldest first', order.join(','));
+    eq(on(), order[last], 'the sample opens on the newest year, now the right-hand end');
+    eq(D.getElementById('yearNext').disabled, true,
+       'so › — one chip to the right — has nowhere to go and is disabled');
+    eq(D.getElementById('yearPrev').disabled, false, 'and ‹ is live');
 
-    D.getElementById('yearNext').click();
-    await wait(300);
-    eq(on(), order[1], '› takes the chip on the right: one year earlier');
-    eq(D.getElementById('yearPrev').disabled, false, 'and ‹ comes alive behind it');
     D.getElementById('yearPrev').click();
     await wait(300);
-    eq(on(), order[0], '‹ takes the chip on the left: one year later, and back where we were');
+    eq(on(), order[last - 1], '‹ takes the chip on the left: one year EARLIER');
+    eq(D.getElementById('yearNext').disabled, false, 'and › comes alive behind it');
+    D.getElementById('yearNext').click();
+    await wait(300);
+    eq(on(), order[last], '› takes the chip on the right: one year later, and back where we were');
 
-    /* To the far end, where › must stop rather than wrap. */
+    /* To the far end, where ‹ must stop rather than wrap. */
     for (let i = 0; i < order.length; i++) {
-      const b = D.getElementById('yearNext');
+      const b = D.getElementById('yearPrev');
       if (b.disabled) break;
       b.click();
       await wait(250);
     }
-    eq(on(), order[order.length - 1], 'pressing › to the end lands on the oldest year');
-    eq(D.getElementById('yearNext').disabled, true, 'where it stops rather than wrapping');
+    eq(on(), order[0], 'pressing ‹ to the end lands on the oldest year');
+    eq(D.getElementById('yearPrev').disabled, true, 'where it stops rather than wrapping');
     /* The nav is always there now, so nothing in it can move under a pointer. */
     eq(D.getElementById('yearNav').hidden, false, 'the nav is never taken away');
     ok(D.getElementById('yearPrev').classList.contains('snav')
@@ -11170,6 +11181,29 @@ t('the year arrows are rendered whatever the plan, and only ever disabled', () =
   ok(/at < 0 \|\| at >= order\.length - 1 \? ' disabled' : ''/.test(fn[0]),
      'and › on the last — a control that comes and goes changes the width of the nav '
      + 'and shoves whatever is beside it out from under the pointer');
+});
+/* ── One direction, both lenses (2026-09-11) ────────────────────────────────
+   The reverse is gone from the rail, and with it the label that had to
+   apologise for it. These two assertions are the change: whatever else moves,
+   ‹ must not mean "earlier" in one strip and "later" in the other. */
+t('‹ means earlier in BOTH strips, and the rail is the plan\'s own order', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const yfn = src.match(/function yearPickerHtml\([\s\S]*?\n\}/);
+  const mfn = src.match(/function monthPickerHtml\([\s\S]*?\n\}/);
+  ok(yfn && mfn, 'both strips are still built in one function each');
+  ok(!/yearKeys\(\)\.slice\(\)\.reverse\(\)/.test(yfn[0]),
+     'the rail is no longer reversed — it is yearKeys() as the rest of the app reads it');
+  ok(/const order = yearKeys\(\)\.slice\(\);/.test(yfn[0]),
+     'and it is still copied before the arrows step it');
+  ok(/id="yearPrev"[\s\S]{0,120}aria-label="The year before"/.test(yfn[0]),
+     '‹ steps to the year BEFORE');
+  ok(/id="yearNext"[\s\S]{0,120}aria-label="The year after"/.test(yfn[0]),
+     'and › to the year after');
+  ok(/id="monthPrev"[\s\S]{0,120}aria-label="The month before"/.test(mfn[0]),
+     'which is what ‹ has always meant in the month strip');
+  ok(/id="monthNext"[\s\S]{0,120}aria-label="The month after"/.test(mfn[0]),
+     'and › there too — one habit, carried between the lenses');
 });
 t('"This year" picks a year exactly as its chip does', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
