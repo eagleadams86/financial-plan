@@ -73,6 +73,33 @@
      THE DEFAULT IS 'auto' — a reader who has never touched the picker follows their
      system, and a retired id lands here too. <html data-theme="auto"> in the markup
      covers the case where this script never runs at all. */
+  /* NOTHING BELOW THE HEADER IS DRAWN UNTIL THE FIRST render() HAS RUN
+     (2026-09-12). `#views` is EMPTY in the markup — every card on the page is
+     built by render() in the main script — and the browser paints the parsed
+     body before that script executes. What it painted was the header, the tab
+     row, and then the footer immediately under the tabs: "Sign in with Google
+     if you want the same data on your other devices" flashing halfway up the
+     page on every refresh, before the plan appeared and shoved it back down.
+     On a first-ever visit the tab row flashed too, since render() is what
+     hides it when there is nothing to tab between.
+
+     Same reasoning as the theme, the zoom and the pin above and below: a thing
+     that is settled a frame late is a page that visibly jumps as it opens. This
+     is set OUTSIDE the try, before anything that can throw, and released in the
+     same task as the first render — see `data-booting` in the main script.
+
+     visibility, not display: the elements keep their boxes, so render() still
+     measures a real layout (the charts size themselves off their container, and
+     a 0-width container is a 0-width chart that never corrects itself). Only
+     the painting is held. */
+  document.documentElement.dataset.booting = 'on';
+  /* The backstop, so a page can never be left blank by a script that died on
+     the way to the release: DOMContentLoaded fires whether or not the main
+     script threw. A no-op on every ordinary load, where the release has already
+     happened. */
+  document.addEventListener('DOMContentLoaded', function () {
+    document.documentElement.removeAttribute('data-booting');
+  }, { once: true });
   try {
     var t = localStorage.getItem('fin-theme');
     var ok = ['auto','light','dark','midnight','sepia'];
@@ -353,6 +380,13 @@ select.ctl:hover { border-color: var(--text-muted); }
    tests.html MEASURES both type sizes against it AND pins the unit, rather than
    trusting either. League Night answered this first (c3a8376); Golf Handicap
    carried the same 134 and the same fault, and carries the same block now. */
+/* Held back until the first render — see the head script for why. The header
+   is static markup and correct at first paint, so it is not covered: what is
+   covered is everything whose CONTENT or presence render() decides. */
+html[data-booting] .tabrow,
+html[data-booting] main,
+html[data-booting] footer { visibility: hidden; }
+
 #syncBtn { min-width: 10.25em; }
 
 /* ── Tabs ───────────────────────────────────────────────────────────────── */
@@ -28413,6 +28447,10 @@ if (viewOnly) {
   render();
 }
 booted = true;
+/* The page is now drawn where it belongs, so let it be seen. In the SAME TASK
+   as the render above, which is what makes this a single paint rather than a
+   reveal a frame later; the head script explains what was flashing before it. */
+document.documentElement.removeAttribute('data-booting');
 /* After the first render, because the offsets are measured off a real layout —
    the head script has already put the attribute on, so nothing moves here. */
 applyPin(savedPin());

@@ -12900,6 +12900,101 @@ t('it is pinned WIDER than its own widest label, at BOTH type sizes', async () =
   } finally { f.remove(); }
 });
 
+group('Nothing below the header is painted before the first render');
+/* ── The Google line that flashed under the tabs (2026-09-12) ───────────────
+   Reported by Charles: on every refresh the footer's privacy note — "Sign in
+   with Google if you want the same data on your other devices" — appeared for
+   an instant directly BELOW THE TABS, then vanished as the plan appeared.
+
+   `#views` is empty in the markup: every card on this page is built by
+   render(), in the main script. The browser paints the parsed body before that
+   script executes, and what it painted was the header, the tab row, and then
+   the footer riding up under the tabs with nothing between them. On a
+   first-ever visit the tab row flashed too, since render() is what hides it
+   when there is nothing to tab between.
+
+   So `data-booting` goes on the root in the HEAD script — before first paint,
+   the same place and for the same reason as the theme, the zoom and the pin —
+   and comes off in the same task as the first render. */
+t('the gate goes on before first paint, and comes off with the first render', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  ok(/document\.documentElement\.dataset\.booting = 'on';/.test(src),
+     'the head script sets it');
+  /* OUTSIDE the try. Inside it, a browser that refuses localStorage would throw
+     on the theme read above and the gate would never go on at all — which is
+     the one kind of browser most likely to be slow enough to show the flash. */
+  const head = src.slice(0, src.indexOf('<link rel="stylesheet"'));
+  const setAt = head.indexOf("dataset.booting = 'on'");
+  const tryAt = head.indexOf('try {');
+  ok(setAt > -1 && tryAt > -1 && setAt < tryAt,
+     'and sets it BEFORE the try that reads localStorage, which a private-mode '
+       + 'browser can throw on', setAt + ' vs ' + tryAt);
+  ok(/booted = true;\s*document\.documentElement\.removeAttribute\('data-booting'\);/.test(src),
+     'and the release sits immediately after the first render, in the SAME task — '
+       + 'a frame later and the reveal is itself the flash');
+  ok(/DOMContentLoaded', function \(\) \{\s*document\.documentElement\.removeAttribute\('data-booting'\);/
+       .test(src),
+     'with a DOMContentLoaded backstop, so a script that dies on the way to the '
+       + 'release can never leave the page blank — haltForNewerData THROWS, and it '
+       + 'throws before the release');
+});
+t('it covers what render() decides, and not the header', () => {
+  const css = stripComments(APP_SRC);
+  const m = css.match(/html\[data-booting\][\s\S]{0,160}?\{[^}]*\}/);
+  ok(m, 'the rule is declared');
+  const rule = m[0];
+  ['.tabrow', 'main', 'footer'].forEach((sel) =>
+    ok(rule.indexOf(sel) > -1, 'the gate covers ' + sel, rule));
+  ok(/visibility: hidden/.test(rule),
+     'and holds the PAINT, not the layout — see the next test for why that matters');
+  ok(!/display: *none/.test(rule),
+     'display:none would give render() a zero-width container to measure');
+});
+t('the gate holds the paint but leaves a real layout to measure', async () => {
+  /* This is the whole reason the rule says `visibility` and not `display`.
+     render() runs while the gate is ON, and the charts size themselves off
+     their container — a zero-width container is a zero-width chart that never
+     corrects itself, because nothing re-measures once Chart.js has built. So
+     the hidden elements have to keep their boxes. */
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?booting=' + Date.now();
+    document.body.appendChild(f);
+  });
+  try {
+    const W = f.contentWindow, D = W.document;
+    /* By the time a frame has loaded the gate is long gone — which is itself
+       the thing to check first. */
+    eq(D.documentElement.getAttribute('data-booting'), null,
+       'a loaded page is never left holding the gate');
+    const main = D.querySelector('main');
+    const opened = Math.round(main.getBoundingClientRect().width);
+    ok(opened > 200, 'sanity: the frame laid out at all', String(opened));
+    D.documentElement.dataset.booting = 'on';
+    try {
+      const cs = W.getComputedStyle(main);
+      eq(cs.visibility, 'hidden', 'the gate hides it');
+      eq(W.getComputedStyle(D.querySelector('footer')).visibility, 'hidden',
+         'and the footer with it — that is the line that was flashing');
+      eq(W.getComputedStyle(D.querySelector('.tabrow')).visibility, 'hidden',
+         'and the tab row, which render() is what hides on a first-ever visit');
+      eq(Math.round(main.getBoundingClientRect().width), opened,
+         'while the box it will be drawn in is UNCHANGED — render() measures this '
+           + 'to size the charts, and display:none would hand it a zero');
+      /* The header is deliberately outside the gate: it is static markup and is
+         already correct at first paint, so holding it back would only make the
+         page slower to show anything at all. */
+      eq(W.getComputedStyle(D.querySelector('header')).visibility, 'visible',
+         'the header is static markup and paints immediately');
+    } finally { D.documentElement.removeAttribute('data-booting'); }
+  } finally { f.remove(); }
+});
+
 group('A table row has to say what it is called');
 /* An empty <th scope="row"> is not a blank cell — it is the row telling a screen
    reader that it is called nothing, and every figure beside it is then announced
