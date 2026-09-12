@@ -2598,6 +2598,16 @@ move you'd otherwise make by hand across two fields, like the trip line's
 nothing commits until Save; `type="button"` keeps it from submitting. The CSS
 puts it UNDER its input, because alongside it shortens that one box and leaves
 the row ragged against its neighbours.
+A field spec may also carry **`newRow`** — this field starts a line rather than
+completing the one above it, for a group of boxes that has to be read ACROSS
+(the trip line's Paid / Credits / Still due). It is NOT `wide`: `wide` takes the
+whole row, `newRow` only refuses to share the previous one. Two halves, both
+required — `grid-column-start: 1` in the CSS, and a `closeRow()` in
+`spansInGrid`, or the row arithmetic goes on counting the broken row as open.
+And remember what `wide` is actually for: a text or money box is capped at 320px
+whatever its cell is, so spanning a cell buys room for its **hint**, never for
+its box. See the trip line under [A trip line splits into
+parts](#a-trip-line-splits-into-parts-2026-09-12).
 **Budget rows drag into place within their section** (`wireRowDrag`), the same
 gesture as the tab bar and for the same reason — pointer events, not HTML5
 drag-and-drop, which does nothing on a touchscreen. It takes three lessons from
@@ -3581,6 +3591,20 @@ charts the same figure.
   invisible to anyone reading one row at a time; a rule is visible to everyone
   who can see the card and silent to everyone who can't. Nothing carries meaning
   by colour.
+- **Item and Merchant share the first line of the window, and Paid / Credits /
+  Still due begin their own** (Charles, 2026-09-12: *"there's room for these on
+  the same line"*). They shipped as two `wide` rows, and that was the wrong
+  instinct twice over: **`wide` buys a text field nothing**, because a box is
+  capped at 320px whatever its cell is — so each was one box against two thirds
+  of an empty line. Widening a cell only ever buys room for its HINT.
+  Taking `wide` off them is what needed the new flag: with those two no longer
+  claiming a row each, Paid flowed up beside Merchant and left Credits and Still
+  due stranded on the next line. **`newRow` is a field that BEGINS a line** —
+  not the same thing as `wide`, which takes the whole of one; this one just
+  refuses to finish somebody else's. It is `grid-column-start: 1` in CSS **and**
+  a `closeRow()` in `spansInGrid`, and both halves are needed: without the
+  second, the row arithmetic still counts the broken row as open and stretches
+  the field left alone above it across a line it no longer ends.
 - **The merchant is not stripped from a share link without notes.** It is a fact
   about the purchase, like the item's own label — the note stays the place for
   anything that needs a sentence — and a share that kept "Airfare" and dropped

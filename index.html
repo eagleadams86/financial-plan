@@ -907,6 +907,12 @@ legend { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04
 .grid-fields > div > label.field { min-height: 2.5em; margin-bottom: 0; }
 .grid-fields > div > input, .grid-fields > div > select { width: 100%; height: 40px; }
 .grid-fields > div.wide { grid-column: 1 / -1; }
+/* A field that BEGINS a line (`newRow`). Not the same thing as `wide`, which
+   takes the whole row: this one just refuses to finish somebody else's. It is
+   for a group of boxes that has to be read across — the trip line's Paid,
+   Credits and Still due — following a shorter row that would otherwise pull the
+   first of them up beside it. */
+.grid-fields > div.rowstart { grid-column-start: 1; }
 /* A BOX IS SIZED BY WHAT IT HOLDS, not by the column it happens to land in.
    `width: 100%` alone gave a three-letter currency code and a two-digit zoom the
    same 250px a sentence gets, and stretched the subtitle across the whole of a
@@ -20204,6 +20210,9 @@ function buildFields(fields, values, link) {
     const cell = document.createElement('div');
     cell.dataset.field = f.key;
     if (f.type === 'note' || f.wide) cell.className = 'wide';
+    /* `newRow`: this field starts a line of its own rather than completing the
+       one above. `wide` already implies it, so the two never both apply. */
+    else if (f.newRow) cell.className = 'rowstart';
     const label = document.createElement('label');
     label.className = 'field';
     label.textContent = f.label;
@@ -20715,6 +20724,12 @@ function spansInGrid(wrap, fields, ownsDialog) {
   for (const cell of cells) {
     /* A wide field is a row to itself: it ends whatever row was in progress. */
     if (cell.classList.contains('wide')) { closeRow(); continue; }
+    /* And a `newRow` field ends the one in progress WITHOUT taking the whole of
+       its own — the CSS moves it to column 1, so this is the row arithmetic
+       being told the same thing. Without it the row in progress would be
+       counted as still open, and the field left alone on the row above would be
+       stretched across a line it no longer ends. */
+    if (cell.classList.contains('rowstart')) closeRow();
     row.push(cell);
     if (row.length === cols) row = [];        // full, nothing to stretch
   }
@@ -24173,24 +24188,29 @@ const EDITORS = {
        own below the other two. Three columns so those three come out the same
        width and fill the line: at the auto-fit four they were three boxes and a
        gap, and Still due — last on the row — was the odd one out.
-       The MERCHANT takes a full width of its own rather than sharing the row
-       with Item, and that is the layout falling out of the column count: at
-       three columns a pair of text boxes comes out as a third and two thirds,
-       which says one of them is the more important and gets the wrong one. Two
-       full lines, the two things that identify the purchase, and then the
-       figures. */
+       ITEM AND MERCHANT SHARE THE FIRST LINE (Charles, 2026-09-12: "there's room
+       for these on the same line"). They shipped as two `wide` rows, and `wide`
+       buys a text field nothing: a box is capped at 320px whatever its cell is,
+       so each was one box against two thirds of an empty line, twice over. They
+       are one column each now — the two facts that identify the purchase, read
+       side by side — and the row simply ends after them, which is what a short
+       row does here.
+       What that costs is the reason `newRow` exists: with those two no longer
+       taking a row each, Paid would have flowed up beside Merchant and left
+       Credits and Still due alone on the next line. The three figures are read
+       ACROSS, so they begin a line of their own. */
     cols: 3,
     fields: [
-      { key: 'label', label: 'Item', type: 'text', wide: true },
+      { key: 'label', label: 'Item', type: 'text' },
       /* WHO the money went to — asked for 2026-09-12. It is a fact about the
          purchase, alongside the item, not prose about it: the note stays the
          place for anything that needs a sentence. It is not stripped from a
          share link without notes, for the same reason the item's own label
          isn't — a share that kept "Airfare" and dropped "Delta" would be
          telling half of one fact. */
-      { key: 'merchant', label: 'Merchant', type: 'text', wide: true,
+      { key: 'merchant', label: 'Merchant', type: 'text',
         hint: 'Who you paid — the airline, the hotel, the booking site.' },
-      { key: 'paid', label: 'Paid', type: 'money' },
+      { key: 'paid', label: 'Paid', type: 'money', newRow: true },
       { key: 'credits', label: 'Credits', type: 'money' },
       { key: 'due', label: 'Still due', type: 'money',
         /* Settling a line means the same two edits every time: add what's due
