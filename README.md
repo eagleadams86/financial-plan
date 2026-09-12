@@ -718,6 +718,14 @@ year you haven't annotated. Notes are grouped by month and laid out across the
 width of the card, so a year's worth reads at a glance instead of running down
 one long strip.
 
+**A note written anywhere else shows as a 📝 beside the row's name** — on
+Property, What You Owe, a trip's lines, a donation, and the rows of a summary
+year. Point at the marker and the note opens beside it, however many lines it
+runs to. On a phone, where a hover bubble of any kind is a dead end, tapping the
+row opens the editor the note was written in. (Until 2026-09-12 the marker used
+the browser's own hover text, which a phone never shows at all and which a table
+scrolled sideways under a parked cursor dropped without a sound.)
+
 ### Entered Months and Finished Years
 
 Mark a month **entered** to freeze its estimates into numbers, like
@@ -2192,7 +2200,9 @@ an invented household of three — two earners, a child, five accounts, this yea
 years of real history behind it — which fills every one of the nine tabs. It carries one of every
 shape each feature reads differently: a secured mortgage and an unsecured student loan and a card
 with no payment said; a flat and its mortgage in another currency; equity and an employer
-contribution on the comp years; and a spending row that existed last year and does not now. It exists because this is the
+contribution on the comp years; and a spending row that existed last year and does not now. It
+carries a note on each kind of row that can hold one — a budget cell, a summary row, a property, a
+debt, a trip line and a donation — so the 📝 and its tooltip are met rather than described. It exists because this is the
 most complex app of the family and an empty grid shows none of what it does. It goes in through
 the same door a backup does, which is worth saying because `coerceShape` is built to carry an odd
 shape rather than throw: a key in the wrong place there does not fail, it settles to a default and
