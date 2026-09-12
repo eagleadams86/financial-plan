@@ -13221,6 +13221,68 @@ t('a split of one is drawn only when it says something its line does not', async
     D.getElementById('rowSaveBtn').click();
   } finally { f.remove(); }
 });
+t('a year of trips keeps its sideways scroll when a line is edited', async () => {
+  /* Reported 2026-09-12: "every time I edit a row, the side-scrolling resets
+     back to the left." A year of trips is a row that scrolls, the row editor
+     saves as you go, and every committed box calls render() — which replaces
+     #views wholesale. The fourth trip in a year could not be edited at all:
+     each field you finished threw the card you were working on off the screen.
+     Driven end to end, because the fault is in the seam between three things
+     that are each correct on their own. */
+  const f = await tripFrame('tripscroll');
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    D.getElementById('tab-vacations').click();
+    await new Promise((r) => setTimeout(r, 150));
+    /* Enough trips in ONE year that the row genuinely scrolls, and added the
+       way a person adds them — a test cannot reach the frame's plan (`state` is
+       a top-level `let` and the app's CSP forbids `eval`), and driving the add
+       bar is the more honest fixture anyway. */
+    const year = String(new Date().getFullYear());
+    for (const name of ['Second trip', 'Third trip', 'Fourth trip', 'Fifth trip']) {
+      D.querySelector('[data-add="trip"]').click();
+      D.getElementById('rf-name').value = name;
+      D.getElementById('rf-year').value = year;
+      D.getElementById('rowSaveBtn').click();
+    }
+
+    const row = () => D.querySelector(`.triprow[data-scrollx="trips-${year}"]`);
+    ok(row(), 'the year draws a row of trip cards, and it opts in by a key that '
+      + 'is STABLE across the rewrite — the element read from and the element '
+      + 'written back to are two different elements with the same job');
+    ok(row().children.length >= 5, 'five trips in the one year', row().children.length);
+    ok(row().scrollWidth > row().clientWidth + 200,
+      'and the row is genuinely wider than the window, or this test proves nothing',
+      `${row().scrollWidth} in ${row().clientWidth}`);
+
+    /* Scrolled to a card well off the left, then a field finished on it. */
+    row().scrollLeft = 900;
+    const parked = row().scrollLeft;
+    ok(parked > 0, 'the row actually moved');
+    const card = row().children[3];
+    const line = card.querySelector('tr[data-edit="tripItem"]');
+    ok(line, 'the fourth card has a line to open');
+    line.click();
+    ok(D.getElementById('rowDialog').open, 'a line on the fourth card opened');
+    const box = D.getElementById('rf-merchant');
+    box.value = 'Kerbside Cars';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+
+    eq(row().scrollLeft, parked,
+      'the row is exactly where it was — the whole complaint');
+    eq(D.getElementById('rowDialog').open, true,
+      'and the window you are typing in is still open on it');
+
+    /* Deleting and reordering go through the same render, so they are the same
+       fix; the move buttons are the ones most likely to be pressed twice. */
+    D.getElementById('rowDownBtn').click();
+    eq(row().scrollLeft, parked, 'moving a line down holds it too');
+  } finally { f.remove(); }
+});
 t('the Investments tab draws both charts, and the sample plan reaches them',
   async () => {
   const f = document.createElement('iframe');

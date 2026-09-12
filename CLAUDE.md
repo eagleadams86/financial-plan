@@ -3680,6 +3680,36 @@ to be the better constraint: both live tests assert from the CARD, which is what
 a reader actually sees, and "the figure on screen is the parts added up" is the
 claim worth pinning.
 
+## A sideways scroll survives a render (2026-09-12)
+
+Charles: *"every time I edit a row, the side-scrolling resets back to the left."*
+A year of trips is a row that scrolls, the row editor **saves as you go**, and
+every committed box calls `render()` — which does `#views.innerHTML = fn()` and
+takes every scroll position inside it to zero. The fourth trip in a year could
+not be edited at all: each field you finished threw the card you were working on
+off the screen.
+
+- **A container opts in with `data-scrollx="<key>"`**, and `render()` reads the
+  positions just before the rewrite and puts them back at the end. The key has
+  to be STABLE, because the element read from and the element written back to
+  are two different elements with the same job — `trips-2026`, not an index.
+- **Measured, not remembered on a scroll listener.** This runs either side of
+  one statement; a listener would fire on every frame of every flick to keep a
+  figure that is read once.
+- **Restored LAST, after `wireView`**, and that is `scrollGridToNow`'s lesson
+  rather than a guess: folding a box reparents its contents into `.card-body`,
+  and reinserting a scroll container resets it to zero — a position put back any
+  earlier is silently thrown away. A row that has lost a card simply lands at
+  its end; the browser clamps.
+- **The budget grid is NOT opted in, and that is deliberate.** It resets too on
+  a window narrow enough to scroll it, but it resets to the CURRENT MONTH rather
+  than to the left, because `scrollGridToNow` puts it there on purpose ("a
+  narrow screen opens the grid on January with the current month seven swipes
+  away"). Opting it in would mean deciding which of the two wins — remembered
+  position, or the month you came for — and that is a decision to take with
+  Charles, not a bug to fix quietly. Raised with him 2026-09-12; the trips row
+  was the reported fault and the only one changed.
+
 ## Growth is not income (2026-08-31)
 
 **An account's rate produces one of two things, and the account says which.**

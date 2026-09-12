@@ -8238,6 +8238,23 @@ function render() {
     comp: renderComp, investments: renderInvestments,
     vacations: renderVacations, giving: renderGiving
   }[view];
+  /* ── A SIDEWAYS SCROLL SURVIVES THE REWRITE ───────────────────────────────
+     Reported 2026-09-12: "every time I edit a row, the side-scrolling resets
+     back to the left." A year of trips is a row that scrolls, the row editor
+     SAVES AS YOU GO, and every committed box calls render() — which replaces
+     `#views` wholesale and takes every scroll position in it to zero. So the
+     fourth trip in a year could not be edited at all: each field you finished
+     threw the card you were working on off the screen.
+
+     Measured and put back rather than remembered on a scroll listener: this
+     runs either side of one statement, and a listener would fire on every
+     frame of every flick to keep a figure that is read once.
+     A container opts in with `data-scrollx="<stable key>"` — stable being the
+     whole of it, since the element the value is read from and the element it is
+     written back to are two different elements with the same job. */
+  const scrolls = new Map();
+  for (const el of target.querySelectorAll('[data-scrollx]'))
+    if (el.scrollLeft) scrolls.set(el.dataset.scrollx, el.scrollLeft);
   target.innerHTML = fn();
   if (viewOnly) stripEditAffordances(target);
   wireView(view);
@@ -8248,6 +8265,15 @@ function render() {
   /* #views has just been rewritten, so the year strip may have appeared,
      vanished, or changed lens under a pinned tab row. */
   measurePinTops();
+  /* LAST, and that is `scrollGridToNow`'s lesson rather than a guess: folding a
+     box reparents its contents into `.card-body`, and reinserting a scroll
+     container resets it to zero — a position put back any earlier is silently
+     thrown away. The browser clamps a position longer than the content, so a
+     row that lost a card simply lands at its end. */
+  for (const el of target.querySelectorAll('[data-scrollx]')) {
+    const x = scrolls.get(el.dataset.scrollx);
+    if (x) el.scrollLeft = x;
+  }
 }
 
 /* Everything that opens an editor is reached one of three ways: a `data-add`
@@ -16723,7 +16749,8 @@ function renderVacations() {
     </div>`
     + chartCard
     + years.map(y => `<h2 class="yearhead">${esc(y)}</h2>
-        <div class="triprow">${byYear.get(y).map(tripCard).join('')}</div>`).join('')
+        <div class="triprow" data-scrollx="trips-${esc(y)}">${
+          byYear.get(y).map(tripCard).join('')}</div>`).join('')
     + ptoYears.map(ptoCard).join('');
 }
 
