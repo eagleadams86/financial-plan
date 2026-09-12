@@ -1033,14 +1033,16 @@ this year compares with the last few, and it gives the tab something to open on.
   your choice.
 - **Each line tracks what's paid, what's credited and what's still due**, with
   a **✓ Paid** button that settles the rest in one click. A line also names the
-  **merchant** — who the money went to — under the item it bought.
+  **merchant** — who the money went to — in a column of its own, which appears
+  only once something in the trip has one.
 - **A line that was several purchases splits into parts.** Three excursions
   booked separately, a flight and its seat fee: press **✂ Split into parts** in
   the line's window and each part keeps its own item, merchant, paid, credits,
   still due and its own **✓ Paid**. The line's three figures become the sums, so
   the card's total and the year chart go on reading one figure per line and
-  never change. The parts sit under their line on the card, indented; **↩ Back
-  to one line** folds them away and keeps the total.
+  never change. The parts sit under their line on the card, indented — always
+  visible, never behind a control; **↩ Back to one line** folds them away and
+  keeps the total.
 - **A holidays & PTO planner**, with from/to dates, under the trips it counts.
 
 ---

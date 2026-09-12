@@ -3608,9 +3608,34 @@ charts the same figure.
 - **The merchant is not stripped from a share link without notes.** It is a fact
   about the purchase, like the item's own label — the note stays the place for
   anything that needs a sentence — and a share that kept "Airfare" and dropped
-  "Delta" would be telling half of one fact. It renders on its own muted line
-  UNDER the item, never joined on with a separator: an item name already wraps
-  in that column, and a name and a shop run together read as one longer name.
+  "Delta" would be telling half of one fact.
+- **The merchant is a COLUMN on the card, and it shipped stacked under the item
+  first** (Charles, 2026-09-12, on his real cruise: *"it's getting too long as I
+  add splits and merchants"*). **Stacking ADDS.** "Hotel" over a hotel whose name
+  runs to three lines is a four-line row for one purchase; side by side a row is
+  as tall as the LONGER of the two. Measured on a ten-row trip: 904px to 611px,
+  a third of the card's height, with seven of its ten rows now a single line.
+  Two things make the column work, and both are the existing rules applied
+  rather than new ones: it appears only once something in the trip has a
+  merchant (the "column of nothing is noise" rule Paid, Credits and Due keep) and
+  **the PARTS are asked as well as the lines**, because a split line usually
+  carries the generic name — "Excursions" — while its parts carry the shops. And
+  it WRAPS, the item column's exception extended to the only other column
+  holding words: a `nowrap` hotel name would push the table wider than its card,
+  and a trip card that scrolls inside itself is what the whole
+  row-scrolls-instead bargain exists to prevent.
+- **`.card.trip`'s cap went 560px → 820px in the same change**, and that is the
+  cost Charles took knowingly: fewer wordy trips stand side by side before a
+  year's row scrolls. Six columns of a real itinerary do not fit in 560 without
+  wrapping every name in the card, and wrapping is the fault being fixed. It is
+  a CAP, not a width — `flex: 0 0 auto` still sizes each card to its own table,
+  so a trip with three lines and no merchants is as narrow as it ever was (330px
+  in the sample) and nothing in an existing plan moves.
+- **Folding a split line's parts away was OFFERED AND DECLINED** (2026-09-12),
+  twice — once when the feature was designed and again when the card got too
+  long. Both times the answer was the same: the parts stay open. Do not add a
+  disclosure triangle to a trip line; the height was fixed by the merchant
+  column and the wider cap instead.
 - **No schema bump.** A build that has never heard of `parts` reads the line's
   own three figures — which are the sums — and simply shows one row instead of
   four. Degrading, not corrupting, is the test for whether a bump is owed.
