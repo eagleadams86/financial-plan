@@ -1049,11 +1049,15 @@ this year compares with the last few, and it gives the tab something to open on.
 - **A line that was several purchases splits into parts.** Three excursions
   booked separately, a flight and its seat fee: press **✂ Split into parts** in
   the line's window and each part keeps its own item, merchant, paid, credits,
-  still due and its own **✓ Paid**. The line's three figures become the sums, so
+  still due, its own **✓ Paid** — and its own **note**, in a box that spans the
+  window under those five, because a note is usually the booking link for that
+  one stay and three of them in the line's note say nothing about which is
+  which. The line's three figures become the sums, so
   the card's total and the year chart go on reading one figure per line and
   never change. The parts sit under their line on the card, indented — always
   visible, never behind a control; **↩ Back to one line** folds them away and
-  keeps the total.
+  keeps the total. Point at a part and its note opens beside it, the same way a
+  line's does.
 - **A holidays & PTO planner**, with from/to dates, under the trips it counts.
 
 ---

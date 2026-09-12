@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1046;
+const EXPECTED = 1049;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -5488,6 +5488,41 @@ t('a part is normalised the same way whether it is typed or read from a file', (
     'only a string is a name — an object would render as "[object Object]"');
   eq(H.tripPart({ merchant: 'X' }).merchant, 'X');
   eq('merchant' in H.tripPart({ merchant: '   ' }), false, 'blank is no merchant');
+  /* A PART HAS ITS OWN NOTE since 2026-09-12 — three stays on one line, each
+     with its own booking link. Prose, so the same rule the merchant keeps: a
+     string or nothing, never a stored blank. */
+  eq(H.tripPart({ note: '  the slipway, 15 min early  ' }).note, 'the slipway, 15 min early');
+  eq('note' in H.tripPart({ note: '   ' }), false, 'blank is no note');
+  eq('note' in H.tripPart({ note: { x: 1 } }), false, 'and only a string is prose');
+});
+t('a part with nothing but a note is still a part', () => {
+  /* Somebody who splits a line to keep three booking links apart has written
+     the only thing that part is for, and the empty-part rule would have
+     deleted it the moment it was saved. A part with NOTHING on it still goes. */
+  const d = H.coerceShape({ vacations: { trips: [{ id: 't', name: 'T', year: 2026,
+    items: [{ label: 'Stays', parts: [
+      { note: '  just a link  ' },
+      { label: '', merchant: '', paid: 0 },
+    ] }] }] } });
+  const parts = d.vacations.trips[0].items[0].parts;
+  eq(parts.length, 1, 'the noted part survives and the empty one does not');
+  eq(parts[0].note, 'just a link', 'trimmed at the boundary, like every other note');
+});
+t('a part’s note is searchable, and a share without notes drops it', () => {
+  const st = H.coerceShape({ vacations: { trips: [{ id: 't', name: 'Trip', year: 2026,
+    items: [{ label: 'Stays', parts: [{ label: 'Villa', note: 'airbnb link here' }] }] }] } });
+  const hits = H.searchPlan(st, 'airbnb', ['vacations']).hits;
+  eq(hits.length, 1, 'Find reaches a part’s note — the archive is write-only otherwise');
+  eq(hits[0].where, 'Trip · Stays · Villa', 'and says which line of which trip it is in');
+  ok(/airbnb link here/.test(hits[0].snippet), 'with the note as the snippet', hits[0].snippet);
+  /* stripNotes walks the payload rather than listing the places it knows about,
+     which is exactly so that a note field added to a later editor is covered
+     without anybody remembering to come back. This is that claim, tested. */
+  const sent = H.stripNotes(JSON.parse(JSON.stringify({ vacations: { trips: [{ items: [
+    { note: 'the line’s note', parts: [{ label: 'P', note: 'the part’s note' }] }] }] } })));
+  eq(sent.vacations.trips[0].items[0].parts[0], { label: 'P' },
+    'a link shared without notes carries no part note either');
+  eq('note' in sent.vacations.trips[0].items[0], false, 'nor the line’s');
 });
 t('the sum is the line, and it is re-derived at the boundary rather than trusted', () => {
   eq(H.sumPart([{ paid: 60 }, { paid: 74.9 }, {}], 'paid'), 134.9);
@@ -12695,6 +12730,27 @@ t('no row that carries a tip also carries a native title', () => {
      'What You Owe’s balance cell is a tip too, and it repeats the row’s note so the '
      + 'note reads everywhere along the row rather than everywhere but there');
 });
+t('a part’s note box is prose, and it takes the whole line', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  /* From the trip line's own spec, not the `type: 'parts'` documentation
+     comment further up the file, which carries a `part: [` of its own. */
+  const at = APP_SRC.indexOf("addLabel: '＋ Add a part',");
+  ok(at > 0, 'the trip part field still declares its add button');
+  const body = APP_SRC.slice(at, APP_SRC.indexOf('settle: {', at));
+  ok(/\{ key: 'note', label: 'Note', type: 'note' \},/.test(body),
+     'a part carries a note of its own — asked for 2026-09-12, after a Stays line '
+     + 'held three Airbnb links in ONE note with nothing to say which was which');
+  ok(body.indexOf("key: 'note'") > body.indexOf("key: 'due'"),
+     'and it comes last, so it is drawn under the five facts rather than among them');
+  const css = stripHtmlComments(APP_SRC);
+  ok(/\.partline \.partgrid > label\.partnote \{ grid-column: 1 \/ -1; \}/.test(css),
+     'it breaks out of the auto-fit track and spans the part — prose in a 150px column '
+     + 'of a five-column grid is a slot nobody can read a sentence in');
+  ok(/\.partline \.partgrid textarea \{/.test(css), 'and it is sized as a textarea');
+  ok(/querySelectorAll\('\.partgrid input, \.partgrid textarea'\)/.test(APP_SRC),
+     'the box list reads textareas too, or it goes out of step with the spec the moment '
+     + 'a part carries a note');
+});
 t('two wide trip cards and their seam are exactly the row', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const css = stripHtmlComments(APP_SRC);
@@ -13329,7 +13385,14 @@ t('the trip line editor splits, adds, settles and comes back — and keeps every
 
     const box = () => D.getElementById('rf-parts');
     const lines = () => [...box().querySelectorAll('.partline')];
-    const subRows = () => [...D.querySelectorAll('.card.trip tr.partrow')];
+    /* SCOPED TO THE CARD THIS TEST DRIVES, which is the first one drawn — this
+       year's trip, since the years run newest first. The sample ships a split
+       line of its own — two museum tickets, each with its own note — on LAST
+       year's trip, and an unscoped selector counts two cards' sub-rows as one
+       list. Same lesson the merchant column taught below. NOT `:first-of-type`:
+       every year draws a `.triprow` of its own, so that matches the first card
+       of each of them. */
+    const subRows = () => [...D.querySelector('.card.trip').querySelectorAll('tr.partrow')];
     /* The first line of the first trip card, as the card draws it: the row's
        name and every figure on it. The card is re-rendered on every commit, so
        this is the plan speaking through the only voice a reader hears. */
@@ -13425,8 +13488,13 @@ t('a split of one is drawn only when it says something its line does not', async
     D.getElementById('tab-vacations').click();
     await new Promise((r) => setTimeout(r, 150));
 
-    const rows = () => [...D.querySelectorAll('.card.trip tr[data-edit="tripItem"]:not(.partrow)')];
-    const subRows = () => [...D.querySelectorAll('.card.trip tr.partrow')];
+    /* One card — the first drawn, which is this year's — for the reason the
+       merchant assertions below give: the sample's own split line is in the
+       other one, and every year draws a `.triprow` of its own so
+       `:first-of-type` would pick up both. */
+    const rows = () => [...D.querySelector('.card.trip')
+      .querySelectorAll('tr[data-edit="tripItem"]:not(.partrow)')];
+    const subRows = () => [...D.querySelector('.card.trip').querySelectorAll('tr.partrow')];
     ok(rows().length >= 2, 'the sample trip has lines to work with', rows().length);
 
     /* Line one: split and leave it. */

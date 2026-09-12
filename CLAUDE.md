@@ -3620,11 +3620,38 @@ a test that says so outright: the same trip written plain and written split
 charts the same figure.
 
 - **A part is a miniature line, not a bare amount, and that is the whole reason
-  to split one.** `{ label, merchant?, paid, due, credits? }` and its own
+  to split one.** `{ label, merchant?, paid, due, credits?, note? }` and its own
   **✓ Paid** — so a split can say "the snorkel trip is paid and the catamaran
   still isn't". A part that could only carry one amount would break a figure
   down without being able to break its SETTLEMENT down, which is the question a
   trip line is actually asked.
+- **AND ITS OWN NOTE, added the same day it shipped without one.** The first cut
+  gave the parts five facts and withheld the sixth on the reasoning that "a note
+  is prose about the WHOLE line, and five sentences hidden one per part is a
+  place for something to be written and never read again". The first real split
+  line disproved it inside a day: `Stays`, three of them, each a different
+  Airbnb, all three booking links stacked in the LINE's note with nothing to say
+  which was which. Charles: *"give each part its own notes section similar to
+  the budget row breakouts. it can be a text box under each that spans the whole
+  window since there are 5 inputs already"* — and the budget's split month had
+  had a note per amount all along, which is the precedent that settles it.
+  - The spec entry is `{ key: 'note', label: 'Note', type: 'note' }`, LAST, so
+    it draws under the five boxes; `buildPartBox` grows a `textarea` branch and
+    `label.partnote` takes it across the grid (`grid-column: 1 / -1`). Prose in
+    one 150px track of a five-column auto-fit grid is a slot nobody can read a
+    sentence in, and a note here is most often a pasted link — longer than any
+    box above it.
+  - **`setPartsValue` reads `input, textarea` now.** Its boxes are indexed
+    against `f.part`, so a spec whose sixth entry is a textarea goes out of step
+    with the DOM the moment a part carries a note.
+  - **A note counts as something on the part**, in both empty-part filters (the
+    editor's `save` and `coerceShape`'s): somebody who splits a line to keep
+    three links apart has written the only thing that part is for.
+  - It reaches everything a line's note reaches: **the part row's own hover
+    text** (`rowTip('', p.note)`), **Find** (`has(p.note)`, with the note as the
+    snippet), and **`stripNotes`** — which needed no change at all, because it
+    walks the payload rather than listing the places it knows about. There is a
+    test that says a link shared without notes carries no part note.
 - **`tripPart` is the one normaliser, shared by the editor and the boundary**,
   so a part typed into the dialog and a part arriving in a backup end up the
   same shape. It coerces its own figures — `coerceShape`'s `num` is local to it
@@ -3638,8 +3665,9 @@ charts the same figure.
   rests on their never disagreeing — so `coerceShape` recomputes the sums from
   the parts, which are the working. A plan written by a build that knows about
   parts and then nudged by one that doesn't cannot leave the two adrift.
-- **An empty part is never written.** A line made of nothing is not a claim
-  anybody meant to file, so `save` drops it — which is what makes an emptied
+- **An empty part is never written.** A line made of nothing — no label, no
+  merchant, no figure and no note — is not a claim anybody meant to file, so
+  `save` drops it — which is what makes an emptied
   list come back as one plain row rather than as a line claiming it is nothing.
 - **A split of ONE that repeats its line is not DRAWN, and is still stored.**
   Pressing "✂ Split into parts" opens on a single part carrying the line's own
@@ -3647,7 +3675,9 @@ charts the same figure.
   and a window closed there would leave the card saying the same thing twice.
   The split month's rule exactly: break the amounts out when there is more than
   one, OR when the only one carries something its line does not (a different
-  name, or a merchant). Shown the moment it earns the room.
+  name, a merchant, or — since notes arrived — a note of its own, which is the
+  commonest reason of all to split a line into exactly one part). Shown the
+  moment it earns the room.
 - **Every row of the group opens the SAME window.** A part is an `editrow`
   carrying its LINE'S index, never one of its own: the parts live in the line's
   editor, nothing on the card can address a part on its own, and the group moves

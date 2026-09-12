@@ -1038,6 +1038,17 @@ legend { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04
 .partline .partgrid > label { display: flex; flex-direction: column; gap: 4px;
   font-size: var(--fs-xs); color: var(--text-secondary); min-width: 0; }
 .partline .partgrid input { width: 100%; height: 36px; }
+/* A PART'S NOTE TAKES THE WHOLE LINE (asked for 2026-09-12: "it can be a text
+   box under each that spans the whole window since there are 5 inputs
+   already"). It is prose, and prose in a 150px column of a five-column grid is
+   a slot nobody can read a sentence in — while a note here is most often a
+   pasted booking link, which is longer than any of the boxes above it. So it
+   breaks out of the auto-fit track and runs the width of the part, under the
+   five facts and above the part's own two buttons. `min-height` is shorter than
+   the standalone textarea's 64px: five of these stack up in one window, and
+   each is about one purchase rather than about the whole line. */
+.partline .partgrid > label.partnote { grid-column: 1 / -1; }
+.partline .partgrid textarea { width: 100%; min-height: 46px; }
 /* The two buttons a part carries — settle it, or take it out. They sit on a
    line of their own under the boxes, the `.field-row` bargain: alongside, they
    would shorten whichever box they followed and leave the grid ragged. */
@@ -5411,7 +5422,7 @@ function coerceShape(data) {
          disagreeing. The parts win: they are the working. */
       if (Array.isArray(it.parts)) {
         it.parts = it.parts.filter(p => p && typeof p === 'object').map(tripPart)
-          .filter(p => p.label || p.merchant || p.paid || p.credits || p.due);
+          .filter(p => p.label || p.merchant || p.paid || p.credits || p.due || p.note);
         if (!it.parts.length) delete it.parts;
         else {
           it.paid = sumPart(it.parts, 'paid');
@@ -9031,6 +9042,25 @@ function sampleState() {
             { label: 'Train', paid: 180, credits: 0, due: 0 },
             { label: 'Hotel', paid: 420, credits: 0, due: 0 },
             { label: 'Meals and museums', paid: 310, credits: 0, due: 0 },
+            /* A SPLIT LINE WHOSE PARTS EACH CARRY THEIR OWN NOTE — the case
+               per-part notes were added for (2026-09-12): one line, two
+               bookings, and a sentence that belongs to one of them rather than
+               to both. It is on LAST year's trip on purpose: the suite drives
+               splitting in the first card of the current year and counts the
+               sub-rows it creates there, so the demo's own split belongs in the
+               other card — which is also the lesson the merchant column
+               already taught, that a trip card is read one card at a time. */
+            /* NO MERCHANTS on these two, deliberately: the sample carries none
+               anywhere, which is what shows that a column of nothing is left
+               out — and the suite reads the second card to prove that a column
+               one trip earns is not forced onto the others. The notes are what
+               this line is here to show. */
+            { label: 'Museums', paid: 62, credits: 0, due: 0, parts: [
+              { label: 'City gallery', paid: 34,
+                note: 'Members go free — it pays for itself in two visits.' },
+              { label: 'Maritime museum', paid: 28,
+                note: 'The tall-ship tour is a separate ticket at the door.' },
+            ] },
           ] }],
         pto: { [y]: { allowance: 25, entries: [
           { name: 'Coast week', from: `${Y}-08-03`, to: `${Y}-08-07`, nights: 7, ptoDays: 5 },
@@ -16580,6 +16610,11 @@ function tripPart(p) {
   if (merchant) out.merchant = merchant;
   const credits = fig(o.credits);
   if (credits) out.credits = credits;
+  /* Prose, like the line's own note: a string or nothing, never a stored blank
+     — `coerceShape`'s rule for every optional field, so a backup written by a
+     build that had no part notes and one that has them read identically. */
+  const note = text(o.note);
+  if (note) out.note = note;
   return out;
 }
 /* A function DECLARATION, not a const arrow: `coerceShape` calls it and sits
@@ -16767,7 +16802,12 @@ function renderVacations() {
           const only = (i.parts || []).length === 1 ? i.parts[0] : null;
           const parts = only
             ? ((only.label && only.label !== i.label)
-               || (only.merchant && only.merchant !== (i.merchant || '')) ? i.parts : [])
+               || (only.merchant && only.merchant !== (i.merchant || ''))
+               /* A note of its own is something its line does not say, exactly
+                  like a label or a merchant of its own — and it is the whole
+                  reason a line gets split into one part in the first place
+                  (a booking link for a stay that is otherwise the line). */
+               || (only.note && only.note !== (i.note || '')) ? i.parts : [])
             : (i.parts || []);
           /* EVERY ROW OF THE GROUP OPENS THE SAME EDITOR, parts included —
              they are one record, and the parts live in the line's own window.
@@ -16780,7 +16820,7 @@ function renderVacations() {
           <th scope="row">${esc(i.label)}</th>
           ${who(i)}${figures(i)}</tr>` + parts.map((p, pi) => `<tr class="editrow partrow${
             pi === parts.length - 1 ? ' partlast' : ''}" data-edit="tripItem"
-            data-id="${esc(t.id)}" data-idx="${idx}">
+            data-id="${esc(t.id)}" data-idx="${idx}"${rowTip('', p.note)}>
             <th scope="row"><span class="sr-only">Part of ${
               esc(i.label || 'the line above')} — </span>${
               esc(p.label || '—')}</th>
@@ -20154,9 +20194,19 @@ function reprimeRow(ctx) {
 function buildPartBox(pf, part, onChange, idx) {
   const label = document.createElement('label');
   label.appendChild(document.createTextNode(pf.label));
-  const input = document.createElement('input');
-  if (pf.type === 'money') asMoneyInput(input);
-  else input.type = 'text';
+  let input;
+  if (pf.type === 'note') {
+    /* The same control the line's own Note is, and the same `type: 'note'` in
+       the spec — a part is a miniature line, so its prose box is the line's
+       prose box. `.partnote` is what takes it across the grid; see the CSS. */
+    input = document.createElement('textarea');
+    input.rows = pf.rows || 2;
+    label.className = 'partnote';
+  } else {
+    input = document.createElement('input');
+    if (pf.type === 'money') asMoneyInput(input);
+    else input.type = 'text';
+  }
   input.value = pf.type === 'money' ? showMoney(part[pf.key] ?? '')
     : (part[pf.key] ?? '');
   /* Named for the reader who cannot see the row it is in. "Paid" alone is the
@@ -20334,7 +20384,11 @@ function setPartsValue(f, host, v) {
   had.forEach((pp, i) => {
     if (partIsEmpty(f, pp)) return;
     const from = stored[si++];
-    const boxes = lines[i] ? [...lines[i].querySelectorAll('.partgrid input')] : [];
+    /* textarea as well as input, or the list goes out of step with `f.part` the
+       moment a part carries a note: the note is the sixth entry in the spec and
+       would line up with nothing. */
+    const boxes = lines[i]
+      ? [...lines[i].querySelectorAll('.partgrid input, .partgrid textarea')] : [];
     f.part.forEach((pf, j) => {
       if (from[pf.key] === undefined) delete pp[pf.key]; else pp[pf.key] = from[pf.key];
       const box = boxes[j];
@@ -24387,12 +24441,17 @@ const EDITORS = {
         action: { label: '✓ Paid', title: 'Move what is still due into Paid',
           run: (val, set) => { set('paid', val('paid') + val('due')); set('due', 0); } } },
       /* A line that was several purchases — three excursions on one booking,
-         a flight and its seat fee. The parts carry the same five facts the
-         line does, minus the note: a note is prose about the WHOLE line, and
-         five sentences hidden one per part is a place for something to be
-         written and never read again. The three money keys are the ones the
-         parent's figures are summed from, so a split line's own boxes go
-         inert and follow the list. */
+         a flight and its seat fee. The three money keys are the ones the
+         parent's figures are summed from, so a split line's own boxes go inert
+         and follow the list.
+         A PART HAS ITS OWN NOTE (2026-09-12). It shipped without one, on the
+         reasoning that "a note is prose about the WHOLE line, and five
+         sentences hidden one per part is a place for something to be written
+         and never read again" — and the first real split line disproved it:
+         Stays, three of them, each a different Airbnb with its own booking
+         link, all three links stacked in the LINE's note where nothing said
+         which was which. Six facts now, and the sixth is prose, so it takes a
+         row of its own across the part rather than a sixth 150px column. */
       { key: 'parts', label: 'Parts', type: 'parts', wide: true,
         splitLabel: '✂ Split into parts', unsplitLabel: '↩ Back to one line',
         addLabel: '＋ Add a part',
@@ -24403,6 +24462,7 @@ const EDITORS = {
           { key: 'paid', label: 'Paid', type: 'money' },
           { key: 'credits', label: 'Credits', type: 'money' },
           { key: 'due', label: 'Still due', type: 'money' },
+          { key: 'note', label: 'Note', type: 'note' },
         ],
         settle: { label: '✓ Paid', title: 'Move this part’s Still due into Paid',
           run: (val, set) => { set('paid', val('paid') + val('due')); set('due', 0); } } },
@@ -24416,7 +24476,10 @@ const EDITORS = {
          row rather than as a line claiming it is made of nothing. */
       const parts = (v.parts || [])
         .map(p => tripPart(p))
-        .filter(p => p.label || p.merchant || p.paid || p.credits || p.due);
+        /* A note counts as something on it. Somebody who splits a line to keep
+           three booking links apart has written the only thing that part is
+           for, and dropping it would delete what they just typed. */
+        .filter(p => p.label || p.merchant || p.paid || p.credits || p.due || p.note);
       const row = parts.length
         /* THE PARENT'S FIGURES ARE THE SUM, ALWAYS. Everything that reads a
            trip — the card's footer, the year chart, Find, a share link — goes
@@ -26588,9 +26651,9 @@ function searchPlan(st, query, allowed) {
          because "Catamaran" on its own does not tell you which trip window to
          open. */
       for (const p of i.parts || [])
-        if (has(p.label) || has(p.merchant))
+        if (has(p.label) || has(p.merchant) || has(p.note))
           push({ view: 'vacations', where: `${t.name} · ${i.label} · ${p.label}`,
-                 snippet: p.merchant || '' });
+                 snippet: [p.merchant, p.note].filter(Boolean).join(' · ') });
     }
   }
   for (const [y, p] of Object.entries((st.vacations || {}).pto || {}))
