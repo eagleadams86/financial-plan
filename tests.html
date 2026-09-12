@@ -12805,24 +12805,26 @@ t('the app actually runs — every tab drawn, both budget lenses, every window o
   }
 });
 
-t('it is pinned WIDER than its own widest label', async () => {
+t('it is pinned WIDER than its own widest label, at BOTH type sizes', async () => {
   /* The one control in the row whose label changes: "☁️ Sign In to Sync" becomes
      a first name the moment Firebase reports who you are, and without a floor
      every control to its right slides sideways on every refresh.
 
-     The floor was 125px and had QUIETLY STOPPED COVERING THE LABEL: that number
-     was taken at an older font size, and the pack moved to a 16px rem ramp on
-     2026-08-22 while it stayed put. The label measures ~130px now, so the pin
-     was five short and the header slid ~5px on a narrow screen again — the exact
-     bug it exists to prevent, back without a word. Golf Handicap carried the
-     same 125 and the same fault. A magic number cannot notice the type ramp
-     changing underneath it; this can, because it MEASURES.
+     THIS TEST WAS GREEN WHILE THE BUG WAS LIVE, and that is the reason the floor
+     is now in em. It measured in a 1280px frame, where the label is 13px text;
+     `.btn.small` takes --fs-base on a coarse pointer, so on a phone the SAME
+     label is 16px text and 21px wider, and the 134px pin was fourteen short of
+     it. The header still slid ~14px on every phone refresh, under a floor
+     written to stop exactly that. No harness frame is a coarse pointer —
+     pointer media cannot be emulated from script — so the coarse size is
+     reached the way the media query reaches it: by putting --fs-base on the
+     button and measuring again. Both sizes have to fit the one floor.
 
-     IT NEEDS ITS OWN FRAME. The suite's frame is 1x1px and its sync button is
-     `display: none` — Firebase cannot run here — so every width read from it is
-     0, and `0 <= 125` passes on the very bug this is written to catch. That is
-     what the first draft of this test did. The guard below is what makes a
-     repeat impossible to miss. */
+     IT NEEDS ITS OWN FRAME, at a phone width. The suite's frame is 1x1px and its
+     sync button is `display: none` — Firebase cannot run here — so every width
+     read from it is 0, and `0 <= 134` passes on the very bug this is written to
+     catch. That is what the first draft of this test did. The guard below is
+     what makes a repeat impossible to miss. */
   const f = document.createElement('iframe');
   /* WITHOUT data-fin-tests THE APP NAVIGATES THE WHOLE PAGE AWAY. index.html
      busts out of any frame that does not carry it — the anti-clickjacking guard
@@ -12832,7 +12834,7 @@ t('it is pinned WIDER than its own widest label', async () => {
      the guard worked exactly as designed. */
   f.setAttribute('data-fin-tests', '');
   f.setAttribute('aria-hidden', 'true');
-  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:800px;border:0';
+  f.style.cssText = 'position:absolute;left:-9999px;width:375px;height:812px;border:0';
   await new Promise((resolve) => {
     f.onload = resolve;
     f.src = 'index.html?syncpin=' + Date.now();
@@ -12842,23 +12844,59 @@ t('it is pinned WIDER than its own widest label', async () => {
     const D = f.contentWindow, btn = D.document.getElementById('syncBtn');
     ok(btn, 'the header carries a sync button');
     btn.hidden = false;              // Firebase cannot run here; the row is still measurable
-    const pin = parseFloat(D.getComputedStyle(btn).minWidth);
-    ok(pin > 0, 'and it has a min-width floor at all', D.getComputedStyle(btn).minWidth);
+    const fsBase = D.getComputedStyle(D.document.documentElement)
+      .getPropertyValue('--fs-base').trim();
+    ok(/^[\d.]+(px|rem|em)$/.test(fsBase), '--fs-base is a length this test can apply', fsBase);
     /* The three labels the sync module actually writes. The signed-in one is a
        FIRST name by design, so it is the short case, not the wide one. */
-    const widths = ['☁️ Sign In to Sync', '☁️ Charlie', '⚠️ Not syncing'].map((label) => {
-      btn.textContent = label;
-      return { label, px: btn.getBoundingClientRect().width };
+    const three = ['☁️ Sign In to Sync', '☁️ Charlie', '⚠️ Not syncing'];
+    /* The two sizes the button paints at, and what they are called on screen.
+       The floor is neutralised for each measurement: with it in force the button
+       reports max(label, floor), so a label that fits reads back as the floor
+       itself and the numbers in the failure message would be fiction. */
+    const runs = [{ at: 'with a mouse', fs: '' }, { at: 'on a phone', fs: fsBase }].map(({ at, fs }) => {
+      btn.style.fontSize = fs;
+      btn.style.minWidth = '';
+      const cs = D.getComputedStyle(btn);
+      const fontPx = parseFloat(cs.fontSize), floorPx = parseFloat(cs.minWidth);
+      btn.style.minWidth = '0px';
+      const labels = three.map((label) => {
+        btn.textContent = label;
+        return { label, px: btn.getBoundingClientRect().width };
+      });
+      return { at, fontPx, floorPx, labels };
     });
-    ok(widths.every((x) => x.px > 40),
-      'the button was actually laid out and measured — a 0 here means nothing below '
-        + 'this line proves anything, which is how the first draft passed',
-      widths.map((x) => x.px.toFixed(1)).join(', '));
-    const widest = widths.reduce((a, b) => (b.px > a.px ? b : a));
-    ok(widest.px <= pin,
-      'the widest label this button ever paints has to fit inside the floor, or the row '
-        + 'moves when sign-in resolves — \u201c' + widest.label + '\u201d needs '
-        + widest.px.toFixed(2) + 'px against a ' + pin + 'px pin');
+
+    runs.forEach((r) => {
+      ok(r.floorPx > 0, 'the button has a min-width floor ' + r.at, String(r.floorPx));
+      ok(r.labels.every((x) => x.px > 40),
+        'the button was actually laid out and measured ' + r.at + ' — a 0 here means '
+          + 'nothing below this line proves anything, which is how the first draft passed',
+        r.labels.map((x) => x.px.toFixed(1)).join(', '));
+      const widest = r.labels.reduce((a, b) => (b.px > a.px ? b : a));
+      ok(widest.px <= r.floorPx,
+        'the widest label this button ever paints has to fit inside the floor, or the row '
+          + 'moves when sign-in resolves — ' + r.at + ', “' + widest.label + '” needs '
+          + widest.px.toFixed(2) + 'px against a ' + r.floorPx.toFixed(2) + 'px floor at '
+          + r.fontPx + 'px type');
+    });
+
+    /* AND THE FLOOR IS IN em — the half a pixel number cannot do. Read as
+       behaviour rather than as source text: a floor in em is measured in the
+       button's own type, so changing that type changes the floor with it. A px
+       floor would not move, and a rem floor would not move either — it answers
+       to the root, which the coarse rule does not touch. */
+    const [mouse, phone] = runs;
+    ok(phone.fontPx > mouse.fontPx,
+      'sanity: --fs-base really is the bigger of the two sizes',
+      mouse.fontPx + ' → ' + phone.fontPx);
+    ok(Math.abs(phone.floorPx / phone.fontPx - mouse.floorPx / mouse.fontPx) < 0.01,
+      'the floor has to follow the button\u2019s own type — in px or rem it stays put while '
+        + 'the coarse rule makes the label 21px wider, which is the bug this file missed',
+      mouse.floorPx + 'px at ' + mouse.fontPx + ' vs ' + phone.floorPx + 'px at ' + phone.fontPx);
+    ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+    ok(/#syncBtn \{ min-width: [\d.]+em; \}/.test(APP_SRC),
+      'and it is written in em, so the next reader is not tempted back to a number');
   } finally { f.remove(); }
 });
 
