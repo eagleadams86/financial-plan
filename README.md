@@ -724,8 +724,8 @@ one long strip.
 
 **A note written anywhere is the row's hover text**, and the row is marked with
 the same little dot wherever it is — a budget row, a person, a savings goal, a
-retirement income row, Property, What You Owe, a trip's lines and its parts, a
-donation, and the rows of a summary year. Everything that can hold a note says
+retirement income row, a holding, Property, What You Owe, a trip's lines and its
+parts, a donation, and the rows of a summary year. Everything that can hold a note says
 so the same way. Point anywhere along a dotted row and the note opens beside it, however
 many lines it runs to, and a pasted link wraps rather than running off the side. On a phone, where a hover
 bubble of any kind is a dead end, tapping the row opens the editor the note was
@@ -1180,6 +1180,11 @@ and the tables then show cost and gain, in dollars and percent, per holding
 and per pot. Holdings without a basis are honestly left out of the footer's
 sum. The same field works on the Retirement tab's holdings, since every
 holdings table is one renderer.
+
+A holding can also carry a **note**, at the bottom of its window — which lot it
+is, where the shares came from, why the price is typed by hand. The row is
+dotted and says it on hover, like every other note in the app, and Find reaches
+it wherever the holding lives.
 
 ### Everything You Hold
 

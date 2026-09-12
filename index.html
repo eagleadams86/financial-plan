@@ -4275,6 +4275,13 @@ function coerceShape(data) {
        total it reaches. */
     const cost = num(h.cost);
     if (typeof cost === 'number') h.cost = cost; else delete h.cost;
+    /* A note of its own (2026-09-12) — where the shares came from, which lot
+       they are, why the price is typed by hand. Prose, so the rule every
+       optional string in here keeps: trimmed, and absent rather than blank.
+       Only a STRING is prose, or an object out of a hand-edited backup reaches
+       the tip as "[object Object]" — tripPart's lesson, same class of fault. */
+    const note = typeof h.note === 'string' ? h.note.trim() : '';
+    if (note) h.note = note; else delete h.note;
   };
   /* A growth rate, read strictly and NOT through num(): num turns anything it
      cannot parse into 0, and a 0 rate is a real statement ("this doesn't
@@ -8870,7 +8877,11 @@ function sampleState() {
           { id: 'brokerage', name: 'Brokerage', accounts: ['long'], rows: [
             { ticker: 'VTI',  shares: 210, price: 268.4, cost: 41200, lookup: true },
             { ticker: 'VXUS', shares: 180, price: 64.2,  cost: 10800, lookup: true },
-            { ticker: 'BND',  shares: 95,  price: 72.1,  cost: 7100,  lookup: true },
+            /* A HOLDING'S NOTE in the demo, since the window grew one: the
+               kind of thing that actually gets written about a holding is
+               which lot it is or why its figures are what they are. */
+            { ticker: 'BND',  shares: 95,  price: 72.1,  cost: 7100,  lookup: true,
+              note: 'Two lots, bought 2021 and 2023 — the basis is both together.' },
           ] },
           { id: 'ben-brokerage', name: "Ben's brokerage", rows: [
             { ticker: 'VTI',  shares: 40, price: 268.4, cost: 8600, lookup: true },
@@ -13311,9 +13322,19 @@ function holdingsTable(rows, list) {
   const hasCost = rows.some(h => typeof h.cost === 'number');
   const body = rows.map((h, idx) => {
     const value = round2((h.shares || 0) * (h.price || 0));
+    /* The row's hover text: why its price is what it is, then the note. The
+       "priced by hand" words used to be a `title` on the ✎ beside the ticker —
+       which, once the row carries a tip, is the app's bubble and the browser's
+       a moment later over one row. The glyph stays as the MARK (it means
+       something the dot does not: this figure was typed, not fetched) and says
+       what it means through `aria-label` instead of a tooltip nobody on a
+       phone ever saw. */
+    const byHand = h.lookup === false ? 'Priced by hand — not looked up' : '';
     return `<tr class="editrow" data-edit="holding"
-      data-list="${esc(list)}" data-idx="${idx}"><th scope="row">${esc(h.ticker)}${
-        h.lookup === false ? ' <span class="muted" title="Priced by hand — not looked up">✎</span>' : ''}</th>
+      data-list="${esc(list)}" data-idx="${idx}"${rowTip(byHand, h.note)
+      }><th scope="row">${esc(h.ticker)}${
+        byHand ? ' <span class="muted" role="img" aria-label="Priced by hand">✎</span>' : ''
+      }${noteDot(h.note)}</th>
       <td>${h.shares ?? ''}</td><td>${h.price != null ? fmtMoney(h.price) : ''}</td>
       <td>${fmtMoney(value)}</td>${!hasCost ? '' : `
       <td>${typeof h.cost === 'number' ? fmtMoney(h.cost) : '<span class="muted">—</span>'}</td>
@@ -23265,6 +23286,11 @@ const EDITORS = {
            explains when to switch it off; two words are not worth a ragged
            row. */
         { key: 'lookup', label: 'Look its price up', type: 'check' },
+        /* LAST, so it is the bottom of the window (asked for 2026-09-12): the
+           four boxes and the three readouts are what the row IS, and a note is
+           prose about it. `noteField` is `type: 'note'`, which takes the full
+           width of the dialog wherever it lands. */
+        noteField,
       ];
     },
     /* Keeps both readouts in step as you type rather than only on open —
@@ -23314,6 +23340,7 @@ const EDITORS = {
          per-row field falls into — so the basis is carried across by hand.
          An emptied box deletes it: "never said" rather than a $0 basis. */
       if (typeof v.cost === 'number') row.cost = v.cost;
+      if (v.note) row.note = v.note;       // the same trap, one field later
       if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
       /* A ticker the plan has not seen before is looked up ON THE SPOT, and the
          six-hour cache does not apply to it: that window exists to stop the
@@ -26738,14 +26765,16 @@ function searchPlan(st, query, allowed) {
       push({ view: 'budget', where: `${a.name} — account`, snippet: '' });
   for (const pf of ((st.side || {}).portfolios || []))
     for (const h of pf.rows || [])
-      if (has(h.ticker))
-        push({ view: 'investments', where: `${h.ticker} · ${pf.name}`, snippet: '' });
+      if (has(h.ticker) || has(h.note))
+        push({ view: 'investments', where: `${h.ticker} · ${pf.name}`,
+               snippet: h.note || '' });
   for (const a of ((st.side || {}).retirementAccounts || [])) {
     if (has(a.name))
       push({ view: 'retirement', where: `${a.name} — retirement account`, snippet: '' });
     for (const h of a.rows || [])
-      if (has(h.ticker))
-        push({ view: 'retirement', where: `${h.ticker} · ${a.name}`, snippet: '' });
+      if (has(h.ticker) || has(h.note))
+        push({ view: 'retirement', where: `${h.ticker} · ${a.name}`,
+               snippet: h.note || '' });
   }
   return { hits, more: dropped };
 }

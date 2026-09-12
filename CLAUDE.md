@@ -1348,6 +1348,30 @@ suite passed while the card was wrong.
       - **The test counts the editors**, not the rows: `noteField` occurrences
         must equal the list of rows asserted to carry both `rowTip` and
         `noteDot`, so a tenth editor with a note and no dot fails the build.
+      - **AND THE COUNT ALMOST DIDN'T COUNT.** It was anchored `^ {6}noteField,$`
+        and read NINE while the file held ten: `holding`'s `fields` is a
+        FUNCTION, so its entry sits two spaces deeper, and the guard written to
+        catch a tenth editor sailed straight past the tenth editor arriving an
+        hour later. `^\s*noteField,$` now. A count is only a guard if it counts
+        the thing and not its whitespace — and the way it was caught is the
+        rule: the suite was made to FAIL on purpose (drop `holding` from the
+        list, watch it read "expected 9, got 10") before being trusted.
+    - **The holdings window got the tenth note (2026-09-12): "add a note field
+      to the bottom of the holdings window."** `noteField` LAST in its `fields`
+      function, so it is the bottom of the dialog, full width under the four
+      boxes and three readouts. Three things it had to touch beyond the spec:
+      `save` REBUILDS the row from scratch — the retAcct trap the cost basis
+      comment already warns about — so the note is carried across by hand;
+      `numHolding` trims it at the boundary (a string or nothing, and only a
+      string, or an object from a hand-edited backup reaches the tip as
+      "[object Object]"); and Find reaches it in BOTH places a holding lives, a
+      portfolio and a retirement account, with the note as the snippet.
+      - **The ✎ beside a hand-priced ticker stopped being a `title`.** Once the
+        row carries a tip, a title inside it is the app's bubble and the
+        browser's a moment later over one row. The glyph stays — it marks
+        something the dot does not, a price that was typed rather than fetched —
+        and says so through `aria-label`, while its words ("Priced by hand — not
+        looked up") became the row tip's hint above the note.
   - **The tip's zone is `#views`, wired once**, rather than a class on the grid's
     scrollport and the month view's wrapper. Five more tables across four tabs
     carry a `data-tip` now, and a per-card class is a thing every table written
