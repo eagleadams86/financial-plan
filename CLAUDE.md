@@ -540,9 +540,9 @@ family names as well as balances.
   All of the above is pinned in the `Sample data` test group, which measures
   `sampleState()` itself rather than a copy that could drift. **A NOTE ON EACH
   KIND OF ROW THAT CAN HOLD ONE** was the rule's last gap, closed 2026-09-12: the
-  sample annotated a budget cell, a property, a debt and a donation, so the 📝
-  marker and its tooltip were live on Household and Giving and invisible on
-  Vacations and in a summary year — the trip line being the very row the tooltip
+  sample annotated a budget cell, a property, a debt and a donation, so the row
+  hover text was live on Household and Giving and there was nothing to find on
+  Vacations or in a summary year — the trip line being the very row the tooltip
   was asked for. A trip line and the `Holiday club` summary row carry one now.
 - **`normalizeIds()` runs first inside `coerceShape`, and every id comes out
   matching `/^[A-Za-z0-9_-]{1,64}$/`** — the family rule Sprint Predictability,
@@ -1263,38 +1263,51 @@ suite passed while the card was wrong.
       six that nothing on screen was carrying. It is now a clause in the Bonuses
       card's paragraph. **A caveat on a total belongs in the open** — a total
       that leaves something out should admit it without being asked.
-  - **The 📝 note markers joined the app's own tip on 2026-09-12** (asked for in
-    those words: "let's add tooltips for these notes"). Five tables draw one —
-    the summary card, Property, What You Owe, a trip's lines and a year of
-    donations — and each handed its words to a native title, which is the quiet
-    half of the problem in its purest form: the marker is a 15px emoji, so the
-    bubble needed the pointer to land inside it, and a `.tablewrap` scrolled
-    sideways under a parked cursor dropped it silently. `noteMark(note)` is the
-    one place a marker is built now, and it writes THREE things: the 📝, the
-    `data-tip`, and an EMPTY `title`. The empty one is not decoration — every
-    one of those rows sits in a `<tr>` whose own title says "Click to edit", a
-    native title is inherited from an ancestor, and without it the app's bubble
-    and the row's would both come up over one row. Property's and What You Owe's
-    row titles stopped appending the note for the same reason; they were the two
-    that did.
-    - **A bare emoji is not a label.** The `title` was also the only thing a
-      screen reader had to go on, so the marker is `role="img"` with
-      `aria-label="Has a note"` now — SHORT on purpose: a `<th scope="row">`'s
-      name is announced again against every cell in its row, so the note's prose
-      belongs in the editor it was written in rather than repeated six times
-      across a table. Without it the row heading read "The flat in Leeds memo".
-    - **Nothing changed for a phone, deliberately.** The marker sits inside a
-      `[data-edit]` row, so `tipOpensEditor` still suppresses a tapped tip and
-      the row editor answers — it holds the note in a box that can be read
-      without holding a finger still.
-    - **A note on a row with NO marker still belongs in a title**: a budget row
-      label, a goal card, a person. There the title is the second way to words
-      the editor holds, which is exactly what the 2026-08-26 audit allows — so
-      the test reads the two rows that changed rather than grepping the file for
-      `.note` in a title.
-    - The sample plan gained a **trip-line note and a summary-row note** at the
-      same time. The tab this was asked about drew no marker at all in the demo,
-      and a feature the demo cannot reach is one nobody finds.
+  - **A ROW'S NOTE IS THE ROW'S HOVER TEXT** (2026-09-12, in two passes on the
+    same day). Five tables hold a note against a row — the summary card,
+    Property, What You Owe, a trip's lines, a year of donations — and each drew
+    a 📝 beside the name with the words hung on it. The first pass moved those
+    words off a native `title` and onto the app's own tip, which fixed the two
+    things a title gets wrong here (nothing at all on a phone; gone when a
+    `.tablewrap` scrolls sideways under a parked cursor) and left the marker
+    as the hover TARGET. That was the remaining fault, and Charles named it:
+    *"remove the icon and trigger the tooltip off the whole row like in other
+    places."* A 15px emoji is a hard thing to point at, and every other hover
+    in this app is a whole cell or a whole line — a grid cell, a month row, a
+    balance. So the marker is **gone**, and `rowTip(hint, note)` builds the
+    row's `data-tip`: the hint is what the row's title used to say ("Click to
+    edit", plus the currency a foreign row reads in), the note is a block of its
+    own under it with a blank line between, and a row with nothing to say gets
+    no attribute at all. It returns the WHOLE attribute for that last reason.
+    - **A row with a tip must not also carry a `title`** — two bubbles over one
+      line, a moment apart. That took the native titles off all five rows, and
+      off **What You Owe's balance cell**, which is the one cell inside a tipped
+      row with something of its own to say ("Stated $X in Jan 2026, paid down to
+      here"): it is `rowTip(balTitle, l.note)` now, repeating the note so the
+      note reads everywhere along the row rather than everywhere but there.
+      A title is still right on a row with NO tip — a goal card, a person, a
+      budget row label — which is what the 2026-08-26 audit allows, so the test
+      reads the rows that changed rather than grepping the file for `.note`.
+    - **A note is often a pasted URL, and a URL is one unbreakable word several
+      hundred pixels long.** `#gridTip` had `max-width` and nothing else, so an
+      Airbnb share link was drawn straight out of the right-hand side of the
+      bubble and the rest of it was simply missing (reported with a screenshot,
+      same day). `overflow-wrap: anywhere`, which is what the gathered notes box
+      already uses on the same text — `.notelist li > .note-text`.
+    - **Nothing changed for a phone, deliberately.** The row is a `[data-edit]`
+      row, so `tipOpensEditor` still suppresses a tapped tip and the editor
+      answers — it holds the note in a box that can be read without holding a
+      finger still.
+    - **What the icon was carrying, nothing carries now**: with no marker,
+      nothing on screen says WHICH rows have a note, and a screen reader is told
+      nothing either (the emoji had `role="img"` + a short `aria-label` for the
+      few hours it existed). That is the trade the instruction made — the rows
+      read clean, and a note is found by hovering a row or opening it. Raised
+      with Charles rather than quietly re-added; if it ever needs marking again,
+      mark it on the ROW (a rule, a tint) and not with a target to hit.
+    - The sample plan gained a **trip-line note and a summary-row note**. The tab
+      this was asked about had no hover text to find in the demo at all, and a
+      feature the demo cannot reach is one nobody finds.
   - **The tip's zone is `#views`, wired once**, rather than a class on the grid's
     scrollport and the month view's wrapper. Five more tables across four tabs
     carry a `data-tip` now, and a per-card class is a thing every table written
@@ -1303,8 +1316,8 @@ suite passed while the card was wrong.
     inner `.tablewrap` reaches the panel only on the way down; and the listeners
     are guarded by `#views.dataset.tipwired`, because the panel outlives the
     render that draws into it. `wireGridTip()` moved from `wireBudget` to
-    `wireView` with it — every tab passes through there, and the markers are on
-    four of them.
+    `wireView` with it — every tab passes through there, and the noted rows are
+    on four of them.
   - `tipOpensEditor` widened to `[data-edit], [data-add]` at the same time. Now
     that a `data-tip` can sit on a row label, the rule has to cover every way a
     row opens an editor, not just the budget grid's three: a tip pinned under a

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1044;
+const EXPECTED = 1045;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -12652,54 +12652,63 @@ t('a heading with a dot beside it does not carry a title as well', () => {
    a desktop a title needs the pointer to cross INTO a 15px emoji, so a table
    scrolled sideways under a parked cursor showed nothing. They carry `data-tip`
    now and the app draws it. */
-group('The note marker');
-t('every marker is built by one helper, and it hands the note to data-tip', () => {
+group('A row’s note');
+t('one helper builds a row’s hover text, and the note is a block of its own', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
-  const m = APP_SRC.match(/function noteMark\(note\) \{[\s\S]*?\n\}/);
-  ok(!!m, 'noteMark is still the one place a 📝 is built');
+  const m = APP_SRC.match(/function rowTip\(hint, note\) \{[\s\S]*?\n\}/);
+  ok(!!m, 'rowTip is still the one place a row’s tip is built');
   const body = m ? m[0] : '';
-  ok(/data-tip="\$\{esc\(note\)\}"/.test(body),
-     'the note reaches the page as an escaped data-tip, which the app draws');
-  ok(/title=""/.test(body),
-     'and with an EMPTY title: every one of these rows sits in a <tr> whose own title '
-     + 'says "Click to edit", and a native title is inherited from an ancestor — without '
-     + 'this, pointing at the marker would raise the app’s bubble and then the row’s');
-  /* The title was also the only thing a screen reader had: with an empty one and
-     no name of its own the marker reads as "memo" inside the row's heading.
-     Short, because a row heading is announced again against every cell in its
-     row — the prose stays in the editor the note was written in. */
-  ok(/role="img" aria-label="Has a note"/.test(body),
-     'the emoji is an image with a short text alternative, not a bare 📝');
-  ok(!/aria-label="\$\{esc\(note\)/.test(body),
-     'and NOT the note itself, which every cell in the row would be announced against');
-  /* FIVE call sites, and a table that hand-rolls its own marker is the drift
-     this counts — the compliance-is-not-greppable rule, applied to the one
-     pattern a new table is most likely to copy from an old one. */
-  const calls = (APP_SRC.match(/noteMark\(/g) || []).length;
-  ok(calls >= 6, 'the helper plus its five call sites', calls);
-  ok(!/title="\$\{esc\((?:i|p|l)\.note\)\}"/.test(APP_SRC),
-     'and no table hands a note to a native title of its own any more');
+  ok(/data-tip="\$\{esc\(text\)\}"/.test(body),
+     'it hands the words to an escaped data-tip — never a title, which a phone never '
+     + 'shows and which dies when a table scrolls sideways under a parked cursor');
+  ok(/join\('\\n\\n'\)/.test(body),
+     'the note is a block under the hint rather than a clause after it, which is '
+     + 'cellTip’s shape: the figure first, then what somebody wrote about it');
+  ok(/return text \? /.test(body),
+     'and a row with nothing to say carries no attribute at all');
+  /* Five tables, one helper. A table that hand-rolls a note into its own title
+     is the drift this counts — the compliance-is-not-greppable rule, applied to
+     the pattern a new table is most likely to copy from an old one. */
+  const calls = (APP_SRC.match(/rowTip\(/g) || []).length;
+  ok(calls >= 7, 'the helper, its five rows and the balance cell', calls);
+  ok(!/📝/.test(APP_SRC.replace(/^[\s\S]*?function rowTip/, '')),
+     'and no table draws a 📝 any more: the marker was a 15px hover target, and the '
+     + 'row is the target now (asked for 2026-09-12)');
 });
-t('a row that carries the marker does not say the note twice', () => {
+t('no row that carries a tip also carries a native title', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
-  /* Read off the two rows themselves, not the whole file: a note appended to a
-     row title is still RIGHT on the rows that draw no marker — a goal card, a
-     person, a budget row — where the title is the second way to words the
-     editor holds. It is wrong only where the marker is now saying them. */
-  for (const kind of ['property', 'liability']) {
-    const at = APP_SRC.indexOf(`data-edit="${kind}" data-idx=`);
-    ok(at > 0, `${kind} still draws a row with an index`);
-    const head = APP_SRC.slice(at, APP_SRC.indexOf('<th scope="row">', at));
-    ok(!/\.note/.test(head),
-       `the ${kind} row's own title must not repeat the note the 📝 beside the name `
-       + 'now carries — two bubbles over one row is what the marker exists to avoid',
-       head.replace(/\s+/g, ' ').slice(0, 160));
+  /* Two bubbles over one row, a moment apart, is what this stops. Read off the
+     rows themselves: a native title is still RIGHT on a row with no tip — a
+     goal card, a person, a budget row label — where it is the second way to
+     words the editor holds, which is what the 2026-08-26 audit allows. */
+  for (const kind of ['property', 'liability', 'donation', 'tripItem']) {
+    const at = APP_SRC.indexOf(`data-edit="${kind}"`);
+    ok(at > 0, `${kind} still draws a row`);
+    const head = APP_SRC.slice(at, at + 400);
+    const row = head.slice(0, head.indexOf('>') + 1);
+    ok(!/\btitle="/.test(row), `the ${kind} row must not carry a title beside its tip`,
+       row.replace(/\s+/g, ' ').slice(0, 160));
   }
+  /* The balance cell is the one CELL inside a tipped row that has something of
+     its own to say, and it said it in a title until the row got a tip. */
+  ok(/<td\$\{rowTip\(balTitle, l\.note\)\}/.test(APP_SRC),
+     'What You Owe’s balance cell is a tip too, and it repeats the row’s note so the '
+     + 'note reads everywhere along the row rather than everywhere but there');
+});
+t('a pasted URL wraps inside the tip instead of running off the side', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const css = stripHtmlComments(APP_SRC).match(/#gridTip \{[^}]*\}/);
+  ok(!!css, 'the tip still declares itself');
+  ok(/overflow-wrap: anywhere/.test(css ? css[0] : ''),
+     'a note is often a pasted link, and a URL is one unbreakable word several hundred '
+     + 'pixels long: with max-width alone the rest of it was drawn outside the bubble');
+  ok(/white-space: pre-line/.test(css ? css[0] : ''),
+     'and the blank line between a hint and its note still renders as one');
 });
 t('the tip zone is the whole panel, wired once, and every view wires it', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   ok(/const wrap = box \|\| F\('views'\);/.test(APP_SRC),
-     'the zone is #views — the markers sit on four tabs, and a class marked per card '
+     'the zone is #views — the noted rows sit on four tabs, and a class marked per card '
      + 'would have to be remembered by every table written after this one');
   ok(/wrap\.dataset\.tipwired/.test(APP_SRC),
      '#views outlives the render that draws into it, so the listeners are hung once');
@@ -12710,31 +12719,32 @@ t('the tip zone is the whole panel, wired once, and every view wires it', () => 
   ok(/wireGridTip\(\);\n  if \(view === 'budget'\) wireBudget\(\);/.test(APP_SRC),
      'wireView wires it for every tab, not wireBudget for one');
 });
-const NOTE_ROW = '<div class="editrow" data-edit="property" data-idx="0"'
-  + ' title="Click to edit">The flat in Leeds'
-  + ' <span class="muted notetip" title="" data-tip="Rented out.">📝</span></div>';
-t('a pointer over the marker raises the note; a finger opens the row instead', () => {
-  const box = tipProbe(w, NOTE_ROW);
+const NOTED_ROW = '<div class="editrow" data-edit="property" data-idx="0"'
+  + ' data-tip="Click to edit\n\nRented out.">The flat in Leeds</div>';
+t('a pointer anywhere on the row raises the note; a finger opens the row instead', () => {
+  const box = tipProbe(w, NOTED_ROW);
   const tip = w.document.getElementById('gridTip');
   try {
-    const mark = box.querySelector('.notetip'), r = mark.getBoundingClientRect();
-    mark.dispatchEvent(new w.PointerEvent('pointermove', { bubbles: true, cancelable: true,
+    const row = box.querySelector('.editrow'), r = row.getBoundingClientRect();
+    /* The far END of the row, not the name: the whole line is the target now,
+       which is the half of this a source scan cannot show. */
+    row.dispatchEvent(new w.PointerEvent('pointermove', { bubbles: true, cancelable: true,
       composed: true, pointerType: 'mouse', pointerId: 7, isPrimary: true,
-      clientX: Math.round(r.left + 2), clientY: Math.round(r.top + 2) }));
+      clientX: Math.round(r.right - 2), clientY: Math.round(r.top + 2) }));
     eq(tip.hidden, false, 'the note is up');
-    eq(tip.textContent, 'Rented out.');
+    eq(tip.textContent, 'Click to edit\n\nRented out.');
     /* And a TAP shows nothing, which is the same rule the grid's cells keep: the
-       marker sits in a row that opens an editor, and the editor holds the note
-       in a box you can read without holding a finger still. */
-    tapWithFinger(w, mark);
+       row opens an editor, and the editor holds the note in a box you can read
+       without holding a finger still. */
+    tapWithFinger(w, row);
     eq(tip.hidden, true, 'a tap leaves it to the row editor');
-    eq(w.__finTestHooks.tipOpensEditor(mark), true);
+    eq(w.__finTestHooks.tipOpensEditor(row), true);
   } finally { tipTeardown(w, box); }
 });
 t('the sample shows a note off the budget: a trip line and a summary row', () => {
-  /* The demo is where the marker is MET, and the sample carried notes on
-     Property, What You Owe and a donation only — so the tab this was asked for
-     (a trip's lines) drew no 📝 at all. See the sample-is-the-demo rule. */
+  /* The demo is where a row note is MET, and the sample carried one on Property,
+     What You Owe and a donation only — so the tab this was asked for (a trip's
+     lines) had no hover text to find. See the sample-is-the-demo rule. */
   const d = H.migrate(H.coerceShape(H.sampleState()));
   const noted = d.vacations.trips
     .flatMap(t => t.items).filter(i => typeof i.note === 'string' && i.note.trim());
