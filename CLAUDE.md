@@ -1366,6 +1366,29 @@ suite passed while the card was wrong.
       string, or an object from a hand-edited backup reaches the tip as
       "[object Object]"); and Find reaches it in BOTH places a holding lives, a
       portfolio and a retirement account, with the note as the snippet.
+      - **A MARK BESIDE A NAME MUST WIDEN ITS COLUMN, NEVER GROW ITS ROW**
+        (reported with a screenshot the same day: "fix this double line issue").
+        A hand-priced `Cash` holding's name cell carries up to THREE marks — the
+        ✎ for a typed price, the note dot, and the edit pencil that appears on
+        hover — and at 83px of ticker column a four-letter name plus three of
+        them does not fit. The browser broke the line instead of widening the
+        column: 35px → 63px, with a lone ✎ sitting under the ticker.
+        Three separate break opportunities had to go, and only the third
+        actually settled it: the hover pencil's `content: ' ✎'` became
+        `'\00a0✎'`, `noteDot` lost its leading space and gained a word joiner
+        (`\u2060`), and — the one that worked — `.tablewrap th.tick` is
+        `white-space: nowrap`, because **min-content sizing treats an
+        inline-block as breakable however many word joiners sit in front of
+        it**. A ticker is an identifier, not prose, and that table already
+        scrolls inside its wrap; the trip card is the opposite case and its item
+        names must keep wrapping.
+      - **The test for it had to be made to fail twice.** The first version
+        measured the row in the suite's 1280px frame — where the cards are wide,
+        the marks fit, and the BROKEN code passed. So did 760px. A layout fault
+        needs its squeeze stated rather than hoped for: the test pinches
+        `.tablewrap` to 300px, then asserts the row is the same height with the
+        marks as without them — and on the unfixed CSS it reads "expected 40,
+        got 63", which are the numbers off the screenshot.
       - **The ✎ beside a hand-priced ticker stopped being a `title`.** Once the
         row carries a tip, a title inside it is the app's bubble and the
         browser's a moment later over one row. The glyph stays — it marks

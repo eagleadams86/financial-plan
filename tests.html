@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1053;
+const EXPECTED = 1054;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -12789,9 +12789,14 @@ t('a noted row carries the family’s dot, and the same declaration draws it', (
      one of these rows is a `tr.editrow`, whose `th:first-child::after` is
      already the hover pencil at opacity 0. A dot written there is generated,
      reports 5px of --accent to getComputedStyle, and paints nothing. */
-  ok(/tr\.editrow > th:first-child::after, tr\.editrow > td:first-child::after \{\n?\s*content: ' ✎'/
+  ok(/tr\.editrow > th:first-child::after, tr\.editrow > td:first-child::after \{\n?\s*content: '\\00a0✎'/
      .test(css),
      'the pencil still owns the name cell’s ::after, which is why the dot is a span');
+  ok(/\\u2060<span class="notedot"/.test(APP_SRC),
+     'the dot is glued to the name with a word joiner and no space — a space there is '
+     + 'one more place a name cell can break');
+  ok(/content: '\\00a0✎'/.test(stripHtmlComments(APP_SRC)),
+     'and the hover pencil hangs off a NON-breaking space for the same reason');
   ok(/<span class="notedot" aria-hidden="true">/.test(APP_SRC),
      'and the dot is that span — aria-hidden, because it restates what the row’s own '
      + 'tip and editor already say in words');
@@ -13600,6 +13605,78 @@ t('the month page reads a note written about the ROW, not only about a month', a
          'and is dotted: the dot answers for either note here, since the line IS the '
          + 'row on this page');
     }
+  } finally { f.remove(); }
+});
+t('the marks beside a ticker take WIDTH, never a second line', async () => {
+  /* Reported 2026-09-12 with a screenshot: a hand-priced `Cash` holding whose
+     name cell carried three marks — the ✎ that says the price was typed, the
+     note dot, and the edit pencil that appears on hover — went from 35px to
+     63px tall, with a lone ✎ sitting under the ticker. The column would not
+     grow: min-content sizing treats an inline-block as breakable however many
+     word joiners sit in front of it, and `.tablewrap`'s table was already
+     scrolling. `white-space: nowrap` on the ticker cell is the fix, and THIS is
+     the shape of test that catches it — hide the marks and the row must not
+     change height. A CSS scan would pass the broken version. */
+  /* A NARROW frame, and that is the whole point: measured in the suite's usual
+     1280px window the retirement cards are wide, the marks fit, and the broken
+     version passes. (Proved — it did.) The fault needs the squeeze it was
+     reported in: four cards across a laptop, a ticker column of ~83px. */
+  const { f, W, D } = await auditFrame(760, 900, 'tickerwrap');
+  try {
+    D.getElementById('tab-retirement').click();
+    await new Promise((r) => setTimeout(r, 150));
+    /* Built through the editor, because the sample deliberately carries no
+       hand-priced row: adding one to it would move the retirement balances
+       every other test reads. */
+    const add = D.querySelector('[data-add="holding"]');
+    ok(!!add, 'a holdings card still offers ＋ Add Holding');
+    add.click();
+    await new Promise((r) => setTimeout(r, 150));
+    const set = (key, val) => {
+      const el = D.getElementById(`rf-${key}`);
+      el.value = val;
+      el.dispatchEvent(new W.Event('input'));
+      el.dispatchEvent(new W.Event('change', { bubbles: true }));
+    };
+    set('ticker', 'Cash');
+    set('shares', '4.42');
+    set('price', '1');
+    set('note', 'The sweep balance — not a security.');
+    const look = D.getElementById('rf-lookup');
+    look.checked = false;
+    look.dispatchEvent(new W.Event('change', { bubbles: true }));
+    D.getElementById('rowSaveBtn').click();
+    await new Promise((r) => setTimeout(r, 200));
+
+    const row = [...D.querySelectorAll('tr[data-edit="holding"]')]
+      .find((tr) => /Cash/.test(tr.textContent));
+    ok(!!row, 'the row is on the card');
+    const th = row.querySelector('th');
+    ok(!!th.querySelector('.notedot'), 'with its note dot');
+    ok(/✎/.test(th.textContent), 'and the hand-priced mark');
+    eq(W.getComputedStyle(th).whiteSpace, 'nowrap',
+       'a ticker is an identifier, not prose — its cell is one line');
+    /* THE MEASUREMENT, under a squeeze the test states rather than hopes for: a
+       viewport narrow enough to reproduce this by itself does not exist at
+       every layout breakpoint, and both 1280px and 760px frames passed the
+       BROKEN version. So the condition is written down — a table pinched to
+       300px, which is a card in a four-across row — and then hiding the two
+       marks must not change the row's height. If either can wrap, it does. */
+    const height = () => Math.round(row.getBoundingClientRect().height);
+    const squeeze = D.createElement('style');
+    squeeze.textContent = '.tablewrap { max-width: 300px }';
+    D.head.appendChild(squeeze);
+    const withMarks = height();
+    const probe = D.createElement('style');
+    probe.textContent = '.notedot { display: none !important }'
+      + ' tr.editrow > th:first-child::after { content: none !important }';
+    D.head.appendChild(probe);
+    const without = height();
+    probe.remove();
+    squeeze.remove();
+    eq(withMarks, without,
+       'the row is the same height with the marks as without them — 63px against '
+       + '40px was the bug', `${withMarks} vs ${without}`);
   } finally { f.remove(); }
 });
 t('every noted row’s dot is really painted, and it is the grid’s own dot', async () => {
