@@ -1298,13 +1298,25 @@ suite passed while the card was wrong.
       row, so `tipOpensEditor` still suppresses a tapped tip and the editor
       answers — it holds the note in a box that can be read without holding a
       finger still.
-    - **What the icon was carrying, nothing carries now**: with no marker,
-      nothing on screen says WHICH rows have a note, and a screen reader is told
-      nothing either (the emoji had `role="img"` + a short `aria-label` for the
-      few hours it existed). That is the trade the instruction made — the rows
-      read clean, and a note is found by hovering a row or opening it. Raised
-      with Charles rather than quietly re-added; if it ever needs marking again,
-      mark it on the ROW (a rule, a tint) and not with a target to hit.
+    - **THE MARK CAME BACK AS THE FAMILY'S NOTE DOT, an hour later.** Taking the
+      icon out took the only thing on screen that said WHICH rows are annotated,
+      which was flagged at the time and then asked for: *"mark the rows that
+      have notes with the same little dot as the budget rows."* So `noteDot(note)`
+      writes a 5px `.notedot` span after the row's name, out of **one
+      declaration** shared with the month page's row dot — same size, same
+      `--accent`, so it is the same dot and not a second one that matches today.
+      It is `aria-hidden`: a restatement of what the row's own tip and editor
+      already say in words. `rowTip` and `noteDot` are one decision, and there
+      is a test that every noted row asks for both.
+      - **IT HAS TO BE AN ELEMENT, and that cost an hour.** Written the obvious
+        way — `tr.noted > th[scope="row"]::after` — it is GENERATED, reports
+        5px of `--accent` to `getComputedStyle`, and paints nothing: every one
+        of these rows is a `tr.editrow`, whose name cell already spends its
+        `::after` on the hover pencil at `opacity: 0`. Nothing in the cascade
+        reads as wrong, and a 14px yellow probe square refused to appear
+        either. The suite now checks the dot's **opacity**, not just its
+        existence, and compares it against the grid's dot rather than against a
+        literal — a scan of the CSS would have passed the broken version.
     - The sample plan gained a **trip-line note and a summary-row note**. The tab
       this was asked about had no hover text to find in the demo at all, and a
       feature the demo cannot reach is one nobody finds.

@@ -718,16 +718,18 @@ year you haven't annotated. Notes are grouped by month and laid out across the
 width of the card, so a year's worth reads at a glance instead of running down
 one long strip.
 
-**A note written anywhere else is the row's hover text** — on Property, What You
-Owe, a trip's lines, a donation, and the rows of a summary year. Point anywhere
-along the row and the note opens beside it, however many lines it runs to, and a
-pasted link wraps rather than running off the side. On a phone, where a hover
+**A note written anywhere else is the row's hover text**, and the row is marked
+with the same little dot the budget's noted cells and rows carry — on Property,
+What You Owe, a trip's lines and its parts, a donation, and the rows of a summary
+year. Point anywhere along a dotted row and the note opens beside it, however
+many lines it runs to, and a pasted link wraps rather than running off the side. On a phone, where a hover
 bubble of any kind is a dead end, tapping the row opens the editor the note was
 written in. (Both of those were fixed on 2026-09-12. The note used to hang off a
 small 📝 beside the name, as the browser's own hover text: a phone never shows
 one at all, a table scrolled sideways under a parked cursor dropped it without a
-sound, and the marker was a 15px thing to aim at. Nothing marks a noted row now
-— the row is simply the target, the way a budget cell is.)
+sound, and the marker was a 15px thing to aim at. The dot replaced it the same
+day: it says a note is there, and the whole row is what you point at — the way a
+budget cell works.)
 
 ### Entered Months and Finished Years
 

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1049;
+const EXPECTED = 1051;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -12706,9 +12706,10 @@ t('one helper builds a row’s hover text, and the note is a block of its own', 
      the pattern a new table is most likely to copy from an old one. */
   const calls = (APP_SRC.match(/rowTip\(/g) || []).length;
   ok(calls >= 7, 'the helper, its five rows and the balance cell', calls);
-  ok(!/📝/.test(APP_SRC.replace(/^[\s\S]*?function rowTip/, '')),
+  ok(!/>📝</.test(APP_SRC),
      'and no table draws a 📝 any more: the marker was a 15px hover target, and the '
-     + 'row is the target now (asked for 2026-09-12)');
+     + 'row is the target now (asked for 2026-09-12). Read as MARKUP, not as the '
+     + 'character — the dot that replaced it says so in its own comment');
 });
 t('no row that carries a tip also carries a native title', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
@@ -12770,6 +12771,43 @@ t('two wide trip cards and their seam are exactly the row', () => {
      + '820 was raised to fix in the first place');
   ok(/flex: 0 0 auto/.test(body),
      'still a cap and not a width: a sparse trip is as narrow as its own table');
+});
+t('a noted row carries the family’s dot, and the same declaration draws it', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const css = stripHtmlComments(APP_SRC);
+  /* ONE declaration for the month page's row dot and every table row's, which
+     is what makes it the same dot rather than a second one that matches today. */
+  ok(/\.mrow\.noted \.mname::after, \.notedot \{ display: inline-block;/.test(css),
+     'the month page’s dot and .notedot come out of one rule');
+  const rule = css.match(/\.mrow\.noted \.mname::after, \.notedot \{[^}]*\}/);
+  const body = rule ? rule[0] : '';
+  for (const decl of ['width: 5px', 'height: 5px', 'border-radius: 50%',
+                      'background: var(--accent)', 'margin-left: 6px'])
+    ok(body.includes(decl), `the dot keeps ${decl} — the grid's dot, to the token`, body);
+  /* AN ELEMENT, not an `::after` on the name cell, and this is the trap: every
+     one of these rows is a `tr.editrow`, whose `th:first-child::after` is
+     already the hover pencil at opacity 0. A dot written there is generated,
+     reports 5px of --accent to getComputedStyle, and paints nothing. */
+  ok(/tr\.editrow > th:first-child::after, tr\.editrow > td:first-child::after \{\n?\s*content: ' ✎'/
+     .test(css),
+     'the pencil still owns the name cell’s ::after, which is why the dot is a span');
+  ok(/<span class="notedot" aria-hidden="true">/.test(APP_SRC),
+     'and the dot is that span — aria-hidden, because it restates what the row’s own '
+     + 'tip and editor already say in words');
+  /* The tip and the dot are one decision: every row that can hold a note asks
+     for both, in the same expression. */
+  const pairs = [['sumrow', 'i.note'], ['property', 'p.note'], ['liability', 'l.note'],
+                 ['tripItem', 'i.note'], ['donation', 'i.note']];
+  for (const [kind, key] of pairs) {
+    const at = APP_SRC.indexOf(`data-edit="${kind}"`);
+    ok(at > 0, `${kind} still draws a row`);
+    /* To the END of the row, not a fixed window: the donation row's name cell
+       sits behind a comment longer than any guess. */
+    const block = APP_SRC.slice(Math.max(0, at - 400), at + 2400);
+    ok(block.includes(`rowTip(`) && block.includes(`noteDot(${key})`),
+       `the ${kind} row asks for both the tip and the dot — a marked row nobody can `
+       + 'hover, or hover text nothing points at, is half a feature');
+  }
 });
 t('a pasted URL wraps inside the tip instead of running off the side', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
@@ -13469,6 +13507,56 @@ t('the trip line editor splits, adds, settles and comes back — and keeps every
     ok(cardLine().includes(money(1100)), 'with the figures the parts arrived at',
       cardLine().join(' | '));
     eq(D.getElementById('rf-paid').disabled, false, 'and the box is yours again');
+  } finally { f.remove(); }
+});
+t('every noted row’s dot is really painted, and it is the grid’s own dot', async () => {
+  /* The bug this exists for: the first cut hung the dot off the row-name cell's
+     `::after`, which `tr.editrow` already spends on the hover pencil at
+     `opacity: 0`. Chrome generated it, getComputedStyle reported 5px of
+     --accent, and nothing appeared on screen — a 14px yellow probe square
+     refused to appear either. Nothing but a paint check catches that. */
+  const f = await tripFrame('notedot');
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {}; W.confirm = () => true; W.alert = () => {};
+    W.loadSample();
+    const dotsOn = (tab) => {
+      D.getElementById('tab-' + tab).click();
+      return [...D.querySelectorAll('#views .notedot')];
+    };
+    for (const [tab, least] of [['household', 5], ['vacations', 3], ['giving', 2]]) {
+      const dots = dotsOn(tab);
+      ok(dots.length >= least, `${tab} marks its noted rows`, dots.length);
+      for (const d of dots) {
+        const s = W.getComputedStyle(d);
+        eq(s.opacity, '1', `a dot at zero opacity is a dot nobody sees (${tab})`);
+        eq(s.width, '5px', `${tab}: 5px wide`);
+        eq(s.height, '5px', `${tab}: 5px tall`);
+        ok(/^#|rgb/.test(s.backgroundColor) && s.backgroundColor !== 'rgba(0, 0, 0, 0)',
+           `${tab}: and it has a colour`, s.backgroundColor);
+        /* Beside the WORDS, the way the month page reads: inside the row's own
+           name cell, after the name. */
+        ok(!!d.closest('th[scope="row"], .rowline > span'),
+           `${tab}: the dot sits in the row’s name cell`);
+      }
+    }
+    /* THE SAME DOT AS THE BUDGET'S, read off both at once rather than asserted
+       twice against a literal. */
+    D.getElementById('tab-budget').click();
+    const live = [...D.querySelectorAll('.yearstrip [data-year]')].pop();
+    if (live) live.click();
+    const cell = D.querySelector('.grid td.noted');
+    ok(!!cell, 'the sample still annotates a budget cell');
+    /* READ AND COPIED NOW. A CSSStyleDeclaration is live, and the next tab click
+       rewrites #views — so a value read off it afterwards comes back as an empty
+       string from a detached cell, which reads exactly like a broken dot. */
+    const g = W.getComputedStyle(cell, '::after');
+    const grid = { w: g.width, bg: g.backgroundColor, r: g.borderRadius };
+    ok(grid.w === '5px', 'the grid’s own dot is still 5px', grid.w);
+    const dot = W.getComputedStyle(dotsOn('household')[0]);
+    eq(dot.width, grid.w, 'the row dot is the grid dot’s size');
+    eq(dot.backgroundColor, grid.bg, 'and its colour, from the same token');
+    eq(dot.borderRadius, grid.r, 'and as round');
   } finally { f.remove(); }
 });
 t('a split of one is drawn only when it says something its line does not', async () => {
