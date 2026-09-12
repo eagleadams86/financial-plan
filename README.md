@@ -711,6 +711,10 @@ quarterly bill re-phased onto the note month, and every balance after it moved.)
 
 ### Notes
 
+A note on a budget **row** — as opposed to one of its months — reads in both
+lenses: on the row's name in the year grid, and on that row's line on the month
+page, which has no row name of its own.
+
 **Every note you've written anywhere in a year is gathered into a box of its
 own under the budget** — cells, split parts, balances and rows — each one
 clickable to jump back to what it was about. The box isn't there at all in a
@@ -718,10 +722,11 @@ year you haven't annotated. Notes are grouped by month and laid out across the
 width of the card, so a year's worth reads at a glance instead of running down
 one long strip.
 
-**A note written anywhere else is the row's hover text**, and the row is marked
-with the same little dot the budget's noted cells and rows carry — on Property,
-What You Owe, a trip's lines and its parts, a donation, and the rows of a summary
-year. Point anywhere along a dotted row and the note opens beside it, however
+**A note written anywhere is the row's hover text**, and the row is marked with
+the same little dot wherever it is — a budget row, a person, a savings goal, a
+retirement income row, Property, What You Owe, a trip's lines and its parts, a
+donation, and the rows of a summary year. Everything that can hold a note says
+so the same way. Point anywhere along a dotted row and the note opens beside it, however
 many lines it runs to, and a pasted link wraps rather than running off the side. On a phone, where a hover
 bubble of any kind is a dead end, tapping the row opens the editor the note was
 written in. (Both of those were fixed on 2026-09-12. The note used to hang off a

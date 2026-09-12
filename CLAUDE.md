@@ -1320,6 +1320,34 @@ suite passed while the card was wrong.
     - The sample plan gained a **trip-line note and a summary-row note**. The tab
       this was asked about had no hover text to find in the demo at all, and a
       feature the demo cannot reach is one nobody finds.
+    - **THEN EVERYWHERE, audited (2026-09-12): "add the dot and tooltip
+      everywhere there might be notes."** The list is not the rows somebody
+      remembers — it is **every editor carrying `noteField`**, which is nine:
+      `category`, `property`, `liability`, `person`, `sumrow`, `goal`,
+      `retIncome`, `donation`, `tripItem`, plus a trip line's PARTS (which
+      declare theirs inline) and the cell dialog's three (a month, one amount of
+      a split month, a stated balance — all three already marked). Four had been
+      left behind and each is now the same pair:
+      - the **budget grid's row label**, whose long native title (`ruleDesc`, the
+        due schedule, "stopped Jan 2027", the note, "— click to edit this row")
+        became `rowTip`'s hint with the note as its own block. `catHint(cat)`
+        builds the hint as PLAIN text now — `rowTip` escapes the lot, where the
+        title `esc`'d each piece into the attribute.
+      - the **person row** and the **goal card**, both "Click to edit · note"
+        titles. The goal's dot goes after the ✓, not between it and the name:
+        the tick is part of what a reached goal is called.
+      - the **retirement income row**, which had a mark already — a TYPED `•` in
+        a muted span — and its note alone in a title. Neither was the family's.
+      - **The month page, twice.** It draws no row label, so a note about the
+        ROW had nowhere to appear on the phone lens at all: the section line now
+        carries it as `rowTip`'s second block under `cellTip`, and so does the
+        **"waiting on the bill" line**, which is the same row and month drawn a
+        second time and carried neither the note nor the dot. A bill whose note
+        says why it is late was the one line on that page that could not say so.
+        The dot there answers for either note — on that page the line IS the row.
+      - **The test counts the editors**, not the rows: `noteField` occurrences
+        must equal the list of rows asserted to carry both `rowTip` and
+        `noteDot`, so a tenth editor with a note and no dot fails the build.
   - **The tip's zone is `#views`, wired once**, rather than a class on the grid's
     scrollport and the month view's wrapper. Five more tables across four tabs
     carry a `data-tip` now, and a per-card class is a thing every table written

@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1051;
+const EXPECTED = 1053;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -12717,7 +12717,8 @@ t('no row that carries a tip also carries a native title', () => {
      rows themselves: a native title is still RIGHT on a row with no tip — a
      goal card, a person, a budget row label — where it is the second way to
      words the editor holds, which is what the 2026-08-26 audit allows. */
-  for (const kind of ['property', 'liability', 'donation', 'tripItem']) {
+  for (const kind of ['property', 'liability', 'donation', 'tripItem',
+                      'category', 'person', 'goal', 'retIncome']) {
     const at = APP_SRC.indexOf(`data-edit="${kind}"`);
     ok(at > 0, `${kind} still draws a row`);
     const head = APP_SRC.slice(at, at + 400);
@@ -12796,8 +12797,22 @@ t('a noted row carries the family’s dot, and the same declaration draws it', (
      + 'tip and editor already say in words');
   /* The tip and the dot are one decision: every row that can hold a note asks
      for both, in the same expression. */
+  /* ALL NINE records that can hold a note, which is every editor carrying
+     `noteField` plus a trip line's parts — asked for 2026-09-12 ("add the dot
+     and tooltip everywhere there might be notes"), and the way to keep that
+     true is to count the editors rather than the rows somebody remembers. */
   const pairs = [['sumrow', 'i.note'], ['property', 'p.note'], ['liability', 'l.note'],
-                 ['tripItem', 'i.note'], ['donation', 'i.note']];
+                 ['tripItem', 'i.note'], ['donation', 'i.note'],
+                 ['category', 'cat.note'], ['person', 'p.note'], ['goal', 'g.note'],
+                 ['retIncome', 'r.note']];
+  /* The count is an assertion of its own: a tenth editor with a `noteField`
+     and no dot is the drift this is for. */
+  const withNote = (APP_SRC.match(/^ {6}noteField,$/gm) || []).length;
+  eq(withNote, pairs.length,
+     'every editor that carries noteField is in the list above — a tenth with no dot '
+     + 'is the drift this counts. (A trip line’s PARTS hold a note too and are the one '
+     + 'that is not a row of its own; they declare it inline, and the split-line tests '
+     + 'below pin theirs.)');
   for (const [kind, key] of pairs) {
     const at = APP_SRC.indexOf(`data-edit="${kind}"`);
     ok(at > 0, `${kind} still draws a row`);
@@ -13509,6 +13524,78 @@ t('the trip line editor splits, adds, settles and comes back — and keeps every
     eq(D.getElementById('rf-paid').disabled, false, 'and the box is yours again');
   } finally { f.remove(); }
 });
+t('a note typed into a row editor puts the dot on that row, and the words in its tip',
+  async () => {
+  /* THE ROUND TRIP, driven the way a person drives it, because the dot and the
+     tip are built in the renderer and a fixture cannot prove they arrive
+     together. The person row is the one picked because the sample leaves
+     everybody un-annotated — so the "before" is real. */
+  const f = await tripFrame('notedotrow');
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {}; W.confirm = () => true; W.alert = () => {};
+    W.loadSample();
+    D.getElementById('tab-household').click();
+    const person = () => D.querySelector('tr[data-edit="person"]');
+    ok(!!person(), 'the sample still lists the household');
+    eq(!!person().querySelector('.notedot'), false, 'nobody is annotated to start with');
+    person().click();
+    const box = D.getElementById('rf-note');
+    ok(!!box, 'the person editor still has its Note box');
+    box.value = 'Works four days a week from 2027.';
+    box.dispatchEvent(new W.Event('input'));
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 120));
+    const save = D.getElementById('rowSaveBtn');
+    if (save) save.click();
+    await new Promise((r) => setTimeout(r, 150));
+    const row = person();
+    ok(!!row.querySelector('.notedot'), 'the dot arrives with the note');
+    ok(/four days a week/.test(row.dataset.tip || ''),
+       'and the row’s own hover text carries the words', row.dataset.tip);
+    ok(!row.hasAttribute('title'),
+       'with no native title beside it — two bubbles over one row is the fault');
+  } finally { f.remove(); }
+});
+t('the month page reads a note written about the ROW, not only about a month', async () => {
+  /* The month lens draws no row label, so a note about the ROW had nowhere to
+     appear on the phone lens at all until 2026-09-12. The sample annotates
+     Insurance ("Renews in March"), which is a fact about the row every month. */
+  const f = await tripFrame('monthrownote');
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {}; W.confirm = () => true; W.alert = () => {};
+    W.loadSample();
+    D.getElementById('tab-budget').click();
+    /* The YEAR lens first: the same note, on the row's label. */
+    const lbl = [...D.querySelectorAll('.grid th.lbl[data-edit="category"]')]
+      .find((th) => /Insurance/.test(th.textContent));
+    ok(!!lbl, 'the grid still draws the Insurance row');
+    ok(/Renews in March/.test(lbl.dataset.tip || ''),
+       'the row label’s tip carries the note', lbl.dataset.tip);
+    ok(/\n\n/.test(lbl.dataset.tip || ''),
+       'as a block of its own under what the row does, never a clause after it');
+    ok(!!lbl.querySelector('.notedot'), 'and the label is dotted');
+    ok(!lbl.hasAttribute('title'), 'the native title it used to carry is gone');
+    /* Then the MONTH lens, where the row has no label to hang it off. */
+    D.querySelector('.vswitch[data-mode="month"]').click();
+    await new Promise((r) => setTimeout(r, 250));
+    /* EVERY line for that row, not the first one found: the month page draws
+       the row twice when a bill is waiting on it — once in the section list and
+       once in the "waiting on the bill" card — and the second one carried
+       neither the note nor the dot until this was widened. */
+    const lines = [...D.querySelectorAll('.mrow[data-cat]')]
+      .filter((el) => /Insurance/.test(el.querySelector('.mname').textContent));
+    ok(lines.length >= 1, 'the month page draws the Insurance line');
+    for (const line of lines) {
+      ok(/Renews in March/.test(line.dataset.tip || ''),
+         'each line carries the row’s note under this month’s figure', line.dataset.tip);
+      ok(line.classList.contains('noted'),
+         'and is dotted: the dot answers for either note here, since the line IS the '
+         + 'row on this page');
+    }
+  } finally { f.remove(); }
+});
 t('every noted row’s dot is really painted, and it is the grid’s own dot', async () => {
   /* The bug this exists for: the first cut hung the dot off the row-name cell's
      `::after`, which `tr.editrow` already spends on the hover pencil at
@@ -13524,7 +13611,10 @@ t('every noted row’s dot is really painted, and it is the grid’s own dot', a
       D.getElementById('tab-' + tab).click();
       return [...D.querySelectorAll('#views .notedot')];
     };
-    for (const [tab, least] of [['household', 5], ['vacations', 3], ['giving', 2]]) {
+    for (const [tab, least] of [['household', 5], ['vacations', 3], ['giving', 2],
+                               /* The budget's ROW label and a goal card, both
+                                  annotated in the sample since 2026-09-12. */
+                               ['budget', 1], ['goals', 1], ['retirement', 0]]) {
       const dots = dotsOn(tab);
       ok(dots.length >= least, `${tab} marks its noted rows`, dots.length);
       for (const d of dots) {
@@ -13536,8 +13626,11 @@ t('every noted row’s dot is really painted, and it is the grid’s own dot', a
            `${tab}: and it has a colour`, s.backgroundColor);
         /* Beside the WORDS, the way the month page reads: inside the row's own
            name cell, after the name. */
-        ok(!!d.closest('th[scope="row"], .rowline > span'),
-           `${tab}: the dot sits in the row’s name cell`);
+        /* The three shapes a "row" takes in this app: a table row's name cell,
+           the summary card's line, and a goal card — whose name lives in its
+           `.label`. Anywhere else and the dot has drifted off the words. */
+        ok(!!d.closest('th[scope="row"], .rowline > span, .goal > .label'),
+           `${tab}: the dot sits beside the row’s name`, d.parentElement.className);
       }
     }
     /* THE SAME DOT AS THE BUDGET'S, read off both at once rather than asserted

@@ -8668,8 +8668,13 @@ function sampleState() {
          Due the 1st, which is the case the look-ahead exists for: you pay it in
          the month BEFORE it falls, so the reminder has to reach forward or it
          arrives on a page nobody opens until it is too late. */
+      /* A ROW note, which is a different thing from a note on one of its
+         months: it is true of the row every month, and since 2026-09-12 it
+         reads in both lenses — the grid's row label and the month page's line.
+         The demo needs one or that pair is invisible in it. */
       { id: 'insurance',  name: 'Insurance',        rule: 'carry',    role: 'normal', section: 'expense',
-        duePay: 'manual', dueDay: 1 },
+        duePay: 'manual', dueDay: 1,
+        note: 'Renews in March — worth shopping around before it does.' },
       { id: 'dining',     name: 'Dining out',       rule: 'avg',      role: 'normal', section: 'expense' },
       { id: 'everything-else', name: 'Everything else', rule: 'avg',  role: 'normal', section: 'expense' },
       /* THE DUE-DATE ROW, and it is the awkward case rather than the easy one
@@ -8778,7 +8783,8 @@ function sampleState() {
         { id: 'emergency-fund', name: 'Emergency fund — six months', count: 'capped',
           accounts: ['emergency'], targetMonths: 6, role: 'normal' },
         { id: 'roof', name: 'Roof replacement', count: 'capped', accounts: ['mid'],
-          target: 14000, targetDate: `${Y + 1}-09` },
+          target: 14000, targetDate: `${Y + 1}-09`,
+          note: 'Two quotes so far; the third is coming after the survey.' },
         /* Queued behind the roof on the SAME account — the demo of "claimed
            first by": its bar counts only what Mid-term holds above $14,000,
            and its tile says so. */
@@ -9536,23 +9542,32 @@ function gridCard(y, yr) {
       data-tip="${esc(cellTip(tipCell))}">${fmtCell(r.v)}</td>`;
   };
 
-  const catTh = (cat) => `<th class="lbl" scope="row" data-edit="category"
-    data-year="${esc(y)}" data-id="${esc(cat.id)}" style="cursor:pointer"
-    title="${esc(cat.name)} — ${esc(ruleDesc(cat, state, goalsOfYear(y)))}${
+  /* THE ROW'S OWN HOVER TEXT, and it is the app's tip rather than a `title`
+     now (2026-09-12) for the reason every other note moved: the note is the
+     last thing in it, a native title never appears on a phone, and the grid is
+     the one surface in this app that scrolls sideways under a parked cursor.
+     Everything the row has to say, then the note as a block of its own — the
+     order `cellTip` reads in.
+     `rowTip` escapes the lot, so the pieces are built as PLAIN TEXT here; they
+     used to be `esc`'d one at a time into the attribute. */
+  const catHint = (cat) => [`${cat.name} — ${ruleDesc(cat, state, goalsOfYear(y))}`,
     /* The whole schedule, not just this year's — the label is the one place in
        the grid a due date appears at all, and it is here rather than on the
        cells because the schedule is a fact about the ROW. `ruleDesc` beside it
        answers a different question (what fills a future month) and the two
        must stay separate: one says what the app guesses, this says when the
        money is owed. */
-    DUE_PAY.includes(cat.duePay) ? ' · ' + esc(dueScheduleWords(cat)) : ''}${
+    DUE_PAY.includes(cat.duePay) ? dueScheduleWords(cat) : '',
     /* A STOPPED ROW SAYS SO HERE, and the grid is the right place for it: the
        Month page answers by hiding the row, which tells you nothing about WHY
        it went, and the year grid is where a row whose figures stop halfway
        across looks like an oversight. Same sentence an account's own row
        carries when it was closed. */
-    cat.until ? ' · stopped ' + esc(monthLabelFull(cat.until)) : ''}${
-    cat.note ? ' · ' + esc(cat.note) : ''} — click to edit this row">${esc(cat.name)}${
+    cat.until ? `stopped ${monthLabelFull(cat.until)}` : ''].filter(Boolean).join(' · ')
+    + ' — click to edit this row';
+  const catTh = (cat) => `<th class="lbl" scope="row" data-edit="category"
+    data-year="${esc(y)}" data-id="${esc(cat.id)}" style="cursor:pointer"${
+    rowTip(catHint(cat), cat.note)}>${esc(cat.name)}${noteDot(cat.note)}${
     /* The overflow explanation sits on the rows it is about rather than on the
        Transfers band, where it used to be: the band now carries the sign
        convention, which every transfer row needs, and two identical "i"s beside
@@ -11516,10 +11531,16 @@ function renderMonthView() {
     const where = own ? ''
       : at > m ? ' · next month\u2019s bill, paid before the month turns'
       : ` · still unpaid, from ${monthLabelFull(at)}`;
-    return `<div class="mrow${own ? '' : at > m ? ' aheadrow' : ' backrow'}"
+    return `<div class="mrow${own ? '' : at > m ? ' aheadrow' : ' backrow'}${
+      /* The waiting line is the same row and month the section list draws, so
+         it is marked and it says the same things: this month's note through
+         `cellTip`, then the ROW's note as its own block. It carried neither
+         until 2026-09-12 — a bill whose note said WHY it was late was the one
+         line on the page that could not tell you. */
+      hasNote(cell) || (cat.note || '').trim() ? ' noted' : ''}"
       data-cat="${esc(cat.id)}"
-      data-m="${esc(at)}" data-year="${esc(ry || y)}" role="button" tabindex="0"
-      data-tip="${esc(cellTip(cell))}"
+      data-m="${esc(at)}" data-year="${esc(ry || y)}" role="button" tabindex="0"${
+      rowTip(cellTip(cell), cat.note)}
       aria-label="${esc(`${cat.name}, ${pill ? pill.text + ', ' : ''}${when}${
         own ? '' : `, in ${monthLabelFull(at)}`}`)}">
       <span class="mname">${esc(cat.name)}</span>
@@ -11771,9 +11792,16 @@ function renderMonthView() {
       const pillHtml = pill
         ? `<span class="pill ${pill.cls}"><span aria-hidden="true">${pill.glyph}</span> ${
             esc(pill.text)}</span> ` : '';
-      return `<div class="mrow${zero ? ' mzero' : ''}${hasNote(r) ? ' noted' : ''}"
+      /* THE ROW'S OWN NOTE READS HERE TOO (2026-09-12). The month page is the
+         phone lens, and it draws no row label — so a note written about the ROW
+         rather than about one of its months had nowhere to appear on it at all,
+         and the phone is where that matters most. It rides as `rowTip`'s second
+         block, under whatever `cellTip` said about this month, and the dot now
+         answers for either: this line is the row, on this page. */
+      return `<div class="mrow${zero ? ' mzero' : ''}${
+        hasNote(r) || (cat.note || '').trim() ? ' noted' : ''}"
         data-cat="${esc(cat.id)}" data-m="${esc(m)}" data-year="${esc(y)}"
-        role="button" tabindex="0" data-tip="${esc(cellTip(r))}"
+        role="button" tabindex="0"${rowTip(cellTip(r), cat.note)}
         aria-label="${esc(`${cat.name}, ${zero ? 'nothing recorded'
           : `${fmtMoney(r.v)}, ${KIND_LABEL[r.kind] || ''}`}${pill ? `, ${pill.text}` : ''}`)}">
         <span class="mname">${esc(cat.name)}</span>
@@ -12154,8 +12182,11 @@ function goalCard(g, idx) {
   const done = g.target && g.saved >= g.target;
   const pct = Math.min(1, g.progress);
   return `<div class="goal ${done ? 'done' : ''}" data-edit="goal" data-idx="${idx}"
-    style="cursor:pointer" title="Click to edit${g.note ? ' · ' + esc(g.note) : ''}">
-    <div class="label">${esc(g.name)}${done ? ' <span aria-hidden="true">✓</span><span class="sr-only"> — reached</span>' : ''}</div>
+    style="cursor:pointer"${rowTip('Click to edit', g.note)}>
+    ${/* The dot goes after the ✓ rather than between it and the name: the tick
+         is part of what the goal is CALLED once it is reached ("Kitchen ✓"),
+         and a mark for a note wedged inside that reads as punctuation. */''}
+    <div class="label">${esc(g.name)}${done ? ' <span aria-hidden="true">✓</span><span class="sr-only"> — reached</span>' : ''}${noteDot(g.note)}</div>
     <div class="value">${fmtMoney(g.saved)} <span class="of">of ${fmtMoney(g.target)}</span></div>
     <div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100"
       aria-valuenow="${Math.round(pct * 100)}" aria-label="${esc(g.name)} progress">
@@ -13579,9 +13610,9 @@ function renderHousehold() {
     const ahead = retires ? `Retires in ${esc(monthLabelFull(retires))}`
       : major ? `Turns 18 in ${esc(monthLabelFull(major))}`
       : '<span class="muted">—</span>';
-    return `<tr class="editrow" data-edit="person" data-idx="${idx}"
-      title="Click to edit${p.note ? ' · ' + esc(p.note) : ''}">
-      <th scope="row">${esc(p.name)}</th>
+    return `<tr class="editrow" data-edit="person" data-idx="${idx}"${
+      rowTip('Click to edit', p.note)}>
+      <th scope="row">${esc(p.name)}${noteDot(p.note)}</th>
       <td style="text-align:left">${p.role === 'child' ? 'Child' : 'Adult'}</td>
       <td>${age === null ? '<span class="muted">—</span>' : age}</td>
       <td style="text-align:left">${ahead}</td></tr>`;
@@ -14159,8 +14190,11 @@ function retIncomeCard() {
       : `${(fed * 100).toFixed(0)}%`;
   };
   const rows = list.map((r, idx) => `<tr class="editrow" data-edit="retIncome"
-      data-idx="${idx}"${r.note ? ` title="${esc(r.note)}"` : ''}>
-      <th scope="row">${esc(r.label || 'Unnamed')}${hasNote(r) ? ' <span class="muted">•</span>' : ''}</th>
+      data-idx="${idx}"${rowTip('', r.note)}>
+      ${/* This row marked its note with a TYPED bullet and a title of its own —
+           the one table that had a mark at all, and neither was the family's.
+           Both are the pair every other row keeps now (2026-09-12). */''}
+      <th scope="row">${esc(r.label || 'Unnamed')}${noteDot(r.note)}</th>
       ${showOwner ? `<td style="text-align:left">${
         esc(ownerLabel(state, r.person)) || '<span class="muted">—</span>'}</td>` : ''}
       <td>${fmtMoney(r.amount || 0)}</td>
