@@ -3527,6 +3527,110 @@ reader two headers to fold and no way to guess which one they shut. `renderBudge
 appends `yearNotes(y)` after the grid or summary card; both fold through the one
 mechanism below.
 
+## A trip line splits into parts (2026-09-12)
+
+Asked for by Charles, looking at a `$134.90` "Excursions" line that was three
+excursions: *"being able to split trip lines like budget rows would be helpful"*
+— plus a **merchant** field, asked for in the same breath.
+
+**It is the split month's bargain, one money column wider.** A budget cell may
+carry `parts`, its `v` stays their sum, and the engine, the subtotals and every
+chart go on reading one number per month. A trip line carries `parts` the same
+way, and its THREE figures — `paid`, `credits`, `due` — are the sums. So the
+card's footer, `vacationYearStats`, the year chart, Find and a share link all go
+on reading a line exactly as they did, and not one of them was touched. There is
+a test that says so outright: the same trip written plain and written split
+charts the same figure.
+
+- **A part is a miniature line, not a bare amount, and that is the whole reason
+  to split one.** `{ label, merchant?, paid, due, credits? }` and its own
+  **✓ Paid** — so a split can say "the snorkel trip is paid and the catamaran
+  still isn't". A part that could only carry one amount would break a figure
+  down without being able to break its SETTLEMENT down, which is the question a
+  trip line is actually asked.
+- **`tripPart` is the one normaliser, shared by the editor and the boundary**,
+  so a part typed into the dialog and a part arriving in a backup end up the
+  same shape. It coerces its own figures — `coerceShape`'s `num` is local to it
+  — because a part's three numbers reach the card through `fmtMoney` and are
+  interpolated RAW: a string from a hand-edited backup poisons every total it is
+  added into (`"60" + "74.9"` is a four-character string) and a string of markup
+  would execute. Only a string is a name, or an object renders as
+  "[object Object]" and looks like something somebody typed.
+- **The line's figures are RE-DERIVED at the boundary, never trusted.** A line
+  and its parts are two ways of saying the same thing, and the whole bargain
+  rests on their never disagreeing — so `coerceShape` recomputes the sums from
+  the parts, which are the working. A plan written by a build that knows about
+  parts and then nudged by one that doesn't cannot leave the two adrift.
+- **An empty part is never written.** A line made of nothing is not a claim
+  anybody meant to file, so `save` drops it — which is what makes an emptied
+  list come back as one plain row rather than as a line claiming it is nothing.
+- **A split of ONE that repeats its line is not DRAWN, and is still stored.**
+  Pressing "✂ Split into parts" opens on a single part carrying the line's own
+  name and figures — the state a split passes through on the way to being one —
+  and a window closed there would leave the card saying the same thing twice.
+  The split month's rule exactly: break the amounts out when there is more than
+  one, OR when the only one carries something its line does not (a different
+  name, or a merchant). Shown the moment it earns the room.
+- **Every row of the group opens the SAME window.** A part is an `editrow`
+  carrying its LINE'S index, never one of its own: the parts live in the line's
+  editor, nothing on the card can address a part on its own, and the group moves
+  and deletes as one.
+- **The indent is marked by a DRAWN rule and said in WORDS**, not by a `↳`
+  glyph: CSS `content` is announced by some screen readers, and a part already
+  says "Part of Excursions —" in visually hidden text. An indent alone is
+  invisible to anyone reading one row at a time; a rule is visible to everyone
+  who can see the card and silent to everyone who can't. Nothing carries meaning
+  by colour.
+- **The merchant is not stripped from a share link without notes.** It is a fact
+  about the purchase, like the item's own label — the note stays the place for
+  anything that needs a sentence — and a share that kept "Airfare" and dropped
+  "Delta" would be telling half of one fact. It renders on its own muted line
+  UNDER the item, never joined on with a separator: an item name already wraps
+  in that column, and a name and a shop run together read as one longer name.
+- **No schema bump.** A build that has never heard of `parts` reads the line's
+  own three figures — which are the sums — and simply shows one row instead of
+  four. Degrading, not corrupting, is the test for whether a bump is owed.
+
+### `type: 'parts'`, and the two faults it took to get right
+
+A new field type in the generic row editor (spec: `part` — one part's boxes;
+`sums` — the outer keys it drives; `settle`; `carry`). The outer money boxes go
+**disabled and filled with the sums** while a split is on, not hidden: hiding a
+control does not withdraw what it claims, and the figure is still the answer to
+"what did this line cost". Dimmed with `opacity` and `not-allowed`, the same way
+every other disabled control in the app says so — no new colour, and no
+background of its own, or an inert box reads as a different KIND of field.
+
+Both faults below were found by USING the editor, not by reading it, both live
+in the join between **a window that saves as you go** and **a field that holds a
+list**, and both left the boxes looking exactly right. There is a live test for
+each.
+
+1. **`＋ Add a part` committed, and `save` dropped the empty part it had just
+   added** — the re-prime that followed took the new row away again, so the
+   button looked dead. An empty part is a box the reader has just opened, not a
+   fact: it is written by the first box in it that gets finished, like every
+   other field in this window. `setPartsValue` therefore has to tolerate a form
+   holding a part the state does not, and carries the empty rows across at the
+   positions they are in while the stored parts line up with the FILLED ones.
+2. **A re-prime replaced the parts array with fresh copies while the boxes went
+   on writing into the OLD objects.** Everything typed into part one was
+   silently restored by the next redraw. So the stored values are copied INTO
+   the objects already on screen and the array keeps its identity — and the list
+   is reused rather than rebuilt, because a rebuild on every committed box would
+   throw the focus out of the part being filled in (the picker-inside-a-card
+   trap, one layer down). The box that currently has focus is never written to.
+
+The list lives on the element (`el._parts`), **not** in a module-level variable
+like the cell editor's `cellParts`: one dialog serves thirty-odd sections, and a
+global left behind by the last window is a bug waiting for the next one.
+
+**A live test cannot read the frame's plan.** `state` is a top-level `let`, so
+it is not on `window`, and the app's own CSP forbids `eval` — which turned out
+to be the better constraint: both live tests assert from the CARD, which is what
+a reader actually sees, and "the figure on screen is the parts added up" is the
+claim worth pinning.
+
 ## Growth is not income (2026-08-31)
 
 **An account's rate produces one of two things, and the account says which.**

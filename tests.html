@@ -5464,6 +5464,92 @@ t('a year with money still due can still grow, whatever the calendar says', () =
     'and when 2026 has passed with nothing due, it settles — the unpaid 2025 still does not');
 });
 
+group('Splitting a trip line');
+/* Asked for 2026-09-12: one line of a trip is often several purchases, and the
+   Budget already had the answer for a month that is more than one number. The
+   bargain is the split month's — the parts are the working, the LINE'S three
+   figures are their sums, and nothing downstream (the card's footer, the year
+   chart, Find, a share link) ever learns that parts exist. These tests are that
+   bargain: if a line and its parts can ever disagree, every figure made from a
+   trip is suspect. */
+t('a part is normalised the same way whether it is typed or read from a file', () => {
+  const p = H.tripPart({ label: '  Snorkel  ', merchant: ' Viator ',
+                         paid: '60.5', credits: 0, due: null });
+  eq(p, { label: 'Snorkel', paid: 60.5, due: 0, merchant: 'Viator' },
+    'trimmed, figures forced to numbers, and a zero credit left off — the field '
+    + 'the imported trips carry whether or not anything was ever credited');
+  eq(H.tripPart({}), { label: '', paid: 0, due: 0 }, 'an empty part is three zeros and a blank');
+  eq(H.tripPart(null), { label: '', paid: 0, due: 0 }, 'and so is nothing at all');
+  /* These figures reach the card through fmtMoney and are interpolated RAW. */
+  const evil = '<img src=x onerror=alert(1)>';
+  eq(H.tripPart({ paid: evil, due: evil, credits: evil }).paid, 0,
+    'markup in a figure becomes 0, the same class fix coerceShape makes everywhere');
+  eq(H.tripPart({ label: { x: 1 }, merchant: ['a'] }).label, '',
+    'only a string is a name — an object would render as "[object Object]"');
+  eq(H.tripPart({ merchant: 'X' }).merchant, 'X');
+  eq('merchant' in H.tripPart({ merchant: '   ' }), false, 'blank is no merchant');
+});
+t('the sum is the line, and it is re-derived at the boundary rather than trusted', () => {
+  eq(H.sumPart([{ paid: 60 }, { paid: 74.9 }, {}], 'paid'), 134.9);
+  eq(H.sumPart(null, 'paid'), 0, 'a line with no parts sums to nothing, never NaN');
+  const d = H.coerceShape({ vacations: { trips: [{ id: 't', name: 'T', year: 2026, items: [
+    /* A backup whose line says one thing and whose parts say another: the
+       parts win, because they are the working. */
+    { label: 'Excursions', paid: 9999, credits: 0, due: 7, parts: [
+      { label: 'Snorkel', paid: 60 },
+      { label: 'Catamaran', paid: '74.9', merchant: 'Viator' }] },
+  ] }] } });
+  const it = d.vacations.trips[0].items[0];
+  eq([it.paid, it.due], [134.9, 0], 'the line is the sum of its parts, whatever it claimed');
+  eq('credits' in it, false, 'and a credit column nothing credited is dropped');
+  eq(it.parts.length, 2);
+});
+t('a part with nothing on it is not a claim, and never reaches the state', () => {
+  const items = H.coerceShape({ vacations: { trips: [{ id: 't', name: 'T', year: 2026, items: [
+    { label: 'Half split', paid: 12, due: 3, parts: [{ label: 'Real', paid: 12 }, { label: '' }, {}] },
+    { label: 'All empty', paid: 12, due: 3, parts: [{ label: '' }, null, 'junk'] },
+    { label: 'Not a list', paid: 5, due: 0, parts: 'nonsense' },
+  ] }] } }).vacations.trips[0].items;
+  eq(items[0].parts.length, 1, 'the empty ones go');
+  eq([items[0].paid, items[0].due], [12, 0], 'and the line follows the one that is left');
+  eq('parts' in items[1], false, 'a split made entirely of nothing is not a split');
+  eq([items[1].paid, items[1].due], [12, 3],
+    'a line whose parts all vanished keeps its OWN figures — there was no working to believe');
+  eq('parts' in items[2], false, 'and `parts` that is not a list is not one');
+});
+t('a credit on a part reaches the line, and only a real one', () => {
+  const it = H.coerceShape({ vacations: { trips: [{ id: 't', name: 'T', year: 2026, items: [
+    { label: 'Excursions', paid: 0, due: 0, parts: [
+      { label: 'a', credits: 30 }, { label: 'b', credits: 0 }] }] }] } })
+    .vacations.trips[0].items[0];
+  eq(it.credits, 30, 'the Credits column of a split line is its parts added up');
+  eq('credits' in it.parts[1], false);
+});
+t('a split line reaches the year chart as ONE figure, exactly as it did before', () => {
+  /* The whole point of keeping the sums on the line: no reader of a trip needs
+     to know parts exist. Same trip, said two ways, one answer. */
+  const plain = { vacations: { trips: [{ id: 't', name: 'T', year: 2026, nights: 2,
+    items: [{ label: 'Excursions', paid: 134.9, due: 0 }] }] } };
+  const split = H.coerceShape({ vacations: { trips: [{ id: 't', name: 'T', year: 2026, nights: 2,
+    items: [{ label: 'Excursions', paid: 0, due: 0, parts: [
+      { label: 'Snorkel', paid: 60 }, { label: 'Catamaran', paid: 74.9 }] }] }] } });
+  eq(H.vacationYearStats(split)[0].total, H.vacationYearStats(plain)[0].total,
+    'the chart cannot tell the two apart');
+  eq(H.vacationYearStats(split)[0].total, 134.9);
+});
+t('a share link with notes left out still carries the merchants', () => {
+  /* A merchant is a fact about the purchase, like the item’s own label — not
+     prose about it. The checkbox says "your written NOTES", and a share that
+     kept "Airfare" and dropped "Delta" would be telling half of one fact. */
+  const d = H.stripNotes(H.coerceShape({ vacations: { trips: [{ id: 't', name: 'T',
+    year: 2026, items: [{ label: 'Airfare', merchant: 'Delta', paid: 400, due: 0,
+      note: 'seat 14C', parts: [{ label: 'Fare', merchant: 'Delta', paid: 400 }] }] }] } }));
+  const it = d.vacations.trips[0].items[0];
+  eq(it.merchant, 'Delta');
+  eq(it.parts[0].merchant, 'Delta');
+  eq('note' in it, false, 'the note itself still goes');
+});
+
 group('Net worth snapshots');
 t('a snapshot is a date and at least one figure, or it is nothing', () => {
   const d = H.coerceShape({ side: { snapshots: [
@@ -12944,6 +13030,169 @@ t('a chart that draws a line answers by column; one that does not keeps the defa
    real frame off the SAMPLE plan rather than a fixture, because the thing most
    worth pinning is that the demo reaches them — a chart the sample never draws
    is a chart nobody sees until they have typed their own targets in. */
+/* ── Splitting a trip line, driven in a real window ─────────────────────────
+   The faults below were all found by USING the editor, not by reading it, and
+   none is visible to a pure test: they live in the join between a window that
+   saves as you go and a field that holds a list. Every one of them left the
+   boxes looking exactly right.
+
+   EVERYTHING IS ASSERTED FROM THE PAGE, never from the plan object — `state` is
+   a top-level `let` and the app's CSP forbids `eval`, so a test cannot reach
+   into the frame and read it. That turned out to be the better test anyway: the
+   card is what a reader sees, and "the figure on screen is the parts added up"
+   is the claim worth pinning. */
+function tripFrame(tag) {
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  return new Promise((resolve) => {
+    f.onload = () => resolve(f);
+    f.src = 'index.html?' + tag + '=' + Date.now();
+    document.body.appendChild(f);
+  });
+}
+t('the trip line editor splits, adds, settles and comes back — and keeps every keystroke',
+  async () => {
+  const f = await tripFrame('tripsplit');
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};                        // read-only: nothing reaches storage
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    D.getElementById('tab-vacations').click();
+    await new Promise((r) => setTimeout(r, 150));
+
+    const box = () => D.getElementById('rf-parts');
+    const lines = () => [...box().querySelectorAll('.partline')];
+    const subRows = () => [...D.querySelectorAll('.card.trip tr.partrow')];
+    /* The first line of the first trip card, as the card draws it: the row's
+       name and every figure on it. The card is re-rendered on every commit, so
+       this is the plan speaking through the only voice a reader hears. */
+    const cardLine = () => [...D.querySelector('.card.trip tbody tr').children]
+      .map((c) => c.textContent.trim());
+    /* Typed the way a person types: `input` as the keys land, then `change` on
+       the way out of the box — which is the event this window commits on. */
+    const type = (row, i, val) => {
+      const b = lines()[row].querySelectorAll('.partgrid input')[i];
+      b.value = val;
+      b.dispatchEvent(new W.Event('input'));
+      b.dispatchEvent(new W.Event('change', { bubbles: true }));
+    };
+    const money = W.__finTestHooks.fmtMoney;
+
+    const row = D.querySelector('tr[data-edit="tripItem"]');
+    ok(row, 'the sample trip still has a line to open');
+    const opened = cardLine();
+    row.click();
+    ok(D.getElementById('rowDialog').open, 'the line editor opened');
+    ok(D.getElementById('rf-merchant'), 'and it asks who the money went to');
+
+    box().querySelector('.parts-toggle').click();
+    eq(lines().length, 1, 'a split opens on ONE part carrying the line as it stands');
+    eq(cardLine(), opened,
+      'and nothing about the line has moved yet — the figures are what is being divided');
+    eq(subRows().length, 0,
+      'a split of one that repeats its line draws no sub-row: the card would '
+      + 'otherwise say the same thing twice on the way to saying it once');
+
+    /* FAULT ONE: `＋ Add a part` used to commit, `save` dropped the empty part
+       it had just added, and the re-prime that followed took the new row away
+       again — the button looked dead. */
+    box().querySelector('.parts-add').click();
+    eq(lines().length, 2, 'a part just added survives long enough to be typed into');
+    eq(subRows().length, 0, 'and an empty part is not written — a line made of '
+      + 'nothing is not a claim anybody meant to file');
+
+    /* FAULT TWO: a re-prime replaced the parts array with fresh copies while
+       the boxes went on writing into the old objects. Everything typed into
+       part ONE was silently restored by the next redraw. Typing into the FIRST
+       part after the list has already been committed once is exactly the shape
+       that failed. */
+    type(0, 0, 'Cottage — week 1');
+    type(0, 1, 'Seaside Cottages');
+    type(0, 2, '600');
+    type(1, 0, 'Cleaning fee');
+    type(1, 2, '120');
+    type(1, 4, '380');
+    eq(lines().length, 2, 'still two parts');
+    const subs = subRows();
+    eq(subs.length, 2, 'and both are on the card');
+    ok(/Cottage — week 1/.test(subs[0].textContent),
+      'what was typed into the FIRST part is what is stored', subs[0].textContent);
+    ok(/Seaside Cottages/.test(subs[0].textContent), 'merchant and all');
+    ok(/Cleaning fee/.test(subs[1].textContent), 'and the second part kept its own');
+    ok(cardLine().includes(money(720)) && cardLine().includes(money(380)),
+      'the LINE is its parts added up', cardLine().join(' | '));
+    eq(D.getElementById('rf-paid').disabled, true,
+      'the line’s own money boxes are inert while the parts are driving them');
+    eq(D.getElementById('rf-paid').value, money(720),
+      'and they SHOW the sum rather than going blank — a figure hidden is a figure withdrawn');
+
+    /* ✓ Paid, per part: the move the whole split exists to make possible. */
+    lines()[1].querySelectorAll('.partbtns .btn')[0].click();
+    ok(/Cleaning fee/.test(subRows()[1].textContent));
+    ok(cardLine().includes(money(1100)),
+      'the line settled with the part that settled — 600 paid, plus the 120 and '
+      + 'the 380 that part two just folded together', cardLine().join(' | '));
+
+    /* Coming back keeps the total and hands the boxes back. */
+    box().querySelector('.parts-toggle').click();
+    eq(subRows().length, 0, 'back to one line');
+    ok(cardLine().includes(money(1100)), 'with the figures the parts arrived at',
+      cardLine().join(' | '));
+    eq(D.getElementById('rf-paid').disabled, false, 'and the box is yours again');
+  } finally { f.remove(); }
+});
+t('a split of one is drawn only when it says something its line does not', async () => {
+  /* Pressing "✂ Split into parts" opens on a single part carrying the line's own
+     name and figures — the state a split passes through on its way to being one.
+     A window closed there would leave the card saying the same thing on two
+     rows. It is the split month's rule (break the amounts out when there is
+     more than one, OR when the only one carries something of its own), and the
+     part is still STORED either way — it is shown the moment it earns the room. */
+  const f = await tripFrame('tripone');
+  try {
+    const W = f.contentWindow, D = W.document;
+    W.save = () => {};
+    W.confirm = () => true;
+    W.alert = () => {};
+    W.loadSample();
+    D.getElementById('tab-vacations').click();
+    await new Promise((r) => setTimeout(r, 150));
+
+    const rows = () => [...D.querySelectorAll('.card.trip tr[data-edit="tripItem"]:not(.partrow)')];
+    const subRows = () => [...D.querySelectorAll('.card.trip tr.partrow')];
+    ok(rows().length >= 2, 'the sample trip has lines to work with', rows().length);
+
+    /* Line one: split and leave it. */
+    rows()[0].click();
+    D.getElementById('rf-parts').querySelector('.parts-toggle').click();
+    D.getElementById('rowSaveBtn').click();
+    eq(subRows().length, 0, 'a split of one that repeats its line is invisible');
+
+    /* Line two: split, then give the single part a merchant the line has not
+       got. Now it says something, so it is drawn. */
+    rows()[1].click();
+    const box = D.getElementById('rf-parts');
+    box.querySelector('.parts-toggle').click();
+    const merch = box.querySelectorAll('.partgrid input')[1];
+    merch.value = 'Coastal Ferries';
+    merch.dispatchEvent(new W.Event('input'));
+    merch.dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq(subRows().length, 1, 'the part that adds a merchant IS drawn');
+    ok(/Coastal Ferries/.test(subRows()[0].textContent), '…and names it',
+      subRows()[0].textContent);
+    ok(/Part of /.test(subRows()[0].textContent),
+      'a part says in WORDS which line it belongs to — the indent and the rule '
+      + 'are invisible to anyone reading one row at a time');
+    eq(subRows()[0].dataset.edit, 'tripItem',
+      'and every row of the group opens the same window: the parts live in the '
+      + 'line’s own editor, and nothing on the card can address one on its own');
+    D.getElementById('rowSaveBtn').click();
+  } finally { f.remove(); }
+});
 t('the Investments tab draws both charts, and the sample plan reaches them',
   async () => {
   const f = document.createElement('iframe');

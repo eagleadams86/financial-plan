@@ -1032,7 +1032,15 @@ this year compares with the last few, and it gives the tab something to open on.
   — airfare, stay, transport, excursions, food, tips, spa — or from nothing,
   your choice.
 - **Each line tracks what's paid, what's credited and what's still due**, with
-  a **✓ Paid** button that settles the rest in one click.
+  a **✓ Paid** button that settles the rest in one click. A line also names the
+  **merchant** — who the money went to — under the item it bought.
+- **A line that was several purchases splits into parts.** Three excursions
+  booked separately, a flight and its seat fee: press **✂ Split into parts** in
+  the line's window and each part keeps its own item, merchant, paid, credits,
+  still due and its own **✓ Paid**. The line's three figures become the sums, so
+  the card's total and the year chart go on reading one figure per line and
+  never change. The parts sit under their line on the card, indented; **↩ Back
+  to one line** folds them away and keeps the total.
 - **A holidays & PTO planner**, with from/to dates, under the trips it counts.
 
 ---
@@ -1520,7 +1528,8 @@ skip them; the word beside each one is the whole label.
 
 Two characters minimum, and it searches everything: every year's rows and
 notes (split-part notes and balance notes included), donations, trips and
-their line items, goals, people, property, and holdings by ticker.
+their line items — the parts of a split line and their merchants included —
+goals, people, property, and holdings by ticker.
 
 A budget hit opens straight into its cell's editor; everything else lands you
 on the right tab. **Enter opens the first result** — the same as clicking it

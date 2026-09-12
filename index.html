@@ -965,6 +965,49 @@ legend { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04
   gap: 6px; align-items: flex-start; }
 .grid-fields > div > .field-row > input { width: 100%; height: 40px; }
 .grid-fields > div > .field-row > .btn { flex: none; white-space: nowrap; }
+/* ── A field that holds a LIST of sub-rows (`type: 'parts'`) ────────────────
+   One line of a trip is often several purchases — three excursions booked
+   separately, a flight and its seat fee — and the Budget already had the
+   answer for a month that is more than one number. This is that answer for a
+   record with more than one MONEY COLUMN: the parts carry their own Paid,
+   Credits and Still due, and the row's three figures become their sums.
+
+   It spans the dialog (`wide`) whatever the column count, because a part is
+   itself a row of boxes and there is nothing sensible to put beside it. Inside,
+   each part is a small grid that WRAPS rather than a fixed row: at 1100px a
+   part's five boxes and two buttons fit on two lines, and on a phone they fall
+   into one column without the list ever scrolling sideways. A dialog that
+   scrolls in two directions is one nobody finishes filling in. */
+.partsbox { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.partslist { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+/* The rule is what separates one part from the next. Above each part but the
+   first, so the block opens and closes on its own edges — the `.manage-sec`
+   rule, which is how every sectioned window in the family divides a list. */
+.partline { display: flex; flex-direction: column; gap: 8px; }
+.partline + .partline { border-top: 1px solid var(--border); padding-top: 10px; }
+.partline .partgrid { display: grid; gap: 8px 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.partline .partgrid > label { display: flex; flex-direction: column; gap: 4px;
+  font-size: var(--fs-xs); color: var(--text-secondary); min-width: 0; }
+.partline .partgrid input { width: 100%; height: 36px; }
+/* The two buttons a part carries — settle it, or take it out. They sit on a
+   line of their own under the boxes, the `.field-row` bargain: alongside, they
+   would shorten whichever box they followed and leave the grid ragged. */
+.partline .partbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+/* What the list currently adds up to, in the same voice as the split month's
+   readout. Not a heading — it is a figure that moves as you type. */
+.partstotal { font-size: var(--fs-xs); color: var(--text-secondary);
+  font-variant-numeric: tabular-nums; }
+/* A money box the parts are driving is READ-ONLY, not hidden: the figure it
+   holds is still the answer to "what did this line cost", and hiding a control
+   does not withdraw what it claims. Dimmed and no-entry, which is how every
+   other disabled control in the app says so (`.btn:disabled`, `.ynav:disabled`)
+   — NO new colour, and no background of its own: an inert box that changed
+   colour would read as a different KIND of field rather than the same field
+   with the pen taken off it. */
+.grid-fields > div > input:disabled,
+.grid-fields > div > .field-row > input:disabled {
+  opacity: .55; cursor: not-allowed; }
 /* Two columns exactly, for a dialog whose fields come in pairs — a rate beside
    the account it's paid into — rather than however many auto-fit chooses. */
 .grid-fields.cols2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1634,6 +1677,38 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   padding: 6px 10px; white-space: nowrap; }
 /* the item names are the one column allowed to wrap rather than widen the card */
 .triprow > .card.trip table tbody th { white-space: normal; }
+/* ── A line broken into parts ───────────────────────────────────────────────
+   The parent row keeps the figures — they are the sum of the parts, so the
+   card's arithmetic is unchanged and the footer still adds the same column.
+   Its parts sit UNDER it, indented and quieter, and the indent is on the item
+   cell alone: indenting the figures would take them out of the column they are
+   meant to be read down.
+   The mark is a DRAWN rule, not a ↳ glyph: CSS `content` is announced by some
+   screen readers, and what a part is has already been said there in words
+   ("Part of Airfare —", visually hidden). An indent alone would be invisible to
+   anyone reading one row at a time; a rule is visible to everyone who can see
+   the card and silent to everyone who can't.
+   The lighter weight and the muted colour are the two the app already uses for
+   supporting figures; nothing here carries meaning by colour alone — the INDENT
+   and the rule say "part of the line above", and both survive with colour off. */
+.triprow > .card.trip tr.partrow > th,
+.triprow > .card.trip tr.partrow > td {
+  font-weight: var(--fw-normal); color: var(--text-secondary); }
+.triprow > .card.trip tr.partrow > th { padding-left: 24px; position: relative; }
+.triprow > .card.trip tr.partrow > th::before {
+  content: ''; position: absolute; left: 12px; top: 4px; bottom: 4px;
+  border-left: 2px solid var(--border-strong); }
+/* Only the LAST part of a group is divided from the line that follows it: the
+   rules between a line and its own parts would cut the group into four
+   unrelated rows, which is the opposite of what the indent is saying. */
+.triprow > .card.trip tr.hasparts > th, .triprow > .card.trip tr.hasparts > td,
+.triprow > .card.trip tr.partrow:not(.partlast) > th,
+.triprow > .card.trip tr.partrow:not(.partlast) > td { border-bottom: none; }
+/* The merchant, under the item it was bought from. Its own line, not joined on
+   with a separator: an item name already wraps in this column, and a name and a
+   shop run together on one line read as one longer name. */
+.triprow > .card.trip .merchant { display: block; font-size: var(--fs-xs);
+  color: var(--text-muted); font-weight: var(--fw-normal); }
 @media (max-width: 700px) {
   /* No narrower cap on a phone: a five-column money table can't be squeezed
      under 88vw and stay readable, and squeezing it is what would put a
@@ -5234,6 +5309,29 @@ function coerceShape(data) {
     t.items = arr(t.items);
     for (const it of t.items) {
       it.paid = num(it.paid); it.credits = num(it.credits); it.due = num(it.due);
+      /* The merchant reaches the card escaped, but only a string is a name —
+         the part normaliser's rule, and the line keeps it too. */
+      if (typeof it.merchant === 'string' && it.merchant.trim())
+        it.merchant = it.merchant.trim();
+      else delete it.merchant;
+      /* A SPLIT LINE'S FIGURES ARE RE-DERIVED HERE, never trusted. The parts
+         and the line's own three numbers are two ways of saying the same
+         thing, and the whole point of the split bargain is that everything
+         downstream reads only the line — so a hand-edited backup, or a plan
+         written by a build that knew about parts and then had its figures
+         nudged by one that didn't, must not be able to leave the two
+         disagreeing. The parts win: they are the working. */
+      if (Array.isArray(it.parts)) {
+        it.parts = it.parts.filter(p => p && typeof p === 'object').map(tripPart)
+          .filter(p => p.label || p.merchant || p.paid || p.credits || p.due);
+        if (!it.parts.length) delete it.parts;
+        else {
+          it.paid = sumPart(it.parts, 'paid');
+          it.due = sumPart(it.parts, 'due');
+          const credits = sumPart(it.parts, 'credits');
+          if (credits) it.credits = credits; else delete it.credits;
+        }
+      } else delete it.parts;
     }
   }
   d.vacations.pto = obj(d.vacations.pto);
@@ -16298,6 +16396,47 @@ function wireInvestments() {
 
 /* ═══════════════════════════ Vacations view ═══════════════════════════════ */
 
+/* ── A trip line split into parts ───────────────────────────────────────────
+   One line of a trip is often several purchases. A part is a miniature line —
+   the same five facts, minus the note — and the LINE'S three figures are the
+   sums of its parts, recomputed wherever a part is written. That is the split
+   month's bargain: everything that reads a trip goes on reading one set of
+   figures per line and never learns that parts exist.
+   `tripPart` is the one normaliser, shared by the editor and the boundary, so
+   a part typed into the dialog and a part arriving in a backup end up the same
+   shape. A zero credit is no credit, the field the imported trips carry whether
+   or not anything was ever credited. */
+function tripPart(p) {
+  const o = (p && typeof p === 'object') ? p : {};
+  /* THE FIGURES ARE COERCED HERE, and this is the boundary's rule rather than
+     tidiness: a part's three numbers reach the card through `fmtMoney` and are
+     interpolated raw, so a string arriving from a hand-edited backup poisons
+     every total it is added into ("60" + "74.9" is a 4-character string) and,
+     worse, a string of markup would execute. `coerceShape`'s own `num` is
+     local to it, so the one normaliser a part has does its own — which is what
+     makes it safe to use from the editor as well.
+     Only a STRING is a name: an object left in a label would otherwise render
+     as "[object Object]" — nonsense that looks like something somebody typed. */
+  const fig = (v) => {
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const text = (v) => typeof v === 'string' ? v.trim() : '';
+  const out = { label: text(o.label), paid: fig(o.paid), due: fig(o.due) };
+  const merchant = text(o.merchant);
+  if (merchant) out.merchant = merchant;
+  const credits = fig(o.credits);
+  if (credits) out.credits = credits;
+  return out;
+}
+/* A function DECLARATION, not a const arrow: `coerceShape` calls it and sits
+   ten thousand lines earlier in the file. A const would be in its temporal dead
+   zone for anything that runs while the script is still being evaluated — the
+   boot-time TDZ that green tests cannot see. */
+function sumPart(parts, key) {
+  return round2((parts || []).reduce((s, p) => s + (p[key] || 0), 0));
+}
+
 /* One record per dated year of trips — the chart's data, pure over state so
    the tests can pin it. A trip's total is the trip card's own sum (paid +
    credits + due, credits stored negative); a trip with no year has no bar to
@@ -16431,14 +16570,52 @@ function renderVacations() {
         <thead><tr><th style="text-align:left">Item</th>${hasPaid ? '<th>Paid</th>' : ''}${
           hasCredits ? '<th>Credits</th>' : ''}${hasDue ? '<th>Due</th>' : ''}${
           hasTotal ? '<th>Total</th>' : ''}</tr></thead>
-        <tbody>${t.items.map((i, idx) => `<tr class="editrow" data-edit="tripItem"
-          data-id="${esc(t.id)}" data-idx="${idx}">
-          <th scope="row">${esc(i.label)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}</th>
-          ${hasPaid ? `<td>${i.paid ? fmtMoney(i.paid) : ''}</td>` : ''}
-          ${hasCredits ? `<td>${i.credits ? fmtMoney(i.credits) : ''}</td>` : ''}
-          ${hasDue ? `<td>${i.due ? fmtMoney(i.due) : ''}</td>` : ''}
-          ${hasTotal ? `<td>${fmtMoney(round2((i.paid || 0) + (i.credits || 0)
-            + (i.due || 0)))}</td>` : ''}</tr>`).join('')}</tbody>
+        <tbody>${t.items.map((i, idx) => {
+          /* The money cells of one line or one of its parts, drawn the same
+             way — a part is a miniature line, so it reads down the same
+             columns. A blank cell, not a $0.00: this table has always left a
+             figure nobody entered empty, and a part is no place to start
+             claiming zeros. */
+          const figures = (r) => `${hasPaid ? `<td>${r.paid ? fmtMoney(r.paid) : ''}</td>` : ''}
+            ${hasCredits ? `<td>${r.credits ? fmtMoney(r.credits) : ''}</td>` : ''}
+            ${hasDue ? `<td>${r.due ? fmtMoney(r.due) : ''}</td>` : ''}
+            ${hasTotal ? `<td>${fmtMoney(round2((r.paid || 0) + (r.credits || 0)
+              + (r.due || 0)))}</td>` : ''}`;
+          /* Who the money went to, on its own line under the item. Muted and
+             smaller: it identifies the purchase, it isn't the name of it. */
+          const who = (r) => r.merchant
+            ? `<span class="merchant">${esc(r.merchant)}</span>` : '';
+          /* A SPLIT OF ONE THAT REPEATS ITS LINE IS NOT DRAWN. Pressing
+             "✂ Split into parts" opens on a single part carrying the line's own
+             name and figures — that is the state a split passes through on its
+             way to being one, and a window closed there would otherwise leave
+             the card saying the same thing on two rows. It is the split
+             month's rule, which breaks its amounts out when there is more than
+             one OR when the only one carries a note of its own: the part is
+             still stored, and it is shown the moment it says something its line
+             doesn't. */
+          const only = (i.parts || []).length === 1 ? i.parts[0] : null;
+          const parts = only
+            ? ((only.label && only.label !== i.label)
+               || (only.merchant && only.merchant !== (i.merchant || '')) ? i.parts : [])
+            : (i.parts || []);
+          /* EVERY ROW OF THE GROUP OPENS THE SAME EDITOR, parts included —
+             they are one record, and the parts live in the line's own window.
+             So a part is an `editrow` carrying the line's index, not an index
+             of its own: nothing on this card can address a part on its own,
+             which is also what makes the group move and delete as one. */
+          const attrs = `class="editrow${parts.length ? ' hasparts' : ''}" data-edit="tripItem"
+            data-id="${esc(t.id)}" data-idx="${idx}"`;
+          return `<tr ${attrs}>
+          <th scope="row">${esc(i.label)}${i.note ? ` <span class="muted" title="${esc(i.note)}">📝</span>` : ''}${who(i)}</th>
+          ${figures(i)}</tr>` + parts.map((p, pi) => `<tr class="editrow partrow${
+            pi === parts.length - 1 ? ' partlast' : ''}" data-edit="tripItem"
+            data-id="${esc(t.id)}" data-idx="${idx}">
+            <th scope="row"><span class="sr-only">Part of ${
+              esc(i.label || 'the line above')} — </span>${
+              esc(p.label || '—')}${who(p)}</th>
+            ${figures(p)}</tr>`).join('');
+        }).join('')}</tbody>
         <tfoot><tr><th>Total</th>${hasPaid ? `<td>${fmtMoney(paid)}</td>` : ''}${
           hasCredits ? `<td>${fmtMoney(credits)}</td>` : ''}${
           hasDue ? `<td>${fmtMoney(due)}</td>` : ''}${
@@ -19716,6 +19893,7 @@ function setFieldValue(f, input, values) {
       .forEach((b) => { b.checked = chosen.has(b.value); });
   } else if (f.type === 'check') input.checked = !!v;
   else if (f.type === 'readout') input.textContent = v ?? '';
+  else if (f.type === 'parts') setPartsValue(f, input, v);
   else if (f.type === 'note') input.value = v ?? '';
   else input.value = v === undefined || v === null ? ''
     : f.type === 'percent' ? roundTo(v * 100, f.dp ?? 2)
@@ -19763,6 +19941,236 @@ function reprimeRow(ctx) {
   if (ed.link) ed.link('', ctx.ds);
   applyFieldVisibility(ctx.spec);
   ctx.opened = JSON.stringify(readFields(ctx.spec));
+}
+
+/* ── A field that holds a LIST of sub-rows (`type: 'parts'`) ────────────────
+   The Budget has split months: a cell may be several amounts, the cell's `v`
+   stays their sum, and nothing downstream ever has to know about parts. This is
+   the same bargain for a record with more than one money column — a trip line,
+   whose three figures are Paid, Credits and Still due. A part is a miniature
+   line with all three of its own, so a split can say "the snorkel trip is paid
+   and the catamaran still isn't", which is the reason to break a line up in the
+   first place. The parent's three figures become the sums and are DISABLED, the
+   way the split month's Amount box is.
+
+   The list lives on the input element (`el._parts`), not in a module-level
+   variable like `cellParts`. One dialog serves thirty-odd sections and a global
+   left behind by the last window is a bug waiting for the next one; reading the
+   value off the element is also what lets `readFields` and `setFieldValue`
+   treat this like any other field.
+
+   The spec:
+     { key, label, type: 'parts', wide: true,
+       part: [ { key, label, type: 'text' | 'money' } ],   // one part's boxes
+       sums: ['paid', 'credits', 'due'],                    // outer keys it drives
+       settle: { label, title, run(val, set) },             // per-part action
+       addLabel, splitLabel, unsplitLabel, hint }
+   `null` means "not split" — one plain row, the outer boxes yours to type in.
+   An empty array never reaches the state: `unsplit` and a list emptied by its
+   own bin buttons both come back to null. */
+
+/* Every part box in one place, so what a part IS lives in the spec rather than
+   in the DOM builder. A money box gets `asMoneyInput`, which reformats on blur
+   — so text that is not a figure empties the box in front of you instead of
+   being stored as one. That is the SPLIT MONTH's behaviour, deliberately, not
+   `unreadableFields`': a part's figure is one of several being added up on
+   screen, and the running total says what was kept the moment you leave the
+   box. */
+function buildPartBox(pf, part, onChange, idx) {
+  const label = document.createElement('label');
+  label.appendChild(document.createTextNode(pf.label));
+  const input = document.createElement('input');
+  if (pf.type === 'money') asMoneyInput(input);
+  else input.type = 'text';
+  input.value = pf.type === 'money' ? showMoney(part[pf.key] ?? '')
+    : (part[pf.key] ?? '');
+  /* Named for the reader who cannot see the row it is in. "Paid" alone is the
+     same accessible name on every part in the list. */
+  input.setAttribute('aria-label', `Part ${idx + 1} — ${pf.label}`);
+  input.oninput = () => {
+    part[pf.key] = pf.type === 'money' ? (parseMoney(input.value) || 0) : input.value;
+    onChange();
+  };
+  label.appendChild(input);
+  return label;
+}
+
+/* The part a fresh split opens on: the line's own figures and its own name,
+   read out of the FORM rather than out of the state, so a figure typed a second
+   ago and not yet committed is the one that gets carried in. `carry` maps an
+   outer field's key onto the part key it lands in — usually the same word,
+   which is why it defaults to identity. */
+function seedPart(f) {
+  const part = {};
+  for (const pf of f.part) {
+    const from = (f.carry && f.carry[pf.key]) || pf.key;
+    const box = F(`rf-${from}`);
+    if (!box || box.tagName !== 'INPUT') continue;
+    part[pf.key] = pf.type === 'money' ? (parseMoney(box.value) || 0) : box.value.trim();
+  }
+  return part;
+}
+
+/* Draw the list from `host._parts`. Called on every structural change (a part
+   added, removed, or the whole thing split or unsplit) — and NOT on every
+   keystroke, which is why the boxes are wired to mutate the array in place. */
+function renderPartsList(host, f) {
+  const list = host.querySelector('.partslist');
+  const parts = host._parts;
+  list.innerHTML = '';
+  list.hidden = !parts;
+  host.querySelector('.parts-add').hidden = !parts;
+  const toggle = host.querySelector('.parts-toggle');
+  toggle.textContent = parts ? (f.unsplitLabel || '↩ Back to one line')
+    : (f.splitLabel || '✂ Split into parts');
+  if (!parts) { partsTally(host, f); return; }
+  parts.forEach((part, i) => {
+    const line = document.createElement('div');
+    line.className = 'partline';
+    const grid = document.createElement('div');
+    grid.className = 'partgrid';
+    for (const pf of f.part)
+      grid.appendChild(buildPartBox(pf, part, () => partsTally(host, f), i));
+    line.appendChild(grid);
+    const btns = document.createElement('div');
+    btns.className = 'partbtns';
+    /* The line editor's "✓ Paid" move, per part — settling one excursion is
+       the same two edits as settling a whole line, and having to do it in the
+       parent's boxes is exactly what splitting was meant to stop. It writes the
+       PART and redraws, because the boxes read their values from the array. */
+    if (f.settle) {
+      const settle = document.createElement('button');
+      settle.type = 'button';                  // never submits the dialog
+      settle.className = 'btn small';
+      settle.textContent = f.settle.label;
+      settle.title = f.settle.title || '';
+      settle.setAttribute('aria-label', `${f.settle.label} — part ${i + 1}`);
+      settle.onclick = () => {
+        f.settle.run((k) => part[k] || 0, (k, n) => { part[k] = round2(n); });
+        renderPartsList(host, f);
+        partsCommitted(host, f);
+      };
+      btns.appendChild(settle);
+    }
+    const del = document.createElement('button');
+    del.type = 'button';                       // never submits the dialog
+    del.className = 'btn small';
+    del.textContent = '🗑️ Remove';
+    del.setAttribute('aria-label', `Remove part ${i + 1}`);
+    del.onclick = () => {
+      parts.splice(i, 1);
+      /* A list emptied one part at a time ends where "Back to one line" ends:
+         at a plain row whose own boxes are live again. Leaving an empty list
+         standing would be a split that claims the line is nothing. */
+      if (!parts.length) host._parts = null;
+      renderPartsList(host, f);
+      partsCommitted(host, f);
+    };
+    btns.appendChild(del);
+    line.appendChild(btns);
+    list.appendChild(line);
+  });
+  partsTally(host, f);
+}
+
+/* What the list adds up to, and the outer boxes it drives. Runs on every
+   keystroke — it is the running total, and the parent's figures ARE this sum,
+   so letting them lag would put two answers to "what did this line cost" on
+   screen at once. */
+function partsTally(host, f) {
+  const parts = host._parts;
+  const money = f.part.filter(pf => pf.type === 'money');
+  const sums = {};
+  for (const pf of money)
+    sums[pf.key] = round2((parts || []).reduce((s, p) => s + (p[pf.key] || 0), 0));
+  /* The outer boxes: filled and inert while split, yours again when not. */
+  for (const key of f.sums || []) {
+    const box = F(`rf-${key}`);
+    if (!box) continue;
+    box.disabled = !!parts;
+    if (parts) box.value = fmtMoney(sums[key] ?? 0);
+    /* A field's action button (the line's own "✓ Paid") goes with its box —
+       a split line settles part by part. */
+    const btn = box.parentElement && box.parentElement.classList.contains('field-row')
+      ? box.parentElement.querySelector('.btn') : null;
+    if (btn && !btn.classList.contains('checkset-all')) btn.disabled = !!parts;
+  }
+  const tally = host.querySelector('.partstotal');
+  if (!parts) { tally.textContent = ''; return; }
+  /* Only the columns that have something in them, the trip card's own rule: a
+     line of "$0.00 credits" on every split is noise, and the one case where a
+     zero must still be said is a split that has cost nothing at all. */
+  const said = money.filter(pf => sums[pf.key])
+    .map(pf => `${fmtMoney(sums[pf.key])} ${pf.label.toLowerCase()}`);
+  tally.textContent = `${parts.length} part${parts.length === 1 ? '' : 's'} · ${
+    said.length ? said.join(' · ') : fmtMoney(0)}`;
+  return sums;
+}
+
+/* A press of one of this field's own buttons is as deliberate as finishing a
+   box, so in a window that saves as you go it commits like one — the money
+   action button's rule (2026-09-07 audit, fix 6). Setting `.value` and
+   splicing an array fire no `change` of their own, so without this the list on
+   screen and the card behind it disagreed until Done. */
+function partsCommitted(host, f) {
+  partsTally(host, f);
+  if (rowCtx && rowCtx.auto && rowMoved(rowCtx)) commitRow(rowCtx, false);
+}
+
+/* Priming the field from stored data — the `setFieldValue` branch. It REUSES
+   the rows it already has whenever the count matches, writing values into the
+   boxes rather than rebuilding them, and that is not an optimisation: this
+   window saves as you go, so `reprimeRow` runs after EVERY committed box, and a
+   list rebuilt from scratch each time would throw the cursor out of the part
+   you are still filling in — the picker-inside-a-card trap, one layer down. */
+const partIsEmpty = (f, p) => !f.part.some(pf => p && p[pf.key]);
+
+/* Priming the field from stored data — the `setFieldValue` branch, and the one
+   that had to be written twice.
+
+   TWO THINGS MAKE IT MORE THAN A REDRAW. The first is the cursor: this window
+   saves as you go, so `reprimeRow` runs after EVERY committed box, and a list
+   rebuilt each time would throw the focus out of the part being filled in — the
+   picker-inside-a-card trap, one layer down. The second is subtler and is what
+   the first attempt got wrong. Each box's handler writes into the part OBJECT
+   it was built against, so a re-prime that swaps the array for fresh copies
+   leaves every keystroke landing in an orphan nothing reads: the boxes looked
+   right, and the next redraw quietly restored what the reader had just typed
+   over. So the stored values are copied INTO the objects already on screen, and
+   the array keeps its identity.
+
+   The list is also allowed to be longer than what is stored: `save` never
+   writes an empty part — a line made of nothing is not a claim anybody meant to
+   file — so a row just added with `＋ Add a part` has no stored counterpart. It
+   keeps its place and its object; the stored parts line up with the FILLED rows
+   in order. Anything that cannot be lined up that way (an undo, a list rewritten
+   from elsewhere) falls back to a clean rebuild. */
+function setPartsValue(f, host, v) {
+  const stored = Array.isArray(v) ? v.map(p => ({ ...p })) : [];
+  const had = host._parts;
+  const filled = (had || []).filter(pp => !partIsEmpty(f, pp));
+  const rebuild = () => {
+    host._parts = stored.length ? stored : null;
+    renderPartsList(host, f);
+  };
+  if (!had || filled.length !== stored.length) { rebuild(); return; }
+  let si = 0;
+  const lines = [...host.querySelectorAll('.partline')];
+  had.forEach((pp, i) => {
+    if (partIsEmpty(f, pp)) return;
+    const from = stored[si++];
+    const boxes = lines[i] ? [...lines[i].querySelectorAll('.partgrid input')] : [];
+    f.part.forEach((pf, j) => {
+      if (from[pf.key] === undefined) delete pp[pf.key]; else pp[pf.key] = from[pf.key];
+      const box = boxes[j];
+      /* Never overwrite the box the reader is in: `change` fires on the way
+         OUT of a box, so by now the focus is on the next one, and re-setting it
+         would drop the caret at the end of a value that has not changed. */
+      if (!box || box === document.activeElement) return;
+      box.value = pf.type === 'money' ? showMoney(pp[pf.key] ?? '') : (pp[pf.key] ?? '');
+    });
+  });
+  partsTally(host, f);
 }
 
 function buildFields(fields, values, link) {
@@ -19813,10 +20221,11 @@ function buildFields(fields, values, link) {
        browser rather than trusted: see the test that drives it. */
     if (f.help) label.insertAdjacentHTML('beforeend',
       ' ' + helpBtn(f.help, f.helpLabel || String(f.label).toLowerCase()));
-    /* A readout is a <p> and a checks group is a <div> — `for` cannot point
-       at either, so both name their own label with aria-labelledby instead;
-       a dangling htmlFor would be a lie for AT to trip on. */
-    if (f.type !== 'readout' && f.type !== 'checks') label.htmlFor = `rf-${f.key}`;
+    /* A readout is a <p>, and a checks group and a parts list are <div>s —
+       `for` cannot point at any of them, so each names its own label with
+       aria-labelledby instead; a dangling htmlFor would be a lie for AT to
+       trip on. */
+    if (!['readout', 'checks', 'parts'].includes(f.type)) label.htmlFor = `rf-${f.key}`;
     label.id = `rf-${f.key}-lbl`;
     cell.appendChild(label);
     let input;
@@ -19858,6 +20267,55 @@ function buildFields(fields, values, link) {
          bottom of its cell, which made it drift up or down with however many
          lines its hint happened to run to. */
       input.style.cssText = 'width:20px;height:20px;margin-top:10px;align-self:flex-start';
+    } else if (f.type === 'parts') {
+      /* Built empty and filled by `setFieldValue` below, like every other box
+         — the ONE setter rule. The buttons are wired here because they belong
+         to the field, not to whatever it currently holds. */
+      input = document.createElement('div');
+      input.className = 'partsbox';
+      input.setAttribute('role', 'group');
+      input.setAttribute('aria-labelledby', `rf-${f.key}-lbl`);
+      const toggle = document.createElement('button');
+      toggle.type = 'button';                  // never submits the dialog
+      toggle.className = 'btn small parts-toggle';
+      toggle.onclick = () => {
+        /* Splitting OPENS ON WHAT THE LINE ALREADY SAYS — one part carrying the
+           row's own figures and its own name — rather than on an empty box.
+           The figures are the thing being broken up, and a split that threw
+           them away would make the first move "type them in again"; it is also
+           the only opening that leaves the parent's sums where they were, so
+           nothing on the card changes until you actually divide something.
+           Coming BACK is the mirror: the sums are already in the outer boxes,
+           so unsplitting keeps the total and drops only the breakdown. */
+        input._parts = input._parts ? null : [seedPart(f)];
+        renderPartsList(input, f);
+        partsCommitted(input, f);
+      };
+      input.appendChild(toggle);
+      const list = document.createElement('div');
+      list.className = 'partslist';
+      input.appendChild(list);
+      const add = document.createElement('button');
+      add.type = 'button';                     // never submits the dialog
+      add.className = 'btn small parts-add';
+      add.textContent = f.addLabel || '＋ Add a part';
+      add.onclick = () => {
+        (input._parts = input._parts || []).push({});
+        /* Redrawn, NOT committed. An empty part is a box the reader has just
+           opened, not a fact about the line — and `save` drops one, so
+           committing here would write the list without it and the re-prime
+           that follows would take the new row away from under the cursor. It
+           is written by the first box in it that gets finished, like every
+           other field in this window. */
+        renderPartsList(input, f);
+      };
+      input.appendChild(add);
+      const tally = document.createElement('p');
+      tally.className = 'partstotal';
+      /* `status`, so the running total is ANNOUNCED as it moves — the figure a
+         split is judged by is the one a reader who cannot see it most needs. */
+      tally.setAttribute('role', 'status');
+      input.appendChild(tally);
     } else if (f.type === 'readout') {
       /* Not an input at all: a figure the dialog derives and the reader never
          types. It carries nothing into save() — `readFields` skips it — and it
@@ -20297,6 +20755,13 @@ function readFields(fields) {
       continue;
     }
     if (f.type === 'check') { out[f.key] = el.checked; continue; }
+    /* A copy, never the live array: `rowCtx.opened` is a JSON snapshot of this
+       and `rowMoved` compares against it, so handing over the array the boxes
+       are still mutating would make every split look unchanged. */
+    if (f.type === 'parts') {
+      out[f.key] = el._parts ? el._parts.map(p => ({ ...p })) : null;
+      continue;
+    }
     const raw = el.value.trim();
     if (f.type === 'money') { out[f.key] = parseMoney(raw); continue; }
     if (f.type === 'number' || f.type === 'percent') {
@@ -23700,16 +24165,31 @@ const EDITORS = {
 
   tripItem: {
     title: (ds, isNew) => isNew ? 'Add a Line' : 'Trip Line',
-    sub: () => 'Leave the label blank for a continuation line, or everything blank for a spacer.',
+    sub: () => 'Leave the label blank for a continuation line, or everything blank for a spacer. '
+      + 'Split a line that was several purchases — the parts keep their own figures and add up to it.',
     /* The item's name is a name, not a figure — it takes the full width, which
        also puts the three money boxes together on one line where they can be
        read against each other, instead of leaving one stranded on a row of its
        own below the other two. Three columns so those three come out the same
        width and fill the line: at the auto-fit four they were three boxes and a
-       gap, and Still due — last on the row — was the odd one out. */
+       gap, and Still due — last on the row — was the odd one out.
+       The MERCHANT takes a full width of its own rather than sharing the row
+       with Item, and that is the layout falling out of the column count: at
+       three columns a pair of text boxes comes out as a third and two thirds,
+       which says one of them is the more important and gets the wrong one. Two
+       full lines, the two things that identify the purchase, and then the
+       figures. */
     cols: 3,
     fields: [
       { key: 'label', label: 'Item', type: 'text', wide: true },
+      /* WHO the money went to — asked for 2026-09-12. It is a fact about the
+         purchase, alongside the item, not prose about it: the note stays the
+         place for anything that needs a sentence. It is not stripped from a
+         share link without notes, for the same reason the item's own label
+         isn't — a share that kept "Airfare" and dropped "Delta" would be
+         telling half of one fact. */
+      { key: 'merchant', label: 'Merchant', type: 'text', wide: true,
+        hint: 'Who you paid — the airline, the hotel, the booking site.' },
       { key: 'paid', label: 'Paid', type: 'money' },
       { key: 'credits', label: 'Credits', type: 'money' },
       { key: 'due', label: 'Still due', type: 'money',
@@ -23717,14 +24197,52 @@ const EDITORS = {
            to what's paid, then zero it. */
         action: { label: '✓ Paid', title: 'Move what is still due into Paid',
           run: (val, set) => { set('paid', val('paid') + val('due')); set('due', 0); } } },
+      /* A line that was several purchases — three excursions on one booking,
+         a flight and its seat fee. The parts carry the same five facts the
+         line does, minus the note: a note is prose about the WHOLE line, and
+         five sentences hidden one per part is a place for something to be
+         written and never read again. The three money keys are the ones the
+         parent's figures are summed from, so a split line's own boxes go
+         inert and follow the list. */
+      { key: 'parts', label: 'Parts', type: 'parts', wide: true,
+        splitLabel: '✂ Split into parts', unsplitLabel: '↩ Back to one line',
+        addLabel: '＋ Add a part',
+        sums: ['paid', 'credits', 'due'],
+        part: [
+          { key: 'label', label: 'Item', type: 'text' },
+          { key: 'merchant', label: 'Merchant', type: 'text' },
+          { key: 'paid', label: 'Paid', type: 'money' },
+          { key: 'credits', label: 'Credits', type: 'money' },
+          { key: 'due', label: 'Still due', type: 'money' },
+        ],
+        settle: { label: '✓ Paid', title: 'Move this part’s Still due into Paid',
+          run: (val, set) => { set('paid', val('paid') + val('due')); set('due', 0); } } },
       noteField,
     ],
     get: (ds) => state.vacations.trips.find(t => t.id === ds.id).items[+ds.idx],
     save(ds, v) {
       const t = state.vacations.trips.find(t => t.id === ds.id);
-      const row = { label: v.label || '', paid: v.paid ?? 0, due: v.due ?? 0 };
-      if (v.credits !== null && v.credits !== undefined && v.credits !== 0)
-        row.credits = v.credits;
+      /* A part with nothing on it at all is dropped — the same rule the split
+         month keeps, and the reason an emptied list comes back as one plain
+         row rather than as a line claiming it is made of nothing. */
+      const parts = (v.parts || [])
+        .map(p => tripPart(p))
+        .filter(p => p.label || p.merchant || p.paid || p.credits || p.due);
+      const row = parts.length
+        /* THE PARENT'S FIGURES ARE THE SUM, ALWAYS. Everything that reads a
+           trip — the card's footer, the year chart, Find, a share link — goes
+           on reading `paid` / `credits` / `due` and never learns that parts
+           exist, exactly as the budget's engine never learns about a split
+           month. Recomputed here rather than trusted from the form, so the
+           two can't drift. */
+        ? { label: v.label || '', paid: sumPart(parts, 'paid'),
+            due: sumPart(parts, 'due') }
+        : { label: v.label || '', paid: v.paid ?? 0, due: v.due ?? 0 };
+      const credits = parts.length ? sumPart(parts, 'credits') : v.credits;
+      if (credits !== null && credits !== undefined && credits !== 0)
+        row.credits = credits;
+      if (v.merchant) row.merchant = v.merchant;
+      if (parts.length) row.parts = parts;
       if (v.note) row.note = v.note;
       if (ds.idx !== undefined) t.items[+ds.idx] = row; else t.items.push(row);
     },
@@ -25861,9 +26379,20 @@ function searchPlan(st, query, allowed) {
     if (has(t.name))
       push({ view: 'vacations', where: `${t.name}${t.year ? ` · ${t.year}` : ''}`,
              snippet: 'trip' });
-    for (const i of t.items || [])
-      if (has(i.label) || has(i.note))
-        push({ view: 'vacations', where: `${t.name} · ${i.label}`, snippet: i.note || '' });
+    for (const i of t.items || []) {
+      if (has(i.label) || has(i.note) || has(i.merchant))
+        push({ view: 'vacations', where: `${t.name} · ${i.label}`,
+               snippet: [i.merchant, i.note].filter(Boolean).join(' · ') });
+      /* A part is searchable in its own right — it is where the name of what
+         you actually bought now lives, and a split line's own label is often
+         the generic one ("Excursions"). It says which line it belongs to,
+         because "Catamaran" on its own does not tell you which trip window to
+         open. */
+      for (const p of i.parts || [])
+        if (has(p.label) || has(p.merchant))
+          push({ view: 'vacations', where: `${t.name} · ${i.label} · ${p.label}`,
+                 snippet: p.merchant || '' });
+    }
   }
   for (const [y, p] of Object.entries((st.vacations || {}).pto || {}))
     for (const e of (p && p.entries) || [])
@@ -27806,6 +28335,7 @@ applyPin(savedPin());
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDollar,
+  tripPart, sumPart,
   parseMoney, raiseFor, sinceLastYear,
   /* The sample plan, so its tests measure the SAME object the button loads
      rather than a copy of it that can drift. */
