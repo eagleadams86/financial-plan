@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1066;
+const EXPECTED = 1068;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -18127,6 +18127,105 @@ t('Pick takes a figure instead of opening it; → Field writes into an editor th
     ok(dlg.open, 'and the editor underneath is still open');
     W.finGet().goals[idx].target = before;
     dlg.close();
+  } finally { f.remove(); if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep); }
+});
+t('drag-selecting across the months scrolls the grid from the pinned columns', async () => {
+  /* A 760px frame, so the twelve months overflow their wrap and there is
+     something to scroll; the drag begins on a month cell and the pointer is
+     parked over the pinned year-total column with the button held. */
+  const { f, W, D } = await auditFrame(760, 900, 'gridselscroll');
+  try {
+    D.getElementById('tab-budget').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const grid = D.querySelector('#views table.grid'), wrap = grid.closest('.gridwrap');
+    ok(wrap.scrollWidth > wrap.clientWidth + 50, 'the grid overflows its wrap at 760px', wrap.scrollWidth - wrap.clientWidth);
+    wrap.scrollLeft = 0;
+    const first = [...D.querySelectorAll('#views td.cell[data-cat]')].find((c) => /\$/.test(c.textContent));
+    const tot = first.parentElement.querySelector('td.rowtot');
+    const fr = first.getBoundingClientRect(), tr = tot.getBoundingClientRect();
+    const ev = (type, target, x, y, extra) => target.dispatchEvent(new W.PointerEvent(type, Object.assign(
+      { bubbles: true, cancelable: true, pointerType: 'mouse', clientX: x, clientY: y }, extra || {})));
+    ev('pointerdown', first, fr.left + 4, fr.top + 4, { button: 0, buttons: 1 });
+    ev('pointermove', tot, tr.left + 30, tr.top + 6, { buttons: 1 });
+    await new Promise((r) => setTimeout(r, 120));
+    const moved = wrap.scrollLeft;
+    ok(moved > 0, 'the wrap scrolled toward the months under the pinned total column', moved);
+    await new Promise((r) => setTimeout(r, 120));
+    ok(wrap.scrollLeft > moved, 'and keeps scrolling while the pointer stays there', wrap.scrollLeft);
+    ok(W.gridRangeCells().length > 1 && W.gridRangeCells().every((c) => c.parentElement === first.parentElement),
+       'the block was extended along the row as the months came into view', W.gridRangeCells().length);
+    ev('pointerup', tot, tr.left + 30, tr.top + 6, { button: 0, buttons: 0 });
+    const stopped = wrap.scrollLeft;
+    await new Promise((r) => setTimeout(r, 120));
+    eq(wrap.scrollLeft, stopped, 'and stops the moment the button is released');
+    /* A press that BEGAN on a label is a row reorder, and never scrolls. */
+    const lbl = first.parentElement.querySelector('th.lbl'), lr = lbl.getBoundingClientRect();
+    wrap.scrollLeft = 200;
+    ev('pointerdown', lbl, lr.left + 4, lr.top + 4, { button: 0, buttons: 1 });
+    ev('pointermove', lbl, lr.left + 8, lr.top + 8, { buttons: 1 });
+    await new Promise((r) => setTimeout(r, 120));
+    eq(wrap.scrollLeft, 200, 'a drag from the label column leaves the scroll alone');
+    ev('pointerup', lbl, lr.left + 8, lr.top + 8, { button: 0, buttons: 0 });
+  } finally { f.remove(); }
+});
+t('a drag on the grid selects a BLOCK of cells — a column as readily as a row', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'gridblock');
+  const keep = localStorage.getItem('fin-calc');
+  try {
+    D.getElementById('tab-budget').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const grid = D.querySelector('#views table.grid');
+    const rows = [...grid.tBodies[0].rows].filter((tr) => tr.querySelector('td.cell[data-cat]'));
+    ok(rows.length >= 3, 'the sample grid has three category rows to select down');
+    const a = rows[0].querySelectorAll('td.cell')[1], b = rows[2].querySelectorAll('td.cell')[3];
+    const ev = (type, target, extra) => { const r = target.getBoundingClientRect(); target.dispatchEvent(new W.PointerEvent(type, Object.assign(
+      { bubbles: true, cancelable: true, pointerType: 'mouse', clientX: r.left + 5, clientY: r.top + 5 }, extra || {}))); };
+    ev('pointerdown', a, { button: 0, buttons: 1 });
+    ev('pointermove', b, { buttons: 1 });
+    const block = W.gridRangeCells();
+    const rowsIn = new Set(block.map((td) => td.parentElement)), colsIn = new Set(block.map((td) => td.cellIndex));
+    eq(rowsIn.size, 3, 'three rows in the block');
+    eq([...colsIn].sort((x, y) => x - y).join(','), [a.cellIndex, a.cellIndex + 1, a.cellIndex + 2].join(','), 'three columns in the block — not whole rows');
+    ok(block.every((td) => !td.classList.contains('lbl')), 'never the label column');
+    ok(W.getComputedStyle(block[0]).backgroundColor !== W.getComputedStyle(rows[0].querySelectorAll('td.cell')[0]).backgroundColor,
+       'and the block is painted');
+    ev('pointerup', b, { button: 0, buttons: 0 });
+    b.click();
+    eq(D.getElementById('cellDialog').open, false, 'the click that ends the drag opens no editor');
+    eq(W.gridRangeCells().length, block.length, 'and the block stands after the button is released');
+    /* Add Selected reads the block, cell by cell, with labels. */
+    D.getElementById('calcBtn').click();
+    D.getElementById('calcClearBtn').click();
+    D.getElementById('calcSelBtn').click();
+    const tape = [...D.querySelectorAll('#calcTape li:not(.calc-empty)')];
+    eq(tape.length, block.filter((td) => W.figureAt(td)).length, 'every figure in the block went on the tape');
+    ok(tape.every((li) => /· \w{3} \d\d$/.test(li.querySelector('.calc-lbl').textContent)), 'each with its row and month');
+    /* A press straight down one column is a column. */
+    const c1 = rows[0].querySelectorAll('td.cell')[2], c2 = rows[2].querySelectorAll('td.cell')[2];
+    ev('pointerdown', c1, { button: 0, buttons: 1 }); ev('pointermove', c2, { buttons: 1 }); ev('pointerup', c2, { button: 0, buttons: 0 });
+    const col = W.gridRangeCells();
+    eq(new Set(col.map((td) => td.cellIndex)).size, 1, 'one column');
+    eq(col.length, 3, 'three cells down it');
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    eq(W.gridRangeCells().length, 0, 'Escape clears the block');
+    /* And on an ordinary table — a trip's lines on Vacations (Charles: "such
+       as columns in the vacations"). The first column is the row's name and
+       stays out; the click that ends the drag opens no editor. */
+    D.getElementById('tab-vacations').click();
+    await new Promise((r) => setTimeout(r, 400));
+    const trip = [...D.querySelectorAll('#views .card.trip table')].find((tb) => tb.tBodies[0] && tb.tBodies[0].rows.length >= 2);
+    ok(trip, 'the sample has a trip with two lines');
+    const t1 = trip.tBodies[0].rows[0].cells[1], t2 = trip.tBodies[0].rows[1].cells[1];
+    ev('pointerdown', t1, { button: 0, buttons: 1 }); ev('pointermove', t2, { buttons: 1 }); ev('pointerup', t2, { button: 0, buttons: 0 });
+    const tc = W.gridRangeCells();
+    eq(tc.length, 2, 'two cells down one column of the trip');
+    ok(tc.every((td) => td.cellIndex === 1 && td.closest('table') === trip), 'the same column, in that table');
+    t2.click();
+    eq(D.getElementById('rowDialog').open, false, 'the drag’s last click opened no trip editor');
+    ev('pointerdown', trip.tBodies[0].rows[0].cells[0], { button: 0, buttons: 1 });
+    eq(W.gridRangeCells().length, 0, 'a press on the name column starts no block');
+    const js = stripComments(APP_SRC);
+    ok(/e\.preventDefault\(\);\s*\/\/ no native selection from a month cell/.test(js), 'the pointerdown is refused, so no text selection starts in the months');
   } finally { f.remove(); if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep); }
 });
 t('docking pads the page and survives a reload; a phone gets a sheet', async () => {

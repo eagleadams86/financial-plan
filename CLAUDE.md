@@ -6804,6 +6804,41 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   flash has played), and re-focuses whatever inside the window had the focus.
   The re-flash was the "re-highlights" in his report; the scroll reset was the
   bug.
+- **A drag on the grid selects a BLOCK, not the browser's rows** (Charles,
+  2026-09-13: *"i can select multiple data in a row but not multiple data in
+  a column. it just starts highlighting entire rows"*). Text selection runs in
+  document order; a grid wants a rectangle. `wireGridRange` refuses the
+  pointerdown on a month cell — no native selection starts there, the label
+  column keeps its own — and paints `td.selrange` over the rows and columns
+  between the anchor and the pointer (`gridRangePaint`, by `sectionRowIndex`
+  × `cellIndex`, section bands and the label column skipped). The click that
+  ends a drag is swallowed by a capturing listener and by the Pick listener
+  (`gridDragEndedAt`, 400ms — the `rowDragEndedAt` shape). Add Selected reads
+  the block ahead of any text highlight; ⌘C copies it as TSV; Escape, a new
+  press or a redraw clears it. The fill is `--unit-active-bg`/`-txt`, the tabs'
+  chosen pairing, at (0,4,3) after the row-hover rule it would otherwise lose
+  to. Focus still lands on a pressed cell by hand, since a refused pointerdown
+  moves none. **Every table in `#views`** gets it from `wireView`, not the grid
+  alone (Charles: *"check the other views and tabs … such as columns in the
+  vacations"*): the block lives in one `tbody` (`gridRange.body`), the first
+  column of any table is its name and is never in a block (`c0 ≥ 1`, and a
+  press there starts none), the fill selector is `#views tbody …` so it
+  outranks any table's own hover. **`gridDragEndedAt` starts at −1e9, not 0**:
+  at 0 the "swallow the drag's last click" window covered the first 400ms of
+  every page, and six existing tests that click a cell at boot went red.
+  Verified on the sample's trip lines as well as the grid.
+- **Drag-selecting across the months scrolls the grid from its PINNED
+  columns** (Charles, 2026-09-13: *"the scroller doesn't activate until the
+  mouse is passed the first or last column"*). The browser autoscrolls a
+  selection drag only once the pointer leaves the scroll box's BOX, and the
+  label and year-total columns are sticky INSIDE `.gridwrap`. `wireGridSelectScroll`
+  (beside `wireGridKeys`, wired for shared views too — selecting is reading)
+  scrolls the wrap on a rAF loop while a held mouse button sits over `.lbl`
+  or `.rowtot`, faster the deeper in (4–24px a frame), and extends the
+  selection to `caretPositionFromPoint` under the pointer each frame, which is
+  what the native autoscroll does. A press that BEGAN on a label is
+  `wireRowDrag`'s and never scrolls; a finger is left to scroll. Tested in a
+  760px frame where the twelve months genuinely overflow.
 - **Pick is a CAPTURING click listener on the document**, so it runs before the
   grid's click, the month rows' and the delegated `data-edit` route; nothing
   else in the file captures a click except the month page's reveal line, which

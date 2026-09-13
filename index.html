@@ -1394,6 +1394,12 @@ main:focus { outline: none; }
    read across, and lighting one says it is. */
 .grid tbody tr:not(.sechead):hover > th,
 .grid tbody tr:not(.sechead):hover > td:not(.now) { background: var(--bg-card-alt); }
+/* A BLOCK of selected cells — the tabs' chosen pairing, the pack's own
+   contrast-checked pair, so it reads as a selection whichever theme is on and
+   over the current month's tint. The hover rule above is (0,4,3), so the
+   second selector here has to be too, and comes after it. */
+#views tbody tr:not(.sechead) > td.selrange,
+#views tbody tr:not(.sechead):hover > td.selrange { background: var(--unit-active-bg); color: var(--unit-active-txt); }
 .grid tr.balance td, .grid tr.balance th { border-top: 1px solid var(--border-strong); }
 /* Section separators: Income / Expenses / Transfers / Accounts */
 .grid tr.sechead th, .grid tr.sechead td { background: var(--bg-card-alt);
@@ -19070,6 +19076,10 @@ function wireView(view) {
   const btn = F('welcomeRestoreBtn');
   if (btn) btn.onclick = () => openModal(F('dataDialog'));
   wireYearStrip();
+  /* A block-select on every table the tab drew — the tables are rebuilt each
+     render, so each is wired once, here, and a fresh render has no block. */
+  gridRange = null;
+  document.querySelectorAll('#views table').forEach(wireGridRange);
   /* Every tab, not just the Budget: the row notes put a `data-tip` on Household,
      Trips and Giving too, and the panel this hangs off is the same one whichever
      view drew into it. It wires itself once and then stands. */
@@ -25532,6 +25542,7 @@ function wireBudget() {
      reading, not editing, and Enter simply opens nothing now that the click
      listener above was never attached. */
   if (grid) wireGridKeys(grid);
+  if (grid) wireGridSelectScroll(grid);   // after wireView's wireGridRange: its pointerdown set the anchor this extends
   if (grid && !viewOnly) wireRowDrag(grid);
   /* The gathered notes sit outside the table, so the grid's own listener can't
      reach them — but a note you can't get back to the cell of is only half
@@ -25582,6 +25593,152 @@ function wireBudget() {
    minus the role juggling that would strip the table's own row/column headers.
    Re-run on every render — the grid element is rebuilt each time, so nothing
    stacks. */
+/* A BLOCK SELECTION ON THE GRID (Charles, 2026-09-13: "i can select multiple
+   data in a row but not multiple data in a column. it just starts
+   highlighting entire rows"). The browser's text selection runs in document
+   order, so a drag down a column takes every row in between whole. A grid
+   wants a RECTANGLE: press on a cell, drag to another, and every cell in the
+   block between them is chosen — a column, a row, or a box of both. The
+   pointerdown is refused so no native selection starts in the months (the
+   label column keeps its own); a click still opens the cell, and the click
+   that ENDS a drag is swallowed. Add Selected reads the block ahead of any
+   text highlight; ⌘C / Ctrl+C copies it as tab-separated text; Escape, a new
+   press on the grid, or a redraw clears it. Mouse only — a finger scrolls. */
+let gridRange = null;          // { grid, a: {r, c}, b: {r, c} } while a block is drawn
+let gridDragEndedAt = -1e9;    // the click that ends a drag is not a click on a cell (never "just now" on a fresh page)
+/* EVERY TABLE ON EVERY TAB, not the budget grid alone (Charles, 2026-09-13:
+   "check the other views and tabs to see if this can be reasonably achieved,
+   such as columns in the vacations"): a trip's lines, the holdings, the
+   bonuses by year, the donations — one block-select over all of them. The
+   first column of any table is the row's name and is never in a block; the
+   grid's pinned year-total column is. */
+const gridCellAt = (td) => ({ r: td.parentElement.sectionRowIndex, c: td.cellIndex });
+function gridRangeCells() { return [...document.querySelectorAll('#views table td.selrange')]; }
+function gridRangeClear() {
+  gridRangeCells().forEach((td) => td.classList.remove('selrange'));
+  gridRange = null;
+}
+function gridRangePaint() {
+  if (!gridRange) return;
+  const { grid, body, a, b } = gridRange;
+  const r0 = Math.min(a.r, b.r), r1 = Math.max(a.r, b.r), c0 = Math.max(1, Math.min(a.c, b.c)), c1 = Math.max(a.c, b.c);
+  grid.querySelectorAll('td.selrange').forEach((td) => td.classList.remove('selrange'));
+  [...body.rows].slice(r0, r1 + 1).forEach((tr) => {
+    if (tr.classList.contains('sechead')) return;
+    [...tr.cells].forEach((cell) => {
+      if (cell.tagName === 'TD' && cell.cellIndex >= c0 && cell.cellIndex <= c1) cell.classList.add('selrange');
+    });
+  });
+}
+/* Extend the block to the cell under a point. Over a PINNED column the block
+   ends at the last month that is actually in view beside it — the pinned
+   cell itself only once the wrap has scrolled as far as it goes. */
+function gridRangeExtendAt(grid, x, y) {
+  if (!gridRange) return;
+  const el = document.elementFromPoint(x, y);
+  let td = el && el.closest('td, th');
+  if (!td || !grid.contains(td) || td.parentElement.parentElement !== gridRange.body) return;
+  const wrap = grid.closest('.gridwrap');
+  if (!wrap) { gridRange.b = gridCellAt(td); gridRangePaint(); return; }   // an ordinary table has no pinned columns
+  const months = [...td.parentElement.cells].filter((c) => c.tagName === 'TD' && !c.classList.contains('lbl') && !c.classList.contains('rowtot'));
+  if (td.classList.contains('lbl')) {
+    const edge = td.getBoundingClientRect().right;
+    td = wrap.scrollLeft <= 0 ? months[0] : months.find((c) => c.getBoundingClientRect().left >= edge - 1);
+  } else if (td.classList.contains('rowtot')) {
+    const edge = td.getBoundingClientRect().left, atEnd = wrap.scrollLeft >= wrap.scrollWidth - wrap.clientWidth - 1;
+    td = atEnd ? td : [...months].reverse().find((c) => c.getBoundingClientRect().right <= edge + 1);
+  }
+  if (!td) return;
+  gridRange.b = gridCellAt(td);
+  gridRangePaint();
+}
+function wireGridRange(grid) {
+  let down = null;
+  grid.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    gridRangeClear();        // any press on a table lets the old block go, wherever it lands
+    const td = e.target.closest('td');
+    if (!td || td.cellIndex === 0 || td.classList.contains('lbl')
+        || !td.closest('tbody') || td.closest('table') !== grid || e.target.closest('button, a, input, select')) return;
+    e.preventDefault();      // no native selection from a month cell; the click still comes
+    if (typeof td.focus === 'function' && td.hasAttribute('tabindex')) td.focus({ preventScroll: true });
+    down = { td, x: e.clientX, y: e.clientY };
+  });
+  grid.addEventListener('pointermove', (e) => {
+    if (!down || !(e.buttons & 1) || e.pointerType !== 'mouse') return;
+    if (!gridRange) {
+      if (Math.hypot(e.clientX - down.x, e.clientY - down.y) < 4) return;
+      gridRange = { grid, body: down.td.parentElement.parentElement, a: gridCellAt(down.td), b: gridCellAt(down.td) };
+    }
+    gridRangeExtendAt(grid, e.clientX, e.clientY);
+  });
+  const end = () => { if (down && gridRange) gridDragEndedAt = performance.now(); down = null; };
+  document.addEventListener('pointerup', end);
+  document.addEventListener('pointercancel', end);
+  /* The click that ends a drag lands on whatever cell the pointer stopped on,
+     and would open its editor (or, with Pick on, take it). Swallowed. */
+  grid.addEventListener('click', (e) => {
+    if (performance.now() - gridDragEndedAt < 400) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+}
+document.addEventListener('keydown', (e) => {
+  if (!gridRange || document.querySelector('dialog[open]')) return;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (e.key === 'Escape') { gridRangeClear(); e.preventDefault(); return; }
+  if ((e.key === 'c' || e.key === 'C') && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+    const cells = gridRangeCells();
+    if (!cells.length) return;
+    const rows = new Map();
+    cells.forEach((td) => { const r = td.parentElement.sectionRowIndex; if (!rows.has(r)) rows.set(r, []); rows.get(r).push(td.textContent.trim()); });
+    const tsv = [...rows.values()].map((r) => r.join('\t')).join('\n');
+    if (navigator.clipboard) navigator.clipboard.writeText(tsv).then(() => toast(`Copied ${cells.length} cell${cells.length === 1 ? '' : 's'}`), () => {});
+    e.preventDefault();
+  }
+});
+
+/* DRAG-SELECTING ACROSS THE MONTHS SCROLLS THE GRID FROM THE PINNED COLUMNS
+   (Charles, 2026-09-13: "the scroller doesn't activate until the mouse is
+   passed the first or last column. i'd like it to start side scrolling once
+   the cursor reaches the unscrollable column instead"). The browser's own
+   autoscroll starts only once the pointer leaves the scroll box's BOX, and
+   the label and year-total columns are pinned INSIDE that box — so a drag
+   stalled on them with the months it wanted still off screen. With the
+   button held and the pointer over a pinned column, the wrap scrolls toward
+   the months under it, faster the deeper in, and the selection is extended
+   to the caret under the pointer each frame, which is what the native
+   autoscroll would have done. Mouse only — a finger scrolls. A drag that
+   BEGAN on a label is a row reorder (wireRowDrag) and is left alone. */
+function wireGridSelectScroll(grid) {
+  const wrap = grid.closest('.gridwrap');
+  if (!wrap) return;
+  let raf = 0, dir = 0, speed = 0, px = 0, py = 0, selecting = false, fromTot = false;
+  const stop = () => { dir = 0; if (raf) cancelAnimationFrame(raf); raf = 0; };
+  const tick = () => {
+    raf = 0;
+    if (!dir) return;
+    wrap.scrollLeft += dir * speed;
+    gridRangeExtendAt(grid, px, py);   // the block follows the months as they come into view
+    raf = requestAnimationFrame(tick);
+  };
+  grid.addEventListener('pointerdown', (e) => {
+    selecting = e.button === 0 && e.pointerType === 'mouse' && !e.target.closest('th.lbl, td.lbl');
+    fromTot = !!e.target.closest('td.rowtot');   // a drag down the total column is not asking to scroll
+  });
+  grid.addEventListener('pointermove', (e) => {
+    if (!selecting || e.pointerType !== 'mouse' || !(e.buttons & 1)) { stop(); return; }
+    px = e.clientX; py = e.clientY;
+    const lbl = e.target.closest('th.lbl, td.lbl'), tot = fromTot ? null : e.target.closest('th.rowtot, td.rowtot');
+    if (!lbl && !tot) { stop(); return; }
+    const r = (lbl || tot).getBoundingClientRect();
+    const depth = lbl ? r.right - e.clientX : e.clientX - r.left;   // how far INTO the pinned column
+    dir = lbl ? -1 : 1;
+    speed = Math.min(24, 4 + depth / 4);
+    if (!raf) raf = requestAnimationFrame(tick);
+  });
+  ['pointerup', 'pointercancel'].forEach((ev) => document.addEventListener(ev, () => { selecting = false; stop(); }));
+  wrap.addEventListener('pointerleave', stop);
+}
 function wireGridKeys(grid) {
   const cells = [...grid.querySelectorAll('td.cell')];
   cells.forEach((c, i) => { c.tabIndex = i === 0 ? 0 : -1; });
@@ -27995,7 +28152,7 @@ function pickFrom(target) {
   return true;
 }
 document.addEventListener('click', (e) => {
-  if (!calcPick) return;
+  if (!calcPick || performance.now() - gridDragEndedAt < 400) return;   // a drag's last click is not a pick
   const t = e.target;
   if (!t || !t.closest || !t.closest('#views, #chartMaxi')) return;
   if (t.closest('button, a, input, select, textarea, label, [data-help], [data-reveal]')) return;
@@ -28129,7 +28286,8 @@ F('calcForm').addEventListener('submit', (e) => {
 F('calcSelBtn').addEventListener('mousedown', (e) => e.preventDefault());
 F('calcSelBtn').onclick = () => {
   const sel = window.getSelection ? window.getSelection() : null;
-  let figs = selectedFigures(sel);
+  const block = gridRangeCells();
+  let figs = block.length ? block.map((td) => figureAt(td)).filter(Boolean) : selectedFigures(sel);
   if (!figs.length) figs = numbersIn(sel ? String(sel) : '').map((n) => ({ value: n, label: 'Selected on the page' }));
   if (!figs.length) { toast('Nothing numeric is highlighted — select some figures on the page first'); return; }
   figs.forEach((fg) => addToTape(fg.value, fg.label, true, fg.kind));

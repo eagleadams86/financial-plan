@@ -1620,6 +1620,13 @@ with its ✕.
   its own label — even if the drag started halfway through a figure — and
   names, dates, years and percentages are left alone, so dragging down a
   column of months gives you the months, not the row labels beside them.
+  On any table — the year grid, a trip's lines, the holdings, the bonuses —
+  a drag selects a **block** of cells, spreadsheet-fashion: down a column,
+  along a row, or a box of both, rather than the browser's whole rows. The
+  first column is the row's name and stays out. The year grid scrolls the
+  moment the cursor reaches the pinned label or year-total column, so a run
+  longer than the screen is one drag. ⌘C / Ctrl+C copies the block as
+  tab-separated text, Escape clears it.
 - **Work anything out** in the box: `1200*3 + 45`, or `(total - 500) / 12`.
   Click a row on the tape and its figure goes into the box wherever the
   cursor is, wearing its kind (`$10239`, `9.43%`, `210`) and nothing else —
