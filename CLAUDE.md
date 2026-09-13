@@ -6728,6 +6728,14 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   fallback for a highlight that crosses no figure element. The button refuses
   its own `mousedown` so the press cannot collapse the highlight it is about
   to read (the toast in that screenshot was a second press finding it gone).
+- **Every figure cell of the grid is pickable, the derived rows included**
+  (Charles, the same day: *"i can't add some prefilled fields such as total and
+  interests & dividends"*). `CALC_FIGURE_SEL` names `table.grid td`, not
+  `td.cell`: Interest & Dividends, the section and owner subtotals and the
+  Total row are plain `<td>`s in `tr.derived` / `tr.subtotal` / `tr.total`, and
+  the first cut refused exactly the figures a reader most wants to add up. The
+  constant is shared by `figureAt`, `selectedFigures` and the crosshair rule,
+  so the three cannot disagree about what a figure is.
 - **Pick is a CAPTURING click listener on the document**, so it runs before the
   grid's click, the month rows' and the delegated `data-edit` route; nothing
   else in the file captures a click except the month page's reveal line, which

@@ -1603,8 +1603,9 @@ is totalled, averaged and counted, and a figure you no longer want comes off
 with its ✕.
 
 - **Pick figures straight off the page.** Switch **⌖ Pick** on and a click on
-  any figure — a month in the budget grid, a line on the Month page, a tile, a
-  row in a table — puts it on the tape instead of opening its editor, labelled
+  any figure — a month in the budget grid, its subtotals, Interest & Dividends
+  and Total rows included, a line on the Month page, a tile, a row in a table
+  — puts it on the tape instead of opening its editor, labelled
   with where it came from ("Rent · Mar 26"). While it is on, the Pick button is
   filled and a band under the title bar says so, so you can tell at a glance
   what a click will do. Switch Pick off to go back to editing; a click on a
