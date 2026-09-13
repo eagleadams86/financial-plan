@@ -6795,6 +6795,15 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   whole label and its figure as `data-tip` — the app's own hover text, wired
   by `wireGridTip(F('calcTape'))`, since a native `title` never shows on a
   phone (the 2026-08-26 rule). Storage is unchanged: one string.
+- **The move into a dialog carries the tape's scroll and the focus with it**
+  (Charles, 2026-09-13: *"the tape does keep scrolling back to the top each
+  time one of those is selected … that's a bug"*). `appendChild` of a live
+  node is a reinsertion: the scroll box inside opens at the top and a CSS
+  animation on it runs again. `calcRehome` reads `#calcTape.scrollTop`
+  before the move and writes it back after, strips `.calc-new` first (the
+  flash has played), and re-focuses whatever inside the window had the focus.
+  The re-flash was the "re-highlights" in his report; the scroll reset was the
+  bug.
 - **Pick is a CAPTURING click listener on the document**, so it runs before the
   grid's click, the month rows' and the delegated `data-edit` route; nothing
   else in the file captures a click except the month page's reveal line, which
