@@ -1620,7 +1620,8 @@ with its ✕.
   column of months gives you the months, not the row labels beside them.
 - **Work anything out** in the box: `1200*3 + 45`, or `(total - 500) / 12`.
   Click a row on the tape and its figure goes into the box wherever the
-  cursor is, and nothing else — type the operator, click the row, carry on.
+  cursor is, wearing its kind (`$10239`, `9.43%`, `210`) and nothing else —
+  type the operator, click the row, carry on.
   Six names read the tape — **total, avg, count, min, max** and **last** — so
   `total*1.05` is the tape plus five percent. `%` is a percent, not a
   remainder: `200*5%` is 10. Enter works it out; **↓ To Tape** puts the answer

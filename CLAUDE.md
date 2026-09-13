@@ -6766,7 +6766,11 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   CARET AND NOTHING ELSE, then focuses the box with the cursor after it. The
   first cut joined it with ` + ` when the text before the caret ended in a
   figure; Charles: *"nope, don't add a plus, just add the value to the formula
-  i'm building wherever the cursor is."* Type the operator, press the row. Labels also strip `[aria-hidden]` and
+  i'm building wherever the cursor is."* Type the operator, press the row.
+  **It goes in wearing its kind** — `calcToken`: `$10239`, `-$500`, `9.43%`,
+  `210` — asked for an hour later with a screenshot of exactly that typed by
+  hand; the parser strips `$` and reads `%` as the postfix percent, so
+  `$10239*7.8%` is 798.642, the figure on his screen. Labels also strip `[aria-hidden]` and
   `[role="img"]` now: the hand-priced ✎ was landing in "VI5TC ✎ · Shares".
 - **Pick is a CAPTURING click listener on the document**, so it runs before the
   grid's click, the month rows' and the delegated `data-edit` route; nothing
