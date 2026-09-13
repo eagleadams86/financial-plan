@@ -6815,9 +6815,13 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   ends a drag is swallowed by a capturing listener and by the Pick listener
   (`gridDragEndedAt`, 400ms — the `rowDragEndedAt` shape). Add Selected reads
   the block ahead of any text highlight; ⌘C copies it as TSV; Escape, a new
-  press or a redraw clears it. The fill is `--unit-active-bg`/`-txt`, the tabs'
-  chosen pairing, at (0,4,3) after the row-hover rule it would otherwise lose
-  to. Focus still lands on a pressed cell by hand, since a refused pointerdown
+  press or a redraw clears it. The mark is the TILES' — `--accent-bg` under an
+  inset `--accent` ring drawn round the OUTSIDE of the block, each cell
+  drawing only the sides it sits on (`sel-t/b/l/r`, four custom properties
+  composed into one `box-shadow`); Charles preferred it to the first cut's
+  `--unit-active-bg`/`-txt` fill (*"i like that color better than the white
+  you used for the grids"*). Declared at (0,4,3) after the row-hover rule it
+  would otherwise lose to. Focus still lands on a pressed cell by hand, since a refused pointerdown
   moves none. **Every table in `#views`** gets it from `wireView`, not the grid
   alone (Charles: *"check the other views and tabs … such as columns in the
   vacations"*): the block lives in one `tbody` (`gridRange.body`), the first
