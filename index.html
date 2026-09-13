@@ -2446,8 +2446,10 @@ td.projected { font-style: italic; color: var(--text-secondary); }
   color: inherit; background: none; border: 1px solid transparent; border-radius: var(--radius-sm);
   cursor: pointer; text-align: left; }
 #calcTape .calc-use:hover { background: var(--bg-card-alt); }
-#calcTape .calc-lbl { flex: 1; min-width: 0; color: var(--text-secondary); font-size: var(--fs-xs);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#calcTape .calc-lbl { flex: 1; min-width: 0; display: flex; gap: var(--sp-1); color: var(--text-secondary);
+  font-size: var(--fs-xs); white-space: nowrap; }
+#calcTape .calc-name { min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
+#calcTape .calc-when { flex: none; }
 #calcTape .calc-del { flex: none; width: 22px; height: 22px; padding: 0; font: inherit; font-size: var(--fs-xs);
   line-height: 1; background: var(--bg-card-alt); color: var(--text-secondary);
   border: 1px solid var(--border-control); border-radius: var(--radius-sm); cursor: pointer; }
@@ -27763,11 +27765,19 @@ let calcNewAt = -1;   // the index renderTape flashes, set by addToTape for one 
 function renderTape() {
   const ol = F('calcTape');
   const fresh = calcNewAt; calcNewAt = -1;
-  ol.innerHTML = calc.tape.length ? calc.tape.map((e, i) =>
-    `<li${i === fresh ? ' class="calc-new"' : ''}><button type="button" class="calc-use" data-i="${i}" title="Put this figure in the box below">`
-    + `<span class="calc-lbl">${esc(e.l || '')}</span><span class="calc-amt">${fmtKind(e.v, e.k)}</span></button>`
+  /* A label is "row · when" and the WHEN is what tells twelve rows apart, so
+     it is never cut: the row's name ellipsises, the part after the last dot
+     stays whole, and the row's hover text carries the whole label with its
+     figure (Charles, 2026-09-13: "Long-term Savings · Jan…" twelve times). */
+  const split = (l) => { const at = l.lastIndexOf(' · '); return at < 0 ? [l, ''] : [l.slice(0, at), l.slice(at + 3)]; };
+  ol.innerHTML = calc.tape.length ? calc.tape.map((e, i) => {
+    const [name, when] = split(e.l || '');
+    return `<li${i === fresh ? ' class="calc-new"' : ''}><button type="button" class="calc-use" data-i="${i}"`
+    + ` data-tip="${esc(`${e.l ? e.l + '\n' : ''}${fmtKind(e.v, e.k)}\nClick to put it in the box below`)}">`
+    + `<span class="calc-lbl"><span class="calc-name">${esc(name)}</span>${when ? `<span class="calc-when">· ${esc(when)}</span>` : ''}</span>`
+    + `<span class="calc-amt">${fmtKind(e.v, e.k)}</span></button>`
     + `<button type="button" class="calc-del" data-i="${i}" aria-label="Take ${esc(fmtKind(e.v, e.k))} off the tape">`
-    + `<span aria-hidden="true">✕</span></button></li>`).join('')
+    + `<span aria-hidden="true">✕</span></button></li>`; }).join('')
     : '<li class="calc-empty">Nothing on the tape yet — pick a figure off the page, or work one out below.</li>';
   const s = calcStats(calc.tape), k = tapeKind();
   F('calcTotal').textContent = s.count ? fmtKind(s.total, k) : '·';
@@ -27814,6 +27824,7 @@ function useInBox(v, kind) {
   box.focus({ preventScroll: true });
   box.setSelectionRange(at, at);
 }
+wireGridTip(F('calcTape'));   // the app's own hover text, for the whole label
 F('calcTape').addEventListener('click', (e) => {
   const use = e.target.closest('.calc-use');
   if (use) { const en = calc.tape[Number(use.dataset.i)]; if (en) useInBox(en.v, en.k); return; }

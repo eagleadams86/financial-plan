@@ -1608,7 +1608,9 @@ with its ✕.
   — puts it on the tape instead of opening its editor, labelled
   with where it came from ("Rent · Mar 26") and kept as what it is: a
   percentage stays a percentage, a share count keeps its decimals, and only
-  money is rounded to cents. The row just added flashes so your eye finds it.
+  money is rounded to cents. The row just added flashes so your eye finds it,
+  and a long row name gives way before its month does — hover a row for the
+  whole label.
   Pick stays on across a refresh. While it is on, the Pick button is
   filled and a band under the title bar says so, so you can tell at a glance
   what a click will do. Switch Pick off to go back to editing; a click on a

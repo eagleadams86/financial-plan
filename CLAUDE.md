@@ -6786,6 +6786,15 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   readouts, the box and the buttons are at the same place however long the
   tape is. This REVERSES the first cut's `flex: 0 1 auto`, which parked the
   controls directly under a short tape; he wants them anchored.
+- **A tape label's WHEN is never cut** (Charles, 2026-09-13, twelve rows all
+  reading "Long-term Savings · Jan…": *"how might we handle long field names
+  … maybe a tooltip?"*). The part being cut was the distinguishing part, so a
+  tooltip alone would have left the rows identical at a glance. `renderTape`
+  splits the stored label at its LAST " · " into `.calc-name` (ellipsises,
+  `min-width: 3ch`) and `.calc-when` (`flex: none`), and the row carries the
+  whole label and its figure as `data-tip` — the app's own hover text, wired
+  by `wireGridTip(F('calcTape'))`, since a native `title` never shows on a
+  phone (the 2026-08-26 rule). Storage is unchanged: one string.
 - **Pick is a CAPTURING click listener on the document**, so it runs before the
   grid's click, the month rows' and the delegated `data-edit` route; nothing
   else in the file captures a click except the month page's reveal line, which
