@@ -1605,8 +1605,10 @@ with its ✕.
 - **Pick figures straight off the page.** Switch **⌖ Pick** on and a click on
   any figure — a month in the budget grid, a line on the Month page, a tile, a
   row in a table — puts it on the tape instead of opening its editor, labelled
-  with where it came from ("Rent · Mar 26"). Switch Pick off to go back to
-  editing; a click on a row's name still opens its editor either way.
+  with where it came from ("Rent · Mar 26"). While it is on, the Pick button is
+  filled and a band under the title bar says so, so you can tell at a glance
+  what a click will do. Switch Pick off to go back to editing; a click on a
+  row's name still opens its editor either way.
 - **Or highlight a run of figures** with the mouse and press **Σ Add
   Selected**. It reads every number out of the highlight and leaves names,
   dates, years and percentages alone — so dragging down a column of months
@@ -1616,12 +1618,15 @@ with its ✕.
   `total*1.05` is the tape plus five percent. `%` is a percent, not a
   remainder: `200*5%` is 10. Enter works it out; **↓ To Tape** puts the answer
   on the tape.
-- **Send a result into a box.** Open any editor, click into its amount, work
-  the figure out in the calculator, press **→ Field**, and the box takes it
-  exactly as if you had typed it — a window that saves as you go saves it, and
-  a derived box beside it follows. **⎘ Copy** puts the result on the clipboard
-  as a plain number for anything else. With nothing worked out, both use the
-  tape's total.
+- **Choose which figure the buttons use.** The four readouts — Total, Average,
+  Count and Result — are a choice: click one and it fills, and **⎘ Copy** and
+  **→ Field** act on that figure. Working something out chooses Result for
+  you; the arrow keys walk the four.
+- **Send it into a box.** Open any editor, click into its amount, work the
+  figure out in the calculator (or choose the total), press **→ Field**, and
+  the box takes it exactly as if you had typed it — a window that saves as you
+  go saves it, and a derived box beside it follows. **⎘ Copy** puts the chosen
+  figure on the clipboard as a plain number for anything else.
 - **Move it or dock it.** Drag it anywhere by its title bar, or press **⧉
   Dock** and it runs down the right-hand edge with the page making room beside
   it. On a phone it is a sheet along the bottom either way.

@@ -17889,8 +17889,22 @@ t('Pick takes a figure instead of opening it; → Field writes into an editor th
     const win = D.getElementById('calcWin');
     ok(!win.hidden, 'the header button opens the window');
     eq(D.getElementById('calcBtn').getAttribute('aria-expanded'), 'true');
-    D.getElementById('calcPickBtn').click();
-    eq(D.getElementById('calcPickBtn').getAttribute('aria-pressed'), 'true');
+    const pickBtn = D.getElementById('calcPickBtn'), pickNote = D.getElementById('calcPickNote');
+    const offFill = W.getComputedStyle(pickBtn).backgroundColor;
+    eq(W.getComputedStyle(pickNote).display, 'none', 'with Pick off there is no band saying it is on');
+    pickBtn.click();
+    eq(pickBtn.getAttribute('aria-pressed'), 'true');
+    /* The mode is VISIBLE, not just announced: the button fills, and a band says
+       so in words. Asked for on 2026-09-13, after it shipped with aria-pressed
+       and a crosshair alone. Measured off the live element, never off the
+       attribute — the family's [hidden] lesson. */
+    ok(W.getComputedStyle(pickBtn).backgroundColor !== offFill,
+       'the Pick button fills while it is on', W.getComputedStyle(pickBtn).backgroundColor);
+    eq(W.getComputedStyle(pickBtn).backgroundColor, W.getComputedStyle(pickNote).backgroundColor,
+       'in the same pairing as the band under the title bar');
+    ok(W.getComputedStyle(pickNote).display !== 'none' && pickNote.getBoundingClientRect().height > 0,
+       'and the band is on screen, saying what a click will now do');
+    ok(/Pick is on/.test(pickNote.textContent), pickNote.textContent);
     const cell = [...D.querySelectorAll('#views td.cell[data-cat]')].find((c) => /\$/.test(c.textContent));
     cell.click();
     eq(D.getElementById('cellDialog').open, false, 'with Pick on, the cell editor did NOT open');
@@ -17904,6 +17918,8 @@ t('Pick takes a figure instead of opening it; → Field writes into an editor th
     await new Promise((r) => setTimeout(r, 50));
     eq(win.parentElement, D.body, 'and came back out when it closed');
     D.getElementById('calcPickBtn').click();
+    eq(W.getComputedStyle(pickBtn).backgroundColor, offFill, 'off again, the button is plain again');
+    eq(W.getComputedStyle(pickNote).display, 'none', 'and the band is gone');
     /* → Field, on a goal whose target is a plain figure. */
     D.getElementById('tab-goals').click();
     await new Promise((r) => setTimeout(r, 400));
@@ -17930,6 +17946,27 @@ t('Pick takes a figure instead of opening it; → Field writes into an editor th
     eq(W.parseMoney(box.value), 2500, 'the box holds the result');
     eq(W.finGet().goals[idx].target, 2500, 'and the editor committed it as if it had been typed');
     ok(said.some((m) => /sent to/.test(m)), 'said out loud', JSON.stringify(said));
+    /* WHICH figure the buttons use is chosen on the readouts (asked for
+       2026-09-13: "a way to choose which to copy instead of always the total").
+       Working something out chose Result; choosing Average sends the tape's
+       average instead — one figure on the tape, so its average is that figure,
+       which is not 2,500. */
+    const rows = [...D.querySelectorAll('#calcStats .calc-stat')];
+    eq(rows.map((r2) => r2.getAttribute('role')).join(), 'radio,radio,radio,radio', 'four readouts, radios');
+    eq(D.querySelector('#calcStats .calc-stat[aria-checked="true"]').dataset.use, 'result',
+       'working something out chose Result');
+    const avgRow = D.querySelector('#calcStats .calc-stat[data-use="avg"]');
+    const plainFill = W.getComputedStyle(avgRow).backgroundColor;
+    avgRow.click();
+    eq(D.querySelectorAll('#calcStats .calc-stat[aria-checked="true"]').length, 1, 'exactly one chosen');
+    eq(avgRow.getAttribute('aria-checked'), 'true');
+    ok(W.getComputedStyle(avgRow).backgroundColor !== plainFill, 'and the chosen row is filled', plainFill);
+    ok(/average/.test(D.getElementById('calcFieldBtn').title), 'the button says what it will send');
+    box.focus();
+    btn.click();
+    eq(W.parseMoney(box.value), W.parseMoney(cell.textContent), 'the average went into the box, not the result');
+    avgRow.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    eq(D.querySelector('#calcStats .calc-stat[aria-checked="true"]').dataset.use, 'count', 'the arrow keys walk the readouts');
     /* Escape inside the window closes the WINDOW and leaves the editor up. */
     D.getElementById('calcExpr').focus();
     D.getElementById('calcExpr').dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));

@@ -6699,6 +6699,25 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   and pin — and its variable is `dock`, not `calc`: a `var` in the head script
   is a window global, and the main script's `let calc` would be a SyntaxError
   against it. Only an OPEN and docked window pads the page.
+- **Pick is VISIBLY on or off** (asked for the day it shipped: *"add some kind
+  of indicator for when pick is on/off"* — it had `aria-pressed` and a crosshair
+  cursor alone, which is nothing to a reader who has not moved the mouse). Two
+  marks, both from the `setPick` switch: the button fills with the year strip's
+  chosen pairing (`--accent` on `--accent-bg`, the pack's contrast-checked pair
+  the Year/Month switch already uses for "this one is on"), and a `#calcPickNote`
+  band under the title bar says in words what a click will now do — a
+  `role="status"` live region, so it is heard as well as seen. The test reads
+  the COMPUTED fill and the band's rectangle, never the attribute.
+- **The readouts are RADIOS, and the chosen one is what Copy and → Field act
+  on** (asked for the same day: *"add a way to choose which to copy instead of
+  always the total"* — the first cut used the result if there was one, else the
+  total, and nothing on screen said which). Total, Average, Count and Result
+  are whole-width `role="radio"` buttons in a `#calcStats` radiogroup, the
+  chosen one in the Pick pairing; `setUse(key)` moves the choice, the arrow
+  keys walk it, working something out chooses Result, Clear goes back to Total.
+  `calcUse` is not persisted — a choice about this moment. Count copies as a
+  bare integer (`calcUseText`), never through `fmtMoney`. The Result row is
+  above the box with the other three, so the four are one group.
 - **Pick is a CAPTURING click listener on the document**, so it runs before the
   grid's click, the month rows' and the delegated `data-edit` route; nothing
   else in the file captures a click except the month page's reveal line, which
