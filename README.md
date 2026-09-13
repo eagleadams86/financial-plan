@@ -1624,8 +1624,9 @@ with its ✕.
   type the operator, click the row, carry on.
   Six names read the tape — **total, avg, count, min, max** and **last** — so
   `total*1.05` is the tape plus five percent. `%` is a percent, not a
-  remainder: `200*5%` is 10. Enter works it out; **↓ To Tape** puts the answer
-  on the tape.
+  remainder: `200*5%` is 10. Enter works it out and puts the answer straight
+  on the tape, labelled with what you typed, so a chain of workings reads
+  back as a list.
 - **Choose which figure the buttons use.** The four readouts — Total, Average,
   Count and Result — are a choice: click one and it fills, and **⎘ Copy** and
   **→ Field** act on that figure. Working something out chooses Result for
