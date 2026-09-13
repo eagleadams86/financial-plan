@@ -1638,7 +1638,9 @@ with its ✕.
   figure on the clipboard as a plain number for anything else.
 - **Move it or dock it.** Drag it anywhere by its title bar, or press **⧉
   Dock** and it runs down the right-hand edge with the page making room beside
-  it. On a phone it is a sheet along the bottom either way.
+  it; docked, the readouts, the box and the buttons stay at the foot of the
+  window however long the tape grows. On a phone it is a sheet along the
+  bottom either way.
 - **It stays open on purpose.** Unlike every other window here it does not
   close when you click elsewhere — that is the point of it. Close it with its
   ✕, the Calc button, or Escape while you are in it. Everything else on the

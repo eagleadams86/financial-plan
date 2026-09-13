@@ -6779,6 +6779,13 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   money for an empty tape — and a refused expression adds nothing. The ↓ To
   Tape button is gone with `#calcAddResBtn`; the Result readout stays, because
   it is also the radio that makes the result what Copy and → Field send.
+- **Docked, the controls sit at the FOOT and never move** (Charles,
+  2026-09-13: *"when docked, keep these items at the bottom of the page so
+  they never move"*). `html[data-calc="dock"] #calcTape { flex: 1 1 auto }`
+  — the tape takes the column's spare height and scrolls inside it, so the
+  readouts, the box and the buttons are at the same place however long the
+  tape is. This REVERSES the first cut's `flex: 0 1 auto`, which parked the
+  controls directly under a short tape; he wants them anchored.
 - **Pick is a CAPTURING click listener on the document**, so it runs before the
   grid's click, the month rows' and the delegated `data-edit` route; nothing
   else in the file captures a click except the month page's reveal line, which
