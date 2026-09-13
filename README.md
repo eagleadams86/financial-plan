@@ -1540,6 +1540,7 @@ Where comp stands, and how it got there.
 
 | Button | What it does |
 | --- | --- |
+| **Σ Calc** | A tape calculator that floats over the page, or docks beside it |
 | **⌕ Find** (⌘K / Ctrl+K) | One search box over all of it |
 | **↩ Undo** (⌘Z / Ctrl+Z) | Walk back through this sitting's changes |
 | **⚙ Preferences** | Settings that apply across the whole app |
@@ -1593,6 +1594,44 @@ straight back through them, one honest step at a time.
   to retype. ⌘Z / Ctrl+Z goes straight back without asking — a modifier chord
   isn't pressed by accident, and it's the way to walk back several steps at a
   time.
+
+### Calculator
+
+**Σ Calc** in the header opens a small calculator that stays open while you
+read — no other app to switch to. It is a **tape**: every figure you put on it
+is totalled, averaged and counted, and a figure you no longer want comes off
+with its ✕.
+
+- **Pick figures straight off the page.** Switch **⌖ Pick** on and a click on
+  any figure — a month in the budget grid, a line on the Month page, a tile, a
+  row in a table — puts it on the tape instead of opening its editor, labelled
+  with where it came from ("Rent · Mar 26"). Switch Pick off to go back to
+  editing; a click on a row's name still opens its editor either way.
+- **Or highlight a run of figures** with the mouse and press **Σ Add
+  Selected**. It reads every number out of the highlight and leaves names,
+  dates, years and percentages alone — so dragging down a column of months
+  gives you the months, not the row labels beside them.
+- **Work anything out** in the box: `1200*3 + 45`, or `(total - 500) / 12`.
+  Six names read the tape — **total, avg, count, min, max** and **last** — so
+  `total*1.05` is the tape plus five percent. `%` is a percent, not a
+  remainder: `200*5%` is 10. Enter works it out; **↓ To Tape** puts the answer
+  on the tape.
+- **Send a result into a box.** Open any editor, click into its amount, work
+  the figure out in the calculator, press **→ Field**, and the box takes it
+  exactly as if you had typed it — a window that saves as you go saves it, and
+  a derived box beside it follows. **⎘ Copy** puts the result on the clipboard
+  as a plain number for anything else. With nothing worked out, both use the
+  tape's total.
+- **Move it or dock it.** Drag it anywhere by its title bar, or press **⧉
+  Dock** and it runs down the right-hand edge with the page making room beside
+  it. On a phone it is a sheet along the bottom either way.
+- **It stays open on purpose.** Unlike every other window here it does not
+  close when you click elsewhere — that is the point of it. Close it with its
+  ✕, the Calc button, or Escape while you are in it. Everything else on the
+  page, editors included, works with it open.
+- **It is this device's.** Where it sits, whether it is docked, and the tape
+  itself are remembered in this browser only — never synced, never in a backup
+  or a share link. *Delete Everything* clears the tape with the rest.
 
 ### The Years Strip
 

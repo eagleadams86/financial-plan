@@ -126,6 +126,13 @@
        visibly jumps as it opens. Only the attribute goes on here — the offsets
        it reads are measured once there is a layout to measure. */
     if (localStorage.getItem('fin-pin') === '1') document.documentElement.dataset.pin = 'on';
+    /* And a DOCKED calculator, for the same reason a third time: docking pads
+       the page to make room down its right-hand edge, and a pad that arrives a
+       frame late is a page that jumps. LAST in this try on purpose — a corrupt
+       value throws in JSON.parse, and the theme, zoom and pin above are already
+       on by then. Only an OPEN, docked calculator pads the page. */
+    var dock = JSON.parse(localStorage.getItem('fin-calc') || 'null');
+    if (dock && dock.open === true && dock.dock === true) document.documentElement.dataset.calc = 'dock';
   } catch (e) {}
   /* Frame-buster. GitHub Pages can't send frame-ancestors (a meta CSP ignores
      it), so any origin could iframe this page and redress the reader's own
@@ -152,6 +159,7 @@
 :root {
   --chrome-h: 30px;    /* small header buttons + pickers */
   --control-h: 38.5px; /* full-size buttons + toolbar pickers */
+  --calc-w: 300px;     /* the calculator window, floating or docked */
   /* This app is WIDER than the family's 1500px, deliberately. Its main object
      is a spreadsheet — twelve months plus a year total, forty-odd rows — and at
      1500px December sat under the right-hand edge on a screen with room to
@@ -2371,6 +2379,98 @@ td.projected { font-style: italic; color: var(--text-secondary); }
 #chartMaxi { position: fixed; left: 0; right: 0; bottom: 0; top: var(--maxi-top, 0px);
   z-index: 15; background: var(--bg); padding: 20px; display: none; }
 #chartMaxi.open { display: flex; }
+
+/* ── The calculator ──────────────────────────────────────────────────────────
+   A plain fixed div, like #chartMaxi and for a stronger version of its reason.
+   It has to stay USABLE while a modal editor is open — that is what "send the
+   result to a field" means — and nothing on the page can be, except the
+   dialog and its descendants: a body-level element under a modal is inert even
+   as a popover in the top layer (probed 2026-09-13: it paints on top, and a
+   click never arrives). So openModal() MOVES this node into whichever dialog
+   opens and calcRehome() brings it back, and a descendant of the dialog is
+   clickable wherever on the screen it sits. That also decides the layering:
+   z-index 30 sits over the header (20) and a maximised chart (15) and under
+   the cell tooltip (70), and while it is inside a dialog the top layer carries
+   it anyway.
+   EVERY RULE IS ID-SCOPED. Inside a dialog it would otherwise inherit
+   `dialog p` and `dialog h3`, and the markup uses <span>/<output> rather than
+   <p>/<h3> as the belt to that.
+   No shadow (pack rule 14): the edge is --border-strong on --bg-card. The
+   drag position is a pair of custom properties written by JS in LAYOUT pixels
+   (screen ÷ zoom, the pinGridHeader lesson) and read ONLY by the floating
+   rule, so a desktop position can never leak into the dock or the phone's
+   sheet. `user-select: none` on the whole window is not decoration: a press on
+   a button here must not collapse the text the reader has just highlighted on
+   the page, since "Add what's selected" reads exactly that. */
+#calcWin { position: fixed; z-index: 30; right: 16px; top: calc(var(--tabs-top, 60px) + 16px);
+  width: min(var(--calc-w), calc(100vw / var(--zoom, 1) - 32px));
+  max-height: calc((100vh - 32px) / var(--zoom, 1));
+  display: flex; flex-direction: column; background: var(--bg-card); color: var(--text-primary);
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  font-size: var(--fs-base); font-variant-numeric: tabular-nums; user-select: none; }
+#calcWin[hidden] { display: none; }        /* display:flex above beats the UA [hidden] rule */
+#calcWin.placed { left: var(--calc-x); top: var(--calc-y); right: auto; }
+#calcBar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border); cursor: move; touch-action: none; }
+#calcTitle { flex: 1; min-width: 0; font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+  color: var(--text-secondary); letter-spacing: var(--ls-label); text-transform: uppercase; }
+#calcTape { flex: 0 1 auto; min-height: 0; max-height: 40vh; overflow: auto; overscroll-behavior: contain;
+  margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+#calcTape li { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border); }
+#calcTape li.calc-empty { color: var(--text-secondary); font-size: var(--fs-xs); }
+#calcTape .calc-lbl { flex: 1; min-width: 0; color: var(--text-secondary); font-size: var(--fs-xs);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#calcTape .calc-del { flex: none; width: 22px; height: 22px; padding: 0; font: inherit; font-size: var(--fs-xs);
+  line-height: 1; background: var(--bg-card-alt); color: var(--text-secondary);
+  border: 1px solid var(--border-control); border-radius: var(--radius-sm); cursor: pointer; }
+#calcTape .calc-del:hover { border-color: var(--text-muted); color: var(--text-primary); }
+/* One readout per line, the figure against the right edge: three across
+   wrapped a five-figure total in a 300px window, and a plan's total is
+   routinely seven. */
+#calcStats { display: grid; gap: var(--sp-1); margin: 0; padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border); }
+#calcStats div { display: flex; justify-content: space-between; gap: var(--sp-3); }
+#calcStats dt { font-size: var(--fs-xs); color: var(--text-secondary); }
+#calcStats dd { margin: 0; font-weight: var(--fw-semibold); font-size: var(--fs-sm); }
+#calcForm { display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
+#calcExpr { flex: 1; min-width: 0; user-select: text; }
+#calcResult { display: block; padding: var(--sp-2) var(--sp-4); font-size: var(--fs-md);
+  font-weight: var(--fw-bold); min-height: 1.6em; user-select: text; overflow-wrap: anywhere; }
+#calcResult.calc-err { font-size: var(--fs-xs); font-weight: var(--fw-normal); color: var(--text-secondary);
+  font-style: italic; }
+#calcActions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
+  padding: 0 var(--sp-4) var(--sp-4); }
+/* Docked: a sidebar from the header's bottom edge to the foot of the window,
+   and the page pads to make room. --tabs-top is the header's measured height ÷
+   zoom, kept fresh by measurePinTops(); nothing new to measure. .wrap is
+   border-box with a 2400px cap, so the pad narrows the content on every real
+   screen; never pad body — the header would shrink with it. */
+html[data-calc="dock"] #calcWin { left: auto; right: 0; top: var(--tabs-top, 0px); bottom: 0;
+  width: var(--calc-w); max-height: none; border-width: 0 0 0 1px; border-radius: 0; }
+/* Docked, the tape may run as long as the column allows and shrinks to keep
+   the readouts and the box on screen — but it never GROWS past its rows, so
+   the empty space of a short tape sits at the foot, not between the tape and
+   its total. */
+html[data-calc="dock"] #calcTape { max-height: none; flex: 0 1 auto; }
+html[data-calc="dock"] #calcBar { cursor: default; }
+html[data-calc="dock"] .wrap { padding-right: calc(16px + var(--calc-w)); }
+/* Picking: the figures a click would take get the crosshair. */
+html[data-calc-pick] #views :is(td.cell, td.rowtot, .mrow, .goal, .tablewrap td),
+html[data-calc-pick] #chartMaxi :is(.goal, .tablewrap td) { cursor: crosshair; }
+@media (max-width: 700px) {
+  /* A bottom sheet, whichever mode it was left in: a 300px window on a 390px
+     phone is the page, and there is no right-hand edge to dock down. */
+  /* `.placed` is named here on purpose: a desktop drag position is (1,1,0)
+     against the bare id's (1,0,0), and without it a phone that had once been a
+     laptop window kept the window where the mouse left it. */
+  #calcWin, #calcWin.placed, html[data-calc="dock"] #calcWin { left: 0; right: 0; top: auto; bottom: 0;
+    width: auto; max-width: 100vw; max-height: calc(60vh / var(--zoom, 1)); border-width: 1px 0 0;
+    border-radius: var(--radius) var(--radius) 0 0; }
+  html[data-calc="dock"] .wrap { padding-right: 16px; }
+  #calcDockBtn { display: none; }
+  #calcBar { cursor: default; touch-action: auto; }
+}
 @media (max-width: 640px) {
   #chartMaxi { padding: 10px; }
   /* On a phone the card's opening paragraph is five or six lines of an 812px
@@ -2458,6 +2558,10 @@ body.maxi-open { overflow: hidden; }
      the paper. This rule is the belt to that closing's braces — an overlay that
      somehow stayed open would still not print a blank page over the plan. */
   .chart-max, .maxi-nav, #chartMaxi { display: none !important; }
+  /* The calculator is furniture too, and a docked one pads the page to make
+     room for itself; on paper there is nothing to make room for. */
+  #calcWin { display: none !important; }
+  html[data-calc="dock"] .wrap { padding-right: 16px !important; }
   /* Every horizontal scroller opens out: a budget year is twelve months wide
      and the whole point of printing one is to have the twelve. Landscape for
      the same reason — the pack sets the margins, this sets the shape. */
@@ -2545,11 +2649,14 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
          how the page looks, so it sits at the far end where it is out of the way
          of the controls that do something.
 
-         Everything else — sync and undo here — goes to the LEFT of find, at the
-         other end from the furniture. Undo sits beside sync rather than beside
-         Preferences because it is hidden until there is something to undo, and
-         a button that appears mid-row shoves its neighbours sideways; at the
-         left-hand end of a right-aligned row it only ever pushes into space. -->
+         Everything else — sync, undo and the calculator here — goes to the LEFT
+         of find, at the other end from the furniture. Undo sits beside sync
+         rather than beside Preferences because it is hidden until there is
+         something to undo, and a button that appears mid-row shoves its
+         neighbours sideways; at the left-hand end of a right-aligned row it
+         only ever pushes into space. The calculator (2026-09-13) is this app's
+         own — no sibling has one — and takes the place just left of find: a
+         tool you open to work with the page, beside the other one. -->
 
     <!-- Every button in this row wears a glyph in front of its word. They are
          plain text characters, not emoji and not an icon font — one more file
@@ -2569,6 +2676,8 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
     <!-- Hidden until there is something to undo THIS SITTING — the ring lives
          in memory, so a reload starts it empty and the button stays away. -->
     <button class="btn small" id="undoBtn" hidden title="Put things back the way they were before the last change — asks first (⌘Z / Ctrl+Z goes straight back)"><span aria-hidden="true">↩</span> Undo</button>
+    <button class="btn small" id="calcBtn" aria-expanded="false" aria-controls="calcWin"
+      title="A calculator that stays open while you read — pick figures straight off the page, or send a result into a box"><span aria-hidden="true">Σ</span> Calc</button>
     <button class="btn small" id="findBtn" title="Search every year's rows, notes, donations, trips and holdings (⌘K / Ctrl+K)"><span aria-hidden="true">⌕</span> Find</button>
     <!-- Quarter steps here for the everyday change; Preferences takes an exact
          percentage, and whatever it is appears in this list as its own option
@@ -2699,6 +2808,49 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
 <!-- The budget grid's own tooltip — filled by wireGridTip, aria-hidden because
      it only ever repeats what the cell dialog already offers a reader. -->
 <div id="gridTip" hidden aria-hidden="true"></div>
+
+<!-- ── The calculator ────────────────────────────────────────────────────
+     NOT a <dialog>, and NOT closed by a click off it — the one deliberate
+     exception to the family's backdrop rule. A tape you are adding figures to
+     is not a thing to dismiss by mis-clicking, and the whole point of it is to
+     stay up while you read the page and while an editor is open. It is a
+     plain fixed div for the reason the CSS records: a modal dialog makes every
+     body-level element inert, popover or not, so openModal() moves this node
+     INTO the open dialog and calcRehome() moves it back. Outside .wrap (which
+     goes inert under a maximised chart) and outside #views (rewritten
+     wholesale by every render). A region, not a dialog: it is a tool panel
+     beside the page, with no modality and no focus trap. -->
+<div id="calcWin" role="region" aria-labelledby="calcTitle" hidden>
+  <div id="calcBar">
+    <span id="calcTitle"><span aria-hidden="true">Σ</span> Calculator</span>
+    <button type="button" class="btn small" id="calcPickBtn" aria-pressed="false"
+      title="While this is on, clicking a figure on the page adds it to the tape instead of opening it"><span aria-hidden="true">⌖</span> Pick</button>
+    <!-- Dressed by dressDockBtn(): the word says what pressing will DO next. -->
+    <button type="button" class="btn small" id="calcDockBtn"></button>
+    <button type="button" class="btn small" id="calcCloseBtn" aria-label="Close the calculator"><span aria-hidden="true">✕</span></button>
+  </div>
+  <ol id="calcTape" aria-label="The tape"></ol>
+  <dl id="calcStats">
+    <div><dt>Total</dt><dd id="calcTotal">·</dd></div>
+    <div><dt>Average</dt><dd id="calcAvg">·</dd></div>
+    <div><dt>Count</dt><dd id="calcCount">0</dd></div>
+  </dl>
+  <form id="calcForm" novalidate>
+    <label class="sr-only" for="calcExpr">Work something out</label>
+    <input id="calcExpr" type="text" inputmode="decimal" autocomplete="off" spellcheck="false"
+      autocapitalize="off" placeholder="1200*3 + 45 · total*1.05">
+    <button type="submit" class="btn small" id="calcEqBtn" title="Work it out (Enter)">=</button>
+  </form>
+  <output id="calcResult" for="calcExpr" aria-live="polite"></output>
+  <div id="calcActions">
+    <button type="button" class="btn small" id="calcAddResBtn" title="Put the result on the tape"><span aria-hidden="true">↓</span> To Tape</button>
+    <button type="button" class="btn small" id="calcSelBtn" title="Add every figure in the text you have highlighted on the page"><span aria-hidden="true">Σ</span> Add Selected</button>
+    <button type="button" class="btn small" id="calcCopyBtn" title="Copy the result — or the total — as a plain number"><span aria-hidden="true">⎘</span> Copy</button>
+    <button type="button" class="btn small" id="calcFieldBtn" title="Write the result — or the total — into the box you last clicked in"><span aria-hidden="true">→</span> Field</button>
+    <button type="button" class="btn small" id="calcClearBtn" title="Empty the tape"><span aria-hidden="true">⌫</span> Clear</button>
+    <button type="button" class="tile-help" data-help="calculator" aria-label="What does the calculator do?">i</button>
+  </div>
+</div>
 
 <!-- ── Search ────────────────────────────────────────────────────────────── -->
 <dialog id="searchDialog" aria-labelledby="searchDialogTitle">
@@ -3555,6 +3707,178 @@ function asMoneyInput(input) {
   return input;
 }
 const showMoney = (v) => (v === null || v === undefined || v === '') ? '' : fmtMoney(v);
+
+/* ── The calculator's arithmetic ─────────────────────────────────────────────
+   Four pure functions the calculator window is built on, kept beside
+   parseMoney because they read money the way it does. All are on
+   __finTestHooks.
+   calcEval is a tokenizer and a recursive-descent parser over
+   + - * / % ( ), NEVER eval or Function — the CSP forbids both, and a
+   calculator that evaluated its box as JavaScript would be an XSS hole on the
+   shared origin. `%` is a POSTFIX percent (200*5% is 10): a money calculator
+   never wants a remainder, and "5% of" is the thing people reach for it to do.
+   The six names — total avg count min max last — read the tape's stats, so
+   `total*1.05` is the tape plus five percent; an empty tape refuses them
+   rather than reading 0 ("nothing on the tape yet" is not a figure). */
+const CALC_NAMES = { total: 'total', sum: 'total', avg: 'avg', mean: 'avg', average: 'avg',
+  count: 'count', min: 'min', max: 'max', last: 'last', ans: 'last' };
+function calcEval(expr, vars) {
+  const v = vars || {};
+  /* Spaces are kept as SEPARATORS, not stripped: "1 2" is two figures with
+     nothing between them and must be refused, where stripping would read 12. */
+  const src = String(expr ?? '').replace(MINUS_FORMS, '-').replace(/[×✕]/g, '*')
+    .replace(/÷/g, '/').replace(/[$,]/g, '').trim();
+  if (!src) return { ok: false, reason: 'Nothing to work out' };
+  const toks = [];
+  for (let i = 0; i < src.length;) {
+    const rest = src.slice(i);
+    let m;
+    if (/^[\s ]/.test(rest)) { i++; continue; }
+    if ((m = /^(\d+(?:\.\d*)?|\.\d+)/.exec(rest))) { toks.push({ t: 'n', v: parseFloat(m[1]) }); i += m[1].length; }
+    else if ((m = /^[a-z]+/i.exec(rest))) { toks.push({ t: 'id', v: m[0].toLowerCase() }); i += m[0].length; }
+    else if ('+-*/%()'.includes(rest[0])) { toks.push({ t: rest[0] }); i++; }
+    else return { ok: false, reason: `Can’t read “${rest[0]}”` };
+  }
+  let p = 0, depth = 0;
+  const fail = (reason) => { throw new Error(reason); };
+  const peek = () => (toks[p] ? toks[p].t : null);
+  const sum = () => {
+    let a = product();
+    while (peek() === '+' || peek() === '-') { const op = toks[p++].t; const b2 = product(); a = op === '+' ? a + b2 : a - b2; }
+    return a;
+  };
+  const product = () => {
+    let a = signed();
+    while (peek() === '*' || peek() === '/') {
+      const op = toks[p++].t; const b2 = signed();
+      if (op === '/') { if (b2 === 0) fail('Division by zero'); a /= b2; } else a *= b2;
+    }
+    return a;
+  };
+  const signed = () => {
+    if (peek() === '-') { p++; return -signed(); }
+    if (peek() === '+') { p++; return signed(); }
+    return percent();
+  };
+  const percent = () => { let a = atom(); while (peek() === '%') { p++; a /= 100; } return a; };
+  const atom = () => {
+    const tk = toks[p];
+    if (!tk) fail('Unfinished — something is missing at the end');
+    if (tk.t === 'n') { p++; return tk.v; }
+    if (tk.t === 'id') {
+      p++;
+      const key = CALC_NAMES[tk.v];
+      if (!key) fail(`Unknown name “${tk.v}” — the names are total, avg, count, min, max and last`);
+      const val = v[key];
+      if (val === null || val === undefined) fail('Nothing on the tape yet');
+      return val;
+    }
+    if (tk.t === '(') {
+      if (++depth > 64) fail('Too many brackets');
+      p++;
+      const a = sum();
+      if (peek() !== ')') fail('A bracket was never closed');
+      p++; depth--;
+      return a;
+    }
+    return fail(`Unexpected “${tk.t}”`);
+  };
+  try {
+    const value = sum();
+    if (p < toks.length) fail('Unfinished — two things with nothing between them');
+    if (!Number.isFinite(value)) fail('Out of range');
+    return { ok: true, value };
+  } catch (e) { return { ok: false, reason: e.message }; }
+}
+/* Every figure in a run of highlighted text. A token with a letter in it is a
+   word, not a figure — "401k" is a row name and "Mar" is a month; a date is a
+   date; a percentage is a share, not money; and a bare four-digit integer from
+   1900 to 2100 with nothing money-like about it ($ , . brackets) is a YEAR off
+   a column heading. That last rule is the one real ambiguity: a plan can hold
+   a genuine $2,026, and it will arrive as "$2,026" or "2,026" and be kept. */
+function numbersIn(text) {
+  const out = [];
+  for (const tk of String(text ?? '').replace(MINUS_FORMS, '-').replace(/ /g, ' ').split(/[\s·|;:]+/)) {
+    if (!tk) continue;
+    if (/[a-z]/i.test(tk)) continue;
+    if (/^\d{4}[-/]\d{1,2}/.test(tk) || /^\d{1,2}\/\d{1,2}/.test(tk)) continue;
+    if (/%$/.test(tk)) continue;
+    if (/^\d{4}$/.test(tk) && +tk >= 1900 && +tk <= 2100) continue;
+    const n = parseMoney(tk);
+    if (n !== null) out.push(n);
+  }
+  return out;
+}
+function calcStats(tape) {
+  const vs = (Array.isArray(tape) ? tape : []).map((e) => e && e.v).filter((n) => Number.isFinite(n));
+  const count = vs.length;
+  const total = round2(vs.reduce((a, b2) => a + b2, 0));
+  return { count, total, avg: count ? round2(total / count) : null,
+    min: count ? Math.min(...vs) : null, max: count ? Math.max(...vs) : null,
+    last: count ? vs[count - 1] : null };
+}
+/* The figure under a click, and the words for where it came from. Pure over
+   the element handed in so a frame test can ask it about the sample plan.
+   Nothing on this page carries a raw value — every figure is fmtMoney text,
+   with `·` for a zero — so this READS THE TEXT back through parseMoney, and
+   refuses anything with a letter in it (a name, a date) after stripping a
+   currency-code prefix like CA$. A goal tile's value reads "$saved of
+   $target"; the `.of` span is dropped so the saved figure is the one taken.
+   The label is the row's name and the column's heading (a month), or the
+   tile's label — capped here, escaped at the sink. */
+function figureAt(el) {
+  if (!el || typeof el.closest !== 'function') return null;
+  const hit = el.closest('td.cell, td.rowtot, .mrow, .goal, .tablewrap td');
+  if (!hit) return null;
+  const plain = (node) => {
+    if (!node) return '';
+    const c = node.cloneNode(true);
+    c.querySelectorAll('button, .sr-only, .notedot, .of').forEach((x) => x.remove());
+    return c.textContent.replace(/\s+/g, ' ').trim();
+  };
+  const headOf = (cell) => {
+    const table = cell.closest('table');
+    const row = table && table.tHead && table.tHead.rows[0];
+    return row && row.cells[cell.cellIndex] ? plain(row.cells[cell.cellIndex]) : '';
+  };
+  let text = '', label = '';
+  if (hit.matches('td.cell, td.rowtot')) {
+    text = plain(hit);
+    label = [plain(hit.parentElement.querySelector('th')), headOf(hit)].filter(Boolean).join(' · ');
+  } else if (hit.matches('.mrow')) {
+    text = plain(hit.querySelector('.mamt'));
+    const m = hit.dataset.m;
+    label = [plain(hit.querySelector('.mname')), m ? monthLabel(m) : ''].filter(Boolean).join(' · ');
+  } else if (hit.matches('.goal')) {
+    text = plain(hit.querySelector('.value'));
+    label = plain(hit.querySelector('.label'));
+  } else {
+    text = plain(hit);
+    const first = hit.parentElement.cells[0];
+    label = [first !== hit ? plain(first) : '', headOf(hit)].filter(Boolean).join(' · ');
+  }
+  if (text === '·') return { value: 0, label: label.slice(0, 60) };
+  const t = text.replace(/^[A-Z]{1,3}(?=\p{Sc})/u, '');
+  if (!t || /[a-z]/i.test(t)) return null;
+  const value = parseMoney(t);
+  if (value === null) return null;
+  return { value, label: label.slice(0, 60) };
+}
+/* What comes back out of localStorage under fin-calc: numbers only, a capped
+   tape, labels held to a length — the coerceQuotes discipline for a key that
+   any page on the shared origin could have written. */
+const CALC_TAPE_MAX = 200;
+function coerceCalc(raw) {
+  const r = (raw && typeof raw === 'object') ? raw : {};
+  const num = (n) => ((typeof n === 'number' && Number.isFinite(n)) ? n : null);
+  const tape = (Array.isArray(r.tape) ? r.tape : [])
+    .filter((e) => e && typeof e === 'object' && typeof e.v === 'number' && Number.isFinite(e.v))
+    .slice(-CALC_TAPE_MAX)
+    .map((e) => ({ v: round2(e.v), l: typeof e.l === 'string' ? e.l.slice(0, 60) : '' }));
+  const x = num(r.x), y = num(r.y);
+  return { open: r.open === true, dock: r.dock === true,
+    x: (x !== null && y !== null) ? x : null, y: (x !== null && y !== null) ? y : null, tape };
+}
 
 /* JSON from outside — a backup file someone sent, the synced copy, even this
    browser's own storage after another tab wrote it — is parsed with a reviver
@@ -7471,6 +7795,27 @@ function computeGoals(st, computed, todayIso) {
    which is a wall of text on a phone and unskimmable anywhere. */
 const b = (text) => ({ b: text });
 const HELP = {
+  calculator: { title: 'The Calculator', body: [
+    ['A tape calculator that stays open while you read. Every figure you put on the ',
+      b('tape'), ' is totalled, averaged and counted above the box, and a figure you no longer '
+      + 'want comes off with its ✕.'],
+    ['Switch ', b('Pick'), ' on and a click on any figure on the page — a month in the budget, a '
+      + 'tile, a row in a table — puts it on the tape instead of opening it, labelled with where it '
+      + 'came from. Switch it off to go back to editing. Or highlight a run of figures with the '
+      + 'mouse and press Add Selected, which reads every number out of the highlight and leaves '
+      + 'names, dates and percentages alone.'],
+    ['The box works anything out: 1200*3 + 45, or (total - 500) / 12. Six names read the tape — ',
+      b('total, avg, count, min, max and last'), ' — so total*1.05 is the tape plus five percent, and '
+      + '200*5% is ten. Enter works it out; To Tape puts the answer on the tape.'],
+    ['Copy puts the result on the clipboard as a plain number. ', b('→ Field'),
+      ' writes it into the last box you clicked in — open a row, click into its amount, work the '
+      + 'figure out here, press → Field, and the window saves it as if you had typed it. With '
+      + 'nothing worked out, both use the total.'],
+    ['Drag it by its title bar, or ', b('Dock'), ' it down the right-hand edge and the page makes '
+      + 'room. It does not close when you click elsewhere — that is the point of it — only on its ✕, '
+      + 'the Calc button, or Escape while you are in it. It is remembered on this device only: never '
+      + 'synced, never in a backup or a share link, and Delete Everything clears the tape.'],
+  ] },
   /* ── One dot per thing it explains ────────────────────────────────────────
      These were ONE entry behind ONE dot on the Money In tile until 2026-08-24,
      which meant the explanation of the closing total was three paragraphs deep
@@ -26965,7 +27310,14 @@ F('clearConfirm').onclick = () => {
     localStorage.removeItem(QUOTE_CACHE);
     localStorage.removeItem(PRICE_RUN);
     localStorage.removeItem(PRICE_KEY);
+    /* The calculator's tape is figures picked off the plan, so an emptied plan
+       must mean an emptied tape. CALC_KEY is declared further down the file
+       and read here at click time, never at parse time. */
+    localStorage.removeItem(CALC_KEY);
   } catch (e) {}
+  calc = coerceCalc(null);
+  renderTape();
+  closeCalc();
   save();                 // the one write path, so this pushes to the cloud too
   /* …but save() debounces its push, and a delete must not sit in that window:
      clearing then closing the tab inside 1.2s would leave the cloud copy intact,
@@ -27186,6 +27538,8 @@ function raisesKeyboard(el) {
 }
 function openModal(dlg) {
   dlg.showModal();
+  /* The calculator follows the dialog in — see the Calculator section. */
+  calcFollowModal(dlg);
   if (!window.matchMedia('(pointer: coarse)').matches) return;
   const el = document.activeElement;
   if (!el || !dlg.contains(el)) return;
@@ -27214,6 +27568,11 @@ function openModal(dlg) {
 function closeOnBackdropClick(dlg) {
   if (!dlg) return;
   const outside = (e) => {
+    /* The calculator is a CHILD of an open dialog (openModal moves it in) that
+       sits wherever on the screen the reader dragged it — outside the dialog's
+       box, usually. A press on it is a press on the calculator, not on the
+       backdrop, or adding a figure to the tape would close the editor under it. */
+    if (e.target && e.target.closest && e.target.closest('#calcWin')) return false;
     const r = dlg.getBoundingClientRect();
     return e.clientX < r.left || e.clientX > r.right
         || e.clientY < r.top || e.clientY > r.bottom;
@@ -27235,6 +27594,363 @@ function closeOnBackdropClick(dlg) {
 ['dataDialog', 'clearDialog', 'rowDialog', 'cellDialog', 'helpDialog', 'shareDialog',
  'searchDialog', 'compareDialog'].forEach(id =>
   closeOnBackdropClick(F(id)));
+
+/* ═══════════════════════════════ Calculator ═══════════════════════════════
+   A tape calculator that lives on the page (2026-09-13, asked for by Charlie:
+   "a calculator that opens as a sidebar or a movable window that can interact
+   with data in the app"). A floating window dragged by its title bar, or
+   docked down the right-hand edge; on a phone, a sheet along the bottom.
+   The pure arithmetic — calcEval, numbersIn, calcStats, figureAt, coerceCalc —
+   sits beside parseMoney. This block is the window: what it remembers, how it
+   survives a modal editor, and the four ways figures move through it.
+
+   FIN-CALC IS THIS DEVICE'S. Like the zoom and the pin it describes a screen,
+   not a plan: never in state, so never synced, never in a backup and never in
+   a share link. The tape is figures picked off the plan, which is why "Delete
+   everything" clears it, and why the harness never writes it — the suite's
+   frames share this origin's localStorage with the real page.
+
+   THE MODAL CHOREOGRAPHY is the load-bearing part. A modal <dialog> makes
+   every node outside itself inert, and a popover in the top layer is no
+   exception (probed 2026-09-13 — it paints above the dialog and a click never
+   arrives). A DESCENDANT of the dialog is not inert, positions against the
+   viewport, and is not clipped by the dialog's overflow. So openModal() hands
+   the dialog to calcFollowModal(), which moves this window inside it, and the
+   dialog's close moves it back out — to the next dialog still open (help over
+   a row editor), else to body. A dialog's `close` is a QUEUED TASK, the
+   row-editor lesson: the handler asks which dialogs are open at the moment it
+   runs rather than assuming the one that closed was on top. */
+const CALC_KEY = 'fin-calc';
+const calcInHarness = (() => {
+  try { return !!(window.frameElement && window.frameElement.hasAttribute('data-fin-tests')); }
+  catch (e) { return false; }
+})();
+const calcWin = F('calcWin'), calcBar = F('calcBar'), calcExpr = F('calcExpr');
+function loadCalc() {
+  try { return coerceCalc(JSON.parse(localStorage.getItem(CALC_KEY) || 'null')); }
+  catch (e) { return coerceCalc(null); }
+}
+let calc = loadCalc();
+let calcPick = false;        // never persisted: a mode you switch on to use, not a setting
+let calcTarget = null;       // the last box the reader was in, for → Field
+let calcLast = null;         // the last worked-out result, if the box holds one
+let calcSaveTimer = 0;
+const calcModals = [];       // dialogs opened through openModal, in the order they opened
+const calcSheet = () => window.matchMedia('(max-width: 700px)').matches;
+
+function saveCalc() {
+  if (calcInHarness) return;
+  clearTimeout(calcSaveTimer);
+  calcSaveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(CALC_KEY, JSON.stringify(
+        { v: 1, open: calc.open, dock: calc.dock, x: calc.x, y: calc.y, tape: calc.tape }));
+    } catch (e) {}
+  }, 300);
+}
+
+/* The tape and its three readouts. Labels are the reader's own page read back,
+   so they go through esc() here — the one sink. */
+function renderTape() {
+  const ol = F('calcTape');
+  ol.innerHTML = calc.tape.length ? calc.tape.map((e, i) =>
+    `<li><span class="calc-lbl">${esc(e.l || '')}</span><span class="calc-amt">${fmtMoney(e.v)}</span>`
+    + `<button type="button" class="calc-del" data-i="${i}" aria-label="Take ${esc(fmtMoney(e.v))} off the tape">`
+    + `<span aria-hidden="true">✕</span></button></li>`).join('')
+    : '<li class="calc-empty">Nothing on the tape yet — pick a figure off the page, or work one out below.</li>';
+  const s = calcStats(calc.tape);
+  F('calcTotal').textContent = s.count ? fmtMoney(s.total) : '·';
+  F('calcAvg').textContent = s.count ? fmtMoney(s.avg) : '·';
+  F('calcCount').textContent = String(s.count);
+  ol.scrollTop = ol.scrollHeight;
+}
+function addToTape(v, label, quiet) {
+  calc.tape.push({ v: round2(v), l: String(label || '').slice(0, 60) });
+  if (calc.tape.length > CALC_TAPE_MAX) calc.tape.splice(0, calc.tape.length - CALC_TAPE_MAX);
+  if (!quiet) { renderTape(); saveCalc(); }
+}
+F('calcTape').addEventListener('click', (e) => {
+  const b2 = e.target.closest('.calc-del');
+  if (!b2) return;
+  calc.tape.splice(Number(b2.dataset.i), 1);
+  renderTape(); saveCalc();
+});
+
+/* Where the window lives right now: inside the topmost open dialog, else body. */
+function calcHome() {
+  const open = calcModals.filter((d) => d.open);
+  return open.length ? open[open.length - 1] : document.body;
+}
+function calcRehome() {
+  const home = calcHome();
+  if (calcWin.parentElement !== home) home.appendChild(calcWin);
+}
+function calcFollowModal(dlg) {
+  const at = calcModals.indexOf(dlg);
+  if (at !== -1) calcModals.splice(at, 1);
+  else {
+    /* Once per dialog. The close EVENT is a queued task and a hidden document
+       throttles it (the harness lesson); the `open` attribute comes off
+       synchronously and an observer reports it in a microtask, which nothing
+       throttles — so both routes lead home, and whichever runs first wins. */
+    dlg.addEventListener('close', calcRehome);
+    new MutationObserver(calcRehome).observe(dlg, { attributes: true, attributeFilter: ['open'] });
+  }
+  calcModals.push(dlg);                             // newest open dialog last
+  calcRehome();
+}
+
+/* Position, in LAYOUT pixels: a rect and a pointer are in screen pixels, the
+   zoom multiplies a fixed `left`, so both are divided once on the way in
+   (pinGridHeader's lesson). Clamped so the title bar can always be reached. */
+function placeCalcAt(x, y) {
+  const z = zoomScale || 1;
+  const maxX = Math.max(0, window.innerWidth / z - calcWin.offsetWidth);
+  const maxY = Math.max(0, window.innerHeight / z - calcBar.offsetHeight);
+  calc.x = Math.round(Math.min(maxX, Math.max(0, x)));
+  calc.y = Math.round(Math.min(maxY, Math.max(0, y)));
+  calcWin.style.setProperty('--calc-x', `${calc.x}px`);
+  calcWin.style.setProperty('--calc-y', `${calc.y}px`);
+  calcWin.classList.add('placed');
+}
+function clampCalc() {
+  if (calc.x === null || calcWin.hidden || calc.dock || calcSheet()) return;
+  placeCalcAt(calc.x, calc.y);
+}
+window.addEventListener('resize', clampCalc);
+
+/* Dragging by the title bar — the tab bar's mechanics: pointer events, the
+   capture on the bar, a 6px threshold before a press becomes a drag, and the
+   end on pointerup/pointercancel/lostpointercapture, never on click. A press
+   on one of the bar's buttons is that button's, not a drag. */
+let calcDrag = null;
+calcBar.addEventListener('pointerdown', (e) => {
+  if (e.button || e.target.closest('button') || calc.dock || calcSheet()) return;
+  const r = calcWin.getBoundingClientRect(), z = zoomScale || 1;
+  calcDrag = { sx: e.clientX, sy: e.clientY, dx: (e.clientX - r.left) / z, dy: (e.clientY - r.top) / z, moved: false };
+  calcBar.setPointerCapture(e.pointerId);
+});
+calcBar.addEventListener('pointermove', (e) => {
+  if (!calcDrag) return;
+  if (!calcDrag.moved) {
+    if (Math.hypot(e.clientX - calcDrag.sx, e.clientY - calcDrag.sy) < 6) return;
+    calcDrag.moved = true;
+  }
+  const z = zoomScale || 1;
+  placeCalcAt(e.clientX / z - calcDrag.dx, e.clientY / z - calcDrag.dy);
+});
+const endCalcDrag = () => {
+  if (!calcDrag) return;
+  if (calcDrag.moved) saveCalc();
+  calcDrag = null;
+};
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach((ev) => calcBar.addEventListener(ev, endCalcDrag));
+
+/* Docked or floating. The button's word says what pressing it will DO next
+   (the pin button's rule). Docking pads .wrap, so the grid's pinned header
+   has to re-measure — the same pair applyPin runs. */
+function dressDockBtn() {
+  const b2 = F('calcDockBtn');
+  b2.innerHTML = `<span aria-hidden="true">⧉</span> ${calc.dock ? 'Float' : 'Dock'}`;
+  b2.title = calc.dock ? 'Let the calculator float over the page again'
+                       : 'Dock the calculator down the right-hand edge of the page';
+}
+function applyDock(on) {
+  calc.dock = !!on;
+  if (calc.dock && calc.open) document.documentElement.dataset.calc = 'dock';
+  else delete document.documentElement.dataset.calc;
+  dressDockBtn();
+  pinnedShift = -1; pinGridHeader();
+  measurePinTops();
+  saveCalc();
+}
+
+function setPick(on) {
+  calcPick = !!on;
+  F('calcPickBtn').setAttribute('aria-pressed', String(calcPick));
+  if (calcPick) document.documentElement.dataset.calcPick = 'on';
+  else delete document.documentElement.dataset.calcPick;
+}
+function openCalc(opts) {
+  calc.open = true;
+  calcWin.hidden = false;
+  calcRehome();
+  if (calc.x !== null) placeCalcAt(calc.x, calc.y);
+  applyDock(calc.dock);
+  F('calcBtn').setAttribute('aria-expanded', 'true');
+  if (opts && opts.focus === false) return;
+  /* The openModal rule for a phone: a text box focused on open raises the
+     keyboard over the very thing you just opened. */
+  if (window.matchMedia('(pointer: coarse)').matches) { calcWin.tabIndex = -1; calcWin.focus({ preventScroll: true }); }
+  else calcExpr.focus({ preventScroll: true });
+}
+function closeCalc() {
+  calc.open = false;
+  setPick(false);
+  calcWin.hidden = true;
+  delete document.documentElement.dataset.calc;
+  F('calcBtn').setAttribute('aria-expanded', 'false');
+  pinnedShift = -1; pinGridHeader();
+  measurePinTops();
+  saveCalc();
+}
+function toggleCalc() { if (calc.open) closeCalc(); else openCalc(); }
+
+/* PICK: while it is on, a click on a figure inside the page takes the figure
+   instead of opening its editor. A CAPTURING listener on the document, so it
+   runs before the grid's click, the month rows' and the delegated data-edit
+   route — nothing else in the file captures a click except the month page's
+   reveal line, which is excluded here along with every real control. A click
+   that lands on no figure (a row label, a heading) falls through untouched,
+   so the page still works with Pick on. The month rows open on Enter/Space
+   by their own keydown route, so that gets the same treatment. */
+function pickFrom(target) {
+  const fig = figureAt(target);
+  if (!fig) return false;
+  addToTape(fig.value, fig.label);
+  toast(`${fmtMoney(fig.value)} added to the tape`);
+  return true;
+}
+document.addEventListener('click', (e) => {
+  if (!calcPick) return;
+  const t = e.target;
+  if (!t || !t.closest || !t.closest('#views, #chartMaxi')) return;
+  if (t.closest('button, a, input, select, textarea, label, [data-help], [data-reveal]')) return;
+  if (!pickFrom(t)) return;
+  e.stopPropagation(); e.preventDefault();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (!calcPick || (e.key !== 'Enter' && e.key !== ' ')) return;
+  const row = e.target && e.target.closest && e.target.closest('.mrow[data-cat], .mrow[data-bal]');
+  if (!row || !pickFrom(row)) return;
+  e.stopPropagation(); e.preventDefault();
+}, true);
+
+/* → FIELD writes into the last box the reader was in. Remembered on focusin —
+   a real text or number box, not read-only, and not one of the calculator's
+   own — and checked again at the moment of use, because the row editor
+   rebuilds its boxes and a remembered one may no longer be on the page. The
+   value goes in as a plain number and an `input` then a `change` are
+   dispatched, which is everything a typed figure would have caused: link()
+   fills a derived box on input, the row editor commits on change, and
+   asMoneyInput dresses it on blur. */
+document.addEventListener('focusin', (e) => {
+  const el = e.target;
+  if (!(el instanceof HTMLInputElement)) return;
+  if (el.type !== 'text' && el.type !== 'number') return;
+  if (el.readOnly || el.disabled || el.closest('#calcWin')) return;
+  calcTarget = el;
+});
+const calcResultValue = () => {
+  if (calcLast !== null) return calcLast;
+  return calc.tape.length ? calcStats(calc.tape).total : null;
+};
+const fieldName = (el) => {
+  const lab = el.labels && el.labels[0];
+  if (!lab) return 'the box';
+  const c = lab.cloneNode(true);
+  c.querySelectorAll('button, .sr-only').forEach((x) => x.remove());
+  return c.textContent.replace(/\s+/g, ' ').trim() || 'the box';
+};
+/* A press on → Field keeps the focus where it is, so the box the reader is IN
+   is still the active element when the button acts — the belt to the focusin
+   tracker's braces (a programmatic focus in a window without system focus
+   fires no focusin at all). A keyboard press reaches the button by Tab and
+   still has the tracker. */
+F('calcFieldBtn').addEventListener('pointerdown', (e) => e.preventDefault());
+const fieldTarget = () => {
+  const ok = (el) => el instanceof HTMLInputElement && (el.type === 'text' || el.type === 'number')
+    && el.isConnected && !el.readOnly && !el.disabled && !el.closest('#calcWin');
+  const active = document.activeElement;
+  if (ok(active)) return active;
+  return ok(calcTarget) ? calcTarget : null;
+};
+F('calcFieldBtn').onclick = () => {
+  const val = calcResultValue();
+  if (val === null) { toast('Nothing to send yet — pick a figure or work one out first'); return; }
+  const el = fieldTarget();
+  if (viewOnly || !el) {
+    toast('Click into a box first, then press → Field');
+    return;
+  }
+  el.value = String(round2(val));
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  el.focus({ preventScroll: true });
+  toast(`${fmtMoney(val)} sent to ${fieldName(el)}`);
+};
+
+/* The expression box. Enter works it out; the result is the figure the
+   buttons below act on, and the total stands in when nothing has been worked
+   out. A refused expression is said in the result line, in words. */
+F('calcForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const out = F('calcResult');
+  const r = calcEval(calcExpr.value, calcStats(calc.tape));
+  if (r.ok) {
+    calcLast = round2(r.value);
+    out.textContent = fmtMoney(calcLast);
+    out.classList.remove('calc-err');
+  } else {
+    calcLast = null;
+    out.textContent = r.reason;
+    out.classList.add('calc-err');
+  }
+});
+F('calcAddResBtn').onclick = () => {
+  if (calcLast === null) { toast('Work something out first — then it goes on the tape'); return; }
+  addToTape(calcLast, calcExpr.value.trim());
+};
+F('calcSelBtn').onclick = () => {
+  const nums = numbersIn(window.getSelection ? String(window.getSelection()) : '');
+  if (!nums.length) { toast('Nothing numeric is highlighted — select some figures on the page first'); return; }
+  nums.forEach((n) => addToTape(n, 'Selected on the page', true));
+  renderTape(); saveCalc();
+  toast(`${nums.length} figure${nums.length === 1 ? '' : 's'} added from the selection`);
+};
+F('calcCopyBtn').onclick = async () => {
+  const val = calcResultValue();
+  if (val === null) { toast('Nothing to copy yet'); return; }
+  try {
+    await navigator.clipboard.writeText(String(round2(val)));
+    toast(`Copied ${fmtMoney(val)} as a plain number`);
+  } catch (e) {
+    toast('The browser refused the copy — select the result and copy it by hand');
+  }
+};
+F('calcClearBtn').onclick = () => {
+  calc.tape = [];
+  calcLast = null;
+  F('calcResult').textContent = '';
+  F('calcResult').classList.remove('calc-err');
+  calcExpr.value = '';
+  renderTape(); saveCalc();
+};
+F('calcBtn').onclick = toggleCalc;
+F('calcCloseBtn').onclick = () => { closeCalc(); F('calcBtn').focus({ preventScroll: true }); };
+F('calcDockBtn').onclick = () => applyDock(!calc.dock);
+F('calcPickBtn').onclick = () => setPick(!calcPick);
+/* Escape with the focus inside the window closes the WINDOW, and stops there:
+   an editor open underneath keeps its own Escape for itself. */
+calcWin.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  e.preventDefault(); e.stopPropagation();
+  closeCalc();
+  /* Under a modal the header is inert and refuses the focus, so it goes back
+     into the dialog the reader was working in (the openModal arrangement). */
+  const home = calcHome();
+  if (home === document.body) F('calcBtn').focus({ preventScroll: true });
+  else { home.tabIndex = -1; home.focus({ preventScroll: true }); }
+});
+/* The ⓘ needs a listener of its own: the one that routes every other dot is
+   on #views, and a second copy on #chartMaxi — this window is in neither. */
+calcWin.addEventListener('click', (e) => {
+  const h = e.target.closest('[data-help]');
+  if (h) openHelp(h.dataset.help);
+});
+renderTape();
+dressDockBtn();
+if (calc.open) openCalc({ focus: false });
 
 /* ═════════════════════════════ Theme & chrome ═════════════════════════════ */
 
@@ -27403,6 +28119,7 @@ function applyZoom(z) {
     custom.textContent = `${pct}%`;
   }
   sel.value = String(pct);
+  clampCalc();            // a floating calculator's position is in layout px, and the viewport just changed size in them
 }
 F('zoomSel').onchange = (e) => applyZoom(e.target.value);
 
@@ -28724,6 +29441,9 @@ applyPin(savedPin());
 window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDollar,
   tripPart, sumPart,
   parseMoney, raiseFor, sinceLastYear,
+  /* The calculator's arithmetic: the parser, the selection reader, the tape's
+     stats, the figure under a click, and the boundary for fin-calc. */
+  calcEval, numbersIn, calcStats, figureAt, coerceCalc, CALC_TAPE_MAX,
   /* The sample plan, so its tests measure the SAME object the button loads
      rather than a copy of it that can drift. */
   sampleState,
