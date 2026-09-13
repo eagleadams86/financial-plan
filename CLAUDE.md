@@ -6827,6 +6827,15 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   at 0 the "swallow the drag's last click" window covered the first 400ms of
   every page, and six existing tests that click a cell at boot went red.
   Verified on the sample's trip lines as well as the grid.
+  **Tiles and month lines are a RUN, not a rectangle** (Charles, the same
+  hour: *"that looks nice. can you do the same for these other types of
+  items?"*): `wireItemRange` on every `.goalgrid` and `.mrows`, the block
+  being the group's `.goal`/`.mrow` children between the anchor and the
+  pointer (`gridRange.items`, indices rather than row × column). They keep
+  their own colours (a done goal's green, an estimate's italic) under an inset
+  ring in `--accent` over `--accent-bg` — a ring is not a shadow. ⌘C writes
+  items as `label\tfigure` lines. A press on a dot, a button or a link in a
+  tile starts nothing.
 - **Drag-selecting across the months scrolls the grid from its PINNED
   columns** (Charles, 2026-09-13: *"the scroller doesn't activate until the
   mouse is passed the first or last column"*). The browser autoscrolls a

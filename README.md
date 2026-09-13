@@ -1623,7 +1623,9 @@ with its ✕.
   On any table — the year grid, a trip's lines, the holdings, the bonuses —
   a drag selects a **block** of cells, spreadsheet-fashion: down a column,
   along a row, or a box of both, rather than the browser's whole rows. The
-  first column is the row's name and stays out. The year grid scrolls the
+  first column is the row's name and stays out. Tiles (the goals, Net Worth,
+  the month's tiles) and the Month page's lines select the same way, as a run
+  from the one you press on to the one you stop at. The year grid scrolls the
   moment the cursor reaches the pinned label or year-total column, so a run
   longer than the screen is one drag. ⌘C / Ctrl+C copies the block as
   tab-separated text, Escape clears it.
