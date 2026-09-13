@@ -6638,3 +6638,109 @@ in the commit.
     account first takes that much less, and the unchanged answers. The tile
     one runs `computeGoals` on `fixtureState()` and pins `claimedBy` for one
     taker, two takers, and none, plus the rendered foot.
+
+## The Calculator (2026-09-13)
+
+Asked for by Charlie: *"a calculator that opens as a sidebar or a moveable
+window that can interact with data in the app … select values and add /
+multiply / average / total … or copy results from the calculator to a field."*
+Decided with him the same day: a **floating window with a Dock toggle** (both,
+not one), **click-to-pick AND a selection sweep**, and it **remembers its
+position, mode, open state and tape on this device**. `#calcWin`, its CSS beside
+`#chartMaxi`, the four pure functions beside `parseMoney`, the wiring block
+after the backdrop registration list, `HELP.calculator`, `fin-calc`.
+
+- **IT IS NOT A `<dialog>`, AND THE REASON WAS MEASURED.** Every editor here is a
+  modal dialog, and a modal makes every node outside itself inert — **a
+  `popover="manual"` in the top layer included**: probed in Chromium 152 before
+  a line was written, it paints ABOVE the dialog and a click never arrives
+  (`elementFromPoint` returns the dialog). A DESCENDANT of the dialog is not
+  inert, positions against the viewport, and is not clipped by the dialog's
+  `overflow: auto`. So `openModal()` calls `calcFollowModal(dlg)`, which MOVES
+  the window into the dialog, and it comes back out when the dialog closes —
+  to the next dialog still open (help over a row editor), else to `body`.
+  **Two routes home, on purpose.** The `close` event is a queued task and a
+  hidden document throttles it (the Browser pane left the window inside a
+  closed dialog for over 50ms); a `MutationObserver` on the `open` attribute
+  reports in a microtask, which nothing throttles. `calcHome()` asks which
+  dialogs are `.open` at the moment it runs rather than assuming the one that
+  closed was on top.
+- **IT DOES NOT CLOSE ON A CLICK OFF IT — the one deliberate exception to the
+  family's backdrop rule.** A tape you are adding figures to is not a thing to
+  dismiss by mis-clicking, and staying up while you read is the whole point.
+  Closed by its ✕, the header button, or Escape with the focus inside it —
+  which then goes back into the open dialog if there is one (the header is
+  inert under a modal and refuses the focus). The two backdrop tests enumerate
+  `<dialog id=` out of the markup and never see it, which is right.
+  `closeOnBackdropClick`'s `outside()` returns false for a target inside
+  `#calcWin`: a child of the dialog dragged outside the dialog's box is not a
+  press on the backdrop, or adding a figure would close the editor under it.
+- **Every rule is id-scoped**, because inside a dialog the window would
+  otherwise inherit `dialog p` and `dialog h3`; the markup uses `<span>` and
+  `<output>` rather than `<p>`/`<h3>` as the belt to that. No shadow (pack rule
+  14): `--border-strong` on `--bg-card`. **`user-select: none` on the whole
+  window is load-bearing** — a press on Add Selected must not collapse the
+  highlight it is about to read. The expression box and the result line opt
+  back in.
+- **The position is two custom properties in LAYOUT pixels** (`--calc-x`,
+  `--calc-y`, plus a `.placed` class) read ONLY by the floating rule. A rect and
+  a pointer are screen pixels and the zoom multiplies a fixed `left`, so both
+  are divided by `zoomScale` once on the way in (pinGridHeader's lesson);
+  `applyZoom` and `resize` re-clamp. **The phone sheet names `#calcWin.placed`
+  explicitly** — found in the pane: `.placed` is (1,1,0) against the media
+  rule's (1,0,0), so a phone that had once been a laptop window kept the window
+  where the mouse left it, 349px in on a 375px screen.
+- **Dock reuses `--tabs-top`** (the header's measured height ÷ zoom, which
+  `measurePinTops()` already keeps fresh) and pads `.wrap` by `--calc-w` —
+  never `body`, or the header shrinks with it. Docking re-runs `pinnedShift =
+  -1; pinGridHeader()` because the grid's pinned header measured a wider
+  wrap. The HEAD script sets `data-calc="dock"` before first paint from
+  `fin-calc`, LAST in its `try` so a corrupt value cannot cost the theme, zoom
+  and pin — and its variable is `dock`, not `calc`: a `var` in the head script
+  is a window global, and the main script's `let calc` would be a SyntaxError
+  against it. Only an OPEN and docked window pads the page.
+- **Pick is a CAPTURING click listener on the document**, so it runs before the
+  grid's click, the month rows' and the delegated `data-edit` route; nothing
+  else in the file captures a click except the month page's reveal line, which
+  is excluded with every real control. A click that lands on no figure (a row
+  label, a heading) falls through, so the page still works with Pick on. The
+  month rows open on Enter/Space by their own keydown route and get the same
+  treatment; the grid's Enter is `td.click()` and is caught. `figureAt(el)` is
+  pure over the element: **nothing on this page carries a raw value** — every
+  figure is `fmtMoney` text with `·` for zero — so it reads the text back
+  through `parseMoney` and refuses anything with a letter in it after a
+  currency-code prefix, a goal tile's `.of` span dropped so the SAVED figure is
+  taken. Labels are capped at 60 and escaped at the sink (`renderTape`).
+- **`calcEval` is a recursive-descent parser, never `eval`** — the CSP forbids
+  it and a box evaluated as JavaScript would be an XSS hole on the shared
+  origin; a test slices the function out and pins the absence. `%` is a
+  POSTFIX percent (`200*5%` is 10) — a money calculator never wants a
+  remainder; one-line change if that is ever wrong. The six names read the
+  tape's stats and an empty tape REFUSES them rather than reading 0. **Spaces
+  are separators, not stripped** — the first cut read `1 2` as 12. And the `×`
+  substitution must not include a plain `x`: the first cut turned `max` into
+  `ma*`. `numbersIn` skips a bare four-digit integer 1900–2100 with nothing
+  money-like about it — a year off a column heading; `$2,026` is kept.
+- **→ Field keeps the focus where it was.** A `pointerdown` on the button is
+  `preventDefault`ed so the box the reader is IN is still the active element
+  when the button acts — the belt to the `focusin` tracker, which turned out
+  to be the braces: a programmatic `focus()` in a window without system focus
+  fires no `focusin` at all (the Browser pane), and the tracker alone read
+  "click into a box first" over a focused box. The value goes in as a plain
+  number and `input` then `change` are dispatched — everything a typed figure
+  causes: `link()` on input, the row editor's commit on change, `asMoneyInput`
+  on blur. A read-only box (a goal's target while months are set) is refused,
+  which is right.
+- **`fin-calc` is this device's** — the zoom's and the pin's argument. Not in
+  state, so never synced, never in a backup, never in a share link; "Delete
+  everything" clears it because the tape is figures off the plan. `saveCalc()`
+  is a no-op inside a `data-fin-tests` frame (computed locally — `inTestHarness`
+  is declared 1,700 lines below), and the frame tests that need a stored value
+  seed it by hand and put back what they found.
+- **Tests: 12 `t()` blocks** — five source-pinned, five pure, two frame-driven
+  (`figureAt` over the sample's five figure shapes; Pick refusing to open the
+  cell editor, `elementFromPoint` on → Field UNDER an open `#rowDialog`, the
+  commit read through `finGet()`, Escape leaving the editor up; the dock pad,
+  a reload with the dock on read off the head script, and a 375px sheet). All
+  twelve proven red against `main`. The existing HELP pin gained a third call
+  site, `data-help="(\w+)"`, for a dot written literally in static markup.

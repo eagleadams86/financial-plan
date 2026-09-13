@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1054;
+const EXPECTED = 1066;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -11558,8 +11558,10 @@ t('every info dot has words behind it', () => {
      only knew the first shape would have reported `rowDue` as an entry nothing
      renders — which is the failure this test exists to catch, arriving as a
      false one. */
+  /* THREE since 2026-09-13: the calculator window is static markup outside
+     #views and writes its dot literally, as data-help="calculator". */
   const used = [...new Set([...stripComments(APP_SRC)
-    .matchAll(/helpBtn\('(\w+)'|\bhelp: '(\w+)'/g)].map(m => m[1] || m[2]))];
+    .matchAll(/helpBtn\('(\w+)'|\bhelp: '(\w+)'|data-help="(\w+)"/g)].map(m => m[1] || m[2] || m[3]))];
   ok(used.length > 20, 'the scan found the dots at all — it matched ' + used.length + ' keys');
   eq(used.filter(k => !H.HELP[k]).join(', '), '',
     'every dot has an entry to open — a key with none opens an empty sheet');
@@ -17688,6 +17690,299 @@ t('the month it opens is worked out, never assumed to be the page you are on', (
   ok(!/class="mrow derived"/.test(fn),
      'the row is no longer marked derived — that class is what gives a line the '
      + 'default cursor, and it now opens an editor like the rows above it');
+});
+
+group('The calculator');
+/* A tape calculator that stays open while you read (2026-09-13). The one
+   thing every test here turns on: it is NOT a <dialog>. A modal dialog makes
+   every node outside itself inert — a popover in the top layer included
+   (probed in Chromium the day it was built) — so the window is a plain fixed
+   div that openModal() moves INTO the open dialog, where it is clickable, and
+   the dialog's close moves it back out. The two backdrop tests above enumerate
+   `<dialog id=` out of the markup and never see it, which is right: it is the
+   one window in the app that does not close on a click off it. */
+const calcSlice = (name) => {
+  const js = stripComments(APP_SRC);
+  const i = js.indexOf('function ' + name + '(');
+  if (i < 0) return '';
+  let d = 0, started = false;
+  for (let k = i; k < js.length; k++) {
+    if (js[k] === '{') { d++; started = true; }
+    else if (js[k] === '}') { d--; if (started && d === 0) return js.slice(i, k + 1); }
+  }
+  return '';
+};
+t('the calculator is a region outside .wrap and #views, and not a <dialog>', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const html = stripHtmlComments(APP_SRC);
+  const at = html.indexOf('<div id="calcWin" role="region"');
+  ok(at > 0, 'the window is a plain div with role="region"');
+  ok(!/<dialog id="calcWin"/.test(html), 'and never a <dialog> — the top layer would make it inert '
+     + 'under an editor and the backdrop rule would close it on a click off it');
+  ok(at > html.indexOf('</main>'), 'it sits after </main>, outside .wrap (which goes inert under a '
+     + 'maximised chart) and outside #views (which every render rewrites)');
+  ok(at > html.indexOf('id="chartMaxi"'), 'beside the maximised-chart overlay, its layering sibling');
+  ok(/#calcWin \{ position: fixed; z-index: 30;/.test(APP_SRC),
+     'fixed at z-index 30: over the header (20) and a maximised chart (15), under the tooltip (70)');
+  ok(/<button class="btn small" id="calcBtn" aria-expanded="false" aria-controls="calcWin"/.test(html),
+     'the header button says what it controls');
+  const row = html.slice(html.indexOf('id="undoBtn"'), html.indexOf('id="findBtn"'));
+  ok(row.includes('id="calcBtn"'), 'and sits between Undo and Find — "everything else" goes left of find');
+});
+t('the print block hides the calculator and un-pads a docked page', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const at = APP_SRC.indexOf('@media print');
+  let i = APP_SRC.indexOf('{', at), depth = 0, end = i;
+  for (; i < APP_SRC.length; i++) {
+    if (APP_SRC[i] === '{') depth++;
+    else if (APP_SRC[i] === '}' && !--depth) { end = i; break; }
+  }
+  const block = APP_SRC.slice(at, end);
+  ok(/#calcWin \{ display: none !important; \}/.test(block), 'the window never prints');
+  ok(/html\[data-calc="dock"\] \.wrap \{ padding-right: 16px !important; \}/.test(block),
+     'and a docked page prints at its full width — there is nothing to make room for on paper');
+  ok(/#calcWin\[hidden\] \{ display: none; \}/.test(APP_SRC),
+     'the closed window is really hidden: its own display:flex would beat the UA [hidden] rule');
+});
+t('fin-calc is this device’s, dies with Delete everything, and never travels', () => {
+  const js = stripComments(APP_SRC);
+  ok(/const CALC_KEY = 'fin-calc';/.test(js), 'the key is its own, beside the zoom and the pin');
+  const del = js.slice(js.indexOf("F('clearConfirm').onclick"), js.indexOf("F('importBtn').onclick"));
+  ok(/localStorage\.removeItem\(CALC_KEY\)/.test(del), 'Delete everything removes it — the tape is figures off the plan');
+  ok(/calc = coerceCalc\(null\);\s*renderTape\(\);\s*closeCalc\(\);/.test(del),
+     'and empties the tape on screen in the same press');
+  const payload = js.slice(js.indexOf('function buildSharePayload'), js.indexOf('function buildSharePayload') + 4000);
+  ok(!/CALC_KEY|calc\.tape/.test(payload), 'never in a share link');
+  ok(!/settings\.calc/.test(js) && !/state\.calc/.test(js), 'and not in the state at all, so no backup or sync carries it');
+  ok(/if \(calcInHarness\) return;/.test(calcSlice('saveCalc')),
+     'the harness never writes it — its frames share this origin’s localStorage with the real page');
+});
+t('a docked calculator is on before first paint, after the pin', () => {
+  const head = APP_SRC.slice(0, APP_SRC.indexOf('</head>'));
+  const pin = head.indexOf("localStorage.getItem('fin-pin')");
+  const calc = head.indexOf("localStorage.getItem('fin-calc')");
+  ok(pin > 0 && calc > pin, 'the head script reads fin-calc, and does so AFTER fin-pin — a corrupt value '
+     + 'throws in JSON.parse and must not cost the theme, zoom and pin already applied');
+  ok(/dock\.open === true && dock\.dock === true\) document\.documentElement\.dataset\.calc = 'dock'/.test(head),
+     'only an OPEN and docked window pads the page');
+  ok(/html\[data-calc="dock"\] \.wrap \{ padding-right: calc\(16px \+ var\(--calc-w\)\); \}/.test(APP_SRC),
+     'the pad is the window’s own width token on .wrap, never on body');
+});
+t('calcEval: precedence, unary minus, postfix percent, and money spellings', () => {
+  const v = (s) => { const r = H.calcEval(s); ok(r.ok, s + ' → ' + r.reason); return r.value; };
+  eq(v('1+2*3'), 7);
+  eq(v('(1+2)*3'), 9);
+  eq(v('-3*-2'), 6);
+  eq(v('$1,000 * 2'), 2000);
+  eq(v('200*5%'), 10, 'a percent is postfix — 5% of 200, never a remainder');
+  eq(v('10/4'), 2.5);
+  eq(v('1 -- 1'), 2);
+  eq(v('−5'), -5, 'the typographic minus sign reads as a minus, as parseMoney reads it');
+  eq(v('12 × 3 ÷ 4'), 9, 'the × and ÷ keys read as * and /');
+  eq(v('max'.length), 3, '(sanity) the name max is not mangled by the × substitution');
+  eq(H.calcEval('max', { max: 4 }).value, 4, 'the name max survives — an early cut turned its x into a *');
+});
+t('calcEval: the tape’s names, and every refusal in words', () => {
+  eq(H.calcEval('total*1.05', { total: 200 }).value, 210);
+  eq(H.calcEval('(total - 500) / 12', { total: 1700 }).value, 100);
+  eq(H.calcEval('sum + avg', { total: 10, avg: 5 }).value, 15, 'sum is total, mean is avg');
+  const no = (s, vars, why) => {
+    const r = H.calcEval(s, vars);
+    ok(r.ok === false && typeof r.reason === 'string' && r.reason.length > 3, s + ' should refuse: ' + JSON.stringify(r));
+    if (why) ok(why.test(r.reason), s + ' — reason: ' + r.reason);
+  };
+  no('avg', { avg: null }, /tape/);
+  no('avg', {}, /tape/);
+  no('1/0', null, /zero/i);
+  no('2 +', null, /unfinished/i);
+  no('foo', null, /unknown name/i);
+  no('', null, /nothing/i);
+  no('1 2', null, /unfinished/i);
+  no('alert(1)', null, /unknown name/i);
+  no('(1+2', null, /bracket/i);
+  no('1 @ 2', null, /read/i);
+  no('1e309*10', null, /range|read|unfinished/i);   // the e is an unknown word, so it stops early
+  const src = calcSlice('calcEval');
+  ok(src.length > 500, 'calcEval is a function declaration the suite can slice out');
+  ok(!/\beval\(|new Function\(|\bFunction\(/.test(src),
+     'and it is a parser, not eval — the CSP forbids both, and a box evaluated as JavaScript would '
+     + 'be an XSS hole on the shared origin');
+});
+t('numbersIn reads the figures out of a highlight and leaves the words, dates and shares', () => {
+  eq(H.numbersIn('Rent $1,200.00 · Mar 2026 · (45.50) · 401k · 12% · 2026-03'), [1200, -45.5]);
+  eq(H.numbersIn(''), []);
+  eq(H.numbersIn('1,234\n5'), [1234, 5]);
+  eq(H.numbersIn('Total: $10.00\tAverage: $5.00'), [10, 5], 'a readout label and its figure split on the colon');
+  eq(H.numbersIn('−200 3/12 $2,026'), [-200, 2026],
+     'a typographic minus reads, a day/month date is skipped, and a comma-formatted 2,026 is money not a year');
+  eq(H.numbersIn('2026 2027'), [], 'bare years off a column heading are not figures');
+});
+t('calcStats: an empty tape has no average, and a full one adds up', () => {
+  eq(H.calcStats([]), { count: 0, total: 0, avg: null, min: null, max: null, last: null });
+  eq(H.calcStats([{ v: 10 }, { v: 20 }, { v: -3 }]), { count: 3, total: 27, avg: 9, min: -3, max: 20, last: -3 });
+  eq(H.calcStats([{ v: 0.1 }, { v: 0.2 }]).total, 0.3, 'summed through round2, so float dust never reaches the readout');
+});
+t('coerceCalc: numbers only, a capped tape, labels held to a length', () => {
+  eq(H.coerceCalc(null), { open: false, dock: false, x: null, y: null, tape: [] });
+  eq(H.coerceCalc('junk'), { open: false, dock: false, x: null, y: null, tape: [] });
+  const long = H.coerceCalc({ open: 'yes', dock: true, x: 10, y: 'y', tape: Array.from({ length: 201 }, (_, i) => ({ v: i, l: 'x'.repeat(80) })) });
+  eq(long.open, false, 'a truthy string is not true');
+  eq(long.dock, true);
+  eq(long.x, null, 'a position is a pair — one number without the other is no position');
+  eq(long.tape.length, H.CALC_TAPE_MAX, 'the tape is capped');
+  eq(long.tape[0].v, 1, 'and it keeps the NEWEST entries');
+  eq(long.tape[0].l.length, 60, 'labels are cut to 60 characters');
+  eq(H.coerceCalc({ tape: [{ v: '12' }, { v: NaN }, { v: 1.005, l: 5 }, null] }).tape, [{ v: 1.01, l: '' }],
+     'a string figure, a NaN and a non-object are dropped; a non-string label is emptied');
+});
+t('figureAt reads the sample’s grid cell, row total, month row, goal tile and holdings cell', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'figureat');
+  try {
+    D.getElementById('tab-budget').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const cell = [...D.querySelectorAll('#views td.cell[data-cat]')].find((c) => /\$/.test(c.textContent));
+    ok(cell, 'the sample budget has a category cell with a figure in it');
+    const g = W.figureAt(cell);
+    eq(g.value, W.parseMoney(cell.textContent), 'the value is the cell’s own text read back through parseMoney');
+    const name = cell.parentElement.querySelector('th').textContent.replace(/\s+/g, ' ').trim();
+    ok(g.label.startsWith(name.slice(0, 20)), 'the label opens with the row’s name', g.label);
+    ok(/ · \w{3} \d\d$/.test(g.label), 'and closes with the column’s month', g.label);
+    const zero = [...D.querySelectorAll('#views td.cell[data-cat]')].find((c) => c.textContent.trim() === '·');
+    if (zero) eq(W.figureAt(zero).value, 0, 'the zero glyph reads as 0');
+    const tot = [...D.querySelectorAll('#views td.rowtot')].find((c) => /\$/.test(c.textContent));
+    ok(tot, 'the grid has a year-total cell');
+    eq(W.figureAt(tot).value, W.parseMoney(tot.textContent), 'a row total reads like a cell');
+    eq(W.figureAt(cell.parentElement.querySelector('th')), null, 'a row LABEL is not a figure');
+    D.querySelector('.vswitch[data-mode="month"]').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const row = [...D.querySelectorAll('#views .mrow[data-cat]')].find((r) => /\$/.test(r.querySelector('.mamt').textContent));
+    ok(row, 'the month page has a category row with a figure');
+    const m = W.figureAt(row.querySelector('.mamt'));
+    eq(m.value, W.parseMoney(row.querySelector('.mamt').textContent));
+    ok(m.label.includes(W.monthLabel(row.dataset.m)), 'the month row’s label names its month', m.label);
+    D.getElementById('tab-goals').click();
+    await new Promise((r) => setTimeout(r, 400));
+    const goal = D.querySelector('#views .goal[data-edit="goal"]');
+    const gv = W.figureAt(goal.querySelector('.value'));
+    const saved = W.parseMoney(goal.querySelector('.value').firstChild.textContent);
+    eq(gv.value, saved, 'a goal tile gives its SAVED figure, not the target after "of"');
+    ok(gv.label.length > 0 && !/\$/.test(gv.label), 'labelled with the tile’s own label', gv.label);
+    D.getElementById('tab-investments').click();
+    await new Promise((r) => setTimeout(r, 400));
+    const td = [...D.querySelectorAll('#views .tablewrap tbody td')].find((c) => /\$/.test(c.textContent));
+    ok(td, 'the holdings table has a money cell');
+    const h = W.figureAt(td);
+    eq(h.value, W.parseMoney(td.textContent));
+    const ticker = td.parentElement.cells[0].textContent.replace(/\s+/g, ' ').trim().split(' ')[0];
+    ok(h.label.includes(ticker), 'labelled with the row’s first cell — the ticker', h.label + ' / ' + ticker);
+  } finally { f.remove(); }
+});
+t('Pick takes a figure instead of opening it; → Field writes into an editor the window is usable over', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'calcpick');
+  const keep = localStorage.getItem('fin-calc');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    D.getElementById('tab-budget').click();
+    await new Promise((r) => setTimeout(r, 300));
+    D.getElementById('calcBtn').click();
+    const win = D.getElementById('calcWin');
+    ok(!win.hidden, 'the header button opens the window');
+    eq(D.getElementById('calcBtn').getAttribute('aria-expanded'), 'true');
+    D.getElementById('calcPickBtn').click();
+    eq(D.getElementById('calcPickBtn').getAttribute('aria-pressed'), 'true');
+    const cell = [...D.querySelectorAll('#views td.cell[data-cat]')].find((c) => /\$/.test(c.textContent));
+    cell.click();
+    eq(D.getElementById('cellDialog').open, false, 'with Pick on, the cell editor did NOT open');
+    eq(D.querySelectorAll('#calcTape li:not(.calc-empty)').length, 1, 'the figure is on the tape');
+    eq(D.getElementById('calcCount').textContent, '1');
+    eq(W.parseMoney(D.getElementById('calcTotal').textContent), W.parseMoney(cell.textContent));
+    cell.parentElement.querySelector('th').click();
+    ok(D.getElementById('rowDialog').open, 'a click on a row LABEL still opens its editor — Pick only takes figures');
+    eq(win.parentElement.id, 'rowDialog', 'and the window followed the dialog in');
+    D.getElementById('rowDialog').close();
+    await new Promise((r) => setTimeout(r, 50));
+    eq(win.parentElement, D.body, 'and came back out when it closed');
+    D.getElementById('calcPickBtn').click();
+    /* → Field, on a goal whose target is a plain figure. */
+    D.getElementById('tab-goals').click();
+    await new Promise((r) => setTimeout(r, 400));
+    const goal = [...D.querySelectorAll('#views .goal[data-edit="goal"]')]
+      .find((g) => W.finGet().goals[g.dataset.idx].target && !W.finGet().goals[g.dataset.idx].targetMonths);
+    ok(goal, 'the sample has a goal with a typed target');
+    const idx = goal.dataset.idx, before = W.finGet().goals[idx].target;
+    goal.click();
+    const dlg = D.getElementById('rowDialog');
+    ok(dlg.open, 'the goal editor is open');
+    const btn = D.getElementById('calcFieldBtn');
+    const r = btn.getBoundingClientRect();
+    ok(r.width > 0, 'the window is on screen over the modal', JSON.stringify(r));
+    const hit = D.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+    ok(hit === btn || (hit && hit.closest('#calcFieldBtn') === btn),
+       'what a pointer hits in the middle of → Field IS the button — a body-level window would be inert here',
+       hit && hit.tagName + '#' + hit.id);
+    const box = D.getElementById('rf-target');
+    box.focus();
+    D.getElementById('calcExpr').value = '2000+500';
+    D.getElementById('calcForm').requestSubmit();
+    eq(W.parseMoney(D.getElementById('calcResult').textContent), 2500);
+    btn.click();
+    eq(W.parseMoney(box.value), 2500, 'the box holds the result');
+    eq(W.finGet().goals[idx].target, 2500, 'and the editor committed it as if it had been typed');
+    ok(said.some((m) => /sent to/.test(m)), 'said out loud', JSON.stringify(said));
+    /* Escape inside the window closes the WINDOW and leaves the editor up. */
+    D.getElementById('calcExpr').focus();
+    D.getElementById('calcExpr').dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    ok(win.hidden, 'Escape in the window closed it');
+    ok(dlg.open, 'and the editor underneath is still open');
+    W.finGet().goals[idx].target = before;
+    dlg.close();
+  } finally { f.remove(); if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep); }
+});
+t('docking pads the page and survives a reload; a phone gets a sheet', async () => {
+  const keep = localStorage.getItem('fin-calc');
+  let f;
+  try {
+    ({ f } = await auditFrame(1280, 900, 'calcdock'));
+    const W = f.contentWindow, D = W.document;
+    D.getElementById('calcBtn').click();
+    const wrap = D.querySelector('.wrap');
+    const padBefore = W.getComputedStyle(wrap).paddingRight;
+    D.getElementById('calcDockBtn').click();
+    eq(D.documentElement.dataset.calc, 'dock');
+    const pad = parseFloat(W.getComputedStyle(wrap).paddingRight);
+    ok(pad >= 300 + parseFloat(padBefore), 'docked, .wrap makes room for the window', pad);
+    const r = D.getElementById('calcWin').getBoundingClientRect();
+    ok(Math.abs(r.right - 1280) < 1 && r.bottom >= 899, 'the window runs down the right edge to the foot', JSON.stringify(r));
+    ok(/Float/.test(D.getElementById('calcDockBtn').textContent), 'and the button now offers to float it');
+    D.getElementById('calcDockBtn').click();
+    eq(D.documentElement.dataset.calc, undefined, 'floating again, the pad is gone');
+    f.remove();
+    /* A reload with the dock on: the HEAD script pads the page before first paint. */
+    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: true, x: null, y: null, tape: [] }));
+    f = document.createElement('iframe');
+    f.setAttribute('data-fin-tests', '');
+    f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+    await new Promise((resolve) => { f.onload = resolve; f.src = 'index.html?calcreload=' + Date.now(); document.body.appendChild(f); });
+    const D2 = f.contentWindow.document;
+    eq(D2.documentElement.dataset.calc, 'dock', 'the attribute is on at load');
+    ok(!D2.getElementById('calcWin').hidden, 'and the window is open');
+    ok(D2.head.textContent.includes("localStorage.getItem('fin-calc')"), 'set by the head script, before the main one');
+    f.remove();
+    /* A phone: a sheet along the bottom, no pad, nothing wider than the screen. */
+    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: true, x: 900, y: 300, tape: [] }));
+    ({ f } = await auditFrame(375, 812, 'calcsheet'));
+    const W3 = f.contentWindow, D3 = W3.document;
+    const s = D3.getElementById('calcWin').getBoundingClientRect();
+    ok(s.width <= 375 && s.left === 0 && Math.abs(s.bottom - 812) < 1,
+       'a full-width sheet at the foot, though it was saved docked with a desktop position', JSON.stringify(s));
+    eq(W3.getComputedStyle(D3.querySelector('.wrap')).paddingRight, '16px', 'no pad on a phone');
+    ok(D3.documentElement.scrollWidth <= 376, 'and the page is no wider than the screen', D3.documentElement.scrollWidth);
+    eq(W3.getComputedStyle(D3.getElementById('calcDockBtn')).display, 'none', 'there is no edge to dock down, so no Dock button');
+  } finally {
+    if (f) f.remove();
+    if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
+  }
 });
 
 async function run() {
