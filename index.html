@@ -3894,6 +3894,35 @@ function figureAt(el) {
   if (value === null) return null;
   return { value, label: label.slice(0, 60) };
 }
+/* The figures a highlight TOUCHES, read cell by cell rather than out of its
+   text. Reported with a screenshot the day Add Selected shipped: a drag that
+   began halfway through "-$117.44" put $44.00 on the tape — a partial token,
+   with the sign gone — and every line was labelled "Selected on the page".
+   Every figure element the selection intersects, even by a character, gives
+   its WHOLE figure through figureAt, with its own label; numbersIn stays the
+   fallback for a highlight that crosses no figure element (prose, a note).
+   Pure over the Selection handed in. */
+const CALC_FIGURE_SEL = 'td.cell, td.rowtot, .mrow, .goal, .tablewrap td';
+function selectedFigures(sel) {
+  const out = [];
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return out;
+  const seen = new Set();
+  for (let i = 0; i < sel.rangeCount; i++) {
+    const range = sel.getRangeAt(i);
+    const anc = range.commonAncestorContainer;
+    const root = anc.nodeType === 1 ? anc : anc.parentElement;
+    if (!root) continue;
+    const own = root.closest(CALC_FIGURE_SEL);
+    const els = own ? [own] : [...root.querySelectorAll(CALC_FIGURE_SEL)];
+    for (const el of els) {
+      if (seen.has(el) || !range.intersectsNode(el)) continue;
+      seen.add(el);
+      const fig = figureAt(el);
+      if (fig) out.push(fig);
+    }
+  }
+  return out;
+}
 /* What comes back out of localStorage under fin-calc: numbers only, a capped
    tape, labels held to a length — the coerceQuotes discipline for a key that
    any page on the shared origin could have written. */
@@ -7832,8 +7861,8 @@ const HELP = {
     ['Switch ', b('Pick'), ' on and a click on any figure on the page — a month in the budget, a '
       + 'tile, a row in a table — puts it on the tape instead of opening it, labelled with where it '
       + 'came from. Switch it off to go back to editing. Or highlight a run of figures with the '
-      + 'mouse and press Add Selected, which reads every number out of the highlight and leaves '
-      + 'names, dates and percentages alone.'],
+      + 'mouse and press Add Selected: every cell the highlight touches, even by a character, goes '
+      + 'on whole with its own label, and names, dates and percentages are left alone.'],
     ['The box works anything out: 1200*3 + 45, or (total - 500) / 12. Six names read the tape — ',
       b('total, avg, count, min, max and last'), ' — so total*1.05 is the tape plus five percent, and '
       + '200*5% is ten. Enter works it out; To Tape puts the answer on the tape.'],
@@ -27972,12 +28001,18 @@ F('calcAddResBtn').onclick = () => {
   if (calcLast === null) { toast('Work something out first — then it goes on the tape'); return; }
   addToTape(calcLast, calcExpr.value.trim());
 };
+/* The press must not collapse the highlight it is about to read: the window
+   is user-select: none, and the mousedown is refused as well, the → Field
+   arrangement. */
+F('calcSelBtn').addEventListener('mousedown', (e) => e.preventDefault());
 F('calcSelBtn').onclick = () => {
-  const nums = numbersIn(window.getSelection ? String(window.getSelection()) : '');
-  if (!nums.length) { toast('Nothing numeric is highlighted — select some figures on the page first'); return; }
-  nums.forEach((n) => addToTape(n, 'Selected on the page', true));
+  const sel = window.getSelection ? window.getSelection() : null;
+  let figs = selectedFigures(sel);
+  if (!figs.length) figs = numbersIn(sel ? String(sel) : '').map((n) => ({ value: n, label: 'Selected on the page' }));
+  if (!figs.length) { toast('Nothing numeric is highlighted — select some figures on the page first'); return; }
+  figs.forEach((fg) => addToTape(fg.value, fg.label, true));
   renderTape(); saveCalc();
-  toast(`${nums.length} figure${nums.length === 1 ? '' : 's'} added from the selection`);
+  toast(`${figs.length} figure${figs.length === 1 ? '' : 's'} added from the highlight`);
 };
 F('calcCopyBtn').onclick = async () => {
   const val = calcResultValue();
@@ -29516,7 +29551,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   parseMoney, raiseFor, sinceLastYear,
   /* The calculator's arithmetic: the parser, the selection reader, the tape's
      stats, the figure under a click, and the boundary for fin-calc. */
-  calcEval, numbersIn, calcStats, figureAt, coerceCalc, CALC_TAPE_MAX,
+  calcEval, numbersIn, calcStats, figureAt, selectedFigures, coerceCalc, CALC_TAPE_MAX,
   /* The sample plan, so its tests measure the SAME object the button loads
      rather than a copy of it that can drift. */
   sampleState,

@@ -6718,6 +6718,16 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   `calcUse` is not persisted — a choice about this moment. Count copies as a
   bare integer (`calcUseText`), never through `fmtMoney`. The Result row is
   above the box with the other three, so the four are one group.
+- **Add Selected reads the CELLS a highlight touches, not its text** (a
+  screenshot from Charles within the hour: a drag begun halfway through
+  "-$117.44" put **$44.00** on the tape, the sign gone with the partial token,
+  and eight lines all labelled "Selected on the page"). `selectedFigures(sel)`
+  walks every figure element the range intersects — `range.intersectsNode`,
+  so a cell touched by one character gives its WHOLE figure through
+  `figureAt`, with its own label — and `numbersIn` over the text is the
+  fallback for a highlight that crosses no figure element. The button refuses
+  its own `mousedown` so the press cannot collapse the highlight it is about
+  to read (the toast in that screenshot was a second press finding it gone).
 - **Pick is a CAPTURING click listener on the document**, so it runs before the
   grid's click, the month rows' and the delegated `data-edit` route; nothing
   else in the file captures a click except the month page's reveal line, which

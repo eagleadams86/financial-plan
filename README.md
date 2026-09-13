@@ -1610,9 +1610,10 @@ with its ✕.
   what a click will do. Switch Pick off to go back to editing; a click on a
   row's name still opens its editor either way.
 - **Or highlight a run of figures** with the mouse and press **Σ Add
-  Selected**. It reads every number out of the highlight and leaves names,
-  dates, years and percentages alone — so dragging down a column of months
-  gives you the months, not the row labels beside them.
+  Selected**. Every cell the highlight touches goes on the tape whole, with
+  its own label — even if the drag started halfway through a figure — and
+  names, dates, years and percentages are left alone, so dragging down a
+  column of months gives you the months, not the row labels beside them.
 - **Work anything out** in the box: `1200*3 + 45`, or `(total - 500) / 12`.
   Six names read the tape — **total, avg, count, min, max** and **last** — so
   `total*1.05` is the tape plus five percent. `%` is a percent, not a
