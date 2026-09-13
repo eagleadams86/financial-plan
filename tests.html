@@ -17823,8 +17823,10 @@ t('calcStats: an empty tape has no average, and a full one adds up', () => {
   eq(H.calcStats([{ v: 0.1 }, { v: 0.2 }]).total, 0.3, 'summed through round2, so float dust never reaches the readout');
 });
 t('coerceCalc: numbers only, a capped tape, labels held to a length', () => {
-  eq(H.coerceCalc(null), { open: false, dock: false, x: null, y: null, tape: [] });
-  eq(H.coerceCalc('junk'), { open: false, dock: false, x: null, y: null, tape: [] });
+  eq(H.coerceCalc(null), { open: false, dock: false, pick: false, x: null, y: null, tape: [] });
+  eq(H.coerceCalc('junk'), { open: false, dock: false, pick: false, x: null, y: null, tape: [] });
+  eq(H.coerceCalc({ pick: true }).pick, true, 'Pick is remembered — a refresh used to switch it off');
+  eq(H.coerceCalc({ pick: 'on' }).pick, false);
   const long = H.coerceCalc({ open: 'yes', dock: true, x: 10, y: 'y', tape: Array.from({ length: 201 }, (_, i) => ({ v: i, l: 'x'.repeat(80) })) });
   eq(long.open, false, 'a truthy string is not true');
   eq(long.dock, true);
@@ -17832,8 +17834,14 @@ t('coerceCalc: numbers only, a capped tape, labels held to a length', () => {
   eq(long.tape.length, H.CALC_TAPE_MAX, 'the tape is capped');
   eq(long.tape[0].v, 1, 'and it keeps the NEWEST entries');
   eq(long.tape[0].l.length, 60, 'labels are cut to 60 characters');
-  eq(H.coerceCalc({ tape: [{ v: '12' }, { v: NaN }, { v: 1.005, l: 5 }, null] }).tape, [{ v: 1.01, l: '' }],
-     'a string figure, a NaN and a non-object are dropped; a non-string label is emptied');
+  eq(H.coerceCalc({ tape: [{ v: '12' }, { v: NaN }, { v: 1.005, l: 5 }, null] }).tape, [{ v: 1.01, k: 'money', l: '' }],
+     'a string figure, a NaN and a non-object are dropped; a non-string label is emptied; no kind is money');
+  eq(H.coerceCalc({ tape: [{ v: 19.0714567, k: 'num' }, { v: 24.5, k: 'pct' }, { v: 1, k: 'bogus' }] }).tape
+       .map((e) => e.k + ':' + e.v).join(' '), 'num:19.071457 pct:24.5 money:1',
+     'shares keep six places and a percent stays one; an unknown kind is money');
+  eq(H.fmtKind(24.5, 'pct'), '24.5%');
+  eq(H.fmtKind(2782.14, 'num'), '2,782.14');
+  eq(H.fmtKind(19.071, 'num'), '19.071', 'a share count is never rounded to cents');
 });
 t('figureAt reads the sample’s grid cell, row total, month row, goal tile and holdings cell', async () => {
   const { f, W, D } = await auditFrame(1280, 900, 'figureat');
@@ -17888,6 +17896,25 @@ t('figureAt reads the sample’s grid cell, row total, month row, goal tile and 
     eq(h.value, W.parseMoney(td.textContent));
     const ticker = td.parentElement.cells[0].textContent.replace(/\s+/g, ' ').trim().split(' ')[0];
     ok(h.label.includes(ticker), 'labelled with the row’s first cell — the ticker', h.label + ' / ' + ticker);
+    eq(h.kind, 'money', 'a dollar figure is money');
+    /* A SHARE COUNT is a plain number, kept to its decimals, and a PERCENTAGE
+       is a percentage — Charles's two screenshots of 2026-09-13: 19.071 shares
+       on the tape as $19.07, a 24.5% savings rate as $24.50. */
+    const shares = [...D.querySelectorAll('#views .tablewrap tbody td')].find((c) => {
+      const tb = c.closest('table'), hd = tb.tHead && tb.tHead.rows[0].cells[c.cellIndex];
+      return hd && /shares/i.test(hd.textContent) && /^\d+(\.\d+)?$/.test(c.textContent.trim());
+    });
+    ok(shares, 'the sample holds a share count');
+    const sh = W.figureAt(shares);
+    eq(sh.kind, 'num', 'shares are a plain number');
+    eq(sh.value, parseFloat(shares.textContent), 'kept to every decimal');
+    D.getElementById('tab-goals').click();
+    await new Promise((r) => setTimeout(r, 400));
+    const pct = [...D.querySelectorAll('#views .goal .value')].find((v) => /%\s*$/.test(v.textContent.trim()));
+    ok(pct, 'the sample’s Savings Rate tile reads as a percentage');
+    const pc = W.figureAt(pct);
+    eq(pc.kind, 'pct', 'a percentage is a percentage');
+    eq(pc.value, parseFloat(pct.textContent), 'at its own figure, not cents of a dollar');
   } finally { f.remove(); }
 });
 t('Pick takes a figure instead of opening it; → Field writes into an editor the window is usable over', async () => {
@@ -17918,12 +17945,54 @@ t('Pick takes a figure instead of opening it; → Field writes into an editor th
     ok(W.getComputedStyle(pickNote).display !== 'none' && pickNote.getBoundingClientRect().height > 0,
        'and the band is on screen, saying what a click will now do');
     ok(/Pick is on/.test(pickNote.textContent), pickNote.textContent);
-    const cell = [...D.querySelectorAll('#views td.cell[data-cat]')].find((c) => /\$/.test(c.textContent));
+    let cell = [...D.querySelectorAll('#views td.cell[data-cat]')].find((c) => /\$/.test(c.textContent));
     cell.click();
     eq(D.getElementById('cellDialog').open, false, 'with Pick on, the cell editor did NOT open');
     eq(D.querySelectorAll('#calcTape li:not(.calc-empty)').length, 1, 'the figure is on the tape');
     eq(D.getElementById('calcCount').textContent, '1');
     eq(W.parseMoney(D.getElementById('calcTotal').textContent), W.parseMoney(cell.textContent));
+    /* The row just added is the one that flashes (Charles, 2026-09-13: "draw
+       the eye's attention") — a tint that fades, never a shadow (pack rule 14).
+       Read off the computed style, not the class. */
+    const fresh = D.querySelector('#calcTape li:not(.calc-empty)');
+    eq(W.getComputedStyle(fresh).animationName, 'calc-flash', 'the new row runs the flash');
+    /* A picked share count is WRITTEN as one on the tape, and only the newest
+       row flashes. */
+    D.getElementById('tab-investments').click();
+    await new Promise((r) => setTimeout(r, 400));
+    const shareTd = [...D.querySelectorAll('#views .tablewrap tbody td')].find((c) => {
+      const tb = c.closest('table'), hd = tb.tHead && tb.tHead.rows[0].cells[c.cellIndex];
+      return hd && /shares/i.test(hd.textContent) && /^\d+(\.\d+)?$/.test(c.textContent.trim());
+    });
+    shareTd.click();
+    const rowsNow = [...D.querySelectorAll('#calcTape li:not(.calc-empty)')];
+    const last = rowsNow[rowsNow.length - 1];
+    eq(last.querySelector('.calc-amt').textContent, shareTd.textContent.trim(),
+       'the tape shows the share count as typed, with no dollar sign');
+    eq(rowsNow.filter((li) => W.getComputedStyle(li).animationName === 'calc-flash').length, 1, 'one row flashes — the newest');
+    /* A press on a row puts its figure in the box WHERE THE CURSOR IS and
+       nothing more — no + (Charles, 2026-09-13: "just add the value to the
+       formula i'm building wherever the cursor is"). */
+    const box2 = D.getElementById('calcExpr');
+    const v1 = String(W.parseMoney(cell.textContent)), v2 = shareTd.textContent.trim();
+    box2.value = '';
+    rowsNow[0].querySelector('.calc-use').click();
+    eq(box2.value, v1, 'the first row went in');
+    box2.value = v1 + '*';
+    box2.setSelectionRange(box2.value.length, box2.value.length);
+    last.querySelector('.calc-use').click();
+    eq(box2.value, v1 + '*' + v2, 'the second landed after the operator the reader typed, with nothing added');
+    box2.setSelectionRange(0, 0);
+    rowsNow[0].querySelector('.calc-use').click();
+    eq(box2.value, v1 + v1 + '*' + v2, 'and at the START when the cursor is there');
+    eq(D.activeElement, box2, 'the box has the focus to carry on');
+    eq(box2.selectionStart, v1.length, 'with the cursor just after what went in');
+    box2.value = '';
+    [...D.querySelectorAll('#calcTape .calc-del')].pop().click();
+    D.getElementById('tab-budget').click();
+    await new Promise((r) => setTimeout(r, 300));
+    /* The grid was redrawn on the way back — the cell held above is a dead node. */
+    cell = [...D.querySelectorAll('#views td.cell[data-cat]')].find((c) => /\$/.test(c.textContent));
     /* Add Selected reads the CELLS a highlight touches, whole, with their own
        labels — a drag that begins halfway through "-$117.44" must not put
        $44.00 on the tape (a screenshot from Charles, 2026-09-13). The range
@@ -18029,7 +18098,7 @@ t('docking pads the page and survives a reload; a phone gets a sheet', async () 
     eq(D.documentElement.dataset.calc, undefined, 'floating again, the pad is gone');
     f.remove();
     /* A reload with the dock on: the HEAD script pads the page before first paint. */
-    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: true, x: null, y: null, tape: [] }));
+    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: true, pick: true, x: null, y: null, tape: [] }));
     f = document.createElement('iframe');
     f.setAttribute('data-fin-tests', '');
     f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
@@ -18037,6 +18106,9 @@ t('docking pads the page and survives a reload; a phone gets a sheet', async () 
     const D2 = f.contentWindow.document;
     eq(D2.documentElement.dataset.calc, 'dock', 'the attribute is on at load');
     ok(!D2.getElementById('calcWin').hidden, 'and the window is open');
+    eq(D2.getElementById('calcPickBtn').getAttribute('aria-pressed'), 'true',
+       'and Pick is still on — Charles: "refresh turns the picker off"');
+    ok(D2.getElementById('calcPickNote').getBoundingClientRect().height > 0, 'with its band showing');
     ok(D2.head.textContent.includes("localStorage.getItem('fin-calc')"), 'set by the head script, before the main one');
     f.remove();
     /* A phone: a sheet along the bottom, no pad, nothing wider than the screen. */

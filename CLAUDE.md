@@ -6736,6 +6736,38 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   the first cut refused exactly the figures a reader most wants to add up. The
   constant is shared by `figureAt`, `selectedFigures` and the crosshair rule,
   so the three cannot disagree about what a figure is.
+- **A tape entry has a KIND — money, pct or num — read off the figure's own
+  text** (two screenshots the same day: a 24.5% savings rate on the tape as
+  $24.50, 19.071 shares as $19.07). `figureAt` reads a trailing % as a
+  percentage, a currency symbol or the accounting brackets as money, and a
+  bare number as a plain number kept to six places; `calcRound` and `fmtKind`
+  are the one rounding and the one spelling per kind; `tapeKind()` is what the
+  readouts, the result, Copy and → Field use — the entries' kind when they
+  all agree, plain numbers for a tape that mixes dollars and shares (neither,
+  and lies about nothing), money for an empty tape. `coerceCalc` keeps the
+  kind, and an unknown one is money. Only money is ever rounded to cents.
+- **The row just added FLASHES, and it is a tint, not a glow** (asked for as
+  "a show glow … so it draws the eye's attention", 2026-09-13). A glow is a
+  box-shadow and the pack forbids one anywhere (rule 14), so `li.calc-new`
+  runs `calc-flash`, `--accent-bg` fading to transparent over 1.2s; the pack's
+  reduced-motion rule cuts it to .01ms. `addToTape` sets `calcNewAt` and
+  `renderTape` spends it on ONE render, so a delete or a reload flashes
+  nothing. The test reads `animationName` off the computed style.
+- **Pick survives a refresh** (Charles, 2026-09-13: *"refresh turns the picker
+  off"*). It shipped as "a mode, not a setting" and not persisted; he uses it
+  as a setting. `calc.pick` rides in `fin-calc`, `setPick` saves, and
+  `openCalc` restores it — only while the window is open, since Pick with the
+  window shut would take figures nobody could see land.
+- **A tape row is a button that puts its figure in the box** (Charles,
+  2026-09-13: *"if i click on one of the items, add it's value to the
+  calculations field"*). `.calc-use` wraps the label and the figure — a real
+  button beside the row's ✕, never a `role="button"` on the `<li>`, which would
+  nest one control in another — and `useInBox` inserts the figure AT THE
+  CARET AND NOTHING ELSE, then focuses the box with the cursor after it. The
+  first cut joined it with ` + ` when the text before the caret ended in a
+  figure; Charles: *"nope, don't add a plus, just add the value to the formula
+  i'm building wherever the cursor is."* Type the operator, press the row. Labels also strip `[aria-hidden]` and
+  `[role="img"]` now: the hand-priced ✎ was landing in "VI5TC ✎ · Shares".
 - **Pick is a CAPTURING click listener on the document**, so it runs before the
   grid's click, the month rows' and the delegated `data-edit` route; nothing
   else in the file captures a click except the month page's reveal line, which

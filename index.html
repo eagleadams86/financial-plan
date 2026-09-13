@@ -2432,6 +2432,20 @@ td.projected { font-style: italic; color: var(--text-secondary); }
 #calcTape li { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4);
   border-bottom: 1px solid var(--border); }
 #calcTape li.calc-empty { color: var(--text-secondary); font-size: var(--fs-xs); }
+/* The row just added FLASHES — the accent tint, fading over a second — so the
+   eye finds it at the foot of a long tape (asked for as "a glow", 2026-09-13).
+   A tint and not a glow because a glow is a box-shadow, and the pack forbids
+   one anywhere (rule 14). The pack's reduced-motion rule cuts the animation
+   to .01ms, so it is simply the row for a reader who asked for no motion. */
+#calcTape li.calc-new { animation: calc-flash 1.2s ease-out 1; }
+@keyframes calc-flash { from { background: var(--accent-bg); } to { background: transparent; } }
+/* The row's figure is a button that puts itself in the box: no boundary of
+   its own until hovered, like the readouts. */
+#calcTape .calc-use { flex: 1; min-width: 0; display: flex; justify-content: space-between; align-items: baseline;
+  gap: var(--sp-3); margin: 0; padding: 0 var(--sp-1); font: inherit; font-size: var(--fs-sm);
+  color: inherit; background: none; border: 1px solid transparent; border-radius: var(--radius-sm);
+  cursor: pointer; text-align: left; }
+#calcTape .calc-use:hover { background: var(--bg-card-alt); }
 #calcTape .calc-lbl { flex: 1; min-width: 0; color: var(--text-secondary); font-size: var(--fs-xs);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #calcTape .calc-del { flex: none; width: 22px; height: 22px; padding: 0; font: inherit; font-size: var(--fs-xs);
@@ -3842,8 +3856,8 @@ function numbersIn(text) {
 function calcStats(tape) {
   const vs = (Array.isArray(tape) ? tape : []).map((e) => e && e.v).filter((n) => Number.isFinite(n));
   const count = vs.length;
-  const total = round2(vs.reduce((a, b2) => a + b2, 0));
-  return { count, total, avg: count ? round2(total / count) : null,
+  const total = roundTo(vs.reduce((a, b2) => a + b2, 0), 6);
+  return { count, total, avg: count ? roundTo(total / count, 6) : null,
     min: count ? Math.min(...vs) : null, max: count ? Math.max(...vs) : null,
     last: count ? vs[count - 1] : null };
 }
@@ -3871,7 +3885,10 @@ function figureAt(el) {
   const plain = (node) => {
     if (!node) return '';
     const c = node.cloneNode(true);
-    c.querySelectorAll('button, .sr-only, .notedot, .of').forEach((x) => x.remove());
+    /* Buttons, hidden text, the note dot, a goal's "of $target", and the
+       decorative marks — the hand-priced ✎ is a role="img" span and an
+       aria-hidden glyph elsewhere, and both were landing in labels. */
+    c.querySelectorAll('button, .sr-only, .notedot, .of, [aria-hidden="true"], [role="img"]').forEach((x) => x.remove());
     return c.textContent.replace(/\s+/g, ' ').trim();
   };
   const headOf = (cell) => {
@@ -3895,13 +3912,32 @@ function figureAt(el) {
     const first = hit.parentElement.cells[0];
     label = [first !== hit ? plain(first) : '', headOf(hit)].filter(Boolean).join(' · ');
   }
-  if (text === '·') return { value: 0, label: label.slice(0, 60) };
+  label = label.slice(0, 60);
+  if (text === '·') return { value: 0, kind: 'money', label };
   const t = text.replace(/^[A-Z]{1,3}(?=\p{Sc})/u, '');
+  /* THE KIND IS READ OFF THE TEXT (Charles, 2026-09-13, two screenshots: a
+     24.5% savings rate arrived as $24.50 and 19.071 shares as $19.07). A
+     trailing % is a percentage; a currency symbol or the accounting brackets
+     is money; a bare number — shares, a count — is a plain number kept to six
+     places, never rounded to cents. */
+  if (/%\s*$/.test(t)) {
+    const n = parseFloat(t.replace(MINUS_FORMS, '-').replace(/[^0-9.\-]/g, ''));
+    return Number.isFinite(n) ? { value: roundTo(n, 6), kind: 'pct', label } : null;
+  }
   if (!t || /[a-z]/i.test(t)) return null;
-  const value = parseMoney(t);
-  if (value === null) return null;
-  return { value, label: label.slice(0, 60) };
+  if (/\p{Sc}/u.test(t) || BRACKETED.test(t)) {
+    const value = parseMoney(t);
+    return value === null ? null : { value, kind: 'money', label };
+  }
+  const n = parseFloat(t.replace(MINUS_FORMS, '-').replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(n) ? { value: roundTo(n, 6), kind: 'num', label } : null;
 }
+/* How a figure of each kind is written and rounded. */
+const CALC_KINDS = ['money', 'pct', 'num'];
+const calcRound = (v, kind) => (kind === 'money' ? round2(v) : roundTo(v, 6));
+const fmtKind = (v, kind) => (kind === 'pct' ? `${roundTo(v, 4)}%`
+  : kind === 'num' ? Number(roundTo(v, 6)).toLocaleString('en-US', { maximumFractionDigits: 6 })
+  : fmtMoney(v));
 /* The figures a highlight TOUCHES, read cell by cell rather than out of its
    text. Reported with a screenshot the day Add Selected shipped: a drag that
    began halfway through "-$117.44" put $44.00 on the tape — a partial token,
@@ -3940,9 +3976,12 @@ function coerceCalc(raw) {
   const tape = (Array.isArray(r.tape) ? r.tape : [])
     .filter((e) => e && typeof e === 'object' && typeof e.v === 'number' && Number.isFinite(e.v))
     .slice(-CALC_TAPE_MAX)
-    .map((e) => ({ v: round2(e.v), l: typeof e.l === 'string' ? e.l.slice(0, 60) : '' }));
+    .map((e) => {
+      const k = CALC_KINDS.includes(e.k) ? e.k : 'money';
+      return { v: calcRound(e.v, k), k, l: typeof e.l === 'string' ? e.l.slice(0, 60) : '' };
+    });
   const x = num(r.x), y = num(r.y);
-  return { open: r.open === true, dock: r.dock === true,
+  return { open: r.open === true, dock: r.dock === true, pick: r.pick === true,
     x: (x !== null && y !== null) ? x : null, y: (x !== null && y !== null) ? y : null, tape };
 }
 
@@ -7867,7 +7906,9 @@ const HELP = {
       + 'want comes off with its ✕.'],
     ['Switch ', b('Pick'), ' on and a click on any figure on the page — a month in the budget, a '
       + 'tile, a row in a table — puts it on the tape instead of opening it, labelled with where it '
-      + 'came from. Switch it off to go back to editing. Or highlight a run of figures with the '
+      + 'came from — and as what it is: a percentage stays a percentage, a share count keeps its '
+      + 'decimals, only money is rounded to cents. Click a row on the tape and its figure goes into '
+      + 'the box below, wherever the cursor is. Switch it off to go back to editing. Or highlight a run of figures with the '
       + 'mouse and press Add Selected: every cell the highlight touches, even by a character, goes '
       + 'on whole with its own label, and names, dates and percentages are left alone.'],
     ['The box works anything out: 1200*3 + 45, or (total - 500) / 12. Six names read the tape — ',
@@ -27698,7 +27739,7 @@ function loadCalc() {
   catch (e) { return coerceCalc(null); }
 }
 let calc = loadCalc();
-let calcPick = false;        // never persisted: a mode you switch on to use, not a setting
+let calcPick = false;        // mirrored into calc.pick, so a refresh keeps it (Charles, 2026-09-13)
 let calcTarget = null;       // the last box the reader was in, for → Field
 let calcLast = null;         // the last worked-out result, if the box holds one
 let calcSaveTimer = 0;
@@ -27711,32 +27752,61 @@ function saveCalc() {
   calcSaveTimer = setTimeout(() => {
     try {
       localStorage.setItem(CALC_KEY, JSON.stringify(
-        { v: 1, open: calc.open, dock: calc.dock, x: calc.x, y: calc.y, tape: calc.tape }));
+        { v: 1, open: calc.open, dock: calc.dock, pick: calc.pick, x: calc.x, y: calc.y, tape: calc.tape }));
     } catch (e) {}
   }, 300);
 }
 
 /* The tape and its three readouts. Labels are the reader's own page read back,
    so they go through esc() here — the one sink. */
+let calcNewAt = -1;   // the index renderTape flashes, set by addToTape for one render
 function renderTape() {
   const ol = F('calcTape');
+  const fresh = calcNewAt; calcNewAt = -1;
   ol.innerHTML = calc.tape.length ? calc.tape.map((e, i) =>
-    `<li><span class="calc-lbl">${esc(e.l || '')}</span><span class="calc-amt">${fmtMoney(e.v)}</span>`
-    + `<button type="button" class="calc-del" data-i="${i}" aria-label="Take ${esc(fmtMoney(e.v))} off the tape">`
+    `<li${i === fresh ? ' class="calc-new"' : ''}><button type="button" class="calc-use" data-i="${i}" title="Put this figure in the box below">`
+    + `<span class="calc-lbl">${esc(e.l || '')}</span><span class="calc-amt">${fmtKind(e.v, e.k)}</span></button>`
+    + `<button type="button" class="calc-del" data-i="${i}" aria-label="Take ${esc(fmtKind(e.v, e.k))} off the tape">`
     + `<span aria-hidden="true">✕</span></button></li>`).join('')
     : '<li class="calc-empty">Nothing on the tape yet — pick a figure off the page, or work one out below.</li>';
-  const s = calcStats(calc.tape);
-  F('calcTotal').textContent = s.count ? fmtMoney(s.total) : '·';
-  F('calcAvg').textContent = s.count ? fmtMoney(s.avg) : '·';
+  const s = calcStats(calc.tape), k = tapeKind();
+  F('calcTotal').textContent = s.count ? fmtKind(s.total, k) : '·';
+  F('calcAvg').textContent = s.count ? fmtKind(s.avg, k) : '·';
   F('calcCount').textContent = String(s.count);
   ol.scrollTop = ol.scrollHeight;
 }
-function addToTape(v, label, quiet) {
-  calc.tape.push({ v: round2(v), l: String(label || '').slice(0, 60) });
+/* The tape's own kind: what every entry on it is, when they agree; a tape
+   mixing dollars and shares reads back as plain numbers, which is neither
+   and lies about nothing; an empty tape is money — this is a money app. */
+function tapeKind() {
+  if (!calc.tape.length) return 'money';
+  const k = calc.tape[0].k || 'money';
+  return calc.tape.every((e) => (e.k || 'money') === k) ? k : 'num';
+}
+function addToTape(v, label, quiet, kind) {
+  const k = CALC_KINDS.includes(kind) ? kind : 'money';
+  calc.tape.push({ v: calcRound(v, k), k, l: String(label || '').slice(0, 60) });
   if (calc.tape.length > CALC_TAPE_MAX) calc.tape.splice(0, calc.tape.length - CALC_TAPE_MAX);
+  calcNewAt = calc.tape.length - 1;
   if (!quiet) { renderTape(); saveCalc(); }
 }
+/* A press on a tape row puts its figure INTO THE BOX, exactly where the
+   cursor is and nothing else (Charles, 2026-09-13: "add it's value to the
+   calculations field" — and, when the first cut joined it with a +, "nope,
+   don't add a plus, just add the value to the formula i'm building wherever
+   the cursor is"). Type the operator, press the row, carry on; the box keeps
+   the focus with the cursor after what went in. */
+function useInBox(v, kind) {
+  const box = calcExpr, fig = String(calcRound(v, kind));
+  const start = box.selectionStart ?? box.value.length, end = box.selectionEnd ?? start;
+  box.value = box.value.slice(0, start) + fig + box.value.slice(end);
+  const at = start + fig.length;
+  box.focus({ preventScroll: true });
+  box.setSelectionRange(at, at);
+}
 F('calcTape').addEventListener('click', (e) => {
+  const use = e.target.closest('.calc-use');
+  if (use) { const en = calc.tape[Number(use.dataset.i)]; if (en) useInBox(en.v, en.k); return; }
   const b2 = e.target.closest('.calc-del');
   if (!b2) return;
   calc.tape.splice(Number(b2.dataset.i), 1);
@@ -27834,6 +27904,8 @@ function applyDock(on) {
 
 function setPick(on) {
   calcPick = !!on;
+  calc.pick = calcPick;
+  saveCalc();
   F('calcPickBtn').setAttribute('aria-pressed', String(calcPick));
   F('calcPickBtn').title = calcPick ? 'Pick is on — switch it off to go back to opening figures'
     : 'While this is on, clicking a figure on the page adds it to the tape instead of opening it';
@@ -27848,6 +27920,7 @@ function openCalc(opts) {
   if (calc.x !== null) placeCalcAt(calc.x, calc.y);
   applyDock(calc.dock);
   F('calcBtn').setAttribute('aria-expanded', 'true');
+  setPick(calc.pick);          // a refresh keeps Pick where it was
   if (opts && opts.focus === false) return;
   /* The openModal rule for a phone: a text box focused on open raises the
      keyboard over the very thing you just opened. */
@@ -27877,8 +27950,8 @@ function toggleCalc() { if (calc.open) closeCalc(); else openCalc(); }
 function pickFrom(target) {
   const fig = figureAt(target);
   if (!fig) return false;
-  addToTape(fig.value, fig.label);
-  toast(`${fmtMoney(fig.value)} added to the tape`);
+  addToTape(fig.value, fig.label, false, fig.kind);
+  toast(`${fmtKind(fig.value, fig.kind)} added to the tape`);
   return true;
 }
 document.addEventListener('click', (e) => {
@@ -27947,7 +28020,8 @@ const calcResultValue = () => {
   if (calcUse === 'count') return s.count || null;
   return calc.tape.length ? s.total : null;
 };
-const calcUseText = (val) => (calcUse === 'count' ? String(val) : fmtMoney(val));
+const calcUseText = (val) => (calcUse === 'count' ? String(val) : fmtKind(val, tapeKind()));
+const calcUseRound = (val) => (calcUse === 'count' ? val : calcRound(val, tapeKind()));
 const calcNothingYet = () => (calcUse === 'result'
   ? 'Nothing worked out yet — press = first, or choose Total, Average or Count above'
   : 'Nothing on the tape yet — pick a figure off the page, or work one out and choose Result');
@@ -27979,7 +28053,7 @@ F('calcFieldBtn').onclick = () => {
     toast('Click into a box first, then press → Field');
     return;
   }
-  el.value = String(round2(val));
+  el.value = String(calcUseRound(val));
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
   el.focus({ preventScroll: true });
@@ -27994,8 +28068,8 @@ F('calcForm').addEventListener('submit', (e) => {
   const out = F('calcResult'), row = F('calcResultRow');
   const r = calcEval(calcExpr.value, calcStats(calc.tape));
   if (r.ok) {
-    calcLast = round2(r.value);
-    out.textContent = fmtMoney(calcLast);
+    calcLast = roundTo(r.value, 6);
+    out.textContent = fmtKind(calcLast, tapeKind());
     row.classList.remove('calc-err');
   } else {
     calcLast = null;
@@ -28006,7 +28080,7 @@ F('calcForm').addEventListener('submit', (e) => {
 });
 F('calcAddResBtn').onclick = () => {
   if (calcLast === null) { toast('Work something out first — then it goes on the tape'); return; }
-  addToTape(calcLast, calcExpr.value.trim());
+  addToTape(calcLast, calcExpr.value.trim(), false, tapeKind());
 };
 /* The press must not collapse the highlight it is about to read: the window
    is user-select: none, and the mousedown is refused as well, the → Field
@@ -28017,7 +28091,7 @@ F('calcSelBtn').onclick = () => {
   let figs = selectedFigures(sel);
   if (!figs.length) figs = numbersIn(sel ? String(sel) : '').map((n) => ({ value: n, label: 'Selected on the page' }));
   if (!figs.length) { toast('Nothing numeric is highlighted — select some figures on the page first'); return; }
-  figs.forEach((fg) => addToTape(fg.value, fg.label, true));
+  figs.forEach((fg) => addToTape(fg.value, fg.label, true, fg.kind));
   renderTape(); saveCalc();
   toast(`${figs.length} figure${figs.length === 1 ? '' : 's'} added from the highlight`);
 };
@@ -28025,7 +28099,7 @@ F('calcCopyBtn').onclick = async () => {
   const val = calcResultValue();
   if (val === null) { toast(calcNothingYet()); return; }
   try {
-    await navigator.clipboard.writeText(String(round2(val)));
+    await navigator.clipboard.writeText(String(calcUseRound(val)));
     toast(`Copied ${CALC_USE_WORD[calcUse]}, ${calcUseText(val)}, as a plain number`);
   } catch (e) {
     toast('The browser refused the copy — select the result and copy it by hand');
@@ -29558,7 +29632,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   parseMoney, raiseFor, sinceLastYear,
   /* The calculator's arithmetic: the parser, the selection reader, the tape's
      stats, the figure under a click, and the boundary for fin-calc. */
-  calcEval, numbersIn, calcStats, figureAt, selectedFigures, coerceCalc, CALC_TAPE_MAX,
+  calcEval, numbersIn, calcStats, figureAt, selectedFigures, coerceCalc, CALC_TAPE_MAX, fmtKind,
   /* The sample plan, so its tests measure the SAME object the button loads
      rather than a copy of it that can drift. */
   sampleState,
