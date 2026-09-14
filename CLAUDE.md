@@ -6838,6 +6838,22 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   screen's width. The docked page pads by the same token, so it gives up 72px
   more. The test reads the buttons' TOPS in a floating and a docked window;
   it cannot reach the coarse figure, since pointer media is not emulable.
+- **Docked, a window centres in the room the dock leaves** (Charles, 2026-09-14,
+  a screenshot of Preferences running under the calculator: *"center windows in
+  the space instead of the whole page"*). Measured first: in a 1,585px window
+  every dialog centred on the screen at 793px against a free space centred at
+  607, and the 1,100px editors ran 130px under the calculator (356px at
+  1,100px). A modal dialog is fixed with the UA's `inset-inline: 0` and auto
+  margins, so `html[data-calc="dock"] dialog[open] { right: var(--calc-w) }`
+  centres it in what is left, and **`--dlg-room`** (`100vw ÷ --zoom − --calc-w`)
+  is the width the base `dialog` rule subtracts its 32px from — every
+  per-window rule is a max-width, so each keeps its own size where it fits.
+  `#helpDialog`'s own line is the family's shared help block, pinned verbatim
+  in five apps, so its docked cap lives in the dock rule instead
+  (`html[data-calc="dock"] #helpDialog[open]`), never in that line. Inside `@media (min-width: 701px)`: at 700px and under the calculator
+  is a sheet and the sheet rules own the dialog. The calculator is a child of the
+  open dialog but positions against the viewport, so it does not move. Tested by
+  opening three windows the app's way in a docked 1,585px frame.
 - **A tape label's WHEN is never cut** (Charles, 2026-09-13, twelve rows all
   reading "Long-term Savings · Jan…": *"how might we handle long field names
   … maybe a tooltip?"*). The part being cut was the distinguishing part, so a

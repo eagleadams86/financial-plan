@@ -1665,7 +1665,8 @@ with its ✕.
 - **Move it or dock it.** Drag it anywhere by its title bar, or press **⧉
   Dock** and it runs down the right-hand edge with the page making room beside
   it; docked, the readouts, the box and the buttons stay at the foot of the
-  window however long the tape grows. On a phone it is a sheet along the
+  window however long the tape grows, and any window you open centres in the
+  space beside the calculator rather than running under it. On a phone it is a sheet along the
   bottom either way, the tape shows three rows before it scrolls (the newest
   stay in view), and any window you open — a cell, a row, Help — fills the
   screen above the sheet rather than centring behind it, its contents
