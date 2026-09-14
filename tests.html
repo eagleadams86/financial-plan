@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1072;
+const EXPECTED = 1073;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -11120,13 +11120,24 @@ t('every tile row fits the tiles it promises, and none strands a lone tile', () 
      short last row is STRETCHED to finish the line rather than leaving a
      hole. The floor and the gap are read back out of the app, so raising
      either fails here instead of quietly making a row too tight. */
-  {
+  /* The Month page's cards answer the same table since 2026-09-14 (Charles:
+     "never just one orphaned card. it should be 4x1 or 2x2 or 1x4"), so one
+     walker checks both grids against their own floor, gap and container. */
+  const GRIDS = [
+    { grid: 'goalgrid', box: 'tiles', blocks: 5, counts: 7, checks: 40,
+      parent: /:has\(> \.goalgrid\) \{ container: tiles \/ inline-size; \}/ },
+    { grid: 'monthgrid', box: 'monthcards', blocks: 3, counts: 3, checks: 9,
+      parent: /\.monthcards \{ container: monthcards \/ inline-size; \}/ },
+  ];
+  for (const G of GRIDS) {
     const CSS = APP_SRC;
-    const f = CSS.match(/\.goalgrid \{ display: grid; gap: (\d+)px;[^}]*minmax\((\d+)px/);
-    ok(f, 'the auto-fit fallback still states a gap and a smallest tile');
+    const f = CSS.match(new RegExp('\\.' + G.grid
+      + ' \\{ display: grid; gap: (\\d+)px;[^}]*minmax\\((?:min\\(100%, )?(\\d+)px'));
+    ok(f, G.grid + ': the auto-fit fallback still states a gap and a smallest tile');
     const GAP = f ? +f[1] : 0, MIN = f ? +f[2] : 0;
-    const blocks = [...CSS.matchAll(/@container tiles \(min-width: (\d+)px\) \{([\s\S]*?)\n\}/g)];
-    ok(blocks.length >= 5, 'the container queries are there — ' + blocks.length + ' of them');
+    const blocks = [...CSS.matchAll(new RegExp('@container ' + G.box
+      + ' \\(min-width: (\\d+)px\\) \\{([\\s\\S]*?)\\n\\}', 'g'))];
+    ok(blocks.length >= G.blocks, G.grid + ': the container queries are there — ' + blocks.length + ' of them');
     const st = {};
     let checked = 0;
     for (const [, atStr, body] of blocks) {
@@ -11168,10 +11179,10 @@ t('every tile row fits the tiles it promises, and none strands a lone tile', () 
         checked++;
       }
     }
-    ok(Object.keys(st).length >= 7, 'every tile count from two to eight is answered');
-    ok(checked >= 40, 'and each one is checked at every width above the one it changes at');
-    ok(/:has\(> \.goalgrid\) \{ container: tiles \/ inline-size; \}/.test(CSS),
-       "the row's own parent is the named container — without it every query above "
+    ok(Object.keys(st).length >= G.counts, G.grid + ': every tile count it holds is answered');
+    ok(checked >= G.checks, G.grid + ': and each one is checked at every width above the one it changes at');
+    ok(G.parent.test(CSS),
+       G.grid + ": the row's parent is the named container — without it every query above "
        + 'matches nothing and the counts silently stop applying');
   }
 });
@@ -18345,6 +18356,43 @@ t('the calculator’s buttons sit on one line, floating and docked (2026-09-14)'
     }
     ok(/@media \(pointer: coarse\) \{ :root \{ --calc-w: 416px; \} \}/.test(APP_SRC),
        'touch type has its own, wider figure — the same row at 16px needs 410.8px');
+  } finally {
+    if (f) f.remove();
+    if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
+  }
+});
+t('the Month page never strands a card: 4, 2 + 2 or one per line (2026-09-14)', async () => {
+  /* Charles, 2026-09-14, the calculator docked in a 1,585px window: Accounts
+     on a row of its own under the other three. Read off the live cards, not
+     the rule — the rule is walked by the tile-row test. */
+  const keep = localStorage.getItem('fin-calc');
+  let f = null;
+  const shape = (D) => {
+    const rows = new Map();
+    for (const c of D.querySelector('.monthgrid').children) {
+      const top = Math.round(c.getBoundingClientRect().top);
+      rows.set(top, (rows.get(top) || 0) + 1);
+    }
+    return [...rows.values()].join('+');
+  };
+  try {
+    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: true, x: null, y: null, tape: [] }));
+    for (const [width, four, three] of [[1585, '4', '3'], [1200, '2+2', '1+1+1']]) {
+      const fr = await auditFrame(width, 900, 'monthcards');
+      f = fr.f;
+      const D = fr.D;
+      D.getElementById('tab-budget').click();
+      D.querySelector('.vswitch[data-mode="month"]').click();
+      await new Promise((r) => setTimeout(r, 200));
+      const grid = D.querySelector('.monthgrid');
+      ok(grid, width + 'px: the Month page is up');
+      eq(D.documentElement.dataset.calc, 'dock', 'with the calculator docked beside it');
+      eq(grid.children.length, 4, 'the sample fills all four cards');
+      eq(shape(D), four, width + 'px: four cards');
+      grid.lastElementChild.remove();
+      eq(shape(D), three, width + 'px: three cards — never two and one');
+      f.remove(); f = null;
+    }
   } finally {
     if (f) f.remove();
     if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);

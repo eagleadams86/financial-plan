@@ -153,7 +153,10 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
   month before. **Left over is the one that goes green or red**, since it is the
   only one of the five with a direction of its own: a month that went backwards
   is the thing you most want to spot on the page.
-- **Each section as a list, biggest first**, with a bar for each row's share of
+- **Each section as a list, biggest first** — Income, Expenses, Transfers and
+  Accounts sit four across when the window has room (even with the calculator
+  docked beside them), two and two when it doesn't, and one per line on a
+  phone; never three with one left over — with a bar for each row's share of
   its section and, underneath, where the figure came from: something that
   happened, an estimate of yours, or the rule that worked it out, named. A row
   pointing the other way from its section is a **refund** — cash back, a

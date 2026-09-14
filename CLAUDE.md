@@ -4456,6 +4456,20 @@ gets asked, which is "what is this month doing, and can I fix that one row
 while I'm standing in a shop": on a phone that meant pinching into a
 thirteen-column table to reach one cell.
 
+- **The four cards (Income, Expenses, Transfers, Accounts) follow the tile-row
+  table, never auto-fit's leftovers** (Charles, 2026-09-14, calculator docked:
+  *"accounts is still on its own row"*, then *"there's never just one orphaned
+  card. it should be 4x1 or 2x2 or 1x4"*). The floor went 320px → **260px**:
+  a docked calculator leaves his 1,585px window a 1,181px grid, which fits
+  three 320px cards and stranded Accounts. Measured with the sample: four
+  across there is 281.75px a card with nothing overflowing, 262px still reads
+  (longer names wrap), content bottoms out near 200px. Four go 4 / 2+2 / 1 per
+  line, three go 3 / 1, two go 2 / 1 — `:has(> :nth-child(N):last-child)`
+  counts, `@container monthcards` widths at N × 260 + (N − 1) × 18
+  (538 / 816 / 1094), exactly `.goalgrid`'s shape. The container is a
+  `.monthcards` WRAPPER around the grid, not `.tipzone`: `container-type`
+  makes a stacking context and a containing block, and `.tipzone` also holds
+  the pinned year strip. The tile-row test walks both grids.
 - **Why not a tenth tab.** The two are one object read two ways, the tab bar
   already wraps at nine, and a share link's own tab list, `SECTION_NEEDS`,
   `tabOrder`, `allowedViews` and the search's view filter would all have needed
