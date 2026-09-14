@@ -6973,6 +6973,19 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   one nowrap line with `overflow-x: auto`, the ring's 4px bought with a
   negative margin; the name is `.headbar`'s own child and stays put. Charles
   asked for this one directly, so it is no longer "only League Night has it".
+  **A phone on its side gets the same two scrollers** (Charles, 2026-09-14, a
+  landscape iPhone screenshot: the theme picker wrapped to a second line and the
+  tabs to a second row). Landscape is 844–932px, so the width test never
+  matched; measured in an emulated 844×390 touch screen the header was 139px
+  and the tab row 96px, and after it they are 93px and 46px — the upright
+  figures. That one block's query is now `(max-width: 700px), (pointer:
+  coarse) and (max-height: 500px)`: a landscape iPad is 820px tall and a short
+  desktop window has a fine pointer, and both were measured unchanged. It takes
+  `#zoomSel { display: none }` with it (pinch does its job there too). ONLY that
+  block — the calculator sheet, the pinned-bar rule and the rest of the phone
+  layout are still width rules. `renderTabs`' nudge is not width-gated, so the
+  chosen tab scrolls into view on its side too. The harness cannot emulate
+  pointer media, so the phone-header test holds the query text itself.
 - **Drag-selecting across the months scrolls the grid from its PINNED
   columns** (Charles, 2026-09-13: *"the scroller doesn't activate until the
   mouse is passed the first or last column"*). The browser autoscrolls a
