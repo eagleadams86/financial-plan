@@ -1554,6 +1554,11 @@ a header that paints before anything else runs, and each takes the theme's own
 text colour — no meaning ever rides on hue alone. A screen reader is told to
 skip them; the word beside each one is the whole label.
 
+**On a phone the row is one line that scrolls sideways**, with the app's name
+on its own line above it. The controls used to wrap to three lines, and with
+the calculator's sheet along the bottom the plan was a slot between them.
+Flick the row to reach the controls past the edge; the name stays put.
+
 ### Find
 
 Two characters minimum, and it searches everything: every year's rows and
@@ -1629,6 +1634,11 @@ with its ✕.
   moment the cursor reaches the pinned label or year-total column, so a run
   longer than the screen is one drag. ⌘C / Ctrl+C copies the block as
   tab-separated text, Escape clears it.
+  **On a phone, hold a finger on the first cell for a moment, then tap the
+  last**: the block between them is selected, another tap moves that corner,
+  and a tap on any other part of a table lets it go. Scrolling in between
+  leaves the block alone, so the far corner can be off the screen when you
+  start. Works on the tiles and the Month page's lines the same way.
 - **Work anything out** in the box: `1200*3 + 45`, or `(total - 500) / 12`.
   Click a row on the tape and its figure goes into the box wherever the
   cursor is, wearing its kind (`$10239`, `9.43%`, `210`) and nothing else —
@@ -1651,7 +1661,9 @@ with its ✕.
   Dock** and it runs down the right-hand edge with the page making room beside
   it; docked, the readouts, the box and the buttons stay at the foot of the
   window however long the tape grows. On a phone it is a sheet along the
-  bottom either way.
+  bottom either way, the tape shows three rows before it scrolls (the newest
+  stay in view), and any window you open — a cell, a row, Help — opens in the
+  space above the sheet rather than centred behind it.
 - **It stays open on purpose.** Unlike every other window here it does not
   close when you click elsewhere — that is the point of it. Close it with its
   ✕, the Calc button, or Escape while you are in it. Everything else on the

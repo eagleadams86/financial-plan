@@ -6840,6 +6840,51 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   ring in `--accent` over `--accent-bg` — a ring is not a shadow. ⌘C writes
   items as `label\tfigure` lines. A press on a dot, a button or a link in a
   tile starts nothing.
+- **A finger HOLDS, then TAPS** (Charles, 2026-09-14: *"you can't actually
+  select multiple items at once on mobile"*). The drag is the mouse's: a finger
+  that moves is scrolling, the browser cancels the pointer the moment it
+  decides so, and no `touch-action` gives the drag to the block without taking
+  the scroll from every table on the page. So on a touch (`pointerType !==
+  'mouse'`, primary pointer only) `beginHold` starts a 500ms timer (`HOLD_MS`)
+  on the press; a move past 8px or a lift cancels it; when it fires the cell
+  is a block of one (`gridRange.touch = true`) and a toast says to tap the
+  other corner. The NEXT press on the block's own body records `rangeTapTo`,
+  and the click that follows moves the far corner (`gridRange.b`), toasting
+  the count; a click on any other part of a table clears the block and goes on
+  to whatever it always did; a `pointercancel` (a scroll) settles no tap and
+  clears nothing — the far corner of a long block is off the screen. Four
+  traps: (1) the LIFT that ends a hold clicks the cell it began on, so
+  `endHold` sets `gridDragEndedAt` when the hold had fired and the existing
+  400ms window swallows it (and Pick); (2) Pick's capturing click yields while
+  `rangeTapTo` is set, or it would take the tapped cell instead of extending;
+  (3) the browser's OWN long press — iOS's selection handles and callout,
+  Android's context menu — must lose: `.holding` on the table/root for the
+  press puts `user-select: none` + `-webkit-touch-callout: none` under the
+  finger, and `contextmenu` is refused while a hold is on; the class comes off
+  at the lift so a figure can still be copied by hand any other time; (4) a
+  stale `rangeTapTo` after a scroll would make Pick refuse its next click, so
+  `pointercancel` clears it too. The harness drives it with synthetic touch
+  `PointerEvent`s (hold 650ms, then tap); the iOS Simulator confirmed the real
+  gesture on 2026-09-14.
+- **On a phone: three rows of tape, and a window opens ABOVE the sheet**
+  (Charles, 2026-09-14, from his phone with the calculator open). The 700px
+  rule pins `#calcTape li` to a written height (`--calc-row-h: calc(1.5em +
+  9px)` — line, 4px twice, 1px rule) and caps the tape at three of them;
+  `renderTape` already scrolls to the foot, and the boot now scrolls once more
+  after `openCalc`, because a tape rendered into a hidden window took no
+  scroll and a restored tape opened at row one. `syncCalcSheet()` (a
+  ResizeObserver on `#calcWin` + the resize listener, and called from
+  open/closeCalc) writes `--calc-sheet-top` — the sheet's MEASURED top edge in
+  layout px, not `100vh` minus its height, since an iOS vh is the tall
+  viewport — and flags the root `data-calc-sheet`; the phone rule then anchors
+  `dialog[open]` to the top (`margin-top: 16px; margin-bottom: auto`) with
+  `max-height` stopping 8px above the sheet. Off a phone or with the window
+  closed both come off and a dialog centres as before. And the HEADER on a
+  phone is League Night's shape (2026-09-08) at last: the controls sit in
+  `.headctl` (declaring the family's 12px gap itself), which under 700px is
+  one nowrap line with `overflow-x: auto`, the ring's 4px bought with a
+  negative margin; the name is `.headbar`'s own child and stays put. Charles
+  asked for this one directly, so it is no longer "only League Night has it".
 - **Drag-selecting across the months scrolls the grid from its PINNED
   columns** (Charles, 2026-09-13: *"the scroller doesn't activate until the
   mouse is passed the first or last column"*). The browser autoscrolls a

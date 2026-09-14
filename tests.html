@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1068;
+const EXPECTED = 1071;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -18315,6 +18315,188 @@ t('docking pads the page and survives a reload; a phone gets a sheet', async () 
     eq(W3.getComputedStyle(D3.querySelector('.wrap')).paddingRight, '16px', 'no pad on a phone');
     ok(D3.documentElement.scrollWidth <= 376, 'and the page is no wider than the screen', D3.documentElement.scrollWidth);
     eq(W3.getComputedStyle(D3.getElementById('calcDockBtn')).display, 'none', 'there is no edge to dock down, so no Dock button');
+  } finally {
+    if (f) f.remove();
+    if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
+  }
+});
+
+t('the phone header is the name above one scrolling line of controls (2026-09-14)', async () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const html = APP_SRC;
+  const head = html.slice(html.indexOf('<div class="headbar">'), html.indexOf('</header>'));
+  const at = head.indexOf('<div class="headctl">');
+  ok(at > 0 && at > head.indexOf('id="brandTag"'), 'the controls sit in .headctl, after the name, which is .headbar’s own child');
+  const inner = head.slice(at);
+  for (const id of ['syncBtn', 'undoBtn', 'calcBtn', 'findBtn', 'zoomSel', 'prefsBtn', 'dataBtn', 'shareBtn', 'themeSel'])
+    ok(inner.includes(`id="${id}"`), `${id} is inside the wrapper`);
+  ok(inner.indexOf('id="themeSel"') > inner.indexOf('id="shareBtn"'), 'and the theme picker is still last');
+  ok(/\.headctl \{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; \}/.test(html),
+     'the wrapper declares the family’s 12px gap itself — a nested row inherits none');
+  ok(/\.headctl \{ flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto;\s*padding: 4px; margin: -4px; scrollbar-width: thin; \}/.test(html),
+     'and on a phone it is one line that scrolls, with room bought for the focus ring');
+  /* Measured in a phone-width frame: the name on its own line, the controls
+     on ONE line below it, and the header shorter than the three-row wrap it
+     replaced. */
+  let f;
+  try {
+    ({ f } = await auditFrame(375, 812, 'headscroll'));
+    const W = f.contentWindow, D = W.document;
+    const ctl = D.querySelector('.headctl'), brand = D.querySelector('.brand');
+    eq(W.getComputedStyle(ctl).overflowX, 'auto', 'the row scrolls sideways');
+    eq(W.getComputedStyle(ctl).columnGap, '12px', 'at the family gap');
+    ok(ctl.scrollWidth > ctl.clientWidth, 'and has something to scroll — eight controls do not fit 375px', ctl.scrollWidth);
+    const tops = new Set([...ctl.children].filter((c) => !c.classList.contains('sr-only') && W.getComputedStyle(c).display !== 'none')
+      .map((c) => Math.round(c.getBoundingClientRect().top)));
+    eq(tops.size, 1, 'every visible control is on one line', [...tops].join(','));
+    ok(brand.getBoundingClientRect().bottom <= ctl.getBoundingClientRect().top + 4, 'the name is on the line above');
+    const hb = D.querySelector('header').getBoundingClientRect().bottom;
+    ok(hb - ctl.getBoundingClientRect().bottom <= 12, 'the line of controls is the last thing in the header — nothing wraps under it', hb - ctl.getBoundingClientRect().bottom);
+    eq(W.getComputedStyle(D.querySelector('header')).position, 'sticky', 'and still sticks');
+  } finally { if (f) f.remove(); }
+});
+t('on a phone the tape shows three rows, and a window opens above the sheet, not behind it (2026-09-14)', async () => {
+  const keep = localStorage.getItem('fin-calc');
+  let f;
+  try {
+    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: false, x: null, y: null,
+      tape: [1, 2, 3, 4, 5, 6].map((n) => ({ v: n * 100, k: 'money', l: `Row ${n} · Jan 26` })) }));
+    ({ f } = await auditFrame(375, 812, 'calcabove'));
+    const W = f.contentWindow, D = W.document;
+    const win = D.getElementById('calcWin'), tape = D.getElementById('calcTape');
+    ok(!win.hidden, 'the calculator is open');
+    const rows = [...tape.querySelectorAll('li')];
+    eq(rows.length, 6, 'six figures on the tape');
+    const rowH = rows[0].getBoundingClientRect().height;
+    ok(rows.every((li) => Math.abs(li.getBoundingClientRect().height - rowH) < 0.5), 'every row is the one written height');
+    ok(Math.abs(tape.clientHeight - 3 * rowH) < 1, 'and the tape shows exactly three of them', `${tape.clientHeight} vs ${3 * rowH}`);
+    ok(tape.scrollHeight > tape.clientHeight, 'the rest scroll');
+    ok(tape.scrollTop >= tape.scrollHeight - tape.clientHeight - 1, 'scrolled to the newest');
+    ok(win.getBoundingClientRect().height < 812 * 0.6, 'so the sheet is well under the 60vh it may take', win.getBoundingClientRect().height);
+    /* The flag and the measured edge. */
+    eq(D.documentElement.dataset.calcSheet, 'on', 'the root says a sheet is open');
+    const top = parseFloat(D.documentElement.style.getPropertyValue('--calc-sheet-top'));
+    ok(Math.abs(top - win.getBoundingClientRect().top) < 1, 'and carries its top edge', `${top} vs ${win.getBoundingClientRect().top}`);
+    /* A long window — Help — opens at the top and stops above the sheet. */
+    D.querySelector('#calcActions [data-help="calculator"]').click();
+    const dlg = D.getElementById('helpDialog');
+    ok(dlg.open, 'help is open');
+    const r = dlg.getBoundingClientRect(), s = win.getBoundingClientRect();
+    ok(Math.abs(r.top - 16) < 1, 'anchored 16px from the top', r.top);
+    ok(r.bottom <= s.top - 7, 'and its foot is above the sheet, with a gap', `${r.bottom} vs ${s.top}`);
+    ok(r.bottom > s.top - 40, 'having grown down to meet it', `${r.bottom} vs ${s.top}`);
+    ok(dlg.scrollHeight > dlg.clientHeight, 'the rest of Help scrolls inside it');
+    dlg.close();
+    /* Measured: with the tape emptied, the message shows whole. */
+    D.getElementById('calcClearBtn').click();
+    const empty = tape.querySelector('li.calc-empty');
+    ok(empty && empty.getBoundingClientRect().height >= empty.scrollHeight - 1 && tape.scrollHeight <= tape.clientHeight + 1,
+       'the empty row is as tall as its text and nothing spills', `${empty && empty.getBoundingClientRect().height} / ${empty && empty.scrollHeight}`);
+    /* Closed, the flag comes off and a window centres itself as before. */
+    D.getElementById('calcCloseBtn').click();
+    eq(D.documentElement.dataset.calcSheet, undefined, 'the flag is off once the calculator closes');
+    eq(D.documentElement.style.getPropertyValue('--calc-sheet-top'), '', 'and the edge is gone');
+    W.openModal(dlg);
+    const r2 = dlg.getBoundingClientRect();
+    ok(Math.abs((812 - r2.bottom) - r2.top) < 2, 'a window centres itself again', `${r2.top} / ${812 - r2.bottom}`);
+    dlg.close();
+    /* A desktop never gets it. */
+    f.remove(); f = null;
+    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: false, x: null, y: null, tape: [] }));
+    ({ f } = await auditFrame(1280, 900, 'calcwide'));
+    eq(f.contentWindow.document.documentElement.dataset.calcSheet, undefined, 'a 1280px window is no sheet');
+    ok(/#calcTape \{ --calc-row-h: calc\(1\.5em \+ 9px\); max-height: calc\(3 \* var\(--calc-row-h\)\); \}/.test(APP_SRC),
+       'the cap is three rows of a written height, inside the phone rule');
+    ok(/#calcTape li:not\(\.calc-empty\) \{ height: var\(--calc-row-h\); \}/.test(APP_SRC),
+       'and only a FIGURE row is pinned to it — the empty tape’s prose wraps to two lines on a phone');
+
+    ok(/html\[data-calc-sheet\] dialog\[open\] \{ margin-top: 16px; margin-bottom: auto;\s*max-height: calc\(var\(--calc-sheet-top, 100vh\) - 24px\); \}/.test(APP_SRC),
+       'and a dialog under the flag is anchored to the top and stops at the measured edge');
+  } finally {
+    if (f) f.remove();
+    if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
+  }
+});
+t('a finger holds a cell, then taps another, to select a block (2026-09-14)', async () => {
+  const keep = localStorage.getItem('fin-calc');
+  let f;
+  try {
+    ({ f } = await auditFrame(1280, 900, 'touchblock'));
+    const W = f.contentWindow, D = W.document;
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const grid = D.querySelector('#views table.grid');
+    const rows = [...grid.tBodies[0].rows].filter((tr) => tr.querySelector('td.cell[data-cat]'));
+    const a = rows[0].querySelectorAll('td.cell')[1], b = rows[2].querySelectorAll('td.cell')[3];
+    const ev = (type, target, extra) => { const r = target.getBoundingClientRect(); target.dispatchEvent(new W.PointerEvent(type, Object.assign(
+      { bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true, clientX: r.left + 5, clientY: r.top + 5 }, extra || {}))); };
+    const tap = async (el) => { ev('pointerdown', el); ev('pointerup', el); el.click(); };
+    /* A quick tap is a tap: it opens the cell as it always did. */
+    await tap(a);
+    ok(D.getElementById('cellDialog').open, 'a tap opens the cell editor');
+    D.getElementById('cellDialog').close();
+    eq(W.gridRangeCells().length, 0, 'and selects nothing');
+    /* A hold becomes a block of one; the lift’s click opens nothing. */
+    ev('pointerdown', a);
+    ok(grid.classList.contains('holding'), 'the table refuses the browser’s own long press while the finger is down');
+    eq(W.getComputedStyle(a).userSelect, 'none', 'measured: no text selection can start');
+    await wait(250);
+    eq(W.gridRangeCells().length, 0, 'a quarter second is not a hold');
+    await wait(400);
+    eq(W.gridRangeCells().length, 1, 'half a second is: the cell is a block of one');
+    ok(a.classList.contains('selrange'), 'that cell');
+    ev('pointerup', a); a.click();
+    ok(!grid.classList.contains('holding'), 'the class comes off with the lift');
+    ok(!D.getElementById('cellDialog').open, 'the lift opened no editor');
+    eq(W.gridRangeCells().length, 1, 'and the block stands');
+    /* A scroll in between leaves it alone — the far corner may be off the screen. */
+    await wait(450);
+    ev('pointerdown', b); ev('pointercancel', b);
+    eq(W.gridRangeCells().length, 1, 'a finger that scrolls the table moves nothing');
+    /* The tap at the other corner runs the block between them. */
+    await tap(b);
+    const block = W.gridRangeCells();
+    eq(new Set(block.map((td) => td.parentElement)).size, 3, 'three rows');
+    eq(new Set(block.map((td) => td.cellIndex)).size, 3, 'three columns — a rectangle, not the browser’s rows');
+    ok(!D.getElementById('cellDialog').open, 'the tap opened no editor');
+    /* Another tap moves the corner again; Pick does not take the cell instead. */
+    D.getElementById('calcBtn').click();
+    D.getElementById('calcClearBtn').click();
+    D.getElementById('calcPickBtn').click();
+    const c = rows[1].querySelectorAll('td.cell')[2];
+    await tap(c);
+    eq(W.gridRangeCells().length, 4, 'the corner moved: two rows by two columns');
+    eq(D.querySelectorAll('#calcTape li:not(.calc-empty)').length, 0, 'and Pick took nothing — the tap was the block’s');
+    D.getElementById('calcPickBtn').click();
+    D.getElementById('calcSelBtn').click();
+    eq(D.querySelectorAll('#calcTape li:not(.calc-empty)').length, 4, 'Add Selected reads the block');
+    /* A tap on the name column lets it go, and the tap goes on to its editor. */
+    await tap(rows[0].cells[0]);
+    eq(W.gridRangeCells().length, 0, 'a tap on a label clears the block');
+    const open = D.querySelector('dialog[open]'); if (open) open.close();
+    /* Tiles: hold one, tap another, and the run between them is chosen. */
+    D.getElementById('tab-goals').click();
+    await wait(400);
+    const tiles = [...D.querySelectorAll('#views .goalgrid .goal[data-edit="goal"]')];
+    ok(tiles.length >= 3, 'three goal tiles');
+    ev('pointerdown', tiles[0].querySelector('.value'));
+    await wait(650);
+    ev('pointerup', tiles[0].querySelector('.value')); tiles[0].click();
+    eq(W.gridRangeCells().length, 1, 'the held tile is a run of one');
+    await wait(450);
+    await tap(tiles[2].querySelector('.label'));
+    eq(W.gridRangeCells().length, 3, 'three tiles, the one between included');
+    ok(!D.getElementById('rowDialog').open, 'and no goal editor opened');
+    /* A mouse press still clears a finger’s block, as it clears its own. */
+    const mev = (type, target, extra) => { const r = target.getBoundingClientRect(); target.dispatchEvent(new W.PointerEvent(type, Object.assign(
+      { bubbles: true, cancelable: true, pointerType: 'mouse', clientX: r.left + 5, clientY: r.top + 5 }, extra || {}))); };
+    mev('pointerdown', tiles[1], { button: 0, buttons: 1 }); mev('pointerup', tiles[1], { button: 0, buttons: 0 });
+    eq(W.gridRangeCells().length, 0, 'gone');
+    const js = stripComments(APP_SRC);
+    ok(/const HOLD_MS = 500;/.test(js), 'the hold is half a second, in one place');
+    ok(/document\.addEventListener\('contextmenu', \(e\) => \{ if \(hold\) e\.preventDefault\(\); \}\);/.test(js),
+       'Android’s long-press menu is refused while a hold is on');
+    ok(/#views \.holding, #views \.holding \* \{ -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; \}/.test(APP_SRC),
+       'and iOS’s selection handles and callout are, by the class');
   } finally {
     if (f) f.remove();
     if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
