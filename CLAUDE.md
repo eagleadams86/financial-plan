@@ -4405,6 +4405,31 @@ goes looking for the thing that should have been there.
   pair a projection with the figure it projects (see the Giving section); re-
   flowing them by count would pair each tile with the wrong partner. A test
   walks the rules and fails if any of them forgets the `:not(.pairs)`.
+- **ROWS OF CARDS TAKE THE SAME TABLE — `.cards2` since 2026-09-14** (the family
+  sweep that followed the Month page's cards, Charles: *"never just one orphaned
+  card"*). Measured on every tab with the sample, in windows from 390px to
+  2560px: Retirement's holdings row — one card per account, four in the sample —
+  went **3 + 1** from about 1,090px to 1,450px, and Investments' panes are the
+  same shape one brokerage account later. `.cards2:not(.pairs)` now answers the
+  2–8 table at its own 340px floor and 18px gap (698 / 1056 / 1414 / 1772 /
+  2130 / 2488 / 2846 — the last two wider than `.wrap` gets, kept so the table is
+  whole), from `@container cardrow` on a **`.cardrow` wrapper** round each row,
+  not on `#views`: a container is a stacking context and a containing block, and
+  `#views` holds the pinned strips. The tile-row walker test checks all three
+  grids (`goalgrid`, `monthgrid`, `cards2`).
+- **A `.cards2.pairs` row can strand a card too, inside a RUN.** Full-width items
+  (Retirement's headings, its note, its holdings row, the wide projection cards)
+  break a pairs row into runs, and the run before "Later" is one 401(k) limit
+  check per earner plus Roth IRA Eligibility — two earners made three, and Roth
+  sat in the left half beside an empty one at every desktop width. `:has()` cannot
+  count a run, so **`stretchLonePairs()`**, called from `wireView`, clears and
+  re-adds `.pair-solo` (`grid-column: 1 / -1`) on the odd card of each run, reading
+  full width off the specified `grid-column-end` so a phone marks the same card.
+  Structural on purpose: the next card added to any run is handled unasked.
+- **The live test sweeps every tab** at 900px and 1300px: the last item of each
+  row of every grid under `#views` must reach the grid's right edge, rows grouped
+  by LEFT resetting, with a floor on the grids reached so an empty walk fails.
+  Both new checks were confirmed red on the old layout.
 
 ## Keeping the cents on a same-month row (2026-09-02)
 

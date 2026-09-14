@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1073;
+const EXPECTED = 1074;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -11128,6 +11128,10 @@ t('every tile row fits the tiles it promises, and none strands a lone tile', () 
       parent: /:has\(> \.goalgrid\) \{ container: tiles \/ inline-size; \}/ },
     { grid: 'monthgrid', box: 'monthcards', blocks: 3, counts: 3, checks: 9,
       parent: /\.monthcards \{ container: monthcards \/ inline-size; \}/ },
+    /* And every row of `.cards2` that is not fixed halves (the family sweep,
+       2026-09-14 — Retirement's holdings row went 3 + 1). */
+    { grid: 'cards2', box: 'cardrow', blocks: 5, counts: 7, checks: 40,
+      parent: /\.cardrow \{ container: cardrow \/ inline-size; \}/ },
   ];
   for (const G of GRIDS) {
     const CSS = APP_SRC;
@@ -18359,6 +18363,52 @@ t('the calculator’s buttons sit on one line, floating and docked (2026-09-14)'
   } finally {
     if (f) f.remove();
     if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
+  }
+});
+t('no row of cards on any tab stops short of its edge (2026-09-14)', async () => {
+  /* The family sweep, as a test: every grid under #views on every tab, in a
+     mid and a wide window. The last item of each row must reach the grid's
+     right edge — which catches a lone card under a full row (Retirement's
+     holdings went 3 + 1) AND a lone card in half of a pairs row (Roth IRA
+     Eligibility, beside an empty half). Rows are grouped by LEFT resetting,
+     never by top, and the sweep counts the grids it reached so an empty walk
+     cannot pass. */
+  for (const width of [900, 1300]) {
+    const { f, W, D } = await auditFrame(width, 900, 'shortrows');
+    try {
+      let grids = 0;
+      const short = [];
+      for (const tab of [...D.querySelectorAll('[role=tab]')]) {
+        tab.click();
+        await new Promise((r) => setTimeout(r, 150));
+        for (const g of D.querySelectorAll('#views *')) {
+          const cs = W.getComputedStyle(g);
+          if (cs.display !== 'grid' || !g.getClientRects().length || g.closest('table, dialog')) continue;
+          if (cs.gridTemplateColumns.split(' ').length < 2) continue;
+          const kids = [...g.children].filter((k) => k.getClientRects().length
+            && W.getComputedStyle(k).position !== 'absolute');
+          if (kids.length < 2) continue;
+          grids++;
+          const edge = g.getBoundingClientRect().right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
+          let row = [], lastLeft = Infinity;
+          const check = () => {
+            if (!row.length) return;
+            const end = row[row.length - 1].getBoundingClientRect().right;
+            if (edge - end > 2) short.push(`${tab.textContent.trim()}: .${String(g.className).trim().replace(/\s+/g, '.')} `
+              + `"${(row[0].querySelector('h2') || row[0]).textContent.trim().slice(0, 30)}" ${Math.round(edge - end)}px short`);
+          };
+          for (const k of kids) {
+            const left = k.getBoundingClientRect().left;
+            if (left <= lastLeft + 0.5) { check(); row = []; }
+            row.push(k);
+            lastLeft = left;
+          }
+          check();
+        }
+      }
+      ok(grids > 10, width + 'px: the sweep reached the tabs’ grids — ' + grids);
+      eq(short.join(' | '), '', width + 'px: every row of every grid reaches its edge');
+    } finally { f.remove(); }
   }
 });
 t('the Month page never strands a card: 4, 2 + 2 or one per line (2026-09-14)', async () => {
