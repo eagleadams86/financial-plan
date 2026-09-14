@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1075;
+const EXPECTED = 1076;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -16489,7 +16489,13 @@ t('at a phone width the tab scroller leaves the focus ring room on every side', 
      on a machine whose tab labels wrap differently. A ring is not clipped by a
      64th of a pixel, so the check is `nearly 4` rather than `4 or more`: a
      padding actually missing reads 0, which this tolerance is nowhere near. */
-  const ROOM = 3.9;
+  /* And not even "nearly 4" once the row is scrolled to an END: the browser
+     clamps `scrollLeft` to `scrollWidth - clientWidth`, and `scrollWidth` is
+     rounded to a whole pixel, so the clamp can land anywhere up to a pixel
+     short. Which fraction you get depends on the row's width — the tab
+     arrows (2026-09-14) narrowed it in this mouse-driven frame and moved it
+     from 0.016px to 0.297px. A missing padding still reads 0. */
+  const ROOM = 3;
   /* The pin is a DEVICE setting on this origin, and this test presses it — so
      it starts from unpinned whatever the browser remembers, and puts back what
      it found even when an assertion throws. A run that failed half-way would
@@ -18478,6 +18484,56 @@ t('the Month page never strands a card: 4, 2 + 2 or one per line (2026-09-14)', 
     if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
   }
 });
+t('the header and the tab bar are one scrolling line at every width, with arrows for a pointer (2026-09-14)', async () => {
+  /* Charles, 2026-09-14, family-wide: a 705px desktop window had the header on
+     two lines and the tabs on five rows with the calculator docked. Measured
+     in that window, and in a wide one where nothing may have changed. */
+  const keep = localStorage.getItem('fin-calc');
+  let f = null;
+  const lines = (W, el) => new Set([...el.children]
+    .filter((c) => c.getClientRects().length && !c.classList.contains('sr-only') && W.getComputedStyle(c).display !== 'none')
+    .map((c) => Math.round(c.getBoundingClientRect().top))).size;
+  try {
+    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: true, x: null, y: null, tape: [] }));
+    let fr = await auditFrame(705, 900, 'rowscroll');
+    f = fr.f;
+    let { W, D } = fr;
+    eq(D.documentElement.dataset.calc, 'dock', '705px, with the calculator docked');
+    const ctl = D.querySelector('.headctl'), tabs = D.querySelector('.tabs');
+    const headNav = D.querySelector('.headrow > .rownav'), tabNav = D.querySelector('.tabrow > .rownav');
+    eq(lines(W, ctl), 1, 'the header controls are one line');
+    eq(lines(W, tabs), 1, 'and the tabs are one row');
+    ok(ctl.scrollWidth > ctl.clientWidth && tabs.scrollWidth > tabs.clientWidth,
+       'both have something to scroll here — otherwise nothing is being measured');
+    ok(!headNav.hidden && !tabNav.hidden, 'so both rows show their arrows');
+    const [prev, next] = headNav.querySelectorAll('button');
+    ok(prev.disabled && !next.disabled, 'at the start, ‹ is off and › is on');
+    next.click();
+    ok(ctl.scrollLeft > 0, 'pressing › scrolls the row', ctl.scrollLeft);
+    await new Promise((r) => setTimeout(r, 50));
+    ok(!prev.disabled, 'and ‹ comes on');
+    const [, tabNext] = tabNav.querySelectorAll('button');
+    tabNext.click();
+    ok(tabs.scrollLeft > 0, 'the tab bar’s › scrolls the tabs', tabs.scrollLeft);
+    f.remove(); f = null;
+
+    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: false, dock: false, x: null, y: null, tape: [] }));
+    fr = await auditFrame(1600, 900, 'rowwide');
+    f = fr.f; ({ W, D } = fr);
+    const wctl = D.querySelector('.headctl');
+    eq(wctl.scrollWidth - wctl.clientWidth <= 1, true, '1600px: the controls fit');
+    ok(D.querySelector('.headrow > .rownav').hidden && D.querySelector('.tabrow > .rownav').hidden,
+       'so neither row shows arrows');
+    ok(Math.abs(wctl.getBoundingClientRect().top - D.querySelector('.brand').getBoundingClientRect().top) < 16,
+       'and the controls sit beside the name, on its line, as they always have');
+    eq(lines(W, D.querySelector('.tabs')), 1, 'the tabs one row');
+  } finally {
+    if (f) f.remove();
+    if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
+  }
+  ok(/@media \(hover: none\), \(pointer: coarse\) \{ \.rownav \{ display: none !important; \} \}/.test(APP_SRC),
+     'the arrows are for a mouse or trackpad — a finger swipes, and on touch their 40px floor grew the header');
+});
 t('the phone header is the name above one scrolling line of controls (2026-09-14)', async () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const html = APP_SRC;
@@ -18488,10 +18544,9 @@ t('the phone header is the name above one scrolling line of controls (2026-09-14
   for (const id of ['syncBtn', 'undoBtn', 'calcBtn', 'findBtn', 'zoomSel', 'prefsBtn', 'dataBtn', 'shareBtn', 'themeSel'])
     ok(inner.includes(`id="${id}"`), `${id} is inside the wrapper`);
   ok(inner.indexOf('id="themeSel"') > inner.indexOf('id="shareBtn"'), 'and the theme picker is still last');
-  ok(/\.headctl \{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; \}/.test(html),
-     'the wrapper declares the family’s 12px gap itself — a nested row inherits none');
-  ok(/\.headctl \{ flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto;\s*padding: 4px; margin: -4px; scrollbar-width: thin; \}/.test(html),
-     'and on a phone it is one line that scrolls, with room bought for the focus ring');
+  ok(/\.headctl \{ display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; flex: 0 1 auto;\s*min-width: 0; overflow-x: auto; padding: 4px; margin: -4px; scrollbar-width: none; \}/.test(html),
+     'the wrapper declares the family’s 12px gap itself — a nested row inherits none — and is one line '
+     + 'that scrolls at EVERY width since 2026-09-14, with room bought for the focus ring');
   /* A phone on its side too (2026-09-14): landscape is wider than 700px, so the
      block also answers a coarse pointer on a screen no taller than 500px. The
      harness cannot emulate pointer media, so the query itself is what is held. */

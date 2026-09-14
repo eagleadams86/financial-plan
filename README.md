@@ -1557,8 +1557,11 @@ a header that paints before anything else runs, and each takes the theme's own
 text colour — no meaning ever rides on hue alone. A screen reader is told to
 skip them; the word beside each one is the whole label.
 
-**On a phone the row is one line that scrolls sideways** — held upright or
-turned on its side — with the app's name on its own line above it. The controls used to wrap to three lines, and with
+**The row is always one line that scrolls sideways.** While every control
+fits beside the app's name it sits there as it always has; when it doesn't —
+a phone, upright or on its side, or a narrow desktop window — it takes a line
+of its own under the name. With a mouse or trackpad, **‹ ›** arrows appear at
+the end of the row whenever something is off an edge. The controls used to wrap to three lines, and with
 the calculator's sheet along the bottom the plan was a slot between them.
 Flick the row to reach the controls past the edge; the name stays put.
 
@@ -1710,8 +1713,10 @@ synced, never in a backup and never carried in a share link. It is in
 On a phone the pin holds the **tab row only**. Three bands of chrome is most of
 a small screen, so the year strip is let go there and only the tabs stay — the
 one that buys you changing tab without scrolling back to the top. The tabs
-themselves sit in one row that scrolls sideways there, rather than wrapping to
-four — and on a phone turned on its side as well, where they used to wrap to two; a tab reached from the keyboard shows its focus ring whole, on every
+themselves sit in one row that scrolls sideways — at every width, so a
+narrow window or a docked calculator no longer stacks them several rows deep,
+with **‹ ›** arrows beside the row for a mouse — and dragging a tab to the
+end of the row scrolls it along, so a tab can be dropped anywhere; a tab reached from the keyboard shows its focus ring whole, on every
 side (fixed 2026-09-04 — the scrolling row used to slice the ring off along
 the top and at both ends).
 

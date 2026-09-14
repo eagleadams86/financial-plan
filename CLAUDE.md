@@ -6986,6 +6986,35 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   layout are still width rules. `renderTabs`' nudge is not width-gated, so the
   chosen tab scrolls into view on its side too. The harness cannot emulate
   pointer media, so the phone-header test holds the query text itself.
+  **Then the whole family went further the same day: the header's controls
+  and the tab bar are ONE SCROLLING LINE AT EVERY WIDTH** (Charles: *"should we
+  just make them both always single line side scrollers?"* — a 705px desktop
+  window had the header on two lines and the tabs five rows deep with the
+  calculator docked). Measured against the previous commit: 1600px, 1100px,
+  150% zoom, an upright phone and a sideways phone are pixel-identical; at 705px
+  the header went 131px → 89 and the tab row 258px → 42 (docked) or 96 → 42.
+  The shape: `.headrow` (`flex: 0 1 auto`) holds `.headctl`, the scroller, and a
+  `.rownav` of two `.ynav.snav` arrows; content-sized, the row stays beside the
+  name while it fits and flex-wrap takes it onto a line of its own when it does
+  not — so the phone's `.brand { flex: 1 1 100% }` rule is gone, the phone gets
+  the shape from the base rule. `.tabs` is the scroller in the base rule with
+  the ring's 4px padding and a `-4px` margin; the phone block keeps only its
+  `margin-bottom: 0` and `touch-action: pan-x pan-y`. **`wireScrollRow(row,
+  nav)`** shows the arrows only while the row overflows (ResizeObserver +
+  MutationObserver + scroll + resize — nothing calls it after boot), disables
+  each at its end, and steps 80% of the row, instantly. **Arrows are for a mouse
+  or trackpad only**: `@media (hover: none), (pointer: coarse) { .rownav {
+  display: none !important } }` — the first cut showed them on phones, where
+  `.ynav.snav`'s 40px touch floor grew the header 6px and slid every control.
+  They are `tabindex="-1"` + `aria-hidden` (Tab and the arrow keys reach every
+  control, and focus scrolls it into view). **A tab drag scrolls the bar**:
+  `dragEdgeScroll` runs a rAF loop while the pointer is within 48px of an end
+  or past it (4–24px a frame) and re-places the tab each step — verified with
+  real mouse events at 705px (Budget held at the right edge rode to the end and
+  saved). Print wraps `.headctl` instead of scrolling it. The phone tab-ring
+  test's end-of-row tolerance went 3.9 → 3: `scrollWidth` is a whole pixel, so
+  the clamp at an end lands up to a pixel short, and the narrower row moved it
+  from 0.016px to 0.297px.
 - **Drag-selecting across the months scrolls the grid from its PINNED
   columns** (Charles, 2026-09-13: *"the scroller doesn't activate until the
   mouse is passed the first or last column"*). The browser autoscrolls a
