@@ -18375,17 +18375,33 @@ t('on a phone the tape shows three rows, and a window opens above the sheet, not
     ok(win.getBoundingClientRect().height < 812 * 0.6, 'so the sheet is well under the 60vh it may take', win.getBoundingClientRect().height);
     /* The flag and the measured edge. */
     eq(D.documentElement.dataset.calcSheet, 'on', 'the root says a sheet is open');
-    const top = parseFloat(D.documentElement.style.getPropertyValue('--calc-sheet-top'));
-    ok(Math.abs(top - win.getBoundingClientRect().top) < 1, 'and carries its top edge', `${top} vs ${win.getBoundingClientRect().top}`);
-    /* A long window — Help — opens at the top and stops above the sheet. */
+    const sh = parseFloat(D.documentElement.style.getPropertyValue('--calc-sheet-h'));
+    ok(Math.abs(sh - win.getBoundingClientRect().height) < 1, 'and carries its height', `${sh} vs ${win.getBoundingClientRect().height}`);
+    /* A long window — Help — opens at the top and runs to the FOOT of the
+       screen, under the sheet: WebKit clips a fixed child of a scrolling
+       dialog to the dialog's box, so a window that stopped above the sheet
+       took the sheet with it on an iPhone (2026-09-14). Its content still
+       scrolls clear of the sheet, by the padding. */
     D.querySelector('#calcActions [data-help="calculator"]').click();
     const dlg = D.getElementById('helpDialog');
     ok(dlg.open, 'help is open');
+    ok(dlg.contains(win), 'the sheet is inside the open dialog (the modal choreography)');
     const r = dlg.getBoundingClientRect(), s = win.getBoundingClientRect();
     ok(Math.abs(r.top - 16) < 1, 'anchored 16px from the top', r.top);
-    ok(r.bottom <= s.top - 7, 'and its foot is above the sheet, with a gap', `${r.bottom} vs ${s.top}`);
-    ok(r.bottom > s.top - 40, 'having grown down to meet it', `${r.bottom} vs ${s.top}`);
+    ok(Math.abs(r.bottom - 812) < 1, 'and running to the foot of the screen, so the sheet sits inside its box', r.bottom);
+    ok(r.left === 0 && Math.abs(r.width - 375) < 1, 'edge to edge, so the sheet’s own edges are inside it too — WebKit clips to the box', `${r.left} ${r.width}`);
+    ok(parseFloat(W.getComputedStyle(dlg).paddingBottom) >= s.height + 8, 'with the sheet’s height and a gap reserved at its foot', W.getComputedStyle(dlg).paddingBottom);
     ok(dlg.scrollHeight > dlg.clientHeight, 'the rest of Help scrolls inside it');
+    /* Help opens with its Got It focused, which scrolls it into view — into
+       the dialog's box, whose foot is under the sheet. Scroll padding keeps
+       the focused control above the sheet. */
+    const got = D.activeElement;
+    ok(got && dlg.contains(got) && !win.contains(got), 'Help opens with a control of its own focused', got && got.id);
+    ok(got.getBoundingClientRect().bottom <= s.top - 7, 'and the focus scroll leaves it above the sheet, not behind it', `${got.getBoundingClientRect().bottom} vs ${s.top}`);
+    eq(W.getComputedStyle(dlg).scrollPaddingBottom, W.getComputedStyle(dlg).paddingBottom, 'scroll padding matches the padding');
+    dlg.scrollTop = dlg.scrollHeight;
+    const last = [...dlg.children].filter((c) => c !== win && c.getBoundingClientRect().height > 0).pop();
+    ok(last.getBoundingClientRect().bottom <= s.top - 7, 'scrolled to its end, the last of the content is clear of the sheet', `${last.getBoundingClientRect().bottom} vs ${s.top}`);
     dlg.close();
     /* Measured: with the tape emptied, the message shows whole. */
     D.getElementById('calcClearBtn').click();
@@ -18395,7 +18411,7 @@ t('on a phone the tape shows three rows, and a window opens above the sheet, not
     /* Closed, the flag comes off and a window centres itself as before. */
     D.getElementById('calcCloseBtn').click();
     eq(D.documentElement.dataset.calcSheet, undefined, 'the flag is off once the calculator closes');
-    eq(D.documentElement.style.getPropertyValue('--calc-sheet-top'), '', 'and the edge is gone');
+    eq(D.documentElement.style.getPropertyValue('--calc-sheet-h'), '', 'and the height is gone');
     W.openModal(dlg);
     const r2 = dlg.getBoundingClientRect();
     ok(Math.abs((812 - r2.bottom) - r2.top) < 2, 'a window centres itself again', `${r2.top} / ${812 - r2.bottom}`);
@@ -18410,8 +18426,8 @@ t('on a phone the tape shows three rows, and a window opens above the sheet, not
     ok(/#calcTape li:not\(\.calc-empty\) \{ height: var\(--calc-row-h\); \}/.test(APP_SRC),
        'and only a FIGURE row is pinned to it — the empty tape’s prose wraps to two lines on a phone');
 
-    ok(/html\[data-calc-sheet\] dialog\[open\] \{ margin-top: 16px; margin-bottom: auto;\s*max-height: calc\(var\(--calc-sheet-top, 100vh\) - 24px\); \}/.test(APP_SRC),
-       'and a dialog under the flag is anchored to the top and stops at the measured edge');
+    ok(/html\[data-calc-sheet\] :is\(dialog, #helpDialog\)\[open\] \{ margin: 16px 0 0; width: 100%; max-width: none;\s*height: auto; max-height: none; padding-bottom: calc\(var\(--calc-sheet-h, 0px\) \+ 28px\);/.test(APP_SRC),
+       'and a dialog under the flag is anchored to the top, stretched to the foot, and padded by the measured height — never capped above the sheet');
   } finally {
     if (f) f.remove();
     if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
@@ -18435,7 +18451,16 @@ t('a finger holds a cell, then taps another, to select a block (2026-09-14)', as
     ok(D.getElementById('cellDialog').open, 'a tap opens the cell editor');
     D.getElementById('cellDialog').close();
     eq(W.gridRangeCells().length, 0, 'and selects nothing');
-    /* A hold becomes a block of one; the lift’s click opens nothing. */
+    /* With Pick OFF a hold is the phone’s own long press: nothing here answers. */
+    ev('pointerdown', a);
+    ok(!grid.classList.contains('holding'), 'no hold begins while Pick is off');
+    await wait(650);
+    eq(W.gridRangeCells().length, 0, 'and no block appears — Charles: "activates even when the picker isn’t on"');
+    ev('pointerup', a);
+    /* Pick on: a hold becomes a block of one; the lift’s click opens nothing. */
+    D.getElementById('calcBtn').click();
+    D.getElementById('calcPickBtn').click();
+    eq(D.getElementById('calcPickBtn').getAttribute('aria-pressed'), 'true', 'Pick is on');
     ev('pointerdown', a);
     ok(grid.classList.contains('holding'), 'the table refuses the browser’s own long press while the finger is down');
     eq(W.getComputedStyle(a).userSelect, 'none', 'measured: no text selection can start');
@@ -18459,16 +18484,22 @@ t('a finger holds a cell, then taps another, to select a block (2026-09-14)', as
     eq(new Set(block.map((td) => td.cellIndex)).size, 3, 'three columns — a rectangle, not the browser’s rows');
     ok(!D.getElementById('cellDialog').open, 'the tap opened no editor');
     /* Another tap moves the corner again; Pick does not take the cell instead. */
-    D.getElementById('calcBtn').click();
     D.getElementById('calcClearBtn').click();
-    D.getElementById('calcPickBtn').click();
     const c = rows[1].querySelectorAll('td.cell')[2];
     await tap(c);
     eq(W.gridRangeCells().length, 4, 'the corner moved: two rows by two columns');
     eq(D.querySelectorAll('#calcTape li:not(.calc-empty)').length, 0, 'and Pick took nothing — the tap was the block’s');
-    D.getElementById('calcPickBtn').click();
     D.getElementById('calcSelBtn').click();
     eq(D.querySelectorAll('#calcTape li:not(.calc-empty)').length, 4, 'Add Selected reads the block');
+    eq(W.gridRangeCells().length, 0, 'and lets it go once taken — a phone has no Escape');
+    /* Pick off lets a standing block go. */
+    ev('pointerdown', b); await wait(650); ev('pointerup', b); b.click();
+    eq(W.gridRangeCells().length, 1, 'a fresh hold');
+    D.getElementById('calcPickBtn').click();
+    eq(W.gridRangeCells().length, 0, 'switching Pick off clears it');
+    D.getElementById('calcPickBtn').click();
+    ev('pointerdown', a); await wait(650); ev('pointerup', a); a.click();
+    await wait(450);
     /* A tap on the name column lets it go, and the tap goes on to its editor. */
     await tap(rows[0].cells[0]);
     eq(W.gridRangeCells().length, 0, 'a tap on a label clears the block');
@@ -18491,6 +18522,7 @@ t('a finger holds a cell, then taps another, to select a block (2026-09-14)', as
       { bubbles: true, cancelable: true, pointerType: 'mouse', clientX: r.left + 5, clientY: r.top + 5 }, extra || {}))); };
     mev('pointerdown', tiles[1], { button: 0, buttons: 1 }); mev('pointerup', tiles[1], { button: 0, buttons: 0 });
     eq(W.gridRangeCells().length, 0, 'gone');
+    ok(/if \(e\.isPrimary === false \|\| !calcPick\) return;/.test(stripComments(APP_SRC)), 'the touch route is gated on Pick, in both wirers');
     const js = stripComments(APP_SRC);
     ok(/const HOLD_MS = 500;/.test(js), 'the hold is half a second, in one place');
     ok(/document\.addEventListener\('contextmenu', \(e\) => \{ if \(hold\) e\.preventDefault\(\); \}\);/.test(js),

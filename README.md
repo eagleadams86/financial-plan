@@ -1634,11 +1634,13 @@ with its ✕.
   moment the cursor reaches the pinned label or year-total column, so a run
   longer than the screen is one drag. ⌘C / Ctrl+C copies the block as
   tab-separated text, Escape clears it.
-  **On a phone, hold a finger on the first cell for a moment, then tap the
-  last**: the block between them is selected, another tap moves that corner,
-  and a tap on any other part of a table lets it go. Scrolling in between
-  leaves the block alone, so the far corner can be off the screen when you
-  start. Works on the tiles and the Month page's lines the same way.
+  **On a phone, with Pick on, hold a finger on the first cell for a moment,
+  then tap the last**: the block between them is selected, another tap moves
+  that corner, and Add Selected takes it. Scrolling in between leaves the
+  block alone, so the far corner can be off the screen when you start.
+  Switching Pick off lets a block go, as does a tap on a row's name. With
+  Pick off a long press is the phone's own, for copying a figure by hand.
+  Works on the tiles and the Month page's lines the same way.
 - **Work anything out** in the box: `1200*3 + 45`, or `(total - 500) / 12`.
   Click a row on the tape and its figure goes into the box wherever the
   cursor is, wearing its kind (`$10239`, `9.43%`, `210`) and nothing else —
@@ -1662,8 +1664,9 @@ with its ✕.
   it; docked, the readouts, the box and the buttons stay at the foot of the
   window however long the tape grows. On a phone it is a sheet along the
   bottom either way, the tape shows three rows before it scrolls (the newest
-  stay in view), and any window you open — a cell, a row, Help — opens in the
-  space above the sheet rather than centred behind it.
+  stay in view), and any window you open — a cell, a row, Help — fills the
+  screen above the sheet rather than centring behind it, its contents
+  scrolling clear of the sheet.
 - **It stays open on purpose.** Unlike every other window here it does not
   close when you click elsewhere — that is the point of it. Close it with its
   ✕, the Calc button, or Escape while you are in it. Everything else on the

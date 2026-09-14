@@ -6845,7 +6845,12 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   that moves is scrolling, the browser cancels the pointer the moment it
   decides so, and no `touch-action` gives the drag to the block without taking
   the scroll from every table on the page. So on a touch (`pointerType !==
-  'mouse'`, primary pointer only) `beginHold` starts a 500ms timer (`HOLD_MS`)
+  'mouse'`, primary pointer only) **and only while Pick is on** — the first cut
+  answered every long press, and Charles the same day: *"the press hold multi
+  selector activates even when the picker isn't on and i can't find a way to
+  turn it off since there's no escape key on mobile"*; with Pick off a long
+  press is the phone's own, and `setPick(false)` clears a touch block, as does
+  Add Selected once it has taken one — `beginHold` starts a 500ms timer (`HOLD_MS`)
   on the press; a move past 8px or a lift cancels it; when it fires the cell
   is a block of one (`gridRange.touch = true`) and a toast says to tap the
   other corner. The NEXT press on the block's own body records `rangeTapTo`,
@@ -6875,11 +6880,26 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   scroll and a restored tape opened at row one. `syncCalcSheet()` (a
   ResizeObserver on `#calcWin` + the resize listener, and called from
   open/closeCalc) writes `--calc-sheet-top` — the sheet's MEASURED top edge in
-  layout px, not `100vh` minus its height, since an iOS vh is the tall
-  viewport — and flags the root `data-calc-sheet`; the phone rule then anchors
-  `dialog[open]` to the top (`margin-top: 16px; margin-bottom: auto`) with
-  `max-height` stopping 8px above the sheet. Off a phone or with the window
-  closed both come off and a dialog centres as before. And the HEADER on a
+  layout px — and flags the root `data-calc-sheet`; the phone rule then
+  anchors `dialog[open]` 16px from the top and STRETCHES it to the foot of the
+  screen (`height: auto; max-height: none; margin-bottom: 0` against the UA's
+  `inset-block: 0`, no vh — an iOS vh is the tall viewport), with
+  `padding-bottom` of the sheet's height plus 28px so the content scrolls
+  clear of the sheet lying over its lower edge, `scroll-padding-bottom` to
+  match so a focus on open (Help's Got It) lands ABOVE the sheet rather than
+  behind it, and edge to edge (`width: 100%; margin: 16px 0 0`, no side
+  borders) because the family's 16px side margins clipped the sheet's first
+  and last characters for the same WebKit reason. **It must not stop above the
+  sheet: WebKit clips a fixed descendant of a scrolling dialog to the
+  dialog's box.** The first cut capped `max-height` at the sheet's top edge
+  and on Charles's iPhone the calculator vanished the moment any window
+  opened (*"the calculator is disappearing when another window is opened"*);
+  Chromium clips nothing and showed it to nobody — the iOS Simulator did. The
+  selector is `html[data-calc-sheet] :is(dialog, #helpDialog)[open]`: the id
+  inside `:is()` lifts the rule to (1,2,1) so its padding beats `#helpDialog
+  { padding: 20px }` and `#dataDialog { padding: 18px }` without an
+  !important; every dialog still matches through `dialog`. Off a phone or
+  with the window closed both come off and a dialog centres as before. And the HEADER on a
   phone is League Night's shape (2026-09-08) at last: the controls sit in
   `.headctl` (declaring the family's 12px gap itself), which under 700px is
   one nowrap line with `overflow-x: auto`, the ring's 4px bought with a

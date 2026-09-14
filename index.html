@@ -2587,15 +2587,36 @@ html[data-calc-pick] #chartMaxi :is(.goal, .tablewrap td) { cursor: crosshair; }
      the viewport, and with the sheet along the bottom its lower half — the
      amount box, the buttons — sat under the calculator that was there to
      work with it. So while the sheet is open (`data-calc-sheet`, kept by
-     syncCalcSheet) a dialog is anchored to the top instead — a fixed 16px
-     margin above, auto below — and may grow no further down than the sheet's
-     top edge, measured in layout pixels by the same function; a longer one
-     scrolls inside itself, as it always did. The sheet's top is MEASURED and
-     not `100vh` minus its height: on iOS a vh is the tall viewport with the
-     toolbar hidden, so a figure built from it would have run under the sheet
-     by the height of that toolbar. */
-  html[data-calc-sheet] dialog[open] { margin-top: 16px; margin-bottom: auto;
-    max-height: calc(var(--calc-sheet-top, 100vh) - 24px); }
+     syncCalcSheet) a dialog runs from 16px below the top of the screen to
+     its FOOT — `height: auto` with the UA's `inset-block: 0` and a fixed
+     margin each side stretches it, no vh needed (an iOS vh is the tall
+     viewport with the toolbar hidden, and would have been wrong by that
+     much) — and its bottom padding is the sheet's measured height plus a
+     gap, so its content scrolls clear of the sheet, which sits over its
+     lower edge. It must NOT stop above the sheet: WEBKIT CLIPS A FIXED
+     DESCENDANT OF A SCROLLING DIALOG TO THE DIALOG'S BOX (the first cut
+     capped max-height at the sheet's top edge, and on Charles's iPhone the
+     calculator vanished the moment any window opened — 2026-09-14, the same
+     day). The sheet is a child of the open dialog by the modal choreography,
+     so the dialog's box has to reach under it. Chromium clips nothing and
+     showed the fault to nobody.
+     `:is(dialog, #helpDialog)` is a specificity trick, not a list: the id
+     lifts the whole rule to (1,2,1), so it beats the per-window `#helpDialog
+     { padding: 20px }` and `#dataDialog { padding: 18px }` for the bottom
+     padding without an !important. Every dialog matches through `dialog`.
+     FULL WIDTH for the same reason: the sheet spans the screen, and the
+     family's 16px side margins clipped its first and last characters off
+     (the Simulator again). The side borders and the lower corners go with
+     them — a panel from edge to edge, rounded only where it starts.
+     `scroll-padding-bottom` matches the padding: a focus on open (Help's Got
+     It, an editor's first box) scrolls its target into the dialog's box, and
+     the foot of that box is under the sheet — so the button arrived hidden
+     behind the calculator until the reader scrolled on. Scroll padding is
+     what tells a focus scroll where the box really ends. */
+  html[data-calc-sheet] :is(dialog, #helpDialog)[open] { margin: 16px 0 0; width: 100%; max-width: none;
+    height: auto; max-height: none; padding-bottom: calc(var(--calc-sheet-h, 0px) + 28px);
+    scroll-padding-bottom: calc(var(--calc-sheet-h, 0px) + 28px);
+    border-width: 1px 0 0; border-radius: var(--radius) var(--radius) 0 0; }
 }
 @media (max-width: 640px) {
   #chartMaxi { padding: 10px; }
@@ -8004,8 +8025,8 @@ const HELP = {
       + 'the box below, wherever the cursor is, wearing its kind — $10239, 9.43%, 210. Switch it off to go back to editing. Or highlight a run of figures with the '
       + 'mouse and press Add Selected: every cell the highlight touches, even by a character, goes '
       + 'on whole with its own label, and names, dates and percentages are left alone. On a phone, '
-      + 'hold a finger on the first cell for a moment, then tap the last: the block between them is '
-      + 'selected, and Add Selected takes it.'],
+      + 'with Pick on, hold a finger on the first cell for a moment, then tap the last: the block '
+      + 'between them is selected, and Add Selected takes it. Switch Pick off to let a block go.'],
     ['The box works anything out: 1200*3 + 45, or (total - 500) / 12. Six names read the tape — ',
       b('total, avg, count, min, max and last'), ' — so total*1.05 is the tape plus five percent, and '
       + '200*5% is ten. Enter works it out and puts the answer on the tape, labelled with what you typed.'],
@@ -25771,7 +25792,13 @@ function gridRangeExtendAt(grid, x, y) {
    moves is scrolling the page, and the browser cancels the pointer the moment
    it decides so — and there is no `touch-action` that would give the drag to
    the block without taking the scroll from every table on the page. So on a
-   touch the block is made in two presses: HOLD a cell still for half a second
+   touch, AND ONLY WHILE PICK IS ON (Charles, the same day: "the press hold
+   multi selector activates even when the picker isn't on and i can't find a
+   way to turn it off since there's no escape key on mobile" — a long press
+   with Pick off is the phone's own, for copying a figure by hand, and a block
+   that outlives its use had no way off the screen: switching Pick off clears
+   it, and so does Add Selected once it has taken it), the block is made in
+   two presses: HOLD a cell still for half a second
    and it becomes a block of one (the browser's own long press is refused by
    `.holding`, above in the CSS); then TAP the cell at the other corner and
    the block runs between them. A further tap moves that corner again; a tap
@@ -25817,7 +25844,7 @@ function wireGridRange(grid) {
   grid.addEventListener('pointerdown', (e) => {
     rangeTapTo = null;
     if (e.pointerType !== 'mouse') {
-      if (e.isPrimary === false) return;
+      if (e.isPrimary === false || !calcPick) return;
       const td = cellOf(e);
       /* A tap on the block's own body moves its far corner (on the click that
          follows, so a finger that scrolls instead moves nothing). */
@@ -25829,7 +25856,7 @@ function wireGridRange(grid) {
         gridRangeClear();
         gridRange = { grid, body: td.parentElement.parentElement, a: gridCellAt(td), b: gridCellAt(td), touch: true };
         gridRangePaint();
-        toast('Now tap the cell at the other corner of the block');
+        toast('Now tap the cell at the other corner. Add Selected takes the block; Pick off lets it go.');
       });
       return;
     }
@@ -25877,7 +25904,7 @@ function wireItemRange(root) {
   root.addEventListener('pointerdown', (e) => {
     rangeTapTo = null;
     if (e.pointerType !== 'mouse') {
-      if (e.isPrimary === false) return;
+      if (e.isPrimary === false || !calcPick) return;
       const it = itemOf(e);
       if (it && gridRange && gridRange.touch && gridRange.root === root) { rangeTapTo = it; return; }
       if (!it) return;
@@ -25886,7 +25913,7 @@ function wireItemRange(root) {
         const at = rangeItemsOf(root).indexOf(it);
         gridRange = { items: true, root, a: at, b: at, touch: true };
         gridRangePaint();
-        toast('Now tap the last one of the run');
+        toast('Now tap the last one of the run. Add Selected takes it; Pick off lets it go.');
       });
       return;
     }
@@ -28299,23 +28326,24 @@ function clampCalc() {
   placeCalcAt(calc.x, calc.y);
 }
 window.addEventListener('resize', clampCalc);
-/* THE SHEET'S TOP EDGE, for the dialogs. On a phone the window is a sheet
-   along the bottom and an open editor has to stop above it (the CSS records
-   why); the edge is where the tape, the Pick band and the buttons' wrapping
-   leave it, so it is measured rather than worked out — in layout pixels, the
-   same division every other measured offset here makes — and written to the
-   root with a flag the phone rule keys on. A ResizeObserver on the window
-   catches the tape growing and the band appearing; the resize listener
-   catches a rotation and iOS's toolbar coming and going. Off a phone, or with
-   the window closed, both come off and a dialog centres itself as before. */
+/* THE SHEET'S HEIGHT, for the dialogs. On a phone the window is a sheet
+   along the bottom and an open editor's content has to scroll clear of it
+   (the CSS records why the editor itself runs underneath); the height is
+   where the tape, the Pick band and the buttons' wrapping leave it, so it is
+   measured rather than worked out — in layout pixels, the same division
+   every other measured offset here makes — and written to the root with a
+   flag the phone rule keys on. A ResizeObserver on the window catches the
+   tape growing and the band appearing; the resize listener catches a
+   rotation. Off a phone, or with the window closed, both come off and a
+   dialog centres itself as before. */
 function syncCalcSheet() {
   const root = document.documentElement;
   if (calc.open && !calcWin.hidden && calcSheet()) {
-    root.style.setProperty('--calc-sheet-top', `${Math.round(calcWin.getBoundingClientRect().top / (zoomScale || 1))}px`);
+    root.style.setProperty('--calc-sheet-h', `${Math.round(calcWin.getBoundingClientRect().height / (zoomScale || 1))}px`);
     root.dataset.calcSheet = 'on';
   } else {
     delete root.dataset.calcSheet;
-    root.style.removeProperty('--calc-sheet-top');
+    root.style.removeProperty('--calc-sheet-h');
   }
 }
 window.addEventListener('resize', syncCalcSheet);
@@ -28376,7 +28404,10 @@ function setPick(on) {
     : 'While this is on, clicking a figure on the page adds it to the tape instead of opening it';
   F('calcPickNote').hidden = !calcPick;
   if (calcPick) document.documentElement.dataset.calcPick = 'on';
-  else delete document.documentElement.dataset.calcPick;
+  else {
+    delete document.documentElement.dataset.calcPick;
+    if (gridRange && gridRange.touch) gridRangeClear();   // a finger's block is Pick's, and goes with it
+  }
 }
 function openCalc(opts) {
   calc.open = true;
@@ -28562,6 +28593,7 @@ F('calcSelBtn').onclick = () => {
   if (!figs.length) { toast('Nothing numeric is highlighted — select some figures on the page first'); return; }
   figs.forEach((fg) => addToTape(fg.value, fg.label, true, fg.kind));
   renderTape(); saveCalc();
+  if (gridRange && gridRange.touch) gridRangeClear();   // taken, and a phone has no Escape to let it go
   toast(`${figs.length} figure${figs.length === 1 ? '' : 's'} added from the highlight`);
 };
 F('calcCopyBtn').onclick = async () => {
