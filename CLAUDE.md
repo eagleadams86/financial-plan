@@ -6786,6 +6786,19 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   readouts, the box and the buttons are at the same place however long the
   tape is. This REVERSES the first cut's `flex: 0 1 auto`, which parked the
   controls directly under a short tape; he wants them anchored.
+- **The window is as wide as its button row** (Charles, 2026-09-14, a
+  screenshot of Clear and the i dot wrapped under the other three: *"i think
+  there's room to make the minimum width allow these four to be
+  side-by-side"*). `--calc-w` went from 300px to **372px**, measured: at 13px
+  mouse type the four buttons and their gaps are 320.3px, the dot 27px, the
+  window's padding and border 18px — 365.3px, plus a few spare. **A coarse
+  pointer has its own figure, 416px** (`@media (pointer: coarse) { :root {
+  --calc-w } }`), because `.btn.small` takes 16px type on touch and the same
+  row is 410.8px — one px number cannot cover two type sizes (the
+  `#syncBtn` lesson). That only bites on an iPad; a phone is the sheet at the
+  screen's width. The docked page pads by the same token, so it gives up 72px
+  more. The test reads the buttons' TOPS in a floating and a docked window;
+  it cannot reach the coarse figure, since pointer media is not emulable.
 - **A tape label's WHEN is never cut** (Charles, 2026-09-13, twelve rows all
   reading "Long-term Savings · Jan…": *"how might we handle long field names
   … maybe a tooltip?"*). The part being cut was the distinguishing part, so a
