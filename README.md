@@ -1694,7 +1694,8 @@ with its ✕.
   scrolling clear of the sheet.
 - **It stays open on purpose.** Unlike every other window here it does not
   close when you click elsewhere — that is the point of it. Close it with its
-  ✕, the Calc button, or Escape while you are in it. Everything else on the
+  ✕, the Calc button, or Escape while you are in it — either way the keyboard
+  lands back in the window you were working in. Everything else on the
   page, editors included, works with it open.
 - **It is this device's.** Where it sits, whether it is docked, and the tape
   itself are remembered in this browser only — never synced, never in a backup

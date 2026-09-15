@@ -7201,3 +7201,6 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   toggle predates part notes, and one press committed the loss (⌘Z restored
   it). It now `confirm()`s when there is more than one part or any part has a
   note or merchant; a split of one that only repeats its line goes quietly.
+- **The calculator's ✕ dropped the focus inside an editor.** It focused
+  `#calcBtn`, inert under a modal, so the focus fell to `<body>`; Escape already
+  sent it into the dialog. Both call `calcFocusHome()` now.
