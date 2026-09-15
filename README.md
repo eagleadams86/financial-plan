@@ -1735,8 +1735,10 @@ The same strip carries the Budget's **Year / Month** switch at its left end, and
 in the Month lens the years are replaced by the plan's months — the arrows step
 from one to the next in both lenses now, and the current month is
 marked with an underscore wherever it has got to. Both lenses put their way back
-to now in the same place, and neither shows it when you are already there. On a phone the switch and the
-arrows take the line above and the strip gets the full width underneath.
+to now in the same place, and neither shows it when you are already there. The
+switch, the strip and the arrows stay on ONE line at every width, a phone
+included — the strip scrolls, and the period you are reading is always brought
+into view.
 See [Year or Month](#year-or-month).
 
 ### Where a Press Leaves the Page

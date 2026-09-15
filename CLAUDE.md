@@ -4706,11 +4706,21 @@ thirteen-column table to reach one cell.
 - **The tooltip is the grid's.** `wireGridTip` looks for `.gridwrap, .tipzone`
   now — one selector rather than a second copy of a handler that never asked
   what kind of box it was in. The month view wraps itself in `.tipzone`.
-- **On a phone the strip stacks** (≤700px): switch and arrows on the line
-  above, rail full-width underneath. Three controls in one row is one too many
-  at 430px — the switch alone took more than half of it and the rail was left
-  showing a month and a half. It reshapes the YEAR strip the same way, which is
-  the same improvement for the same reason.
+- **The strip is ONE LINE at every width** (Charles, 2026-09-14, a 690px
+  window: *"don't drop the years and months to a second line"*). It used to
+  stack under 700px — switch and arrows on the line above, rail full-width
+  underneath — because the switch takes more than half of a 430px screen. That
+  trade was reversed the evening the header and tab bar became single scrolling
+  lines: the rail scrolls, its arrows step the selection and the chosen period is
+  always brought into view. Measured: the strip went 89px → 45 at 690 and 480,
+  91 → 47 on phones; the cost is the rail's width on a phone — 120px at 390,
+  90px at 360, about one period in view. The test reads both lenses at 375 and
+  690. **The chosen segment is a pill inside the pill frame**: the "as of"
+  pair's under-520px `border-radius: calc(var(--radius) - 2px)` was written on
+  bare `.vswitch`, which is also this switch's class, so once the switch sat in a
+  narrow row its 8px corners cut through the 999px frame (Charles, a
+  screenshot, the same evening). Scoped to `.asofswitch .vswitch`; the test
+  checks the chosen segment's corners are at least half its height.
 - **A share link sends `ui: {}`**, so a link always opens on the grid, which is
   what somebody sending "the budget" means by it. The switch still draws in a
   shared view — choosing how to read someone's figures is reading.
