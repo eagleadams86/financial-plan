@@ -7158,3 +7158,8 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   before today now opens as `actual`, over a stored `manual` estimate too;
   a stored `auto` or `actual` keeps its kind. The rule is in the editor, not
   the line, so a press on any bill gone past its date behaves the same way.
+- **→ Field said "sent" into a box nobody could see.** `fieldTarget` checked
+  connected, writable and outside `#calcWin`, never shown: a cell's Amount in
+  a closed editor, or a field a `showIf` had hidden, took the figure and
+  toasted "sent to Amount" while nothing was stored. It now also needs
+  `getClientRects().length` — no box on the page, no target.

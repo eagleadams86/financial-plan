@@ -1668,7 +1668,9 @@ with its ✕.
 - **Send it into a box.** Open any editor, click into its amount, work the
   figure out in the calculator (or choose the total), press **→ Field**, and
   the box takes it exactly as if you had typed it — a window that saves as you
-  go saves it, and a derived box beside it follows. **⎘ Copy** puts the chosen
+  go saves it, and a derived box beside it follows. If the box you last
+  clicked in has since closed or been hidden, it asks you to click into one
+  rather than sending the figure nowhere. **⎘ Copy** puts the chosen
   figure on the clipboard as a plain number for anything else.
 - **Move it or dock it.** Drag it anywhere by its title bar, or press **⧉
   Dock** and it runs down the right-hand edge with the page making room beside

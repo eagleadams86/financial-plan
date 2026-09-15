@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1081;
+const EXPECTED = 1082;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -19033,6 +19033,52 @@ t('a bill already due opens its cell as what happened, so recording it pays it',
     W.openCellEditor(key, 'cat', cat.id, m);
     eq(kindNow(), 'actual', 'an estimate typed before the date reopens as what happened once it has gone by');
     D.getElementById('cellCancelBtn').click();
+  } finally { f.remove(); }
+});
+
+/* ── → Field never reports a figure it did not deliver ──────────────────────
+   The remembered box was checked for being on the page, writable and outside
+   the calculator — never for being SHOWN. Click into a cell's Amount, close
+   the editor, press → Field: "$4,321.00 sent to Amount", into a closed dialog,
+   and nothing stored. A box a `showIf` has hidden fails the same way. */
+t('→ Field refuses a box that is no longer on screen, instead of saying it was sent', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'fieldgone');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    D.getElementById('calcBtn').click();
+    D.getElementById('calcExpr').value = '4321';
+    D.getElementById('calcForm').requestSubmit();
+    eq(W.parseMoney(D.getElementById('calcResult').textContent), 4321, 'fixture: a result to send');
+    D.getElementById('tab-budget').click();
+    await new Promise((r) => setTimeout(r, 300));
+    D.querySelector('#views td.cell[data-cat]').click();
+    await new Promise((r) => setTimeout(r, 150));
+    ok(D.getElementById('cellDialog').open, 'fixture: the cell editor opened');
+    D.getElementById('cellValue').focus();
+    D.getElementById('cellCancelBtn').click();
+    await new Promise((r) => setTimeout(r, 150));
+    ok(!D.getElementById('cellDialog').open, 'fixture: and closed again');
+    said.length = 0;
+    D.getElementById('calcFieldBtn').click();
+    ok(!said.some((s) => /sent to/.test(s)), 'no "sent" for a box inside a closed window', said.join(' | '));
+    ok(said.some((s) => /Click into a box first/.test(s)), 'it asks for a box instead', said.join(' | '));
+    const hold = D.createElement('div');
+    hold.innerHTML = '<input type="text" aria-label="Probe">';
+    D.querySelector('main').appendChild(hold);
+    const probe = hold.firstChild;
+    probe.focus();
+    ok(D.activeElement === probe, 'fixture: the probe box has the focus');
+    hold.hidden = true;
+    said.length = 0;
+    D.getElementById('calcFieldBtn').click();
+    eq(probe.value, '', 'nothing went into a hidden box');
+    ok(!said.some((s) => /sent to/.test(s)), 'and nothing claimed it did', said.join(' | '));
+    hold.hidden = false;
+    probe.focus();
+    D.getElementById('calcFieldBtn').click();
+    eq(probe.value, '4321', 'a box on screen still takes the figure');
+    hold.remove();
   } finally { f.remove(); }
 });
 
