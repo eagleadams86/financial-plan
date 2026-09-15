@@ -7197,3 +7197,7 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   `hasPaid`/`hasCredits`/`hasDue` asked only the lines' own sums, so parts of
   +$100 and −$100 summed to nothing, the column went and both part rows drew
   blank. `anyFig(k)` asks the parts as well — the merchant column already did.
+- **"↩ Back to one line" dropped every part's merchant and note unasked.** The
+  toggle predates part notes, and one press committed the loss (⌘Z restored
+  it). It now `confirm()`s when there is more than one part or any part has a
+  note or merchant; a split of one that only repeats its line goes quietly.

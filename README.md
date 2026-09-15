@@ -1070,7 +1070,8 @@ this year compares with the last few, and it gives the tab something to open on.
   the card's total and the year chart go on reading one figure per line and
   never change. The parts sit under their line on the card, indented — always
   visible, never behind a control; **↩ Back to one line** folds them away and
-  keeps the total. Point at a part and its note opens beside it, the same way a
+  keeps the total — asking first when the parts carry names, merchants or notes
+  of their own, since those go with them (Undo brings them back). Point at a part and its note opens beside it, the same way a
   line's does.
 - **A holidays & PTO planner**, with from/to dates, under the trips it counts.
 
