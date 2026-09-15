@@ -7216,3 +7216,6 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   -0 and `fmtMoney(-0)` keeps the sign; `avgTipLine` passes `|| 0`. Left alone
   on purpose: `round2`'s half-cent tie-break for negatives, which the engine's
   match against the spreadsheet rests on.
+- **Find listed a split of one twice.** A lone part repeating its line is not
+  drawn on the card, but `searchPlan` walked it; it now applies the card's own
+  test (`lone.label/merchant/note` differing from the line) before the parts.
