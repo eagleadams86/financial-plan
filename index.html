@@ -4236,7 +4236,10 @@ function calcEval(expr, vars) {
   try {
     const value = sum();
     if (p < toks.length) fail('Unfinished — two things with nothing between them');
-    if (!Number.isFinite(value)) fail('Out of range');
+    /* A quadrillion, not just "finite" (2026-09-15 review): the handler
+       rounds to six places, and rounding 1e303 overflows to Infinity, which
+       reached the result line and the tape as "$∞". */
+    if (!Number.isFinite(value) || Math.abs(value) >= 1e15) fail('Out of range');
     return { ok: true, value };
   } catch (e) { return { ok: false, reason: e.message }; }
 }
@@ -6291,12 +6294,18 @@ function coerceShape(data) {
   d.vacations.trips = arr(d.vacations.trips);
   /* Trip nights and each line's figures reach the page unescaped, so coerce
      them the same way as holdings. */
+  /* A line's figures take tripPart's ceiling too: finite is not enough when two
+     lines of 1e308 add up to an Infinity on the card (2026-09-15 review). */
+  const tripFig = (v) => {
+    const n = num(v);
+    return typeof n === 'number' && !(Math.abs(n) < 1e12) ? 0 : n;
+  };
   for (const t of d.vacations.trips) {
     t.nights = num(t.nights);
     t.year = num(t.year);
     t.items = arr(t.items);
     for (const it of t.items) {
-      it.paid = num(it.paid); it.credits = num(it.credits); it.due = num(it.due);
+      it.paid = tripFig(it.paid); it.credits = tripFig(it.credits); it.due = tripFig(it.due);
       /* The merchant reaches the card escaped, but only a string is a name —
          the part normaliser's rule, and the line keeps it too. */
       if (typeof it.merchant === 'string' && it.merchant.trim())
@@ -17602,7 +17611,9 @@ function tripPart(p) {
      as "[object Object]" — nonsense that looks like something somebody typed. */
   const fig = (v) => {
     const n = typeof v === 'number' ? v : parseFloat(v);
-    return Number.isFinite(n) ? n : 0;
+    /* Under a trillion (2026-09-15 review): two parts of 1e308 are each
+       finite and add up to Infinity, which the card drew as "$∞". */
+    return Number.isFinite(n) && Math.abs(n) < 1e12 ? n : 0;
   };
   const text = (v) => typeof v === 'string' ? v.trim() : '';
   const out = { label: text(o.label), paid: fig(o.paid), due: fig(o.due) };

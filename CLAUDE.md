@@ -7224,3 +7224,17 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   part notes since they shipped; the words now name both.
 - **privacy.html did not list merchant names.** "What Financial Plan Stores"
   now says who each trip line and its parts was paid to.
+- **Absurd figures drew as "$∞".** `calcEval` refused only non-finite values,
+  and the handler's six-place rounding overflows past ~1e302; it now refuses
+  |value| ≥ 1e15. `tripPart`'s `fig` and `coerceShape`'s new `tripFig` drop a
+  trip figure of |v| ≥ 1e12 to 0 (a trillion-dollar holiday line is a crafted
+  file, not a plan). `num` itself is untouched — it serves fields that are not
+  money.
+- **Left as it is, deliberately: a merchant in the sample plan.** The review
+  noted the demo never shows the Merchant column. But `sampleState` leaves
+  merchants out on purpose, and the suite pins it from both sides: the
+  split-line test drives the current year's card and asserts no Merchant
+  column before it types one, and it asserts the other card does not gain one.
+  A merchant on either card breaks one of those claims, so this stays a
+  question for Charles — the sample-data rule against the demo's own lesson
+  that a column of nothing is left out.

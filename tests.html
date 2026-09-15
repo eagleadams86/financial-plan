@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1095;
+const EXPECTED = 1096;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -19380,6 +19380,26 @@ t('the share window’s notes box names every kind of note it carries', () => {
 t('the privacy page says a trip line stores who it was paid to', async () => {
   const txt = stripHtmlComments(await (await bustFetch('privacy.html')).text());
   ok(/who (a|each) trip line (and its parts )?was paid to/.test(txt), 'the stores paragraph names the merchant');
+});
+
+/* ── An absurd figure is refused, never drawn as $∞ ─────────────────────────
+   calcEval's finite check ran before the handler rounded, and rounding 1e303
+   to six places overflows — "$∞" on the result line and the tape. A trip part
+   or line accepted any finite number, so two of 1e308 added up to Infinity on
+   the card. Only a hand-edited backup or a crafted link reaches the second. */
+t('absurd figures are refused at the boundary rather than shown as $∞', () => {
+  const huge = H.calcEval('1' + '0'.repeat(303));
+  ok(!huge.ok && /Out of range/.test(huge.reason || ''), 'the calculator refuses a result it cannot write', JSON.stringify(huge));
+  ok(H.calcEval('999999999999*99').ok, 'a merely large figure still works out');
+  eq(H.tripPart({ label: 'X', paid: 1e308 }).paid, 0, 'a part figure of a trillion or more is not a figure');
+  eq(H.tripPart({ label: 'X', paid: 1234.5 }).paid, 1234.5, 'an ordinary one is kept');
+  const st = H.coerceShape({ vacations: { trips: [{ id: 't', name: 'T', year: 2026, items: [
+    { label: 'A', paid: 1e308 },
+    { label: 'B', paid: 1e308, parts: [{ label: 'B1', paid: 1e308 }, { label: 'B2', paid: 1e308 }] }] }] } });
+  const it = st.vacations.trips[0].items;
+  ok(it[0].paid === 0 && Number.isFinite(it[0].paid + it[1].paid), 'nor a line’s own, so no trip total adds up to Infinity', JSON.stringify(it));
+  eq(H.coerceShape({ vacations: { trips: [{ id: 't', name: 'T', items: [{ label: 'C', paid: 420 }] }] } })
+    .vacations.trips[0].items[0].paid, 420, 'and an ordinary line keeps its figure');
 });
 
 async function run() {
