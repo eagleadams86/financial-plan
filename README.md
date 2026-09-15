@@ -1672,7 +1672,9 @@ with its ✕.
   window however long the tape grows, and any window you open centres in the
   space beside the calculator rather than running under it. Docked in a window
   narrower than about 930px — where the column would leave the plan a slot — it
-  moves to the bottom as a sheet with three rows of tape instead, and docks
+  moves to the bottom as a sheet with three rows of tape instead — the page
+  making room at its foot, as it does on a phone, so nothing stays hidden under
+  the sheet — and docks
   again when the window widens (**⧉ Float** still floats it there). On a phone it is a sheet along the
   bottom either way, the tape shows three rows before it scrolls (the newest
   stay in view), and any window you open — a cell, a row, Help — fills the

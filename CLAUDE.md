@@ -7055,6 +7055,14 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   against the previous commit: docked at 1600 and 940 unchanged, phones
   unchanged; docked at 929 and 800 a full-width sheet with three rows. The test
   loads 900px docked, presses Float, and narrows a 1000px frame live both ways.
+  **The page makes room for any sheet** (Charles, a screenshot the same evening:
+  *"when the calculator is at the bottom, it hides the bottom part of the
+  screen"* — the Month page's notes and the footer could never be scrolled out
+  from under it, on a phone either): `html[data-calc-sheet] body {
+  padding-bottom: var(--calc-sheet-h) }` plus the same `scroll-padding-bottom`
+  on the root, so a focus or jump scroll stops above the sheet; print zeroes the
+  pad. The test scrolls a 900px docked sheet to the end and asserts the footer
+  clears it.
 - **Drag-selecting across the months scrolls the grid from its PINNED
   columns** (Charles, 2026-09-13: *"the scroller doesn't activate until the
   mouse is passed the first or last column"*). The browser autoscrolls a
