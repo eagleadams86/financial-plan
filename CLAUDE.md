@@ -7204,3 +7204,7 @@ from the 2026-09-15 review" at the foot of `tests.html`.
 - **The calculator's ✕ dropped the focus inside an editor.** It focused
   `#calcBtn`, inert under a modal, so the focus fell to `<body>`; Escape already
   sent it into the dialog. Both call `calcFocusHome()` now.
+- **Pick ignored Enter on a table row.** Its keydown route matched `.mrow`
+  only, so a Tab-focused `tr.editrow` opened its editor with Pick on. A focused
+  row in `#views`/`#chartMaxi` now puts every `figureAt` of `cells.slice(1)` on
+  the tape (the name column out, as a drag leaves it).
