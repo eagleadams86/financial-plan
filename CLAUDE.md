@@ -7193,3 +7193,7 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   `side.portfolios` and `side.retirementAccounts`; `side.daf` — the third
   holdings table, with the same note and dot since `4a5d29f` — was in neither.
   It opens the Giving tab.
+- **A split line whose parts cancelled hid their figures.** `tripCard`'s
+  `hasPaid`/`hasCredits`/`hasDue` asked only the lines' own sums, so parts of
+  +$100 and −$100 summed to nothing, the column went and both part rows drew
+  blank. `anyFig(k)` asks the parts as well — the merchant column already did.

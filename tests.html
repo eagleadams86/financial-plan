@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1086;
+const EXPECTED = 1087;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -19204,6 +19204,34 @@ t('Find reaches a note on a giving-fund holding, as it does the other two', () =
   ok(/VTI/.test(hits[0].where) && /giving fund/i.test(hits[0].where), 'naming the ticker and the fund', hits[0].where);
   eq(hits[0].snippet, 'Zebra lot, gifted in May', 'with the note as its snippet');
   eq(H.searchPlan(st, 'VTI').hits.length, 1, 'and its ticker is found too');
+});
+
+/* ── A column counts its parts' figures ─────────────────────────────────────
+   Paid, Credits and Due each appear once some LINE has a figure — asked of the
+   line's own sums. A split line whose parts cancel (paid $100, refunded $100)
+   sums to nothing, so the Paid column vanished and both part rows were drawn
+   blank: nothing on the card said money had gone out and come back. */
+t('a split line whose parts cancel out still shows the parts’ figures', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'partcols');
+  try {
+    W.finGet().vacations.trips = [{ id: 'tz', name: 'Audit trip', year: 2026, nights: 2, items: [
+      { label: 'Hotel', paid: 0, credits: 0, due: 0, parts: [
+        { label: 'Booked', paid: 100, credits: 0, due: 0 },
+        { label: 'Refunded', paid: -100, credits: 0, due: 0 }] },
+      { label: 'Tours', paid: 0, credits: 0, due: 50 }] }];
+    W.render();
+    D.getElementById('tab-vacations').click();
+    await new Promise((r) => setTimeout(r, 250));
+    const card = D.querySelector('.card.trip');
+    ok(card, 'fixture: the trip is drawn');
+    const heads = [...card.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    ok(heads.includes('Paid'), 'the Paid column is drawn — a part paid and a part refunded are figures', heads.join(', '));
+    const subs = [...card.querySelectorAll('tr.partrow')];
+    eq(subs.length, 2, 'fixture: both parts are drawn under their line');
+    const money = W.__finTestHooks.fmtMoney;
+    ok(subs[0].textContent.includes(money(100)) && subs[1].textContent.includes(money(-100)),
+       'and each part shows its own figure', subs.map((s) => s.textContent.replace(/\s+/g, ' ').trim()).join(' | '));
+  } finally { f.remove(); }
 });
 
 async function run() {

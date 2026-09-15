@@ -1056,7 +1056,8 @@ this year compares with the last few, and it gives the tab something to open on.
   — airfare, stay, transport, excursions, food, tips, spa — or from nothing,
   your choice.
 - **Each line tracks what's paid, what's credited and what's still due**, with
-  a **✓ Paid** button that settles the rest in one click. A line also names the
+  a **✓ Paid** button that settles the rest in one click; each column appears
+  once a line, or a part of a split line, has a figure in it. A line also names the
   **merchant** — who the money went to — in a column of its own, which appears
   only once something in the trip has one.
 - **A line that was several purchases splits into parts.** Three excursions
