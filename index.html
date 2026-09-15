@@ -266,13 +266,17 @@ header {
    side scrollers?" — a 700px desktop window had wrapped them to two lines and
    the tabs to five rows). It was a phone rule first; the phone was only the
    narrowest case of a row that does not fit.
-   `.headrow` is the row and its arrows; `.headctl` is what scrolls. The row is
-   `flex: 0 1 auto` — sized to its content — so while every control fits
-   beside the name it sits there, pushed right by the name's auto margin
-   exactly as before, and the moment it does not, flex-wrap takes the WHOLE row
-   onto a line of its own, where it shrinks to that line and scrolls. Nothing
-   changes on a window wide enough, and a phone lands on the shape it already
-   had: the name above, one line of controls below.
+   `.headrow` is the row and its arrows; `.headctl` is what scrolls. THE ROW
+   STAYS BESIDE THE NAME AND SCROLLS THERE (Charles, the same evening: "keep
+   buttons beside the name" — the first cut took the whole row onto a line of
+   its own the moment it did not fit, which in a 1100px Sprint Predictability
+   window left the name alone on a line above seven controls). So the row
+   takes whatever the name leaves (`flex: 1 1 0%`), its controls packed to the
+   right-hand end (`justify-content: flex-end` on the row, which never
+   overflows — the scroller inside it shrinks instead, so nothing is pushed out
+   of reach), and it only wraps under the name when that would leave it less
+   than 15rem: an upright phone, where the name above and one line of controls
+   below is the shape it already had. On a window wide enough nothing moves.
    THE GAP IS DECLARED HERE and not inherited: a nested row does not get
    `.headbar`'s 12px, which is how the four apps that nest theirs all ended up
    at 8px in the 2026-08-23 sweep. Room for the focus ring on every side is
@@ -280,7 +284,8 @@ header {
    the box grows inward and no control moves. No scrollbar: the arrows beside
    the row are the sign there is more, and the thing a mouse can press —
    a mouse wheel does not scroll sideways, and a Mac hides its bars. */
-.headrow { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; }
+.headrow { display: flex; align-items: center; justify-content: flex-end; gap: 4px;
+  flex: 1 1 0%; min-width: min(15rem, 100%); }
 .headctl { display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; flex: 0 1 auto;
   min-width: 0; overflow-x: auto; padding: 4px; margin: -4px; scrollbar-width: none; }
 .headctl::-webkit-scrollbar { display: none; }
@@ -535,8 +540,8 @@ html[data-booting] footer { visibility: hidden; }
      a nowrap row with `overflow-x: auto` only scrolls when there is something
      to scroll. */
   /* Nothing left to say here since 2026-09-14: the scroller is the base
-     `.headrow` / `.headctl` rule, and a phone gets this shape from it because
-     the controls never fit beside the name. */
+     `.headrow` / `.headctl` rule, and an upright phone gets this shape from it
+     because the name leaves the row less than its 15rem. */
 }
 
 /* ── Pinning the two toolbars ──────────────────────────────────────
@@ -29262,6 +29267,24 @@ function wireScrollRow(row, nav) {
   const step = (dir) => { row.scrollLeft += dir * Math.max(80, Math.round(row.clientWidth * 0.8)); };
   prev.onclick = () => step(-1);
   next.onclick = () => step(1);
+  /* A CONTROL REACHED FROM THE KEYBOARD LANDS WHOLE INSIDE THE ROW. The
+     browser scrolls a focused element into view only when it is entirely
+     hidden, so Tab onto a button half past the edge left it half past the
+     edge (measured on PAPTrack at 480px: Back Up focused with 21px still
+     clipped), and an arrow key along a tab bar did the same. Measured against
+     the PADDING edge, so the 4px bought for the focus ring stays the ring's —
+     the tab nudge's lesson. Only a `:focus-visible` focus: a mouse press
+     needs no help, and scrolling under it would move a tab that is about to
+     be dragged. */
+  row.addEventListener('focusin', (e) => {
+    const t = e.target;
+    if (t === row || !t.matches(':focus-visible')) return;
+    const cs = getComputedStyle(row);
+    const padL = parseFloat(cs.paddingLeft) || 0, padR = parseFloat(cs.paddingRight) || 0;
+    const box = row.getBoundingClientRect(), tr = t.getBoundingClientRect();
+    if (tr.left < box.left + padL) row.scrollLeft += tr.left - box.left - padL;
+    else if (tr.right > box.right - padR) row.scrollLeft += tr.right - box.right + padR;
+  });
   row.addEventListener('scroll', sync, { passive: true });
   if ('ResizeObserver' in window) new ResizeObserver(sync).observe(row);
   new MutationObserver(sync).observe(row, { subtree: true, childList: true, characterData: true,

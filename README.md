@@ -1557,10 +1557,11 @@ a header that paints before anything else runs, and each takes the theme's own
 text colour — no meaning ever rides on hue alone. A screen reader is told to
 skip them; the word beside each one is the whole label.
 
-**The row is always one line that scrolls sideways.** While every control
-fits beside the app's name it sits there as it always has; when it doesn't —
-a phone, upright or on its side, or a narrow desktop window — it takes a line
-of its own under the name. With a mouse or trackpad, **‹ ›** arrows appear at
+**The row is always one line that scrolls sideways, beside the app's name.**
+When the controls don't all fit, the row keeps its place next to the name and
+scrolls there; only an upright phone, where the name leaves too little room,
+puts the row on a line of its own under it. Tabbing onto a control that is
+half past the edge scrolls it fully into view. With a mouse or trackpad, **‹ ›** arrows appear at
 the end of the row whenever something is off an edge. The controls used to wrap to three lines, and with
 the calculator's sheet along the bottom the plan was a slot between them.
 Flick the row to reach the controls past the edge; the name stays put.

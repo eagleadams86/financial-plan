@@ -6994,10 +6994,20 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   150% zoom, an upright phone and a sideways phone are pixel-identical; at 705px
   the header went 131px → 89 and the tab row 258px → 42 (docked) or 96 → 42.
   The shape: `.headrow` (`flex: 0 1 auto`) holds `.headctl`, the scroller, and a
-  `.rownav` of two `.ynav.snav` arrows; content-sized, the row stays beside the
-  name while it fits and flex-wrap takes it onto a line of its own when it does
-  not — so the phone's `.brand { flex: 1 1 100% }` rule is gone, the phone gets
-  the shape from the base rule. `.tabs` is the scroller in the base rule with
+  `.rownav` of two `.ynav.snav` arrows. **The row stays BESIDE THE NAME and
+  scrolls there** (a correction the same evening — the first cut was
+  content-sized and wrapped the whole row under the name the moment it did not
+  fit, which in a 1100px Sprint Predictability window left the name alone above
+  seven controls; Charles: *"keep buttons beside the name"*): `flex: 1 1 0%`
+  with `min-width: min(15rem, 100%)` and `justify-content: flex-end` on the row
+  (the row never overflows — `.headctl` inside it shrinks — so the flex-end
+  cannot strand a control out of reach). It wraps under the name only when the
+  name leaves it under 15rem: an upright phone. So the phone's `.brand { flex: 1
+  1 100% }` rule is gone and the phone gets its shape from the base rule; a
+  sideways phone now has the controls beside the name on one line. The shared
+  helper also brings a **keyboard-focused** control half past the edge WHOLE
+  into the row (a `focusin` guarded by `:focus-visible`, measured against the
+  padding edge) — the browser only scrolls a wholly hidden focus target. `.tabs` is the scroller in the base rule with
   the ring's 4px padding and a `-4px` margin; the phone block keeps only its
   `margin-bottom: 0` and `touch-action: pan-x pan-y`. **`wireScrollRow(row,
   nav)`** shows the arrows only while the row overflows (ResizeObserver +
