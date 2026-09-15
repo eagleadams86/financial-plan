@@ -1675,7 +1675,9 @@ with its ✕.
   figure on the clipboard as a plain number for anything else.
 - **Move it or dock it.** Drag it anywhere by its title bar, or press **⧉
   Dock** and it runs down the right-hand edge with the page making room beside
-  it; docked, the readouts, the box and the buttons stay at the foot of the
+  it. Floating in a short window — or a phone on its side — it stops above
+  the foot of the screen and scrolls within itself, so its buttons are never
+  off the bottom. Docked, the readouts, the box and the buttons stay at the foot of the
   window however long the tape grows, and any window you open centres in the
   space beside the calculator rather than running under it. Docked in a window
   narrower than about 930px — where the column would leave the plan a slot — it

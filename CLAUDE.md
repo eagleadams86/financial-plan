@@ -7170,3 +7170,11 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   month `ownedElsewhere(computed, keys, key, m)` says a walked year holds. Only
   an import or restore makes a grid over 12 months, so it had never shown on a
   plan the app built itself.
+- **A floating calculator ran off short windows.** `top` was `tabs-top + 16px`
+  and `max-height` `100vh − 32px`, so at 1280x450 or a phone on its side
+  (812x375, which floats by design) the button row ended below the screen, and
+  `clampCalc` does nothing for a window that was never dragged. The cap now
+  starts at the window's own top — `tabs-top + 16px`, or `--calc-y` under
+  `.placed` — with a 120px floor, and `#calcWin` is `overflow-y: auto` so a
+  Tab onto a button the height could not fit scrolls it into view. The dock
+  (`max-height: none`) and the sheet (its own `60vh`) outrank both rules.
