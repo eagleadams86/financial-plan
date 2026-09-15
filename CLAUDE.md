@@ -7178,3 +7178,14 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   `.placed` — with a 120px floor, and `#calcWin` is `overflow-y: auto` so a
   Tab onto a button the height could not fit scrolls it into view. The dock
   (`max-height: none`) and the sheet (its own `60vh`) outrank both rules.
+- **On a phone the strip squeezed the chosen chip out of sight.** Once the
+  strip became one line (`252cebb`) the rail took what was left: 50px against
+  a 73px year chip at 320px, and 0px with "This year"/"This month" showing —
+  at 375px on touch too (13px of the month), with the page scrolling sideways.
+  At `max-width: 430px` the switch segments, chips, nav and arrows take tighter
+  padding and the way back shows its `.now-short` "Now" (both spans are in the
+  markup; `display: none` keeps the hidden one out of the name). Under 360px
+  `#yearNow`/`#monthNow` hide — switch + two 40px arrows + one chip is the
+  whole line. Budget at 360px touch, wandered off: about 82px of rail for a
+  75px month chip. The test injects the coarse-pointer arrow rule, which a
+  frame cannot emulate.

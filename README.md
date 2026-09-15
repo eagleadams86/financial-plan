@@ -1742,7 +1742,10 @@ started is underlined with dots, **this year carries an underscore** wherever it
 has got to in the strip, and hovering any of them says which in words. A **This
 Year** button appears at the right-hand end once you have wandered off it — the
 Month lens's button, on the same terms — and takes you back in one click, from
-however far down the strip you have read.
+however far down the strip you have read. On a phone the strip tightens so the
+year or month you're reading always shows whole: that button reads **Now**, and
+on the narrowest screens (under 360px) it steps aside — the underscore still
+marks this year, and the arrows still walk you back.
 
 The same strip carries the Budget's **Year / Month** switch at its left end, and
 in the Month lens the years are replaced by the plan's months — the arrows step

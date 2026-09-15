@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1084;
+const EXPECTED = 1085;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -19141,6 +19141,52 @@ t('a floating calculator ends inside a short window, and Tab can reach its last 
       W.placeCalcAt(40, ht - 200);
       const p = win.getBoundingClientRect();
       ok(p.bottom <= ht + 0.5, 'dragged low, it still ends inside the window', p.bottom);
+    } finally { f.remove(); }
+  }
+});
+
+/* ── The chosen year or month shows whole on a phone ────────────────────────
+   Since the strip became one line (2026-09-14) the rail takes what the switch
+   and the arrows leave. At 320px that was 50px against a 73px year chip, and
+   once "This year" / "This month" joined the arrows the rail went to 0 — at
+   320px AND on a 375px touch phone, where only 13px of the chosen month showed
+   and the page scrolled sideways. A coarse pointer cannot be emulated in a
+   frame, so its 40px arrows are injected as the one rule they come from. */
+t('on a phone the year or month being read shows whole in the strip, and the page never scrolls sideways', async () => {
+  for (const width of [320, 360, 375]) for (const touch of [false, true]) {
+    const { f, W, D } = await auditFrame(width, 700, 'stripfit');
+    try {
+      if (touch) {
+        const st = D.createElement('style');
+        st.textContent = '.ynav.snav { min-width: 40px; min-height: 40px; } .ynav.ynow { min-height: 40px; }';
+        D.head.appendChild(st);
+      }
+      D.getElementById('tab-budget').click();
+      await new Promise((r) => setTimeout(r, 250));
+      for (const mode of ['year', 'month']) {
+        if (mode === 'month') {
+          D.querySelector('.vswitch[data-mode="month"]').click();
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        for (const other of [false, true]) {
+          if (other) {
+            const step = D.querySelector('.yearstrip .snav:not(:disabled)');
+            ok(step, 'fixture: an arrow to wander off with');
+            step.click();
+            await new Promise((r) => setTimeout(r, 250));
+          }
+          const where = width + 'px ' + (touch ? 'touch' : 'mouse') + ', ' + mode + (other ? ', wandered off' : '');
+          const rail = D.querySelector('.yearstrip .yearrail');
+          const chip = rail.querySelector('[aria-checked="true"]');
+          const rr = rail.getBoundingClientRect(), cr = chip.getBoundingClientRect();
+          const shown = Math.min(rr.right, cr.right) - Math.max(rr.left, cr.left);
+          ok(shown >= cr.width - 0.5, where + ': the chosen chip shows whole', shown.toFixed(1) + ' of ' + cr.width.toFixed(1));
+          ok(D.documentElement.scrollWidth <= width, where + ': the page does not scroll sideways', D.documentElement.scrollWidth);
+          const jump = D.querySelector('#yearNow, #monthNow');
+          if (other && width >= 360) ok(jump && jump.getClientRects().length && jump.textContent.includes('Now') && jump.innerText.trim() === 'Now',
+            where + ': the way back is still offered, as "Now"', jump && jump.innerText);
+        }
+      }
     } finally { f.remove(); }
   }
 });
