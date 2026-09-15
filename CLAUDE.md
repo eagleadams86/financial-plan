@@ -7150,3 +7150,11 @@ from the 2026-09-15 review" at the foot of `tests.html`.
 - **Pick and Add Selected took years and dates as figures.** See the KIND
   bullet under The Calculator: `figureAt` now refuses them, as `numbersIn`
   always did, keeping a share count its column names.
+- **The waiting line never settled a period in this month.** When the oldest
+  unpaid period was the current, not-yet-entered month, `openCellEditor`
+  preset "my estimate" (`future`), and `outstandingDues` counts only `actual`
+  as paid — the bill was recorded, "1 period still unpaid" stayed, and every
+  press reopened the same cell. A future month whose `dueOn` deadline is
+  before today now opens as `actual`, over a stored `manual` estimate too;
+  a stored `auto` or `actual` keeps its kind. The rule is in the editor, not
+  the line, so a press on any bill gone past its date behaves the same way.

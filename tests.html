@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1080;
+const EXPECTED = 1081;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -18984,6 +18984,56 @@ t('figureAt refuses a year or a date in a table cell, and still reads a count', 
     const s = w.figureAt(c[6]);
     ok(s && s.value === 2000 && s.kind === 'num', 'a share count of 2000 is shares — its column says so', JSON.stringify(s));
   } finally { box.remove(); }
+});
+
+/* ── A bill already due opens as what happened ──────────────────────────────
+   The waiting line opens the oldest unpaid period, and when that period is
+   THIS month — not yet marked entered — the cell editor treated it as a future
+   month and preset "my estimate". Only an `actual` settles a period in
+   outstandingDues, so recording the bill left the count where it was and every
+   later press reopened the same month. A figure typed for a bill whose due
+   date has already gone by is the bill. Today is pinned so the test does not
+   depend on the calendar. */
+t('a bill already due opens its cell as what happened, so recording it pays it', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'billgone');
+  try {
+    const st = W.finGet();
+    const key = Object.keys(st.years).filter((k) => st.years[k].kind === 'grid' && st.years[k].model === 'live').sort().pop();
+    ok(key, 'fixture: the sample has a live year');
+    const yr = st.years[key];
+    const months = W.yearMonths(yr);
+    const m = months.find((x) => x > yr.enteredThrough && W.monthAdd(x, 1) <= months[months.length - 1]);
+    ok(m, 'fixture: the live year has a month not yet entered, with one after it', yr.enteredThrough);
+    const m2 = W.monthAdd(m, 1);
+    const cat = yr.categories.find((c) => !c.until);
+    ok(cat, 'fixture: a row with no end');
+    Object.assign(cat, { rule: 'none', duePay: 'manual', dueDay: 5 });
+    delete cat.dueMonths; delete cat.dueHold; delete cat.duePayAhead;
+    delete yr.cells[cat.id + '|' + m]; delete yr.cells[cat.id + '|' + m2];
+    W.todayISO = () => m + '-20';               // the 5th of m has gone by; m2's has not
+    W.render();
+    const kindNow = () => (D.querySelector('input[name=cellKind]:checked') || {}).value;
+    W.openCellEditor(key, 'cat', cat.id, m2);
+    eq(kindNow(), 'manual', 'a month whose bill is still ahead opens as an estimate, as before');
+    D.getElementById('cellCancelBtn').click();
+    W.openCellEditor(key, 'cat', cat.id, m);
+    eq(D.getElementById('cellKindWrap').hidden, false, 'fixture: the month is not entered, so the choice is offered');
+    eq(kindNow(), 'actual', 'a bill whose due date has gone by opens as what happened');
+    D.getElementById('cellValue').value = '-40';
+    D.getElementById('cellSaveBtn').click();
+    await new Promise((r) => setTimeout(r, 200));
+    const saved = W.finGet().years[key].cells[cat.id + '|' + m];
+    ok(saved && saved.kind === 'actual', 'and saving it records the bill as paid', JSON.stringify(saved));
+    const out = W.outstandingDues(cat, [m], () => ({ has: true, cell: saved }), W.todayISO());
+    eq(out.count, 0, 'so it no longer counts as a period still unpaid');
+    /* An ESTIMATE already typed for that month is not a reason to keep it one
+       once the date has passed — reopening it to record the bill must still
+       pay it. */
+    W.finGet().years[key].cells[cat.id + '|' + m] = { v: -35, kind: 'manual' };
+    W.openCellEditor(key, 'cat', cat.id, m);
+    eq(kindNow(), 'actual', 'an estimate typed before the date reopens as what happened once it has gone by');
+    D.getElementById('cellCancelBtn').click();
+  } finally { f.remove(); }
 });
 
 async function run() {
