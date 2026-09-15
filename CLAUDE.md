@@ -7208,3 +7208,7 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   only, so a Tab-focused `tr.editrow` opened its editor with Pick on. A focused
   row in `#views`/`#chartMaxi` now puts every `figureAt` of `cells.slice(1)` on
   the tape (the name column out, as a drag leaves it).
+- **At 320px four tabs scrolled sideways.** `.cards2`'s `minmax(340px, 1fr)`
+  column was wider than a 320px screen's 288px of content (Goals, Investments,
+  Retirement, Compensation), which had quietly undone the 2026-09-05 "no
+  horizontal scroll at 320px" pass. The floor is `min(100%, 340px)` — the order the tile-row test reads.
