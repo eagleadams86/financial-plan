@@ -8106,6 +8106,20 @@ function goalClaim(pred, accounts, goals, bal, order, seen = new Set()) {
    here". `etaMonths` is null when nothing is growing — a fact the tile states
    rather than a date it invents — and `aheadMonths` sets the landing against a
    target date when there is one, both measured from `cur`. Pure. */
+/* A MONTH BELONGS TO ITS OWN YEAR when that year is built too (2026-09-15
+   review). A live grid can run past December — an import or restore holds up
+   to 36 months — and the year after it can be built as well; `yearOfMonth`
+   already reads such a month from its own grid everywhere else. Walking the
+   older grid's months as they come read its projection TAIL first, so the
+   pace check dated a goal off balances no page shows for that month, and the
+   goal chart plotted those months twice. True when `m` should be skipped in
+   `key` because another walked year holds it. */
+function ownedElsewhere(computed, keys, key, m) {
+  const own = String(m).slice(0, 4);
+  return own !== key && keys.includes(own)
+    && !!computed[own] && (computed[own].months || []).includes(m);
+}
+
 function goalPace(g, ctx) {
   const { need, held, cur, computed, keys, priorC, years, goals, order } = ctx;
   const ids = g.accounts || [];
@@ -8137,6 +8151,7 @@ function goalPace(g, ctx) {
       if (!c) continue;
       for (const m of c.months) {
         if (m <= cur) continue;
+        if (ownedElsewhere(computed, keys, key, m)) continue;
         if (gapAt(c, m) === 0) { etaMonths = monthDiff(cur, m); etaFrom = 'projected'; break; }
       }
       if (etaMonths !== null) break;
@@ -20487,12 +20502,13 @@ document.addEventListener('keydown', (e) => {
    not the same news. */
 function goalChartPoints(st, computed, liveKey, aheadKeys) {
   const pts = [];
-  for (const key of [liveKey, ...aheadKeys]) {
+  const keys = [liveKey, ...aheadKeys];
+  for (const key of keys) {
     const c = computed[key];
     if (!c) continue;
     const entered = enteredThroughOf(st, key);
     for (const m of c.months)
-      pts.push({ m, v: c.balances[`total|${m}`],
+      if (!ownedElsewhere(computed, keys, key, m)) pts.push({ m, v: c.balances[`total|${m}`],
                  ahead: m > entered, built: key !== liveKey });
   }
   return pts;

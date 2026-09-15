@@ -7163,3 +7163,10 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   a closed editor, or a field a `showIf` had hidden, took the figure and
   toasted "sent to Amount" while nothing was stored. It now also needs
   `getClientRects().length` — no box on the page, no target.
+- **The pace check dated a goal off the wrong grid.** With a live grid past
+  December AND the next year built, `goalPace`'s walk (and `goalChartPoints`)
+  read the overlapping months from the older grid's projection tail first —
+  `yearOfMonth` reads them from their own year everywhere else. Both now skip a
+  month `ownedElsewhere(computed, keys, key, m)` says a walked year holds. Only
+  an import or restore makes a grid over 12 months, so it had never shown on a
+  plan the app built itself.

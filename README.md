@@ -878,7 +878,8 @@ whole sentences and a quarter of the window cuts them mid-word.
 
 Plus progress, target dates, required monthly saving, and **when each goal
 lands** — which **reads the years you've built before it guesses at anything**.
-Month by month, from this one to the end of the last year in your plan, it asks
+Month by month, from this one to the end of the last year in your plan — each
+month read from its own year, even where an imported year runs past December — it asks
 whether the accounts that goal counts have reached what it needs; if they do,
 that month is the answer and no rate comes into it, and the tile says "your plan
 reaches it about …" rather than "at this pace". Only past the end of what you've

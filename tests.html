@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1082;
+const EXPECTED = 1083;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -19080,6 +19080,36 @@ t('→ Field refuses a box that is no longer on screen, instead of saying it was
     eq(probe.value, '4321', 'a box on screen still takes the figure');
     hold.remove();
   } finally { f.remove(); }
+});
+
+/* ── A month is read from the year that owns it ─────────────────────────────
+   A live grid can run past December (an import or restore of up to 36 months),
+   and the year after it can be built too. The rest of the app reads such a
+   month from its OWN year (`yearOfMonth`); the pace walk and the goal chart
+   read it from the older grid's projection tail first. Hand-built figures: the
+   2026 tail says the goal is met in Jan 27, built 2027 says Aug 27. */
+t('the pace check and the goal chart read a month past December from the year that owns it', () => {
+  const months = (start, n) => Array.from({ length: n }, (_, i) => w.monthAdd(start, i));
+  const m26 = months('2026-01', 18), m27 = months('2027-01', 12);
+  const b26 = {}, b27 = {};
+  m26.forEach((m, i) => { b26['sav|' + m] = i < 12 ? 100 * (i + 1) : 5200; b26['total|' + m] = b26['sav|' + m]; });
+  m27.forEach((m, i) => { b27['sav|' + m] = 1200 + 500 * (i + 1); b27['total|' + m] = b27['sav|' + m]; });
+  const computed = { '2026': { months: m26, balances: b26 }, '2027': { months: m27, balances: b27 } };
+  const g = { id: 's', name: 'Savings', target: 5000, accounts: ['sav'], count: 'capped' };
+  const ctx = (keys) => ({ need: 5000, held: 900, cur: '2026-09', computed, keys, priorC: null,
+    years: { '2026': { seeds: {} }, '2027': { seeds: {} } }, goals: [g], order: ['sav'] });
+  eq(w.goalPace(g, ctx(['2026'])).etaMonths, 4,
+    'with nothing built after it, the live grid’s own tail is the plan and Jan 27 is right');
+  const p = w.goalPace(g, ctx(['2026', '2027']));
+  eq(p.etaMonths, w.monthDiff('2026-09', '2027-08'),
+    'with 2027 built, Jan–Jul 27 are 2027’s, which says Aug 27 — not the tail’s Jan 27');
+  const st = { years: { '2026': { kind: 'grid', model: 'live', enteredThrough: '2026-08' }, '2027': { kind: 'grid' } } };
+  const pts = w.goalChartPoints(st, computed, '2026', ['2027']);
+  const seen = pts.map((q) => q.m);
+  eq(seen.length, new Set(seen).size, 'the chart plots each month once', seen.filter((m, i) => seen.indexOf(m) !== i).join(','));
+  const mar = pts.find((q) => q.m === '2027-03');
+  ok(mar && mar.v === b27['total|2027-03'] && mar.built, 'and Mar 27 is 2027’s figure, drawn as a built year', JSON.stringify(mar));
+  eq(w.goalChartPoints(st, computed, '2026', []).length, 18, 'with nothing built ahead, the tail is still drawn');
 });
 
 async function run() {
