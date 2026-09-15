@@ -132,7 +132,11 @@
        value throws in JSON.parse, and the theme, zoom and pin above are already
        on by then. Only an OPEN, docked calculator pads the page. */
     var dock = JSON.parse(localStorage.getItem('fin-calc') || 'null');
-    if (dock && dock.open === true && dock.dock === true) document.documentElement.dataset.calc = 'dock';
+    /* NOT in a window under 930px: there a docked calculator is a sheet along
+       the bottom (2026-09-14), and a pad for a column that is not there would
+       be the jump this line exists to prevent. The width is calcSheet()'s. */
+    if (dock && dock.open === true && dock.dock === true
+        && !matchMedia('(max-width: 929.98px)').matches) document.documentElement.dataset.calc = 'dock';
   } catch (e) {}
   /* Frame-buster. GitHub Pages can't send frame-ancestors (a meta CSP ignores
      it), so any origin could iframe this page and redress the reader's own
@@ -2673,12 +2677,22 @@ html[data-calc-pick] #chartMaxi :is(.goal, .tablewrap td) { cursor: crosshair; }
   /* `.placed` is named here on purpose: a desktop drag position is (1,1,0)
      against the bare id's (1,0,0), and without it a phone that had once been a
      laptop window kept the window where the mouse left it. */
-  #calcWin, #calcWin.placed, html[data-calc="dock"] #calcWin { left: 0; right: 0; top: auto; bottom: 0;
+  html[data-calc="dock"] .wrap { padding-right: 16px; }
+  /* A phone has no right-hand edge to dock down. A narrow DESKTOP window
+     keeps the button — it reads Float there, and a floating window fits. */
+  #calcDockBtn { display: none; }
+}
+/* ── The sheet itself, keyed on the flag rather than on the width ────────────
+   Since 2026-09-14 a sheet is not only a phone: a DOCKED calculator in a
+   window under 930px is one too (see calcSheet()). One definition of "is a
+   sheet" lives in the script, and `data-calc-sheet` — set by syncCalcSheet()
+   in the same task that shows the window — carries it to everything shaped
+   by it: the window, its tape, and the dialogs below. (1,1,1) beats a
+   desktop drag position's `#calcWin.placed` (1,1,0). */
+html[data-calc-sheet] #calcWin { left: 0; right: 0; top: auto; bottom: 0;
     width: auto; max-width: 100vw; max-height: calc(60vh / var(--zoom, 1)); border-width: 1px 0 0;
     border-radius: var(--radius) var(--radius) 0 0; }
-  html[data-calc="dock"] .wrap { padding-right: 16px; }
-  #calcDockBtn { display: none; }
-  #calcBar { cursor: default; touch-action: auto; }
+html[data-calc-sheet] #calcBar { cursor: default; touch-action: auto; }
   /* THREE ROWS OF TAPE, then it scrolls (Charles, 2026-09-14: "limit the tape
      to 3 values before it starts scrolling to limit the calculator size"). A
      sheet is bought with the page's own height, and eleven rows of tape left
@@ -2688,11 +2702,11 @@ html[data-calc-pick] #chartMaxi :is(.goal, .tablewrap td) { cursor: crosshair; }
      with the type and never with a hard pixel figure. renderTape() scrolls
      the tape to its foot on every render, which is what keeps the newest
      figure in view once the fourth one arrives. */
-  #calcTape { --calc-row-h: calc(1.5em + 9px); max-height: calc(3 * var(--calc-row-h)); }
+  html[data-calc-sheet] #calcTape { --calc-row-h: calc(1.5em + 9px); max-height: calc(3 * var(--calc-row-h)); }
   /* Figure rows only: the empty tape's one line of prose wraps to two on a
      phone, and pinned to a row it spilled into the readouts (seen in the iOS
      Simulator, 2026-09-14). Two lines still fit inside three rows. */
-  #calcTape li:not(.calc-empty) { height: var(--calc-row-h); }
+  html[data-calc-sheet] #calcTape li:not(.calc-empty) { height: var(--calc-row-h); }
   /* A WINDOW OPENS ABOVE THE SHEET, NOT BEHIND IT (Charles, 2026-09-14: "make
      windows fill the rest of the space above the calculator instead of
      centered on the whole page behind it"). A modal dialog centres itself in
@@ -2729,7 +2743,6 @@ html[data-calc-pick] #chartMaxi :is(.goal, .tablewrap td) { cursor: crosshair; }
     height: auto; max-height: none; padding-bottom: calc(var(--calc-sheet-h, 0px) + 28px);
     scroll-padding-bottom: calc(var(--calc-sheet-h, 0px) + 28px);
     border-width: 1px 0 0; border-radius: var(--radius) var(--radius) 0 0; }
-}
 @media (max-width: 640px) {
   #chartMaxi { padding: 10px; }
   /* On a phone the card's opening paragraph is five or six lines of an 812px
@@ -28422,7 +28435,17 @@ let calcTarget = null;       // the last box the reader was in, for → Field
 let calcLast = null;         // the last worked-out result, if the box holds one
 let calcSaveTimer = 0;
 const calcModals = [];       // dialogs opened through openModal, in the order they opened
-const calcSheet = () => window.matchMedia('(max-width: 700px)').matches;
+/* A SHEET ALONG THE BOTTOM on a phone, whichever mode it was left in — and in
+   any window under 930px while it is DOCKED (Charles, 2026-09-14, a
+   screenshot of a 932px window with the calculator docked: "when the
+   calculator is open and docked and the window becomes any narrower than this,
+   move the calculator to the bottom and limit the tape to three lines"). At
+   that width the column took 372px of the window and left the plan about 560.
+   A FLOATING calculator keeps floating there; only the dock gives way. The
+   head script repeats the width, so a reload lands in the right shape. */
+const CALC_DOCK_SHEET = '(max-width: 929.98px)';
+const calcSheet = () => window.matchMedia('(max-width: 700px)').matches
+  || (!!calc.dock && window.matchMedia(CALC_DOCK_SHEET).matches);
 
 function saveCalc() {
   if (calcInHarness) return;
@@ -28584,8 +28607,11 @@ window.addEventListener('resize', clampCalc);
 function syncCalcSheet() {
   const root = document.documentElement;
   if (calc.open && !calcWin.hidden && calcSheet()) {
-    root.style.setProperty('--calc-sheet-h', `${Math.round(calcWin.getBoundingClientRect().height / (zoomScale || 1))}px`);
+    /* The flag FIRST: the sheet's own shape keys on it now (it was a phone
+       media rule until 2026-09-14), so the height is only the sheet's once
+       the flag is on. */
     root.dataset.calcSheet = 'on';
+    root.style.setProperty('--calc-sheet-h', `${Math.round(calcWin.getBoundingClientRect().height / (zoomScale || 1))}px`);
   } else {
     delete root.dataset.calcSheet;
     root.style.removeProperty('--calc-sheet-h');
@@ -28630,11 +28656,29 @@ function dressDockBtn() {
   b2.title = calc.dock ? 'Let the calculator float over the page again'
                        : 'Dock the calculator down the right-hand edge of the page';
 }
+/* `data-calc="dock"` is what pads the page and centres a window beside the
+   column, so it is on only while the calculator really IS a column: open,
+   docked, and not a sheet in a narrow window. A resize across the width moves
+   it both ways without touching the reader's choice — `calc.dock` stays true,
+   so widening the window docks it again. Returns whether it changed. */
+function syncDockAttr() {
+  const root = document.documentElement;
+  const want = !!(calc.dock && calc.open && !calcSheet());
+  if (want === (root.dataset.calc === 'dock')) return false;
+  if (want) root.dataset.calc = 'dock';
+  else delete root.dataset.calc;
+  return true;
+}
+window.addEventListener('resize', () => {
+  if (!syncDockAttr()) return;
+  pinnedShift = -1; pinGridHeader();
+  measurePinTops();
+});
 function applyDock(on) {
   calc.dock = !!on;
-  if (calc.dock && calc.open) document.documentElement.dataset.calc = 'dock';
-  else delete document.documentElement.dataset.calc;
+  syncDockAttr();
   dressDockBtn();
+  syncCalcSheet();
   pinnedShift = -1; pinGridHeader();
   measurePinTops();
   saveCalc();

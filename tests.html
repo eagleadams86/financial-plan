@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1076;
+const EXPECTED = 1077;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -17784,8 +17784,10 @@ t('a docked calculator is on before first paint, after the pin', () => {
   const calc = head.indexOf("localStorage.getItem('fin-calc')");
   ok(pin > 0 && calc > pin, 'the head script reads fin-calc, and does so AFTER fin-pin — a corrupt value '
      + 'throws in JSON.parse and must not cost the theme, zoom and pin already applied');
-  ok(/dock\.open === true && dock\.dock === true\) document\.documentElement\.dataset\.calc = 'dock'/.test(head),
-     'only an OPEN and docked window pads the page');
+  ok(/dock\.open === true && dock\.dock === true\s*&& !matchMedia\('\(max-width: 929\.98px\)'\)\.matches\) document\.documentElement\.dataset\.calc = 'dock'/.test(head),
+     'only an OPEN and docked window pads the page — and not under 930px, where a docked calculator is a sheet');
+  ok(/const CALC_DOCK_SHEET = '\(max-width: 929\.98px\)';/.test(APP_SRC),
+     'and the head script’s width is the one calcSheet() uses, or a reload would pad a page the script then un-pads');
   ok(/html\[data-calc="dock"\] \.wrap \{ padding-right: calc\(16px \+ var\(--calc-w\)\); \}/.test(APP_SRC),
      'the pad is the window’s own width token on .wrap, never on body');
 });
@@ -18494,11 +18496,14 @@ t('the header and the tab bar are one scrolling line at every width, with arrows
     .filter((c) => c.getClientRects().length && !c.classList.contains('sr-only') && W.getComputedStyle(c).display !== 'none')
     .map((c) => Math.round(c.getBoundingClientRect().top))).size;
   try {
-    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: true, x: null, y: null, tape: [] }));
+    /* The calculator closed: since the same evening a DOCKED calculator under
+       930px is a sheet along the bottom, so a 705px docked window no longer
+       narrows the page — the header and tabs overflow at 705px on their own. */
+    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: false, dock: false, x: null, y: null, tape: [] }));
     let fr = await auditFrame(705, 900, 'rowscroll');
     f = fr.f;
     let { W, D } = fr;
-    eq(D.documentElement.dataset.calc, 'dock', '705px, with the calculator docked');
+    eq(D.documentElement.dataset.calc, undefined, '705px, with no column beside the page');
     const ctl = D.querySelector('.headctl'), tabs = D.querySelector('.tabs');
     const headNav = D.querySelector('.headrow > .rownav'), tabNav = D.querySelector('.tabrow > .rownav');
     eq(lines(W, ctl), 1, 'the header controls are one line');
@@ -18571,6 +18576,55 @@ t('the phone header is the name above one scrolling line of controls (2026-09-14
     ok(hb - ctl.getBoundingClientRect().bottom <= 12, 'the line of controls is the last thing in the header — nothing wraps under it', hb - ctl.getBoundingClientRect().bottom);
     eq(W.getComputedStyle(D.querySelector('header')).position, 'sticky', 'and still sticks');
   } finally { if (f) f.remove(); }
+});
+t('a docked calculator in a window under 930px is a sheet with three rows of tape (2026-09-14)', async () => {
+  /* Charles, 2026-09-14, a 932px window with the calculator docked: "when the
+     calculator is open and docked and the window becomes any narrower than
+     this, move the calculator to the bottom and limit the tape to three
+     lines". */
+  const keep = localStorage.getItem('fin-calc');
+  let f = null;
+  try {
+    localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: true, x: null, y: null,
+      tape: [1, 2, 3, 4, 5, 6].map((n) => ({ v: n * 100, k: 'money', l: `Row ${n} · Jan 26` })) }));
+    let fr = await auditFrame(900, 800, 'docksheet');
+    f = fr.f;
+    let W = fr.W, D = fr.D;
+    const root = D.documentElement, win = D.getElementById('calcWin'), tape = D.getElementById('calcTape');
+    ok(!win.hidden, '900px: the calculator is open');
+    eq(root.dataset.calc, undefined, 'with no dock attribute — there is no column to make room for');
+    eq(root.dataset.calcSheet, 'on', 'it is a sheet');
+    const r = win.getBoundingClientRect();
+    ok(Math.abs(r.bottom - 800) < 1 && Math.abs(r.left) < 1 && Math.abs(r.width - 900) < 1,
+       'along the bottom, edge to edge', `${r.left} ${r.width} ${r.bottom}`);
+    const rowH = tape.querySelector('li').getBoundingClientRect().height;
+    ok(Math.abs(tape.clientHeight - 3 * rowH) < 1, 'the tape shows three rows', `${tape.clientHeight} vs ${3 * rowH}`);
+    ok(tape.scrollHeight > tape.clientHeight, 'and the rest scroll');
+    eq(W.getComputedStyle(D.querySelector('.wrap')).paddingRight, '16px', 'the page is not padded for a column');
+    const dockBtn = D.getElementById('calcDockBtn');
+    ok(dockBtn.getClientRects().length > 0 && /Float/.test(dockBtn.textContent),
+       'the button still offers Float — a floating window fits a desktop this wide', dockBtn.textContent);
+    dockBtn.click();
+    eq(root.dataset.calcSheet, undefined, 'and pressing it floats the window instead');
+    f.remove(); f = null;
+
+    fr = await auditFrame(1000, 800, 'dockcol');
+    f = fr.f; W = fr.W; D = fr.D;
+    eq(D.documentElement.dataset.calc, 'dock', '1000px: the docked column, as before');
+    eq(D.documentElement.dataset.calcSheet, undefined, 'and no sheet');
+    /* Narrowed live, the way a reader drags a window edge. */
+    f.style.width = '900px';
+    await new Promise((res) => setTimeout(res, 150));
+    eq(D.documentElement.dataset.calc, undefined, 'narrowed to 900px, the column gives way');
+    eq(D.documentElement.dataset.calcSheet, 'on', 'to a sheet');
+    f.style.width = '1000px';
+    await new Promise((res) => setTimeout(res, 150));
+    eq(D.documentElement.dataset.calc, 'dock', 'and widened again it docks — the reader’s choice was kept');
+    eq(D.documentElement.dataset.calcSheet, undefined, 'with the sheet gone');
+  } finally {
+    if (f) f.remove();
+    if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
+  }
 });
 t('on a phone the tape shows three rows, and a window opens above the sheet, not behind it (2026-09-14)', async () => {
   const keep = localStorage.getItem('fin-calc');

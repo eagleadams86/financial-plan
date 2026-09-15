@@ -7015,6 +7015,26 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   test's end-of-row tolerance went 3.9 → 3: `scrollWidth` is a whole pixel, so
   the clamp at an end lands up to a pixel short, and the narrower row moved it
   from 0.016px to 0.297px.
+- **A DOCKED calculator in a window under 930px is a sheet too** (Charles,
+  2026-09-14, a 932px window: *"when the calculator is open and docked and the
+  window becomes any narrower than this, move the calculator to the bottom and
+  limit the tape to three lines"*; 930 was read off that screenshot — the
+  372px column left the plan about 560). `calcSheet()` is the ONE definition:
+  `(max-width: 700px)`, or `calc.dock` and `CALC_DOCK_SHEET` (`(max-width:
+  929.98px)`). A FLOATING calculator keeps floating at that width, and the
+  ⧉ button stays (reading Float) — only a phone hides it. So the sheet's shape
+  stopped being a width rule: `#calcWin`, `#calcBar`, the three-row `#calcTape`
+  and its rows are keyed on **`html[data-calc-sheet]`**, which
+  `syncCalcSheet()` now sets BEFORE it measures (the height is only the
+  sheet's once the flag has shaped it); the dialog rule already keyed on it.
+  **`syncDockAttr()`** keeps `data-calc="dock"` — the page pad, the docked
+  window centring, `--dlg-room` — to a calculator that really is a column
+  (open, docked, not a sheet), on every resize, re-measuring the pinned bars
+  when it flips; `calc.dock` is never touched, so widening docks it again. The
+  head script repeats the width, so a reload at 900px paints no pad. Measured
+  against the previous commit: docked at 1600 and 940 unchanged, phones
+  unchanged; docked at 929 and 800 a full-width sheet with three rows. The test
+  loads 900px docked, presses Float, and narrows a 1000px frame live both ways.
 - **Drag-selecting across the months scrolls the grid from its PINNED
   columns** (Charles, 2026-09-13: *"the scroller doesn't activate until the
   mouse is passed the first or last column"*). The browser autoscrolls a
