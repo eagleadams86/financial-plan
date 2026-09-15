@@ -7222,3 +7222,5 @@ from the 2026-09-15 review" at the foot of `tests.html`.
 - **The share window's notes box undersold itself.** It read "notes on months,
   rows, goals and trips" while `stripNotes` has also governed holding notes and
   part notes since they shipped; the words now name both.
+- **privacy.html did not list merchant names.** "What Financial Plan Stores"
+  now says who each trip line and its parts was paid to.
