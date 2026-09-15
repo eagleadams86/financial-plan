@@ -7212,3 +7212,7 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   column was wider than a 320px screen's 288px of content (Goals, Investments,
   Retirement, Compensation), which had quietly undone the 2026-09-05 "no
   horizontal scroll at 320px" pass. The floor is `min(100%, 340px)` — the order the tile-row test reads.
+- **A year average of a tiny negative read "-$0.00/mo".** `round2` returns
+  -0 and `fmtMoney(-0)` keeps the sign; `avgTipLine` passes `|| 0`. Left alone
+  on purpose: `round2`'s half-cent tie-break for negatives, which the engine's
+  match against the spreadsheet rests on.
