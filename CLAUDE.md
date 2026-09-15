@@ -7035,6 +7035,16 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   test's end-of-row tolerance went 3.9 → 3: `scrollWidth` is a whole pixel, so
   the clamp at an end lands up to a pixel short, and the narrower row moved it
   from 0.016px to 0.297px.
+  **A focus scroll clears the sticky chrome, pinned or not** (Charles, the same
+  evening: *"fix the sticky header shift+tab issue too"*, after Golf's agent found
+  27 of 91 Shift+Tab stops hidden under its phone header). The clearance was
+  `html[data-pin] #views :is(button, …) { scroll-margin-top: var(--pin-clear) }`
+  — pinned only, #views only — while the HEADER is sticky always. It is now
+  `html { scroll-padding-top: var(--pin-clear, 0px) }` (the margin rule removed;
+  the two add together), and `applyPin` keeps `pinWatch` observing the header
+  whether or not anything is pinned, so `--pin-clear` (header + stuck bars + 8)
+  follows the header's depth. The test focuses a control above the window,
+  unpinned and pinned, and checks it lands below `pinnedBottom()`.
 - **A DOCKED calculator in a window under 930px is a sheet too** (Charles,
   2026-09-14, a 932px window: *"when the calculator is open and docked and the
   window becomes any narrower than this, move the calculator to the bottom and

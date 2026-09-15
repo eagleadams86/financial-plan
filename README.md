@@ -1724,7 +1724,9 @@ narrow window or a docked calculator no longer stacks them several rows deep,
 with **‹ ›** arrows beside the row for a mouse — and dragging a tab to the
 end of the row scrolls it along, so a tab can be dropped anywhere; a tab reached from the keyboard shows its focus ring whole, on every
 side (fixed 2026-09-04 — the scrolling row used to slice the ring off along
-the top and at both ends).
+the top and at both ends). And whether or not anything is pinned, a control
+you reach with Tab or Shift+Tab is scrolled to just below the header and any
+pinned bars, never behind them.
 
 A year kept as a yearly summary is set in italics, one built before it has
 started is underlined with dots, **this year carries an underscore** wherever it

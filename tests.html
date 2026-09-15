@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1078;
+const EXPECTED = 1079;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -18484,6 +18484,64 @@ t('the Month page never strands a card: 4, 2 + 2 or one per line (2026-09-14)', 
   } finally {
     if (f) f.remove();
     if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
+  }
+});
+t('a control scrolled into view lands below the sticky chrome, pinned or not (2026-09-14)', async () => {
+  /* Charles, 2026-09-14: "fix the sticky header shift+tab issue too". The
+     header is sticky whether or not anything is pinned, and the clearance used
+     to be a scroll-margin on #views' controls under `html[data-pin]` only — so
+     unpinned, Shift+Tab back up the page lined each control up behind the
+     header.
+     SHORT, NARROW FRAMES, and the shape is the point: Chrome CENTRES a control
+     a script focuses, where a real Tab lines it up with the top edge (found on
+     PAPTrack the same evening). In a tall window a centred control sits below
+     the header whether or not anything clears it, and the check passes on the
+     broken page. At 390px the header is 118px deep; a 200px frame puts the
+     centre under it unpinned, and 260px leaves room below the header and the
+     pinned tab row. */
+  let f = null, W = null, D = null, pinWas = null;
+  try {
+    for (const [pinned, height] of [[false, 200], [true, 260]]) {
+      if (f) f.remove();
+      ({ f, W, D } = await auditFrame(390, height, 'focusclear'));
+      if (pinWas === null) pinWas = W.savedPin();
+      W.applyPin(pinned);
+      await new Promise((r) => setTimeout(r, 200));
+      /* Far enough down to clear the tallest pinned stack, and with enough
+         page UNDER it to scroll it out of sight — the first cut took a help
+         dot at the page's foot, which no scroll can take above the window. */
+      const maxY = D.documentElement.scrollHeight - W.innerHeight;
+      const target = [...D.querySelectorAll('#views button')].find((b) => {
+        if (!b.getClientRects().length || b.closest('.gridwrap, .tablewrap, .yearstrip, .tabrow')) return false;
+        const r = b.getBoundingClientRect();
+        return r.top + W.scrollY > 300 && r.bottom + W.scrollY + 60 <= maxY;
+      });
+      ok(target, 'there is a control a little way down the page to reach');
+      /* Just past it rather than to the page's end: a short view in a 700px
+         frame may not scroll far enough for its end to take the control out
+         of sight. */
+      const wantY = target.getBoundingClientRect().bottom + W.scrollY + 60;
+      W.scrollTo(0, wantY);
+      await new Promise((r) => setTimeout(r, 60));
+      ok(target.getBoundingClientRect().bottom < 0, (pinned ? 'pinned' : 'unpinned') + ': set up — it is above the window',
+         JSON.stringify({ target: target.id || target.className || target.textContent.trim().slice(0, 20),
+           wantY: Math.round(wantY), scrollY: Math.round(W.scrollY), innerH: W.innerHeight,
+           maxY: D.documentElement.scrollHeight - W.innerHeight, bottom: Math.round(target.getBoundingClientRect().bottom),
+           scroller: D.scrollingElement && D.scrollingElement.tagName }));
+      target.focus();
+      const floor = W.pinnedBottom();
+      ok(target.getBoundingClientRect().top >= floor - 0.5,
+         (pinned ? 'pinned' : 'unpinned') + ': focused, it lands below the chrome, not behind it',
+         `${target.getBoundingClientRect().top} vs ${floor}`);
+      target.blur();
+    }
+    ok(/html \{ scroll-padding-top: var\(--pin-clear, 0px\); \}/.test(APP_SRC),
+       'the clearance is the root’s scroll padding, pinned or not');
+    ok(!/scroll-margin-top: var\(--pin-clear/.test(stripComments(APP_SRC)),
+       'and the old per-control margin is gone — the two would add together');
+  } finally {
+    if (W && pinWas !== null) W.applyPin(pinWas);
+    if (f) f.remove();
   }
 });
 t('the year and month strip is one line at every width (2026-09-14)', async () => {
