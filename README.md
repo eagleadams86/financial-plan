@@ -1574,7 +1574,8 @@ Flick the row to reach the controls past the edge; the name stays put.
 Two characters minimum, and it searches everything: every year's rows and
 notes (split-part notes and balance notes included), donations, trips and
 their line items — the parts of a split line and their merchants included —
-goals, people, property, and holdings by ticker.
+goals, people, property, and holdings by ticker or note — the giving fund's
+included.
 
 A budget hit opens straight into its cell's editor; everything else lands you
 on the right tab. **Enter opens the first result** — the same as clicking it

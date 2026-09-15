@@ -7189,3 +7189,7 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   whole line. Budget at 360px touch, wandered off: about 82px of rail for a
   75px month chip. The test injects the coarse-pointer arrow rule, which a
   frame cannot emulate.
+- **Find missed a giving-fund holding's note.** `searchPlan` walked
+  `side.portfolios` and `side.retirementAccounts`; `side.daf` — the third
+  holdings table, with the same note and dot since `4a5d29f` — was in neither.
+  It opens the Giving tab.
