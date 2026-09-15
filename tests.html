@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1079;
+const EXPECTED = 1096;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -18949,6 +18949,457 @@ t('a finger holds a cell, then taps another, to select a block (2026-09-14)', as
     if (f) f.remove();
     if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
   }
+});
+
+group('Fixes from the 2026-09-15 review');
+/* Each test here was written before its fix and proven to fail against the
+   unfixed page, served whole from `git archive` on a second port with this
+   file copied over it. The commit that fixed it names the finding. */
+
+/* ── A year or a date in a table is not a figure ────────────────────────────
+   The highlight path (`numbersIn`) always skipped a bare year and a date; the
+   cell reader Pick and Add Selected use did not — its bare-number branch ran
+   parseFloat over the text, so a pension's "From 2047" went on the tape as
+   2,047 and a currency table's "2026-07-01" as 2,026, and a drag along the row
+   added them into the dollars. A share count is the one bare whole number that
+   can honestly sit between 1900 and 2100, and its column says so. */
+t('figureAt refuses a year or a date in a table cell, and still reads a count', () => {
+  const D = w.document;
+  const box = D.createElement('div');
+  box.className = 'tablewrap';
+  box.innerHTML = '<table><thead><tr><th>Name</th><th>From</th><th>Rate from</th>'
+    + '<th>Paid</th><th>Months</th><th>Amount</th><th>Shares</th></tr></thead><tbody><tr>'
+    + '<td>Pension</td><td>2047</td><td>2026-07-01</td><td>7/1</td><td>3</td>'
+    + '<td>2,026</td><td>2000</td></tr></tbody></table>';
+  D.body.appendChild(box);
+  try {
+    const c = box.querySelectorAll('tbody td');
+    eq(w.figureAt(c[1]), null, 'a bare year under a heading is a year, not 2,047 of anything');
+    eq(w.figureAt(c[2]), null, 'an ISO date is a date, not the 2,026 before its first hyphen');
+    eq(w.figureAt(c[3]), null, 'and a month/day is a date too');
+    const n = w.figureAt(c[4]);
+    ok(n && n.value === 3 && n.kind === 'num', 'a small count still reads as a plain number', JSON.stringify(n));
+    const m = w.figureAt(c[5]);
+    ok(m && m.value === 2026, 'a figure written with its thousands comma is a figure, as numbersIn keeps it', JSON.stringify(m));
+    const s = w.figureAt(c[6]);
+    ok(s && s.value === 2000 && s.kind === 'num', 'a share count of 2000 is shares — its column says so', JSON.stringify(s));
+  } finally { box.remove(); }
+});
+
+/* ── A bill already due opens as what happened ──────────────────────────────
+   The waiting line opens the oldest unpaid period, and when that period is
+   THIS month — not yet marked entered — the cell editor treated it as a future
+   month and preset "my estimate". Only an `actual` settles a period in
+   outstandingDues, so recording the bill left the count where it was and every
+   later press reopened the same month. A figure typed for a bill whose due
+   date has already gone by is the bill. Today is pinned so the test does not
+   depend on the calendar. */
+t('a bill already due opens its cell as what happened, so recording it pays it', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'billgone');
+  try {
+    const st = W.finGet();
+    const key = Object.keys(st.years).filter((k) => st.years[k].kind === 'grid' && st.years[k].model === 'live').sort().pop();
+    ok(key, 'fixture: the sample has a live year');
+    const yr = st.years[key];
+    const months = W.yearMonths(yr);
+    const m = months.find((x) => x > yr.enteredThrough && W.monthAdd(x, 1) <= months[months.length - 1]);
+    ok(m, 'fixture: the live year has a month not yet entered, with one after it', yr.enteredThrough);
+    const m2 = W.monthAdd(m, 1);
+    const cat = yr.categories.find((c) => !c.until);
+    ok(cat, 'fixture: a row with no end');
+    Object.assign(cat, { rule: 'none', duePay: 'manual', dueDay: 5 });
+    delete cat.dueMonths; delete cat.dueHold; delete cat.duePayAhead;
+    delete yr.cells[cat.id + '|' + m]; delete yr.cells[cat.id + '|' + m2];
+    W.todayISO = () => m + '-20';               // the 5th of m has gone by; m2's has not
+    W.render();
+    const kindNow = () => (D.querySelector('input[name=cellKind]:checked') || {}).value;
+    W.openCellEditor(key, 'cat', cat.id, m2);
+    eq(kindNow(), 'manual', 'a month whose bill is still ahead opens as an estimate, as before');
+    D.getElementById('cellCancelBtn').click();
+    W.openCellEditor(key, 'cat', cat.id, m);
+    eq(D.getElementById('cellKindWrap').hidden, false, 'fixture: the month is not entered, so the choice is offered');
+    eq(kindNow(), 'actual', 'a bill whose due date has gone by opens as what happened');
+    D.getElementById('cellValue').value = '-40';
+    D.getElementById('cellSaveBtn').click();
+    await new Promise((r) => setTimeout(r, 200));
+    const saved = W.finGet().years[key].cells[cat.id + '|' + m];
+    ok(saved && saved.kind === 'actual', 'and saving it records the bill as paid', JSON.stringify(saved));
+    const out = W.outstandingDues(cat, [m], () => ({ has: true, cell: saved }), W.todayISO());
+    eq(out.count, 0, 'so it no longer counts as a period still unpaid');
+    /* An ESTIMATE already typed for that month is not a reason to keep it one
+       once the date has passed — reopening it to record the bill must still
+       pay it. */
+    W.finGet().years[key].cells[cat.id + '|' + m] = { v: -35, kind: 'manual' };
+    W.openCellEditor(key, 'cat', cat.id, m);
+    eq(kindNow(), 'actual', 'an estimate typed before the date reopens as what happened once it has gone by');
+    D.getElementById('cellCancelBtn').click();
+  } finally { f.remove(); }
+});
+
+/* ── → Field never reports a figure it did not deliver ──────────────────────
+   The remembered box was checked for being on the page, writable and outside
+   the calculator — never for being SHOWN. Click into a cell's Amount, close
+   the editor, press → Field: "$4,321.00 sent to Amount", into a closed dialog,
+   and nothing stored. A box a `showIf` has hidden fails the same way. */
+t('→ Field refuses a box that is no longer on screen, instead of saying it was sent', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'fieldgone');
+  try {
+    const said = [];
+    W.toast = (m) => said.push(String(m));
+    D.getElementById('calcBtn').click();
+    D.getElementById('calcExpr').value = '4321';
+    D.getElementById('calcForm').requestSubmit();
+    eq(W.parseMoney(D.getElementById('calcResult').textContent), 4321, 'fixture: a result to send');
+    D.getElementById('tab-budget').click();
+    await new Promise((r) => setTimeout(r, 300));
+    D.querySelector('#views td.cell[data-cat]').click();
+    await new Promise((r) => setTimeout(r, 150));
+    ok(D.getElementById('cellDialog').open, 'fixture: the cell editor opened');
+    D.getElementById('cellValue').focus();
+    D.getElementById('cellCancelBtn').click();
+    await new Promise((r) => setTimeout(r, 150));
+    ok(!D.getElementById('cellDialog').open, 'fixture: and closed again');
+    said.length = 0;
+    D.getElementById('calcFieldBtn').click();
+    ok(!said.some((s) => /sent to/.test(s)), 'no "sent" for a box inside a closed window', said.join(' | '));
+    ok(said.some((s) => /Click into a box first/.test(s)), 'it asks for a box instead', said.join(' | '));
+    const hold = D.createElement('div');
+    hold.innerHTML = '<input type="text" aria-label="Probe">';
+    D.querySelector('main').appendChild(hold);
+    const probe = hold.firstChild;
+    probe.focus();
+    ok(D.activeElement === probe, 'fixture: the probe box has the focus');
+    hold.hidden = true;
+    said.length = 0;
+    D.getElementById('calcFieldBtn').click();
+    eq(probe.value, '', 'nothing went into a hidden box');
+    ok(!said.some((s) => /sent to/.test(s)), 'and nothing claimed it did', said.join(' | '));
+    hold.hidden = false;
+    probe.focus();
+    D.getElementById('calcFieldBtn').click();
+    eq(probe.value, '4321', 'a box on screen still takes the figure');
+    hold.remove();
+  } finally { f.remove(); }
+});
+
+/* ── A month is read from the year that owns it ─────────────────────────────
+   A live grid can run past December (an import or restore of up to 36 months),
+   and the year after it can be built too. The rest of the app reads such a
+   month from its OWN year (`yearOfMonth`); the pace walk and the goal chart
+   read it from the older grid's projection tail first. Hand-built figures: the
+   2026 tail says the goal is met in Jan 27, built 2027 says Aug 27. */
+t('the pace check and the goal chart read a month past December from the year that owns it', () => {
+  const months = (start, n) => Array.from({ length: n }, (_, i) => w.monthAdd(start, i));
+  const m26 = months('2026-01', 18), m27 = months('2027-01', 12);
+  const b26 = {}, b27 = {};
+  m26.forEach((m, i) => { b26['sav|' + m] = i < 12 ? 100 * (i + 1) : 5200; b26['total|' + m] = b26['sav|' + m]; });
+  m27.forEach((m, i) => { b27['sav|' + m] = 1200 + 500 * (i + 1); b27['total|' + m] = b27['sav|' + m]; });
+  const computed = { '2026': { months: m26, balances: b26 }, '2027': { months: m27, balances: b27 } };
+  const g = { id: 's', name: 'Savings', target: 5000, accounts: ['sav'], count: 'capped' };
+  const ctx = (keys) => ({ need: 5000, held: 900, cur: '2026-09', computed, keys, priorC: null,
+    years: { '2026': { seeds: {} }, '2027': { seeds: {} } }, goals: [g], order: ['sav'] });
+  eq(w.goalPace(g, ctx(['2026'])).etaMonths, 4,
+    'with nothing built after it, the live grid’s own tail is the plan and Jan 27 is right');
+  const p = w.goalPace(g, ctx(['2026', '2027']));
+  eq(p.etaMonths, w.monthDiff('2026-09', '2027-08'),
+    'with 2027 built, Jan–Jul 27 are 2027’s, which says Aug 27 — not the tail’s Jan 27');
+  const st = { years: { '2026': { kind: 'grid', model: 'live', enteredThrough: '2026-08' }, '2027': { kind: 'grid' } } };
+  const pts = w.goalChartPoints(st, computed, '2026', ['2027']);
+  const seen = pts.map((q) => q.m);
+  eq(seen.length, new Set(seen).size, 'the chart plots each month once', seen.filter((m, i) => seen.indexOf(m) !== i).join(','));
+  const mar = pts.find((q) => q.m === '2027-03');
+  ok(mar && mar.v === b27['total|2027-03'] && mar.built, 'and Mar 27 is 2027’s figure, drawn as a built year', JSON.stringify(mar));
+  eq(w.goalChartPoints(st, computed, '2026', []).length, 18, 'with nothing built ahead, the tail is still drawn');
+});
+
+/* ── A floating calculator fits a short window ──────────────────────────────
+   Its top sits under the header (tabs-top + 16px) but its height was capped at
+   the whole viewport less 32px, so the two together ran off the bottom of any
+   short window — a laptop at 450px, a phone on its side — cutting off the
+   Add Selected / Copy / → Field row. A window nobody had dragged was never
+   clamped, and a keyboard could not scroll a fixed window into view. */
+t('a floating calculator ends inside a short window, and Tab can reach its last button', async () => {
+  for (const [wd, ht] of [[1280, 450], [812, 375]]) {
+    const { f, W, D } = await auditFrame(wd, ht, 'calcshort');
+    try {
+      D.getElementById('calcBtn').click();
+      const win = D.getElementById('calcWin');
+      ok(!win.hidden && D.documentElement.dataset.calcSheet === undefined && D.documentElement.dataset.calc !== 'dock',
+         'fixture: floating at ' + wd + 'x' + ht);
+      for (const n of [11, 22, 33, 44]) {
+        D.getElementById('calcExpr').value = String(n);
+        D.getElementById('calcForm').requestSubmit();
+      }
+      await new Promise((r) => setTimeout(r, 100));
+      const r = win.getBoundingClientRect();
+      ok(r.bottom <= ht + 0.5, 'the window ends inside the ' + wd + 'x' + ht + ' window', r.bottom);
+      const btn = D.getElementById('calcFieldBtn');
+      btn.focus();
+      const b = btn.getBoundingClientRect(), wr = win.getBoundingClientRect();
+      ok(b.top >= wr.top - 0.5 && b.bottom <= Math.min(ht, wr.bottom) + 0.5,
+         'a Tab onto its last button brings the button into view', b.top + '–' + b.bottom + ' in ' + wr.top + '–' + wr.bottom);
+      W.placeCalcAt(40, ht - 200);
+      const p = win.getBoundingClientRect();
+      ok(p.bottom <= ht + 0.5, 'dragged low, it still ends inside the window', p.bottom);
+    } finally { f.remove(); }
+  }
+});
+
+/* ── The chosen year or month shows whole on a phone ────────────────────────
+   Since the strip became one line (2026-09-14) the rail takes what the switch
+   and the arrows leave. At 320px that was 50px against a 73px year chip, and
+   once "This year" / "This month" joined the arrows the rail went to 0 — at
+   320px AND on a 375px touch phone, where only 13px of the chosen month showed
+   and the page scrolled sideways. A coarse pointer cannot be emulated in a
+   frame, so its 40px arrows are injected as the one rule they come from. */
+t('on a phone the year or month being read shows whole in the strip, and the page never scrolls sideways', async () => {
+  for (const width of [320, 360, 375]) for (const touch of [false, true]) {
+    const { f, D } = await auditFrame(width, 700, 'stripfit');
+    try {
+      if (touch) {
+        const st = D.createElement('style');
+        st.textContent = '.ynav.snav { min-width: 40px; min-height: 40px; } .ynav.ynow { min-height: 40px; }';
+        D.head.appendChild(st);
+      }
+      D.getElementById('tab-budget').click();
+      await new Promise((r) => setTimeout(r, 250));
+      for (const mode of ['year', 'month']) {
+        if (mode === 'month') {
+          D.querySelector('.vswitch[data-mode="month"]').click();
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        for (const other of [false, true]) {
+          if (other) {
+            const step = D.querySelector('.yearstrip .snav:not(:disabled)');
+            ok(step, 'fixture: an arrow to wander off with');
+            step.click();
+            await new Promise((r) => setTimeout(r, 250));
+          }
+          const where = width + 'px ' + (touch ? 'touch' : 'mouse') + ', ' + mode + (other ? ', wandered off' : '');
+          const rail = D.querySelector('.yearstrip .yearrail');
+          const chip = rail.querySelector('[aria-checked="true"]');
+          const rr = rail.getBoundingClientRect(), cr = chip.getBoundingClientRect();
+          const shown = Math.min(rr.right, cr.right) - Math.max(rr.left, cr.left);
+          ok(shown >= cr.width - 0.5, where + ': the chosen chip shows whole', shown.toFixed(1) + ' of ' + cr.width.toFixed(1));
+          ok(D.documentElement.scrollWidth <= width, where + ': the page does not scroll sideways', D.documentElement.scrollWidth);
+          const jump = D.querySelector('#yearNow, #monthNow');
+          if (other && width >= 360) ok(jump && jump.getClientRects().length && jump.textContent.includes('Now') && jump.innerText.trim() === 'Now',
+            where + ': the way back is still offered, as "Now"', jump && jump.innerText);
+        }
+      }
+    } finally { f.remove(); }
+  }
+});
+
+/* ── Find reaches the third place a holding lives ───────────────────────────
+   A note on a holding shipped for portfolios, retirement accounts and the
+   giving fund (`4a5d29f`) and wears the note dot in all three tables, but
+   `searchPlan` walked only the first two. */
+t('Find reaches a note on a giving-fund holding, as it does the other two', () => {
+  const st = searchFixture();
+  st.side.daf = [{ ticker: 'VTI', shares: 10, price: 100, note: 'Zebra lot, gifted in May' }];
+  const hits = H.searchPlan(st, 'zebra').hits;
+  eq(hits.length, 1, 'the note is found');
+  eq(hits[0].view, 'giving', 'and it opens the Giving tab, where the fund is drawn');
+  ok(/VTI/.test(hits[0].where) && /giving fund/i.test(hits[0].where), 'naming the ticker and the fund', hits[0].where);
+  eq(hits[0].snippet, 'Zebra lot, gifted in May', 'with the note as its snippet');
+  eq(H.searchPlan(st, 'VTI').hits.length, 1, 'and its ticker is found too');
+});
+
+/* ── A column counts its parts' figures ─────────────────────────────────────
+   Paid, Credits and Due each appear once some LINE has a figure — asked of the
+   line's own sums. A split line whose parts cancel (paid $100, refunded $100)
+   sums to nothing, so the Paid column vanished and both part rows were drawn
+   blank: nothing on the card said money had gone out and come back. */
+t('a split line whose parts cancel out still shows the parts’ figures', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'partcols');
+  try {
+    W.finGet().vacations.trips = [{ id: 'tz', name: 'Audit trip', year: 2026, nights: 2, items: [
+      { label: 'Hotel', paid: 0, credits: 0, due: 0, parts: [
+        { label: 'Booked', paid: 100, credits: 0, due: 0 },
+        { label: 'Refunded', paid: -100, credits: 0, due: 0 }] },
+      { label: 'Tours', paid: 0, credits: 0, due: 50 }] }];
+    W.render();
+    D.getElementById('tab-vacations').click();
+    await new Promise((r) => setTimeout(r, 250));
+    const card = D.querySelector('.card.trip');
+    ok(card, 'fixture: the trip is drawn');
+    const heads = [...card.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    ok(heads.includes('Paid'), 'the Paid column is drawn — a part paid and a part refunded are figures', heads.join(', '));
+    const subs = [...card.querySelectorAll('tr.partrow')];
+    eq(subs.length, 2, 'fixture: both parts are drawn under their line');
+    const money = W.__finTestHooks.fmtMoney;
+    ok(subs[0].textContent.includes(money(100)) && subs[1].textContent.includes(money(-100)),
+       'and each part shows its own figure', subs.map((s) => s.textContent.replace(/\s+/g, ' ').trim()).join(' | '));
+  } finally { f.remove(); }
+});
+
+/* ── Back to one line asks before the breakdown goes ────────────────────────
+   "↩ Back to one line" was written when a part was a name and three figures,
+   and dropped the breakdown at once. Parts carry a merchant and a note now —
+   the design's own example is three booking links, one per part — and one
+   press took all of them with no word said (Undo did bring them back). A split
+   of one that only repeats its line has nothing to lose, and goes quietly. */
+t('Back to one line asks before it drops what the parts say', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'unsplit');
+  try {
+    D.getElementById('tab-vacations').click();
+    await new Promise((r) => setTimeout(r, 250));
+    const row = [...D.querySelectorAll('tr[data-edit="tripItem"]')].find((r) => /Museums/.test(r.textContent));
+    ok(row, 'fixture: the sample keeps its split museum line');
+    row.click();
+    await new Promise((r) => setTimeout(r, 150));
+    ok(D.getElementById('rowDialog').open, 'fixture: its window opened');
+    const box = () => D.getElementById('rf-parts');
+    const lines = () => [...box().querySelectorAll('.partline')];
+    ok(lines().length >= 2, 'fixture: the line is split', lines().length);
+    const asked = [];
+    W.confirm = (m) => { asked.push(String(m)); return false; };
+    box().querySelector('.parts-toggle').click();
+    eq(asked.length, 1, 'it asks before the parts go');
+    ok(/notes/.test(asked[0]) && /total/.test(asked[0]), 'saying what goes and what stays', asked[0]);
+    ok(lines().length >= 2, 'refused, the parts stay', lines().length);
+    ok(D.querySelectorAll('.card.trip tr.partrow').length >= 2, 'on the card as well');
+    W.confirm = (m) => { asked.push(String(m)); return true; };
+    box().querySelector('.parts-toggle').click();
+    eq(lines().length, 0, 'accepted, it is one line again');
+    box().querySelector('.parts-toggle').click();
+    eq(lines().length, 1, 'fixture: split again, on one part repeating the line');
+    box().querySelector('.parts-toggle').click();
+    eq(asked.length, 2, 'and a split of one with nothing of its own goes back without asking');
+    eq(lines().length, 0);
+  } finally { f.remove(); }
+});
+
+/* ── ✕ gives the focus back where Escape does ───────────────────────────────
+   Inside an open editor the header is inert, so the ✕'s `calcBtn.focus()` was
+   refused and the focus fell to <body>; Escape already sent it back into the
+   dialog. One helper for both now. */
+t('closing the calculator with its ✕ inside a window gives the focus back to the window', async () => {
+  const { f, D } = await auditFrame(1280, 900, 'calcx');
+  try {
+    D.getElementById('calcBtn').click();
+    D.getElementById('tab-budget').click();
+    await new Promise((r) => setTimeout(r, 300));
+    D.querySelector('#views td.cell[data-cat]').click();
+    await new Promise((r) => setTimeout(r, 150));
+    const dlg = D.getElementById('cellDialog');
+    ok(dlg.open && dlg.contains(D.getElementById('calcWin')), 'fixture: the calculator followed the editor into its dialog');
+    const x = D.getElementById('calcCloseBtn');
+    x.focus();
+    x.click();
+    await new Promise((r) => setTimeout(r, 50));
+    const a = D.activeElement;
+    ok(D.getElementById('calcWin').hidden, 'the calculator closed');
+    ok(a && a !== D.body && a.getClientRects().length > 0 && dlg.contains(a) && !a.closest('#calcWin'),
+       'and the focus is back in the editor, somewhere a keyboard can see',
+       a ? (a === D.body ? 'body' : a.id || a.tagName) : 'null');
+    D.getElementById('cellCancelBtn').click();
+  } finally { f.remove(); }
+});
+
+/* ── Pick answers the keyboard on a table row ───────────────────────────────
+   Pick's keydown route knew the Month page's lines only. A holdings row reached
+   by Tab and pressed with Enter opened its editor with Pick on, while a click on
+   a cell of that same row picked it. A row has several figures, so the key takes
+   them all — the row's name stays out, as it does from a drag along the row. */
+t('with Pick on, Enter on a table row picks its figures instead of opening its editor', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'pickrow');
+  try {
+    D.getElementById('calcBtn').click();
+    D.getElementById('tab-investments').click();
+    await new Promise((r) => setTimeout(r, 400));
+    D.getElementById('calcPickBtn').click();
+    const row = [...D.querySelectorAll('#views .tablewrap tr.editrow')]
+      .find((r) => [...r.cells].slice(1).some((c) => W.figureAt(c)));
+    ok(row, 'fixture: a holdings row with figures in it');
+    const figs = [...row.cells].slice(1).filter((c) => W.figureAt(c)).length;
+    const tape = () => D.querySelectorAll('#calcTape li:not(.calc-empty)').length;
+    const before = tape();
+    row.focus();
+    row.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    ok(!D.getElementById('rowDialog').open, 'the editor did not open');
+    eq(tape() - before, figs, 'and every figure in the row went on the tape');
+    D.getElementById('calcPickBtn').click();
+    row.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    ok(D.getElementById('rowDialog').open, 'with Pick off, Enter opens the row as it always did');
+  } finally { f.remove(); }
+});
+
+/* ── A card row never pushes a 320px page sideways ──────────────────────────
+   `.cards2`'s floor is 340px — right for the charts and money tables it holds —
+   and at 320px a single column of 340px cards is wider than the screen, so
+   Goals, Investments, Retirement and Compensation scrolled sideways. The floor
+   is `min(340px, 100%)`: the same everywhere a column can hold it. */
+t('at 320px no tab with side-by-side cards scrolls the page sideways', async () => {
+  const { f, D } = await auditFrame(320, 800, 'narrowcards');
+  try {
+    for (const tab of ['goals', 'investments', 'retirement', 'comp']) {
+      D.getElementById('tab-' + tab).click();
+      await new Promise((r) => setTimeout(r, 400));
+      ok(D.querySelector('#views .cards2'), 'fixture: ' + tab + ' draws a card row');
+      ok(D.documentElement.scrollWidth <= 320, tab + ' fits a 320px screen', D.documentElement.scrollWidth);
+    }
+  } finally { f.remove(); }
+});
+
+/* ── A year average never reads -$0.00 ──────────────────────────────────────
+   round2 of a tiny negative is -0, and the formatter spells -0 "-$0.00". */
+t('a year average of a tiny negative total reads $0.00, never -$0.00', () => {
+  eq(H.avgTipLine(-0.01, 12), 'Averages $0.00/mo over 12 months', 'a cent spread over a year is nothing, unsigned');
+  eq(H.avgTipLine(-12, 12), 'Averages -$1.00/mo over 12 months', 'a real negative average keeps its sign');
+});
+
+/* ── Find does not list a split of one twice ────────────────────────────────
+   The card leaves out a single part that only repeats its line; Find listed
+   it anyway, so "Tours" came back as the line and again as its own part. */
+t('Find lists a split of one that only repeats its line once', () => {
+  const st = searchFixture();
+  st.vacations.trips[0].items.push({ label: 'Tours', paid: 50, parts: [{ label: 'Tours', paid: 50 }] });
+  st.vacations.trips[0].items.push({ label: 'Ferry', paid: 30, parts: [{ label: 'Ferry', paid: 30, merchant: 'Coastal Ferries' }] });
+  eq(H.searchPlan(st, 'Tours').hits.length, 1, 'one hit — the part says nothing its line does not');
+  const ferry = H.searchPlan(st, 'Coastal').hits;
+  eq(ferry.length, 1, 'a lone part WITH words of its own is still found, as the card still draws it');
+});
+
+/* ── The share window's notes box names every note it carries ──────────────
+   The tick has always governed holding notes and a split line's part notes too
+   (`stripNotes` takes them out), but its words stopped at "months, rows, goals
+   and trips". */
+t('the share window’s notes box names every kind of note it carries', () => {
+  const s = [...w.document.querySelectorAll('label span')].find((x) => /Your written notes/.test(x.textContent));
+  ok(s, 'fixture: the share window has its notes box');
+  ok(/parts/.test(s.textContent) && /holdings/.test(s.textContent), 'it names the parts of a trip line and holdings', s.textContent);
+});
+
+/* ── The privacy page names the merchant ────────────────────────────────────
+   A trip line and its parts store who the money went to (`bbebdb0`) — a name,
+   which the "What Financial Plan Stores" paragraph did not list. */
+t('the privacy page says a trip line stores who it was paid to', async () => {
+  const txt = stripHtmlComments(await (await bustFetch('privacy.html')).text());
+  ok(/who (a|each) trip line (and its parts )?was paid to/.test(txt), 'the stores paragraph names the merchant');
+});
+
+/* ── An absurd figure is refused, never drawn as $∞ ─────────────────────────
+   calcEval's finite check ran before the handler rounded, and rounding 1e303
+   to six places overflows — "$∞" on the result line and the tape. A trip part
+   or line accepted any finite number, so two of 1e308 added up to Infinity on
+   the card. Only a hand-edited backup or a crafted link reaches the second. */
+t('absurd figures are refused at the boundary rather than shown as $∞', () => {
+  const huge = H.calcEval('1' + '0'.repeat(303));
+  ok(!huge.ok && /Out of range/.test(huge.reason || ''), 'the calculator refuses a result it cannot write', JSON.stringify(huge));
+  ok(H.calcEval('999999999999*99').ok, 'a merely large figure still works out');
+  eq(H.tripPart({ label: 'X', paid: 1e308 }).paid, 0, 'a part figure of a trillion or more is not a figure');
+  eq(H.tripPart({ label: 'X', paid: 1234.5 }).paid, 1234.5, 'an ordinary one is kept');
+  const st = H.coerceShape({ vacations: { trips: [{ id: 't', name: 'T', year: 2026, items: [
+    { label: 'A', paid: 1e308 },
+    { label: 'B', paid: 1e308, parts: [{ label: 'B1', paid: 1e308 }, { label: 'B2', paid: 1e308 }] }] }] } });
+  const it = st.vacations.trips[0].items;
+  ok(it[0].paid === 0 && Number.isFinite(it[0].paid + it[1].paid), 'nor a line’s own, so no trip total adds up to Infinity', JSON.stringify(it));
+  eq(H.coerceShape({ vacations: { trips: [{ id: 't', name: 'T', items: [{ label: 'C', paid: 420 }] }] } })
+    .vacations.trips[0].items[0].paid, 420, 'and an ordinary line keeps its figure');
 });
 
 async function run() {

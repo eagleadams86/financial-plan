@@ -6795,6 +6795,11 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   all agree, plain numbers for a tape that mixes dollars and shares (neither,
   and lies about nothing), money for an empty tape. `coerceCalc` keeps the
   kind, and an unknown one is money. Only money is ever rounded to cents.
+  **A year or a date is not a figure** (2026-09-15 review): before the
+  bare-number branch `figureAt` refuses a date (`2026-07-01`, `7/1`) and a
+  bare integer 1900–2100 — `numbersIn`'s two rules — unless the column heading
+  names a quantity (shares, units, count), since `h.shares` renders without a
+  thousands comma and 2000 shares is a real holding.
 - **The row just added FLASHES, and it is a tint, not a glow** (asked for as
   "a show glow … so it draws the eye's attention", 2026-09-13). A glow is a
   box-shadow and the pack forbids one anywhere (rule 14), so `li.calc-new`
@@ -7130,3 +7135,106 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   a reload with the dock on read off the head script, and a 375px sheet). All
   twelve proven red against `main`. The existing HELP pin gained a third call
   site, `data-help="(\w+)"`, for a dot written literally in static markup.
+
+## Fixes From the 2026-09-15 Review
+
+A full review of everything since the 2026-09-07 audit (the calculator, trip
+parts and notes, the engine's new figures, the one-line chrome), by four
+auditors driving the app headless, each finding re-read in source before it
+was accepted. Charles asked for every finding fixed. Same routine: one commit
+per finding, its test written first and proven red against the pre-fix page
+(the whole `git archive HEAD`, with the new `tests.html` over it, on a second
+port), README and this file in the commit. The tests are the group "Fixes
+from the 2026-09-15 review" at the foot of `tests.html`.
+
+- **Pick and Add Selected took years and dates as figures.** See the KIND
+  bullet under The Calculator: `figureAt` now refuses them, as `numbersIn`
+  always did, keeping a share count its column names.
+- **The waiting line never settled a period in this month.** When the oldest
+  unpaid period was the current, not-yet-entered month, `openCellEditor`
+  preset "my estimate" (`future`), and `outstandingDues` counts only `actual`
+  as paid — the bill was recorded, "1 period still unpaid" stayed, and every
+  press reopened the same cell. A future month whose `dueOn` deadline is
+  before today now opens as `actual`, over a stored `manual` estimate too;
+  a stored `auto` or `actual` keeps its kind. The rule is in the editor, not
+  the line, so a press on any bill gone past its date behaves the same way.
+- **→ Field said "sent" into a box nobody could see.** `fieldTarget` checked
+  connected, writable and outside `#calcWin`, never shown: a cell's Amount in
+  a closed editor, or a field a `showIf` had hidden, took the figure and
+  toasted "sent to Amount" while nothing was stored. It now also needs
+  `getClientRects().length` — no box on the page, no target.
+- **The pace check dated a goal off the wrong grid.** With a live grid past
+  December AND the next year built, `goalPace`'s walk (and `goalChartPoints`)
+  read the overlapping months from the older grid's projection tail first —
+  `yearOfMonth` reads them from their own year everywhere else. Both now skip a
+  month `ownedElsewhere(computed, keys, key, m)` says a walked year holds. Only
+  an import or restore makes a grid over 12 months, so it had never shown on a
+  plan the app built itself.
+- **A floating calculator ran off short windows.** `top` was `tabs-top + 16px`
+  and `max-height` `100vh − 32px`, so at 1280x450 or a phone on its side
+  (812x375, which floats by design) the button row ended below the screen, and
+  `clampCalc` does nothing for a window that was never dragged. The cap now
+  starts at the window's own top — `tabs-top + 16px`, or `--calc-y` under
+  `.placed` — with a 120px floor, and `#calcWin` is `overflow-y: auto` so a
+  Tab onto a button the height could not fit scrolls it into view. The dock
+  (`max-height: none`) and the sheet (its own `60vh`) outrank both rules.
+- **On a phone the strip squeezed the chosen chip out of sight.** Once the
+  strip became one line (`252cebb`) the rail took what was left: 50px against
+  a 73px year chip at 320px, and 0px with "This year"/"This month" showing —
+  at 375px on touch too (13px of the month), with the page scrolling sideways.
+  At `max-width: 430px` the switch segments, chips, nav and arrows take tighter
+  padding and the way back shows its `.now-short` "Now" (both spans are in the
+  markup; `display: none` keeps the hidden one out of the name). Under 360px
+  `#yearNow`/`#monthNow` hide — switch + two 40px arrows + one chip is the
+  whole line. Budget at 360px touch, wandered off: about 82px of rail for a
+  75px month chip. The test injects the coarse-pointer arrow rule, which a
+  frame cannot emulate.
+- **Find missed a giving-fund holding's note.** `searchPlan` walked
+  `side.portfolios` and `side.retirementAccounts`; `side.daf` — the third
+  holdings table, with the same note and dot since `4a5d29f` — was in neither.
+  It opens the Giving tab.
+- **A split line whose parts cancelled hid their figures.** `tripCard`'s
+  `hasPaid`/`hasCredits`/`hasDue` asked only the lines' own sums, so parts of
+  +$100 and −$100 summed to nothing, the column went and both part rows drew
+  blank. `anyFig(k)` asks the parts as well — the merchant column already did.
+- **"↩ Back to one line" dropped every part's merchant and note unasked.** The
+  toggle predates part notes, and one press committed the loss (⌘Z restored
+  it). It now `confirm()`s when there is more than one part or any part has a
+  note or merchant; a split of one that only repeats its line goes quietly.
+- **The calculator's ✕ dropped the focus inside an editor.** It focused
+  `#calcBtn`, inert under a modal, so the focus fell to `<body>`; Escape already
+  sent it into the dialog. Both call `calcFocusHome()` now.
+- **Pick ignored Enter on a table row.** Its keydown route matched `.mrow`
+  only, so a Tab-focused `tr.editrow` opened its editor with Pick on. A focused
+  row in `#views`/`#chartMaxi` now puts every `figureAt` of `cells.slice(1)` on
+  the tape (the name column out, as a drag leaves it).
+- **At 320px four tabs scrolled sideways.** `.cards2`'s `minmax(340px, 1fr)`
+  column was wider than a 320px screen's 288px of content (Goals, Investments,
+  Retirement, Compensation), which had quietly undone the 2026-09-05 "no
+  horizontal scroll at 320px" pass. The floor is `min(100%, 340px)` — the order the tile-row test reads.
+- **A year average of a tiny negative read "-$0.00/mo".** `round2` returns
+  -0 and `fmtMoney(-0)` keeps the sign; `avgTipLine` passes `|| 0`. Left alone
+  on purpose: `round2`'s half-cent tie-break for negatives, which the engine's
+  match against the spreadsheet rests on.
+- **Find listed a split of one twice.** A lone part repeating its line is not
+  drawn on the card, but `searchPlan` walked it; it now applies the card's own
+  test (`lone.label/merchant/note` differing from the line) before the parts.
+- **The share window's notes box undersold itself.** It read "notes on months,
+  rows, goals and trips" while `stripNotes` has also governed holding notes and
+  part notes since they shipped; the words now name both.
+- **privacy.html did not list merchant names.** "What Financial Plan Stores"
+  now says who each trip line and its parts was paid to.
+- **Absurd figures drew as "$∞".** `calcEval` refused only non-finite values,
+  and the handler's six-place rounding overflows past ~1e302; it now refuses
+  |value| ≥ 1e15. `tripPart`'s `fig` and `coerceShape`'s new `tripFig` drop a
+  trip figure of |v| ≥ 1e12 to 0 (a trillion-dollar holiday line is a crafted
+  file, not a plan). `num` itself is untouched — it serves fields that are not
+  money.
+- **Left as it is, deliberately: a merchant in the sample plan.** The review
+  noted the demo never shows the Merchant column. But `sampleState` leaves
+  merchants out on purpose, and the suite pins it from both sides: the
+  split-line test drives the current year's card and asserts no Merchant
+  column before it types one, and it asserts the other card does not gain one.
+  A merchant on either card breaks one of those claims, so this stays a
+  question for Charles — the sample-data rule against the demo's own lesson
+  that a column of nothing is left out.

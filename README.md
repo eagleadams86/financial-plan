@@ -403,7 +403,9 @@ whole point of having said you're still waiting.
 When the bill does finally arrive, **the waiting line opens the oldest period
 still unpaid** — it names that month first, since it is usually not the month
 you are reading — so the figure is recorded where the money should have left.
-Fill it in and the line moves on to the period behind it.
+Fill it in and the line moves on to the period behind it. A bill whose due date
+has already gone by opens as **actual — it happened**, even in a month you have
+not marked entered yet, so recording it is what pays it.
 
 ### A Row That Stopped
 
@@ -876,7 +878,8 @@ whole sentences and a quarter of the window cuts them mid-word.
 
 Plus progress, target dates, required monthly saving, and **when each goal
 lands** — which **reads the years you've built before it guesses at anything**.
-Month by month, from this one to the end of the last year in your plan, it asks
+Month by month, from this one to the end of the last year in your plan — each
+month read from its own year, even where an imported year runs past December — it asks
 whether the accounts that goal counts have reached what it needs; if they do,
 that month is the answer and no rate comes into it, and the tile says "your plan
 reaches it about …" rather than "at this pace". Only past the end of what you've
@@ -1053,7 +1056,8 @@ this year compares with the last few, and it gives the tab something to open on.
   — airfare, stay, transport, excursions, food, tips, spa — or from nothing,
   your choice.
 - **Each line tracks what's paid, what's credited and what's still due**, with
-  a **✓ Paid** button that settles the rest in one click. A line also names the
+  a **✓ Paid** button that settles the rest in one click; each column appears
+  once a line, or a part of a split line, has a figure in it. A line also names the
   **merchant** — who the money went to — in a column of its own, which appears
   only once something in the trip has one.
 - **A line that was several purchases splits into parts.** Three excursions
@@ -1066,7 +1070,8 @@ this year compares with the last few, and it gives the tab something to open on.
   the card's total and the year chart go on reading one figure per line and
   never change. The parts sit under their line on the card, indented — always
   visible, never behind a control; **↩ Back to one line** folds them away and
-  keeps the total. Point at a part and its note opens beside it, the same way a
+  keeps the total — asking first when the parts carry names, merchants or notes
+  of their own, since those go with them (Undo brings them back). Point at a part and its note opens beside it, the same way a
   line's does.
 - **A holidays & PTO planner**, with from/to dates, under the trips it counts.
 
@@ -1571,7 +1576,8 @@ Flick the row to reach the controls past the edge; the name stays put.
 Two characters minimum, and it searches everything: every year's rows and
 notes (split-part notes and balance notes included), donations, trips and
 their line items — the parts of a split line and their merchants included —
-goals, people, property, and holdings by ticker.
+goals, people, property, and holdings by ticker or note — the giving fund's
+included.
 
 A budget hit opens straight into its cell's editor; everything else lands you
 on the right tab. **Enter opens the first result** — the same as clicking it
@@ -1620,10 +1626,13 @@ with its ✕.
   — puts it on the tape instead of opening its editor, labelled
   with where it came from ("Rent · Mar 26") and kept as what it is: a
   percentage stays a percentage, a share count keeps its decimals, and only
-  money is rounded to cents. The row just added flashes so your eye finds it,
+  money is rounded to cents. A year or a date — a pension's start, a tax
+  table's year — is not a figure, so a click on one adds nothing and a drag
+  along its row leaves it out. The row just added flashes so your eye finds it,
   and a long row name gives way before its month does — hover a row for the
   whole label.
-  Pick stays on across a refresh. While it is on, the Pick button is
+  From the keyboard, Enter on a Month page line picks its figure, and Enter on
+  a table row picks every figure along it. Pick stays on across a refresh. While it is on, the Pick button is
   filled and a band under the title bar says so, so you can tell at a glance
   what a click will do. Switch Pick off to go back to editing; a click on a
   row's name still opens its editor either way.
@@ -1664,11 +1673,15 @@ with its ✕.
 - **Send it into a box.** Open any editor, click into its amount, work the
   figure out in the calculator (or choose the total), press **→ Field**, and
   the box takes it exactly as if you had typed it — a window that saves as you
-  go saves it, and a derived box beside it follows. **⎘ Copy** puts the chosen
+  go saves it, and a derived box beside it follows. If the box you last
+  clicked in has since closed or been hidden, it asks you to click into one
+  rather than sending the figure nowhere. **⎘ Copy** puts the chosen
   figure on the clipboard as a plain number for anything else.
 - **Move it or dock it.** Drag it anywhere by its title bar, or press **⧉
   Dock** and it runs down the right-hand edge with the page making room beside
-  it; docked, the readouts, the box and the buttons stay at the foot of the
+  it. Floating in a short window — or a phone on its side — it stops above
+  the foot of the screen and scrolls within itself, so its buttons are never
+  off the bottom. Docked, the readouts, the box and the buttons stay at the foot of the
   window however long the tape grows, and any window you open centres in the
   space beside the calculator rather than running under it. Docked in a window
   narrower than about 930px — where the column would leave the plan a slot — it
@@ -1682,7 +1695,8 @@ with its ✕.
   scrolling clear of the sheet.
 - **It stays open on purpose.** Unlike every other window here it does not
   close when you click elsewhere — that is the point of it. Close it with its
-  ✕, the Calc button, or Escape while you are in it. Everything else on the
+  ✕, the Calc button, or Escape while you are in it — either way the keyboard
+  lands back in the window you were working in. Everything else on the
   page, editors included, works with it open.
 - **It is this device's.** Where it sits, whether it is docked, and the tape
   itself are remembered in this browser only — never synced, never in a backup
@@ -1733,7 +1747,10 @@ started is underlined with dots, **this year carries an underscore** wherever it
 has got to in the strip, and hovering any of them says which in words. A **This
 Year** button appears at the right-hand end once you have wandered off it — the
 Month lens's button, on the same terms — and takes you back in one click, from
-however far down the strip you have read.
+however far down the strip you have read. On a phone the strip tightens so the
+year or month you're reading always shows whole: that button reads **Now**, and
+on the narrowest screens (under 360px) it steps aside — the underscore still
+marks this year, and the arrows still walk you back.
 
 The same strip carries the Budget's **Year / Month** switch at its left end, and
 in the Month lens the years are replaced by the plan's months — the arrows step
