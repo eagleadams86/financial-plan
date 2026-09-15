@@ -1620,7 +1620,9 @@ with its ✕.
   — puts it on the tape instead of opening its editor, labelled
   with where it came from ("Rent · Mar 26") and kept as what it is: a
   percentage stays a percentage, a share count keeps its decimals, and only
-  money is rounded to cents. The row just added flashes so your eye finds it,
+  money is rounded to cents. A year or a date — a pension's start, a tax
+  table's year — is not a figure, so a click on one adds nothing and a drag
+  along its row leaves it out. The row just added flashes so your eye finds it,
   and a long row name gives way before its month does — hover a row for the
   whole label.
   Pick stays on across a refresh. While it is on, the Pick button is

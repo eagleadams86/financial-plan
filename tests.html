@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1079;
+const EXPECTED = 1080;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -18949,6 +18949,41 @@ t('a finger holds a cell, then taps another, to select a block (2026-09-14)', as
     if (f) f.remove();
     if (keep === null) localStorage.removeItem('fin-calc'); else localStorage.setItem('fin-calc', keep);
   }
+});
+
+group('Fixes from the 2026-09-15 review');
+/* Each test here was written before its fix and proven to fail against the
+   unfixed page, served whole from `git archive` on a second port with this
+   file copied over it. The commit that fixed it names the finding. */
+
+/* ── A year or a date in a table is not a figure ────────────────────────────
+   The highlight path (`numbersIn`) always skipped a bare year and a date; the
+   cell reader Pick and Add Selected use did not — its bare-number branch ran
+   parseFloat over the text, so a pension's "From 2047" went on the tape as
+   2,047 and a currency table's "2026-07-01" as 2,026, and a drag along the row
+   added them into the dollars. A share count is the one bare whole number that
+   can honestly sit between 1900 and 2100, and its column says so. */
+t('figureAt refuses a year or a date in a table cell, and still reads a count', () => {
+  const D = w.document;
+  const box = D.createElement('div');
+  box.className = 'tablewrap';
+  box.innerHTML = '<table><thead><tr><th>Name</th><th>From</th><th>Rate from</th>'
+    + '<th>Paid</th><th>Months</th><th>Amount</th><th>Shares</th></tr></thead><tbody><tr>'
+    + '<td>Pension</td><td>2047</td><td>2026-07-01</td><td>7/1</td><td>3</td>'
+    + '<td>2,026</td><td>2000</td></tr></tbody></table>';
+  D.body.appendChild(box);
+  try {
+    const c = box.querySelectorAll('tbody td');
+    eq(w.figureAt(c[1]), null, 'a bare year under a heading is a year, not 2,047 of anything');
+    eq(w.figureAt(c[2]), null, 'an ISO date is a date, not the 2,026 before its first hyphen');
+    eq(w.figureAt(c[3]), null, 'and a month/day is a date too');
+    const n = w.figureAt(c[4]);
+    ok(n && n.value === 3 && n.kind === 'num', 'a small count still reads as a plain number', JSON.stringify(n));
+    const m = w.figureAt(c[5]);
+    ok(m && m.value === 2026, 'a figure written with its thousands comma is a figure, as numbersIn keeps it', JSON.stringify(m));
+    const s = w.figureAt(c[6]);
+    ok(s && s.value === 2000 && s.kind === 'num', 'a share count of 2000 is shares — its column says so', JSON.stringify(s));
+  } finally { box.remove(); }
 });
 
 async function run() {

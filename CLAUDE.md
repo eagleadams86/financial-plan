@@ -6795,6 +6795,11 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   all agree, plain numbers for a tape that mixes dollars and shares (neither,
   and lies about nothing), money for an empty tape. `coerceCalc` keeps the
   kind, and an unknown one is money. Only money is ever rounded to cents.
+  **A year or a date is not a figure** (2026-09-15 review): before the
+  bare-number branch `figureAt` refuses a date (`2026-07-01`, `7/1`) and a
+  bare integer 1900–2100 — `numbersIn`'s two rules — unless the column heading
+  names a quantity (shares, units, count), since `h.shares` renders without a
+  thousands comma and 2000 shares is a real holding.
 - **The row just added FLASHES, and it is a tint, not a glow** (asked for as
   "a show glow … so it draws the eye's attention", 2026-09-13). A glow is a
   box-shadow and the pack forbids one anywhere (rule 14), so `li.calc-new`
@@ -7130,3 +7135,18 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   a reload with the dock on read off the head script, and a 375px sheet). All
   twelve proven red against `main`. The existing HELP pin gained a third call
   site, `data-help="(\w+)"`, for a dot written literally in static markup.
+
+## Fixes From the 2026-09-15 Review
+
+A full review of everything since the 2026-09-07 audit (the calculator, trip
+parts and notes, the engine's new figures, the one-line chrome), by four
+auditors driving the app headless, each finding re-read in source before it
+was accepted. Charles asked for every finding fixed. Same routine: one commit
+per finding, its test written first and proven red against the pre-fix page
+(the whole `git archive HEAD`, with the new `tests.html` over it, on a second
+port), README and this file in the commit. The tests are the group "Fixes
+from the 2026-09-15 review" at the foot of `tests.html`.
+
+- **Pick and Add Selected took years and dates as figures.** See the KIND
+  bullet under The Calculator: `figureAt` now refuses them, as `numbersIn`
+  always did, keeping a share count its column names.
