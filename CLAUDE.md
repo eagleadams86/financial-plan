@@ -7219,3 +7219,6 @@ from the 2026-09-15 review" at the foot of `tests.html`.
 - **Find listed a split of one twice.** A lone part repeating its line is not
   drawn on the card, but `searchPlan` walked it; it now applies the card's own
   test (`lone.label/merchant/note` differing from the line) before the parts.
+- **The share window's notes box undersold itself.** It read "notes on months,
+  rows, goals and trips" while `stripNotes` has also governed holding notes and
+  part notes since they shipped; the words now name both.
