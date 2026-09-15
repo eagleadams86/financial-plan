@@ -7050,6 +7050,17 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   whether or not anything is pinned, so `--pin-clear` (header + stuck bars + 8)
   follows the header's depth. The test focuses a control above the window,
   unpinned and pinned, and checks it lands below `pinnedBottom()`.
+- **…and a control that is itself stuck cancels the padding** (2026-09-15, found by Flow Metrics'
+  review). The padding reserves the strip the header and the pinned bars are DRAWN in, so both
+  engines judged a control there out of view and scrolled the page up on a real Tab — and it stayed
+  stuck, so the next press did it again: Shift+Tab from mid-page onto the theme picker went 700 → 233
+  → 0 at 1280 in Chromium, 700 → 530 → 360 in WebKit, pinned or not. `header *`,
+  `html[data-pin] .tabrow *` and, above 700px only, `html[data-pin] .yearstrip *` take
+  `scroll-margin-top: calc(0px - var(--pin-clear))`. The width scope matters: under the phone rule the
+  year strip is static and scrolls away under the row, and it must keep the padding. A `focus()` does
+  not reproduce the jump, so the suite pins the margins; the jump was measured with real key presses
+  before and after. Flow Metrics (`e736d1e`) and Sprint Predictability carry the same rule.
+  EXPECTED 1096 → 1097.
 - **A DOCKED calculator in a window under 930px is a sheet too** (Charles,
   2026-09-14, a 932px window: *"when the calculator is open and docked and the
   window becomes any narrower than this, move the calculator to the bottom and

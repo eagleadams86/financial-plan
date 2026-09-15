@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1096;
+const EXPECTED = 1097;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -18539,6 +18539,44 @@ t('a control scrolled into view lands below the sticky chrome, pinned or not (20
        'the clearance is the root’s scroll padding, pinned or not');
     ok(!/scroll-margin-top: var\(--pin-clear/.test(stripComments(APP_SRC)),
        'and the old per-control margin is gone — the two would add together');
+  } finally {
+    if (W && pinWas !== null) W.applyPin(pinWas);
+    if (f) f.remove();
+  }
+});
+t('a control that is itself stuck does not move the page when tabbed onto (2026-09-15)', async () => {
+  /* The padding above reserves the strip the header and the pinned bars are drawn
+     in, so a real Tab onto a control THERE scrolled the page to the top. A focus()
+     does not reproduce it and a real key press cannot be sent from here, so the
+     mechanism is held: a stuck control's scroll margin cancels the padding
+     exactly, and a control that scrolls with the page — or the year strip on a
+     phone, where it is not stuck — keeps it. */
+  let f = null, W = null, D = null, pinWas = null;
+  try {
+    for (const [width, pinned] of [[1280, false], [1280, true], [390, true]]) {
+      if (f) f.remove();
+      ({ f, W, D } = await auditFrame(width, 800, 'stuckmargin'));
+      if (pinWas === null) pinWas = W.savedPin();
+      W.applyPin(pinned);
+      await new Promise((r) => setTimeout(r, 200));
+      const smt = (el) => parseFloat(W.getComputedStyle(el).scrollMarginTop) || 0;
+      const clear = parseFloat(D.documentElement.style.getPropertyValue('--pin-clear')) || 0;
+      const cancels = (el) => !!el && clear > 0 && Math.abs(smt(el) + clear) < 1;
+      const label = width + 'px ' + (pinned ? 'pinned' : 'unpinned');
+      ok(cancels(D.getElementById('themeSel')), label + ': a header control cancels the scroll padding',
+         smt(D.getElementById('themeSel')) + ' vs ' + clear);
+      const page = [...D.querySelectorAll('#views button')].find((b) => !b.closest('.tabrow, .yearstrip, header'));
+      ok(page && smt(page) === 0, label + ': a control that scrolls with the page keeps it');
+      if (pinned) {
+        ok(cancels(D.getElementById('pinBtn')), label + ': so does a control in the stuck tab row',
+           smt(D.getElementById('pinBtn')) + ' vs ' + clear);
+        const year = D.querySelector('.yearstrip button');
+        ok(year, label + ': the year strip is on the page to check');
+        if (width > 700) ok(cancels(year), label + ': and one in the stuck year strip', year && smt(year));
+        else ok(year && smt(year) === 0, label + ': but the year strip, which scrolls away on a phone, keeps it',
+                year && smt(year));
+      }
+    }
   } finally {
     if (W && pinWas !== null) W.applyPin(pinWas);
     if (f) f.remove();
