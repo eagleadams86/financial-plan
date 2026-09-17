@@ -1506,6 +1506,31 @@ Equity, not a balance: nothing flows through a house, so the budget engine
 never sees these rows, and the [Progress](#progress) tab's net worth is where
 the figure lands.
 
+#### Looking a value up
+
+A value you state goes stale the moment you look away, so each property's
+editor carries a link to somewhere that will tell you what it is worth today —
+**Redfin** or **Zillow** for a home, **Kelley Blue Book** or **Edmunds** for a
+vehicle, **J.D. Power** for a boat. "Other" offers none: a kind with no
+sensible tool says nothing rather than guessing at one.
+
+**It is a link, not a lookup.** The app fetches nothing, holds no API key and
+talks to no new endpoint — you press the link, read the figure on the site, and
+type it into the box. That is not a compromise so much as the only honest
+option: there is no free valuation API a page like this one can use. Zillow
+retired its public API in 2021 and its replacement does not expose the Zestimate
+at all, Edmunds closed its in 2018, and every free tier that still answers with
+a figure wants a key — which a single-file page on a public site cannot keep
+secret. It also means the value on the row stays a figure **you** stated, which
+is what the Progress tab's net worth promises it is.
+
+A home can carry a **street address**, and it does exactly one thing: opens that
+link on your own house instead of on the site's search page. It is kept in this
+browser alone — never synced, never in a backup, never in a share link — and the
+box is a password box, so your password manager can offer to remember it and
+carry it to your other devices on a path the app never touches. That is the same
+arrangement the [price-lookup key](#prices) uses, and for the same reason.
+
 ### What You Owe
 
 Every debt the household carries, secured on something or not.

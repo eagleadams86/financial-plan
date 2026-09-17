@@ -7281,6 +7281,114 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   twelve proven red against `main`. The existing HELP pin gained a third call
   site, `data-help="(\w+)"`, for a dot written literally in static markup.
 
+## Looking a property's value up (2026-09-17)
+
+Charles: *"are there any free house and/or car value lookups that we can add to
+money map?"* The answer, checked rather than assumed, is **no** — and the
+feature is what is left when you accept that.
+
+- **THERE IS NO FREE VALUATION API THIS PAGE CAN USE, and the reasons are worth
+  keeping so nobody re-researches them.** Zillow retired its public API in
+  September 2021; the replacement (Bridge Interactive) is gated behind MLS
+  affiliation and **does not expose the Zestimate at all**, so even an approved
+  partner cannot get the number. Redfin publishes none. Edmunds closed its in
+  2018. KBB, Black Book and J.D. Power are partner agreements. RentCast (50 calls
+  a month), Auto.dev (1,000) and Vincario do have free tiers and every one of
+  them wants a **bearer token** — which a single-file page on a public origin
+  cannot hold, the same rule that keeps `PRICE_KEY` out of state and out of this
+  repo. NHTSA's vPIC is genuinely free and unkeyed and returns **specs, not
+  values**, so it can confirm what a car IS and never what it is worth.
+- **So the feature is a link OUT and a figure back.** No request, no credential,
+  nothing added to the CSP, and — the part that matters most — the value on the
+  row stays one the reader **stated**. That is what keeps `netWorthParts`'
+  estimate rule true: the Property tile deliberately wears no estimate mark
+  because "no month makes an estimate of them, and marking them would say the
+  reader had guessed at figures they typed". An automated value would have
+  inverted that sentence exactly.
+- **`PROPERTY_LOOKUPS` sits beside `PROPERTY_KINDS`** and there is a test that
+  the two name the same kinds — a kind with no entry would draw nothing and say
+  nothing about why. `url(addr)` hands back the tool's own LANDING page when
+  there is nothing to put in it: the always-safe target, and the one that cannot
+  rot when a site changes its deep-link shape. `other` lists nothing.
+- **Zillow's address URLs are a HYPHEN SLUG, not a query string.** The commas
+  come out and the spaces become hyphens before encoding; percent escapes in
+  that position are a different shape from the one the site writes for itself.
+  Redfin takes the address as an encoded `?address=` instead. Both shapes are
+  pinned.
+- **Two of the five URLs could not be loaded from here, and that is written into
+  the table's comment rather than glossed.** Loaded in the pane 2026-09-17: KBB,
+  Redfin and J.D. Power answer. **Zillow and Edmunds answer an automated browser
+  with a bot wall** ("press and hold to confirm you are a human"), which was not
+  bypassed. That is not evidence their URLs are wrong — a real click is a
+  different condition — but it is why each is SECOND in its list, behind one
+  that was verified, and why both want a real-Safari pass.
+- **`opens` is a sibling of `action` in `buildFields`, not a use of it, and the
+  difference is the ELEMENT.** `action` is a `<button>` because it works on the
+  form; a control that NAVIGATES has to be an `<a>`, or it is a button lying
+  about what it does to everything that reads the page by role — which this
+  app's accessibility passes would find. `rel="noreferrer"` as well as
+  `noopener`: the destination is somebody else's site and which page sent the
+  reader is none of its business. The links are built by `setOpensLinks` from
+  the section's own `link`, never in `buildFields`, because HOW MANY there are
+  depends on the kind.
+- **THE ADDRESS IS NOT ON THE ROW, and `coerceShape` is why that had to be
+  deliberate.** It does not strip unknown keys off a property, so a field put
+  there would ride into Firestore, every backup and every share link with
+  nothing refusing it. It lives in `fin-propaddr`, its own localStorage key, on
+  the `PRICE_KEY` reasoning. The property `save` already rebuilt its row from an
+  explicit literal, so the guard is structural rather than a check — and there
+  is a test that the literal never grows an `addr`, and another that types one
+  through the real dialog and then greps the whole state for it.
+- **It is a `password` FIELD, and that is what makes local-only cost nothing.**
+  Charles asked for it directly: *"treat the address field like a password,
+  similar to the twelve data key, so it can be saved to icloud keychain."*
+  Masked and autocompleted, a manager offers to keep it and the keychain carries
+  it between devices end to end encrypted, on a path this app never touches.
+  Everything that type needs already existed.
+  - **`account` MUST BE PER PROPERTY.** A keychain entry is keyed by origin plus
+    username, so one shared username means the second house's address
+    **overwrites the first's**. Built from the property's **id**, not its name,
+    because a rename must not orphan what the manager already holds. `f.account`
+    was already a per-field override, so this needed no new machinery.
+  - **Offered only on a property that EXISTS** — the `until` rule in the budget
+    row, for a sharper reason than tidiness: the entry is filed under the id,
+    and a property being created has not got one, so an entry made there would
+    be filed against nothing.
+  - **The save prompt does fire in an auto-saving window.** `rowSaveBtn` is
+    `type="submit"` and is only RELABELLED to "Done", so pressing it still runs
+    `rowForm.onsubmit`, which is the event a manager watches.
+  - **The keychain entry is filed against the SHARED ORIGIN**, so the saved
+    address is offered on Sprint Velocity and Flow Metrics too. That is the
+    exposure the Twelve Data key already accepts and autofill needs a deliberate
+    press — but an address is more personal than a read-only quota-limited key,
+    so it is recorded as a decision taken knowingly rather than one inherited.
+- **KEYS ARE VALIDATED AGAINST `ID_OK`, NEVER RE-SLUGGED, and the first version
+  of this plan had it wrong.** The instinct is to run the map's keys through
+  `slugJs` so they follow a repaired id. But `mintIds` leaves a property id that
+  passes `ID_OK` **completely alone** and only mints one that fails it — and
+  `ID_OK` admits capitals and underscores where `slugJs` does not. `Home` slugs
+  to `home` and `My_House` to `my-house`, so re-slugging would have silently
+  detached the address from every property whose id carries either. Matching
+  `mintIds` means keeping an `ID_OK` key as it is and dropping the rest; a
+  reminted id (only ever a malformed one) orphans its address, which is the safe
+  direction — an address you retype, never one pointing at another house. Pinned
+  by a test that reads `Home` and `My_House` back unchanged.
+- **Written only when the question was ASKED.** `showIf` HIDES the box on a kind
+  that is not a home, it does not remove it, so the address is still in the
+  form — and a dialog that never asked must not answer. Without the
+  `row.kind === 'home'` guard, turning a home into a vehicle would file its
+  address against the vehicle and turning it back would find it gone.
+- **`fin-propaddr` is in the delete-all list AND named in what that dialog
+  says.** "Every holding and table in this browser is gone" cannot leave an
+  address sitting on a shared origin, and the sentence now says the key and the
+  address are both going.
+- **The suite's own trap, hit while writing it:** the harness frame shares
+  localhost's localStorage, so a browser that has been used to try this by hand
+  already has an address saved against that property. The first version of the
+  typing test compared the links against what the box OPENED holding and went
+  red for a reason that had nothing to do with the code. It sets the box and
+  reads the links, twice, instead — the ambient-state rule, learned again.
+
 ## Fixes From the 2026-09-15 Review
 
 A full review of everything since the 2026-09-07 audit (the calculator, trip

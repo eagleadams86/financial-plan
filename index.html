@@ -1132,6 +1132,17 @@ legend { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04
   gap: 6px; align-items: flex-start; }
 .grid-fields > div > .field-row > input { width: 100%; height: 40px; }
 .grid-fields > div > .field-row > .btn { flex: none; white-space: nowrap; }
+/* A field that LINKS OUT (`opens`) keeps its links in a row of their own under
+   the box, so a home's two read as a pair rather than as a stack — `.field-row`
+   is a flex COLUMN, and without this box each link would take a line to itself.
+   An <a> is not a <button>: the underline and the inline display have to come
+   off before `.btn` makes it match the controls beside it, and inline-flex is
+   what lets `.btn.small`'s min-height CENTRE the label rather than merely make
+   the box taller. */
+.grid-fields > div > .field-row > .opensbox {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.grid-fields > div > .field-row > .opensbox > .btn {
+  display: inline-flex; align-items: center; text-decoration: none; flex: none; }
 /* ── A field that holds a LIST of sub-rows (`type: 'parts'`) ────────────────
    One line of a trip is often several purchases — three excursions booked
    separately, a flight and its seat fee — and the Budget already had the
@@ -3726,6 +3737,56 @@ const PROPERTY_KINDS = [
   ['other', 'Other'],
 ];
 const PROPERTY_KIND_LABEL = Object.fromEntries(PROPERTY_KINDS);
+
+/* WHERE TO GO AND LOOK A VALUE UP. There is no free valuation API this app can
+   use, and that was checked rather than assumed: Zillow retired its public API
+   in 2021 and its replacement does not expose the Zestimate at all, Redfin
+   publishes none, Edmunds closed its in 2018, and KBB, Black Book and J.D.
+   Power answer only to a partner agreement. The free tiers that do exist
+   (RentCast, Auto.dev, Vincario) all want a bearer token — and a key shipped in
+   a single-file page on a public origin is a key anybody can read, which is the
+   same rule that keeps PRICE_KEY out of state and out of this repo.
+
+   What IS free is each tool's own web page. So the feature is a link out and a
+   figure back: no request, no credential, nothing added to the CSP, and the
+   value stays one the reader STATED rather than one the app guessed — which is
+   what keeps the Property tile's estimate rule (see netWorthParts) true.
+
+   `url(addr)` hands back the tool's own LANDING page when there is nothing to
+   put in it. That is the always-safe target and the one that cannot rot when a
+   site changes its deep-link shape; an address only ever UPGRADES the link.
+   `other` lists nothing — a kind with no sensible tool says nothing rather than
+   guessing at one.
+
+   Loaded in the browser pane 2026-09-17: KBB, Redfin and J.D. Power answer.
+   Zillow and Edmunds answer an automated browser with a bot wall instead, so
+   their URLs are the published shapes rather than ones that session could
+   confirm — which is why each is SECOND in its list, behind one that was. */
+const PROPERTY_LOOKUPS = {
+  home: [
+    { label: 'Redfin', url: (a) => a
+      ? `https://www.redfin.com/what-is-my-home-worth?address=${encodeURIComponent(a)}`
+      : 'https://www.redfin.com/what-is-my-home-worth' },
+    /* Zillow's own address URLs are a HYPHEN SLUG, not a query string —
+       `.../homes/1600-Pennsylvania-Ave-NW-Washington-DC-20500_rb/` — so the
+       commas come out and the spaces become hyphens before encoding. Percent
+       escapes in that position are a different shape from the one the site
+       writes for itself, and this is the link that could not be loaded from
+       here to find out which it forgives. */
+    { label: 'Zillow', url: (a) => a
+      ? `https://www.zillow.com/homes/${encodeURIComponent(
+          a.replace(/,/g, '').replace(/\s+/g, '-'))}_rb/`
+      : 'https://www.zillow.com/how-much-is-my-home-worth/' },
+  ],
+  vehicle: [
+    { label: 'Kelley Blue Book', url: () => 'https://www.kbb.com/whats-my-car-worth/' },
+    { label: 'Edmunds', url: () => 'https://www.edmunds.com/appraisal/' },
+  ],
+  boat: [
+    { label: 'J.D. Power', url: () => 'https://www.jdpower.com/boats' },
+  ],
+  other: [],
+};
 
 /* ── What the household OWES ────────────────────────────────────────────────
    The one figure in this app that used to go stale on its own. A debt was a
@@ -22039,6 +22100,31 @@ function setPartsValue(f, host, v) {
   partsTally(host, f);
 }
 
+/* Fill a field's `opens` box with one link per place the reader can go and look
+   the figure up. REBUILT rather than patched, because the list itself changes
+   with what is in the form — a home offers two, a boat one, "other" none — so
+   there is nothing stable to patch. Nothing in the box can hold the focus at
+   the moment this runs: it is driven by `link`, which fires on typing, and a
+   link is not something you can type into.
+   `rel="noreferrer"` as well as `noopener` — the destination is somebody else's
+   site, and which page sent the reader is none of its business. The label goes
+   in through textContent, so a table that ever grows a name with an ampersand
+   in it cannot become markup. */
+function setOpensLinks(key, list) {
+  const box = F(`rf-opens-${key}`);
+  if (!box) return;
+  box.textContent = '';
+  for (const it of (list || [])) {
+    const a = document.createElement('a');
+    a.className = 'btn small';
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.href = it.href;
+    a.textContent = it.label;
+    box.appendChild(a);
+  }
+}
+
 function buildFields(fields, values, link) {
   const host = F('rowFields');
   host.innerHTML = '';
@@ -22327,6 +22413,27 @@ function buildFields(fields, values, link) {
         if (rowCtx && rowCtx.auto && rowMoved(rowCtx)) commitRow(rowCtx, false);
       };
       row.appendChild(btn);
+      cell.appendChild(row);
+    } else if (f.opens) {
+      /* A field that LINKS OUT — the value lookup beside a property's figure.
+         It is a SIBLING of `action`, not a use of it, and the difference is the
+         element rather than the styling: `action` is a <button> because it
+         works on the form, and a control that NAVIGATES has to be an <a>, or it
+         is a button lying about what it does to everything that reads this page
+         by role.
+         The links themselves are filled in by `setOpensLinks`, from the
+         section's own `link` — which runs on open and on every keystroke, so
+         they follow the kind and the address as they are TYPED rather than as
+         they were when the window opened. They cannot be built here because
+         HOW MANY there are depends on the kind (two for a home, one for a
+         boat, none at all for "other"). */
+      const row = document.createElement('div');
+      row.className = 'field-row';
+      row.appendChild(input);
+      const box = document.createElement('span');
+      box.className = 'opensbox';
+      box.id = `rf-opens-${f.key}`;
+      row.appendChild(box);
       cell.appendChild(row);
     } else if (f.type === 'password') {
       /* Masking a key you cannot read back is how a typo becomes a rejected
@@ -23120,6 +23227,82 @@ const currencyField = (hint) => {
     options: [[own, `${own} — this plan's own`], ...codes.map(c => [c, c])],
     hint: hint || 'Converted into ' + own + ' at the rate on the Household tab.' }];
 };
+
+/* A HOME'S ADDRESS, ON THIS DEVICE AND NOWHERE ELSE. The lookup needs one thing
+   the plan does not hold, and it is more personal than any figure in the file —
+   so it lives here rather than on the property row, for exactly PRICE_KEY's
+   reason: `state` syncs to Firestore, rides in every backup and is the baseline
+   a share link is built from, and an address belongs in none of the three.
+   `coerceShape` does not strip unknown keys off a property row, so a field put
+   there would reach all three without anything refusing it.
+
+   What carries it between devices instead is the BROWSER: the editor's box is a
+   `password` field, so a password manager offers to keep it and iCloud Keychain
+   syncs it end to end encrypted, on a path this app never touches. This map is
+   then this device's copy of what the manager filled in — the same division of
+   labour the price key has had since 2026-08-26. */
+const PROP_ADDR_KEY = 'fin-propaddr';
+const PROP_ADDR_MAX = 200;              // the tax table's `source` cap
+const propAddrInHarness = (() => {
+  try { return !!(window.frameElement && window.frameElement.hasAttribute('data-fin-tests')); }
+  catch (e) { return false; }
+})();
+
+/* The boundary. A value must be a real string and is trimmed and capped; a KEY
+   must satisfy ID_OK and is otherwise dropped.
+
+   KEYS ARE NOT RE-SLUGGED, and that is the whole subtlety. `mintIds` leaves a
+   property id that passes ID_OK completely alone and only mints one that fails
+   it — and ID_OK admits capitals and underscores where `slugJs` does not, so
+   `Home` would slug to `home` and `My_House` to `my-house`. Re-slugging the map
+   to "follow" a repair that never happens would therefore detach the address
+   from every property whose id carries either, silently. Matching mintIds means
+   keeping an ID_OK key as it is. A reminted id — only ever a malformed one —
+   orphans its address instead, which is the safe direction: an address you
+   retype, never one pointing at somebody else's house. */
+function coercePropAddrs(raw) {
+  const out = {};
+  const src = (raw && typeof raw === 'object' && raw.byId && typeof raw.byId === 'object')
+    ? raw.byId : {};
+  for (const [k, v] of Object.entries(src)) {
+    if (typeof v !== 'string' || !ID_OK.test(k)) continue;
+    const addr = v.trim().slice(0, PROP_ADDR_MAX);
+    if (addr) out[k] = addr;
+  }
+  return out;
+}
+
+function loadPropAddrs() {
+  try { return coercePropAddrs(JSON.parse(localStorage.getItem(PROP_ADDR_KEY) || 'null')); }
+  catch (e) { return {}; }            // private mode, or a hand-edited value
+}
+
+function savePropAddrs(map) {
+  if (propAddrInHarness) return;      // the suite must not write a real address
+  try {
+    const byId = coercePropAddrs({ byId: map });
+    if (Object.keys(byId).length) localStorage.setItem(PROP_ADDR_KEY, JSON.stringify({ v: 1, byId }));
+    else localStorage.removeItem(PROP_ADDR_KEY);
+  } catch (e) {}
+}
+
+/* One reader and one writer, so nothing else has to know the shape. An empty
+   address REMOVES the entry rather than storing '' — absent and empty are one
+   claim here, and the smaller footprint is the better one for this field. */
+function propAddrOf(id) { return loadPropAddrs()[id] || ''; }
+function setPropAddr(id, addr) {
+  if (!ID_OK.test(String(id || ''))) return;
+  const map = loadPropAddrs();
+  const clean = String(addr || '').trim().slice(0, PROP_ADDR_MAX);
+  if (clean) map[id] = clean; else delete map[id];
+  savePropAddrs(map);
+}
+
+/* The keychain entry is filed under origin + username, so two properties
+   sharing a username would have the second address overwrite the first. It is
+   built from the ID rather than the name because a rename must not orphan what
+   the manager already holds. */
+function propAddrAccount(id) { return `Money Map property ${id}`; }
 
 const EDITORS = {
 
@@ -24276,7 +24459,9 @@ const EDITORS = {
       + 'own now, in What You Owe below, so it can carry a rate and a payment and work '
       + 'out its own payoff date. Equity — value minus that debt — is what the net worth '
       + 'on the Progress tab counts.',
-    fields: () => [
+    fields: (ds, isNew) => {
+      const row = (!isNew && ds && ds.idx !== undefined) ? state.side.property[+ds.idx] : null;
+      return [
       /* NOT `wide`: a wide field takes a row to itself, which left Name alone
          above and Kind stranded beside an empty half. The four questions pair
          up two by two — what it is, then what it is worth. */
@@ -24284,12 +24469,57 @@ const EDITORS = {
         hint: 'Whatever you call it — "The house", "Jeep", "Sailboat".' },
       { key: 'kind', label: 'Kind', type: 'select',
         options: PROPERTY_KINDS.map(([v, label]) => [v, label]) },
-      { key: 'value', label: 'What it would sell for', type: 'money' },
+      /* `opens` puts the lookup links under this box — the one field they are
+         about. Which links, and whether there are any at all, follows the kind
+         and is filled in by `link` below. */
+      { key: 'value', label: 'What it would sell for', type: 'money', opens: true },
       ...currencyField('The currency it is worth that much IN — a flat abroad is priced '
         + 'where it stands, not where you bank.'),
+      /* THE ADDRESS, and it is offered only on a property that EXISTS — the
+         `until` rule in the budget row, for a sharper reason than tidiness: the
+         password manager files this under the property's ID, and a property
+         being created has not got one yet, so a keychain entry made here would
+         be filed against nothing. Add the property, then tell it where it is.
+
+         `password`, which is the whole reason this can be kept off the plan
+         without costing anything on a second device: masked and autocompleted,
+         a manager offers to save it and iCloud Keychain carries it end to end
+         encrypted, on a path this app never touches — exactly the arrangement
+         the Twelve Data key has. `wide` because the hint has a lot to say and
+         because a password cell is a row taller than its neighbours (the Show
+         button), so it wants a line of its own rather than a half-row that
+         leaves the box beside it short. */
+      ...((row && row.id) ? [{
+        key: 'addr', label: 'Address', type: 'password', wide: true,
+        account: propAddrAccount(row.id),
+        showIf: (v) => v.kind === 'home',
+        hint: 'Kept in this browser and nowhere else — never synced, never in a backup, '
+            + 'never in a share link. Save it to your password manager and that will '
+            + 'carry it to your other devices instead. It does one thing: opens the '
+            + 'lookup on your own house rather than on its search page.',
+      }] : []),
       noteField,
-    ],
-    get: (ds) => ({ ...state.side.property[+ds.idx] }),
+      ];
+    },
+    /* The address is merged in from its own store rather than read off the row,
+       because it is not ON the row — see PROP_ADDR_KEY. A missing row spreads
+       to `{}` rather than throwing, which is what this `get` has always done
+       and what `reprimeRow` reads as "the record is still there". */
+    get: (ds) => {
+      const row = state.side.property[+ds.idx];
+      return { ...row, addr: (row && row.id) ? propAddrOf(row.id) : '' };
+    },
+    /* One box filling in another: the lookup links follow the kind and the
+       address AS THEY ARE TYPED. It reads the form, never the state — nothing
+       is committed until the field is finished — which is what lets the links
+       be right for a kind the reader has picked but not yet saved. */
+    link() {
+      const kindBox = F('rf-kind'), addrBox = F('rf-addr');
+      const kind = kindBox ? kindBox.value : '';
+      const addr = addrBox ? String(addrBox.value || '').trim() : '';
+      setOpensLinks('value', (PROPERTY_LOOKUPS[kind] || [])
+        .map((l) => ({ label: l.label, href: l.url(addr) })));
+    },
     blank: () => ({ kind: 'home' }),
     save(ds, v) {
       if (!v.name) return;
@@ -24303,8 +24533,20 @@ const EDITORS = {
         note: v.note || undefined,
       };
       if (ds.idx !== undefined) {
-        Object.assign(state.side.property[+ds.idx], row);
-        if (row.cur === undefined) delete state.side.property[+ds.idx].cur;
+        const cur = state.side.property[+ds.idx];
+        Object.assign(cur, row);
+        if (row.cur === undefined) delete cur.cur;
+        /* The address goes to its OWN store, never onto the row: `row` above is
+           an explicit literal, so nothing can ride in by accident — which
+           matters, because coerceShape does not strip unknown keys off a
+           property and a field landing there would reach Firestore, every
+           backup and every share link.
+           Written only when the question was ASKED. `showIf` HIDES the box on a
+           kind that is not a home, it does not remove it, so the address is
+           still in the form — and a dialog that never asked must not answer:
+           without this, turning a home into a vehicle would file its address
+           against the vehicle, and turning it back would find it gone. */
+        if (cur.id && row.kind === 'home') setPropAddr(cur.id, v.addr);
       }
       /* A new row is minted an id here rather than left to coerceShape,
          because a debt secured on it needs something to point at the moment
@@ -24322,6 +24564,11 @@ const EDITORS = {
          doing it here is what makes the card read right immediately. */
       if (gone) for (const l of state.side.liabilities || [])
         if (l.securedOn === gone.id) delete l.securedOn;
+      /* The address goes with it. Nothing else would ever clear it — the map is
+         keyed by an id no row has any more — and an address for a house that is
+         not in the plan is the one thing in this store with no reason to exist.
+         The keychain entry is the reader's own and is left to them. */
+      if (gone && gone.id) setPropAddr(gone.id, '');
     },
   },
 
@@ -28903,7 +29150,8 @@ F('wipeBtn').onclick = () => {
   const n = (v, w) => `${v} ${w}${v === 1 ? '' : 's'}`;
   F('clearBody').textContent =
     `This deletes ${n(nYears, 'year')} of budgets, ${n(nGoals, 'goal')}, and every trip, `
-    + `holding and table in this browser — the price-lookup key too, if you added one. `
+    + `holding and table in this browser — the price-lookup key and any address you `
+    + `saved for a lookup too. `
     + `Your theme is kept. There is no undo — a downloaded `
     + `backup is the only way to get any of it back.`;
   /* Said plainly, because "clear this browser" and "clear every device I own"
@@ -28937,6 +29185,10 @@ F('clearConfirm').onclick = () => {
        must mean an emptied tape. CALC_KEY is declared further down the file
        and read here at click time, never at parse time. */
     localStorage.removeItem(CALC_KEY);
+    /* Every home's address. The same promise the price key is cleared under:
+       "every holding and table in this browser is gone" cannot leave an address
+       sitting on a shared origin for any page on it to read. */
+    localStorage.removeItem(PROP_ADDR_KEY);
   } catch (e) {}
   calc = coerceCalc(null);
   renderTape();
@@ -31357,6 +31609,9 @@ applyPin(savedPin());
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDollar,
   tripPart, sumPart,
+  /* Looking a property's value up: where each kind sends you, and the boundary
+     for the one thing that store holds. */
+  PROPERTY_LOOKUPS, PROPERTY_KINDS, coercePropAddrs, propAddrAccount, PROP_ADDR_MAX,
   parseMoney, raiseFor, sinceLastYear,
   /* The calculator's arithmetic: the parser, the selection reader, the tape's
      stats, the figure under a click, and the boundary for fin-calc. */
