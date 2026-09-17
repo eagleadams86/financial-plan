@@ -7623,3 +7623,8 @@ the foot of `tests.html`.
   was "Estimated from Jan 25 — …" for every untyped month, while the cell's
   hover read `PAYCHECK_SOURCE_TIP` — "From your pay schedule" or "assumed".
   The dialog reads `C[y].paycheckSource[m]` now and has a sentence for each.
+- **The Share window scrolled sideways at 320px.** `select#shareYears`'s
+  intrinsic width (its longest option) is wider than the fieldset's content box,
+  and the UA's `min-inline-size: min-content` on `fieldset` let it push the
+  panel out. `fieldset, .formpanel { min-inline-size: 0 }` plus `#shareYears
+  { max-width: 100% }` — the rule Sprint Velocity took on 2026-09-15.
