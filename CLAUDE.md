@@ -7611,3 +7611,11 @@ the foot of `tests.html`.
   browser's own focus return aimed at a cell the render had destroyed. Revert
   and Clear closed first and were fine; Save now does the same
   (`cellDialog.close()` first — the form's own close is then a no-op).
+- **"Looking up Aug 2026's closes…" for ever.** A quiet quote refresh that
+  failed (a 500, a rejected key) leaves `priceCoolOffUntil` set, and
+  `refreshMonthCloses` returned into it with nothing tried and nothing
+  scheduled — `closesWanted` still wanted the tickers, `closeFoot` read that
+  as pending, and nothing was ever going to ask. `retryClosesAfterCoolOff()`
+  (one re-armed timer; renders only while the settled view is up) is armed on
+  that exit as well as on the throttled one. A rejected key then resolves the
+  way it always did inside a close run: tried, "at today's prices".

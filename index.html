@@ -21831,7 +21831,12 @@ async function refreshMonthCloses(month) {
   const want = closesWanted(state, month, todayISO(), { key, shared: viewOnly });
   if (!want.length) return;
   if (refreshingPrices && Date.now() - priceRunStartedAt < PRICE_RUN_STALE_MS) return;
-  if (Date.now() < priceCoolOffUntil) return;
+  /* SKIPPED IS NOT ANSWERED (2026-09-17). A quiet quote refresh that failed a
+     moment ago leaves a cool-off behind, and this used to return into it with
+     nothing tried and nothing scheduled — so the tile said "looking up…" for
+     ever, since `closesWanted` still wanted the tickers and nothing was ever
+     going to ask. The retry the throttled branch below already had. */
+  if (Date.now() < priceCoolOffUntil) { retryClosesAfterCoolOff(); return; }
   refreshingPrices = true;
   priceRunStartedAt = Date.now();
   const token = ++priceRunToken;
@@ -21866,14 +21871,24 @@ async function refreshMonthCloses(month) {
        tickers hits on every first visit — so the rest are asked for again once
        the minute is up, with nobody having to touch anything. The other three
        will not clear in a minute, and are left for the next page load. */
-    if (run.throttled) setTimeout(() => {
-      if (!viewOnly && (state.ui || {}).worthAsOf === 'settled') render();
-    }, PRICE_COOL_OFF_MS + 1000);
+    if (run.throttled) retryClosesAfterCoolOff();
     else for (const t of want) if (!found[`${t}|${month}`]) closeAutoTried.add(`${t}|${month}`);
   }
   saveCloses(found);
   render();
 }
+/* One timer, re-armed rather than stacked: a render of the settled view once
+   the cool-off has passed, which asks `refreshMonthCloses` again. Only that
+   view — a reader who has moved on is not dragged back to Progress. */
+let closeRetryTimer = 0;
+function retryClosesAfterCoolOff() {
+  clearTimeout(closeRetryTimer);
+  closeRetryTimer = setTimeout(() => {
+    closeRetryTimer = 0;
+    if (!viewOnly && (state.ui || {}).worthAsOf === 'settled') render();
+  }, Math.max(0, priceCoolOffUntil - Date.now()) + 1000);
+}
+
 /* Whatever a run brought back is banked, whether or not the run is still the
    current one — a close is a fact about a day, and `onAnswer` has already put
    the ticker in the tried set, so a result dropped for losing the token was
