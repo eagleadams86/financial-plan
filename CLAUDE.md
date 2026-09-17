@@ -7548,3 +7548,10 @@ the foot of `tests.html`.
   while a separate 2031 year filled in. Both branches read resolved cells now
   (`ctx.resolved` in-grid — last year's months are all behind `m`, so they are
   already there).
+- **The waiting line took the engine's estimate for a recorded figure.**
+  `outstandingDues` read `recent` — the stand-in for a period with nothing
+  recorded — from the back of the month list with no kind check and no date
+  filter, so with February missing and April holding an `auto`, "what it last
+  came to" was next month's projection; and an unpaid current month holding an
+  `auto` was summed with `estimated: false`, the line's plain figure a guess.
+  `recent` now skips `auto` cells, and an `auto` in the sum sets `estimated`.

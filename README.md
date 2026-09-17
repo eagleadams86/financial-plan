@@ -406,7 +406,11 @@ whole point of having said you're still waiting.
 When the bill does finally arrive, **the waiting line opens the oldest period
 still unpaid** — it names that month first, since it is usually not the month
 you are reading — so the figure is recorded where the money should have left.
-Fill it in and the line moves on to the period behind it. A bill whose due date
+Fill it in and the line moves on to the period behind it. The line's figure
+is the periods' own amounts where they have one; a period with nothing
+recorded borrows **the last figure you actually recorded**, never one of the
+app's own estimates, and a total that leans on any estimate says so in italics.
+A bill whose due date
 has already gone by opens as **actual — it happened**, even in a month you have
 not marked entered yet, so recording it is what pays it.
 
