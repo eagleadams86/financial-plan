@@ -21810,10 +21810,18 @@ const closeAutoTried = new Set();   // "TICKER|YYYY-MM" asked this page load
    "looking up…" rather than calling a today's price a month-end one while the
    answer is on its way. Empty whenever no lookup would actually run. Pure over
    its arguments except for the page-load tried set. */
-function closesWanted(st, month, today, { key, shared } = {}) {
+function closesWanted(st, month, today, { key, shared, now } = {}) {
   if (shared || !key || !month || today <= monthEndISO(month)) return [];
   const have = st.closes || {};
-  return worthTickers(st).filter(t => !have[`${t}|${month}`] && !closeAutoTried.has(`${t}|${month}`));
+  const at = typeof now === 'number' ? now : Date.now();
+  /* A PRICE is for ever — a close never changes. A "no close" is not: it is
+     whatever the supplier said that day (a hiccup, a fund it did not cover yet,
+     a ticker since corrected), and remembered without a horizon it priced that
+     month at today's price on every device permanently (2026-09-17). It gets
+     the quote side's own day, `NO_QUOTE_TTL_MS`; the page-load tried set still
+     stops a loop within the day. */
+  const settled = (k) => have[k] && (!have[k].noClose || at - (have[k].ts || 0) < NO_QUOTE_TTL_MS);
+  return worthTickers(st).filter(t => !settled(`${t}|${month}`) && !closeAutoTried.has(`${t}|${month}`));
 }
 
 async function refreshMonthCloses(month) {

@@ -7582,3 +7582,10 @@ the foot of `tests.html`.
   a ticker it would never use. `worthTickers(st)` is the list now, over the
   state handed in rather than the global, so the function is pure over its
   arguments and the suite can build the plan it tests.
+- **A "no close" was remembered for ever, and synced.** Any determinate no (a
+  404, a 200 with `values: []`) became `{ noClose: true }` in `state.closes`,
+  which `coerceCloses` keeps and `closesWanted` never re-asked — one hiccup and
+  that month was priced at today's price on every device permanently, the foot
+  reading "at today's prices" with no hint of a failed lookup. The quote side
+  had always retried after `NO_QUOTE_TTL_MS` (a day); `closesWanted` now treats
+  a `noClose` older than that as absent (an optional `now` keeps it pure).
