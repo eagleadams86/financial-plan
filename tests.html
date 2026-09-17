@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1098;
+const EXPECTED = 1109;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -4659,7 +4659,9 @@ t('the third-payday month is still there', () => {
      divide by twelve. */
   const d = H.migrate(H.coerceShape(H.sampleState()));
   const y = String(new Date().getFullYear());
-  const counts = Object.values(d.years[y].paychecks || {});
+  /* RESOLVED, since 2026-09-17: the sample is paid on a pay schedule, so the
+     threes come from the calendar rather than being typed. */
+  const counts = Object.values(H.computeAll(d, `${y}-09-15`)[y].paychecks);
   ok(counts.some(n => n === 3), 'one month must hold three checks');
 });
 t('the pinned balance and the account earnings survive', () => {
@@ -15569,6 +15571,142 @@ t('an inherited assumption is still an assumption, however many years along', ()
   eq(after.counts['2031-01'], 3);
   eq(after.source['2031-01'], 'lastyear', 'a figure somebody typed still reads as one a '
     + 'year later');
+});
+/* ── The pay schedule (2026-09-17) ───────────────────────────────────────────
+   Paid every week or every other week, a month's paycheck count is the
+   calendar, not a guess. Charlie is paid every other Friday: two checks most
+   months, three in two of them, and until this he typed the threes by hand
+   every year. The schedule is a FOURTH answer, between a typed count (which
+   still wins — a holiday moves a payday) and last year's pattern. */
+const BIWEEKLY_2026 = { step: 14, anchor: '2026-01-02' };   // a Friday
+t('every other Friday gives 26 paydays in 2026, three in exactly two months', () => {
+  const months = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, '0')}`);
+  const counts = months.map(m => H.paydaysInMonth(m, BIWEEKLY_2026));
+  eq(counts.reduce((a, b) => a + b, 0), 26);
+  eq(months.filter((m, i) => counts[i] === 3), ['2026-01', '2026-07']);
+  ok(counts.every(n => n === 2 || n === 3), 'never fewer than two, never more than three');
+});
+t('weekly gives four or five a month, and 53 in a year that starts on payday', () => {
+  const W = { step: 7, anchor: '2026-01-02' };
+  const year = (y) => Array.from({ length: 12 }, (_, i) =>
+    H.paydaysInMonth(`${y}-${String(i + 1).padStart(2, '0')}`, W));
+  eq(year(2026).reduce((a, b) => a + b, 0), 52);
+  eq(year(2027).reduce((a, b) => a + b, 0), 53, '1 Jan 2027 is a Friday');
+  ok(year(2027).every(n => n === 4 || n === 5));
+});
+t('an anchor years away, or on the first or last day of a month, counts the same', () => {
+  eq(H.paydaysInMonth('2026-07', { step: 14, anchor: '2019-01-11' }), 3,
+    'seven years before — same fortnight grid as 2 Jan 2026');
+  eq(H.paydaysInMonth('2026-07', { step: 14, anchor: '2033-12-23' }), 3, 'and years after');
+  eq(H.paydaysInMonth('2026-05', { step: 14, anchor: '2026-05-01' }), 3, 'the 1st counts');
+  eq(H.paydaysInMonth('2026-01', { step: 7, anchor: '2026-01-31' }), 5, 'the 31st counts');
+  eq(H.paydaysInMonth('2026-02', { step: 7, anchor: '2026-01-31' }), 4, 'and the 28th');
+});
+t('a typed count beats the schedule, and the schedule beats last year', () => {
+  const yr = { paychecks: { '2026-01': 3.5 } };
+  const prior = { paychecks: { '2025-02': 3, '2025-07': 2 }, paycheckSource: {} };
+  const out = H.resolvePaychecks(yr, ['2026-01', '2026-02', '2026-07'], prior, BIWEEKLY_2026);
+  eq(out.counts['2026-01'], 3.5); eq(out.source['2026-01'], 'entered');
+  eq(out.counts['2026-02'], 2, 'not last February’s 3'); eq(out.source['2026-02'], 'schedule');
+  eq(out.counts['2026-07'], 3); eq(out.source['2026-07'], 'schedule');
+  ok(H.PAYCHECK_SOURCE_TIP.schedule, 'and the hover has words for it');
+});
+t('a schedule counts only while the per-check switch is on, and only when whole', () => {
+  const st = (settings) => ({ settings });
+  eq(H.payScheduleOf(st({ paycheckRule: true, payCadence: 'biweekly', payAnchor: '2026-01-02' })),
+    BIWEEKLY_2026);
+  eq(H.payScheduleOf(st({ paycheckRule: false, payCadence: 'biweekly', payAnchor: '2026-01-02' })),
+    null, 'a hidden knob moves no figures');
+  eq(H.payScheduleOf(st({ paycheckRule: true, payCadence: 'biweekly' })), null, 'no date');
+  eq(H.payScheduleOf(st({ paycheckRule: true, payAnchor: '2026-01-02' })), null, 'no cadence');
+  eq(H.payScheduleOf(st({ paycheckRule: true, payCadence: 'monthly', payAnchor: '2026-01-02' })),
+    null);
+});
+t('the boundary deletes an unreadable cadence or payday', () => {
+  for (const [cad, anc] of [['fortnightly', '2026-02-30'], [14, 20260102],
+                            ['toString', '2026-1-2'], [{}, '<img src=x>']]) {
+    const d = H.coerceShape({ settings: { payCadence: cad, payAnchor: anc }, years: {} });
+    ok(!('payCadence' in d.settings), `cadence ${String(cad)} deleted, never undefined`);
+    ok(!('payAnchor' in d.settings), `payday ${String(anc)} deleted`);
+  }
+  const d = H.coerceShape({ settings: { payCadence: 'weekly', payAnchor: '2028-02-29' }, years: {} });
+  eq([d.settings.payCadence, d.settings.payAnchor], ['weekly', '2028-02-29'], 'a leap day is real');
+});
+t('turning a schedule on retires the typed counts it agrees with, and keeps the rest', () => {
+  const s = { settings: { paycheckRule: true, payCadence: 'biweekly', payAnchor: '2026-01-02' },
+    years: {
+      '2026': { kind: 'grid', paychecks: { '2026-01': 3, '2026-02': 2, '2026-03': 3.5,
+        '2026-07': 2 } },
+      '2025': { kind: 'summary' } } };
+  eq(H.clearScheduleMatches(s), { cleared: 2, kept: 2 });
+  eq(s.years['2026'].paychecks, { '2026-03': 3.5, '2026-07': 2 },
+    'the half check and a moved payday are somebody saying so');
+  s.settings.paycheckRule = false;
+  s.years['2026'].paychecks['2026-01'] = 3;
+  eq(H.clearScheduleMatches(s), { cleared: 0, kept: 0 }, 'no schedule, nothing touched');
+  eq(s.years['2026'].paychecks['2026-01'], 3);
+});
+t('a scheduled year pays per check × the calendar, end to end', () => {
+  const s = fixtureState();
+  Object.assign(s.settings, { paycheckRule: true, payCadence: 'biweekly', payAnchor: '2030-01-04' });
+  s.years['2030'].paychecks = { '2030-05': 3.5 };
+  const c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2030'];
+  eq(c.paychecks['2030-03'], 3, 'March 2030 has three Fridays of the fortnight');
+  eq(c.paycheckSource['2030-06'], 'schedule');
+  approx(c.cells['paycheck|2030-04'].v, 2000);
+  approx(c.cells['paycheck|2030-05'].v, 3500, 'the typed exception still multiplies');
+});
+t('a rollover under a schedule carries only the counts that differ', () => {
+  const s = H.coerceShape(fixtureState());
+  Object.assign(s.settings, { paycheckRule: true, payCadence: 'biweekly', payAnchor: '2030-01-04' });
+  const sched = { step: 14, anchor: '2030-01-04' };
+  s.years['2030'].monthCount = 18;
+  s.years['2030'].paychecks = { '2031-01': H.paydaysInMonth('2031-01', sched), '2031-03': 3.5 };
+  H.rolloverYear(s, H.computeAll(s, TODAY_FIX), '2030');
+  eq(s.years['2031'].paychecks, { '2031-03': 3.5 },
+    'a copied match would come back as a typed count and pin the month');
+});
+t('the sample household is paid on a schedule, with one typed exception', () => {
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  ok(H.payScheduleOf(d), 'the demo reaches the feature');
+  const y = Object.keys(d.years).find(k => d.years[k].kind === 'grid' && d.years[k].model === 'live');
+  const c = H.computeAll(d, `${y}-09-15`)[y];
+  const srcs = Object.values(c.paycheckSource);
+  ok(srcs.filter(x => x === 'schedule').length >= 10, 'most months come from the calendar');
+  eq(srcs.filter(x => x === 'entered').length, 1, 'and one is typed over it');
+  ok(Object.values(c.paychecks).filter(n => n === 3).length >= 1, 'a three-check month shows');
+});
+t('a saved plan with a pay schedule boots into the plan, not the welcome screen', async () => {
+  /* The first build read a lookup CONST from `coerceShape`, which boot runs
+     from a line above it: a temporal-dead-zone throw that load() swallowed, so
+     every saved plan opened as a brand-new one. Engine tests call coerceShape
+     after the script has finished and cannot see it; only a real boot can. */
+  const before = localStorage.getItem('fin-state');
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  try {
+    const plan = H.migrate(H.coerceShape(H.sampleState()));
+    ok(plan.settings.payCadence && plan.settings.payAnchor, 'the plan carries a schedule');
+    plan.ui = { view: 'budget' };
+    localStorage.setItem('fin-state', JSON.stringify(plan));
+    await new Promise((resolve) => {
+      f.onload = resolve;
+      f.src = 'index.html?payboot=' + Date.now();
+      document.body.appendChild(f);
+    });
+    const W = f.contentWindow;
+    W.save = () => {};
+    ok(!/Load Sample Data/.test(W.document.getElementById('views').textContent),
+      'the welcome screen means the stored plan was thrown away at load');
+    ok(W.document.querySelector('tr.paych td[data-tip^="From your pay schedule"]'),
+      'and the Paychecks row counts from the schedule that survived the boundary');
+  } finally {
+    f.remove();
+    if (before === null) localStorage.removeItem('fin-state');
+    else localStorage.setItem('fin-state', before);
+  }
 });
 t('each answer has words, and the assumed one names the figure', () => {
   const tips = H.PAYCHECK_SOURCE_TIP;

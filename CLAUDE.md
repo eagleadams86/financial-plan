@@ -622,6 +622,23 @@ family names as well as balances.
   when inherited, never a colour) — showing `·` beside three checks' worth of
   pay was the real bug — and the cell editor offers it as a placeholder, never
   a value, same rule as the balance branch.
+- **The pay schedule is a FOURTH answer (2026-09-17).** `settings.payCadence`
+  (`'weekly' | 'biweekly'`) + `settings.payAnchor` (any real payday,
+  `YYYY-MM-DD`) → `payScheduleOf(st)` → `{ step, anchor }`, or null when either
+  is missing/malformed OR `paycheckRule` is off (a hidden knob moves no
+  figures). `resolvePaychecks(yr, months, prior, schedule)` order is now
+  **entered → schedule → last year → 2**, source `'schedule'`.
+  `paydaysInMonth(m, schedule)` is pure UTC day arithmetic, anchor either side.
+  Setting or CHANGING a schedule in Preferences runs `clearScheduleMatches`:
+  typed counts equal to the calendar are deleted (they would pin the months
+  and hide a moved date), ones that differ stay as overrides, and the save
+  returns a sentence with both numbers. `rolloverYear` skips copying a count
+  the schedule already gives. Both fields are guarded in `coerceShape`
+  (settings ride in share links) — deleted, never set undefined.
+  **`payStepOf` is a FUNCTION on purpose**: the first version was a
+  `PAY_CADENCE_DAYS` const read by `coerceShape`, which runs at boot from a line
+  ABOVE the const — a TDZ throw that `load()` swallowed, so every saved plan
+  opened as the welcome screen. Only the Investments iframe test caught it.
 - **A count belongs to the year that SHOWS it, and until 2026-09-11 nothing
   said so.** `rolloverYear` seeds a new year by reading the OLD year's
   `paychecks` map at the NEW year's months. That is right for a grid that

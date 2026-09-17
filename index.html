@@ -6282,6 +6282,11 @@ function coerceShape(data) {
      would have quietly turned a corrupt or hostile value into a real-looking
      setting nobody chose, which is exactly the trap the overflow threshold
      already documents. */
+  /* The pay schedule: a vocabulary and a date, both from a share link as
+     readily as from a backup. Anything else is DELETED — no schedule — for
+     the same Object.assign reason as the lead below. */
+  if (!payStepOf(d.settings.payCadence)) delete d.settings.payCadence;
+  if (!validIsoDate(d.settings.payAnchor)) delete d.settings.payAnchor;
   const lead = rateOrNone(d.settings.dueLeadDays);
   if (lead !== undefined)
     d.settings.dueLeadDays = Math.min(60, Math.max(0, Math.round(lead)));
@@ -7291,6 +7296,65 @@ const RULES = {
   },
 };
 
+/* THE PAY SCHEDULE (2026-09-17). Paid every week or every other week, the
+   count of paydays in a month is not a guess at all — it is the calendar.
+   `settings.payCadence` is 'weekly' | 'biweekly' and `settings.payAnchor` any
+   one real payday as YYYY-MM-DD; either missing or malformed is NO schedule,
+   and so is the per-check machinery being switched off, because a hidden knob
+   must not go on moving figures. Settings ride in share links, so both are
+   re-checked here as well as in `coerceShape`. */
+/* A FUNCTION, not a lookup const: `coerceShape` runs at boot from a line above
+   this one, and a const read there is in its temporal dead zone — the throw
+   is caught by load() and the whole plan opens as the welcome screen. */
+function payStepOf(cadence) {
+  return cadence === 'weekly' ? 7 : cadence === 'biweekly' ? 14 : 0;
+}
+function validIsoDate(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, mo, d] = s.split('-').map(Number);
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
+}
+function payScheduleOf(st) {
+  const set = st && st.settings;
+  if (!set || !set.paycheckRule) return null;
+  const step = payStepOf(set.payCadence);
+  if (!step || !validIsoDate(set.payAnchor)) return null;
+  return { step, anchor: set.payAnchor };
+}
+/* Day numbers in UTC, so a clock change can never move a payday a day. */
+const utcDay = (y, mo, d) => Math.round(Date.UTC(y, mo - 1, d) / 86400000);
+/* Paydays in month 'YYYY-MM': every date anchor + k·step that falls inside it,
+   k running both ways, so an anchor years either side of the month works. */
+function paydaysInMonth(m, schedule) {
+  const [y, mo] = m.split('-').map(Number);
+  const [ay, am, ad] = schedule.anchor.split('-').map(Number);
+  const a = utcDay(ay, am, ad);
+  const first = utcDay(y, mo, 1);
+  const last = utcDay(y, mo + 1, 1) - 1;
+  const step = schedule.step;
+  return Math.floor((last - a) / step) - Math.ceil((first - a) / step) + 1;
+}
+/* Turning a schedule on (or changing it) retires every typed count it now
+   agrees with: those were only ever the calendar typed out by hand, and left
+   stored they would pin the months forever and hide a moved date. A count
+   that DISAGREES stays — it is somebody saying this month broke the pattern
+   (a 3.5, a payday moved by a holiday) — and both numbers are returned so the
+   save can say what it did. */
+function clearScheduleMatches(st) {
+  const schedule = payScheduleOf(st);
+  const out = { cleared: 0, kept: 0 };
+  if (!schedule) return out;
+  for (const yr of Object.values(st.years || {})) {
+    if (!yr || yr.kind !== 'grid' || !yr.paychecks) continue;
+    for (const [m, v] of Object.entries(yr.paychecks)) {
+      if (v === paydaysInMonth(m, schedule)) { delete yr.paychecks[m]; out.cleared++; }
+      else out.kept++;
+    }
+  }
+  return out;
+}
+
 /* How many paydays land in each month of a year: its own figure where it has
    one, else the same month of the year before, else two.
 
@@ -7316,13 +7380,17 @@ const PAYCHECKS_DEFAULT = 2;
    at the call site would be the same three-way test written twice, and the copy
    that drifts is always the one on screen. `balanceKinds` is the same idea for
    balances, and this map is named to match. */
-function resolvePaychecks(yr, months, prior) {
+function resolvePaychecks(yr, months, prior, schedule) {
   const out = {}, source = {};
   for (const m of months) {
     const own = yr.paychecks[m];
     const back = monthAdd(m, -12);
     const last = prior?.paychecks?.[back];
     if (own !== undefined) { out[m] = own; source[m] = 'entered'; }
+    /* A PAY SCHEDULE is the calendar answering, so it outranks every guess
+       below it — and only a typed count, which is somebody saying this month
+       broke the pattern, outranks it (2026-09-17). */
+    else if (schedule) { out[m] = paydaysInMonth(m, schedule); source[m] = 'schedule'; }
     else if (last !== undefined) {
       out[m] = last;
       /* AND THE SOURCE TRAVELS WITH THE FIGURE. The prior year's RESOLVED
@@ -7342,6 +7410,7 @@ function resolvePaychecks(yr, months, prior) {
    how to answer it, because the cell takes a number. */
 const PAYCHECK_SOURCE_TIP = {
   entered: 'Entered',
+  schedule: 'From your pay schedule (Preferences)',
   lastyear: 'Estimated from the same month last year',
   assumed: `No count recorded to go on — ${PAYCHECKS_DEFAULT} a month assumed. `
     + 'Click to say how many.',
@@ -7541,7 +7610,8 @@ function computeYearWith(st, yearKey, prior, goals) {
              interest: {}, growth: {}, dividend: {}, paychecks: {},
              paycheckSource: {} };
 
-  const { counts: paychecks, source: paycheckSource } = resolvePaychecks(yr, months, prior);
+  const { counts: paychecks, source: paycheckSource } = resolvePaychecks(yr, months, prior,
+    payScheduleOf(st));
   const ctx = { st, yr, months, resolved, balances, prior, paychecks };
   const live = yr.model === 'live';
   const running = {};   // account id -> tracking has begun
@@ -9704,10 +9774,17 @@ function sampleState() {
     /* A one-off in the income row that carries nothing forward. */
     put('other-income', 5, 1400);
 
+    /* ROSA IS PAID EVERY OTHER FRIDAY, and the pay schedule below says so —
+       so the Paychecks row counts itself, and the third-payday months that
+       quietly make a year's income not divide by twelve land where the
+       calendar puts them, whichever year the sample is opened in. Anchored on
+       the year's first Friday. */
+    const jan1 = new Date(Date.UTC(Y, 0, 1)).getUTCDay();
+    const payAnchor = `${Y}-01-${String(1 + (5 - jan1 + 7) % 7).padStart(2, '0')}`;
     const paychecks = {};
-    /* The third-payday month — the one that quietly makes a year's income not
-       divide by twelve, and the reason the per-check machinery exists. */
-    paychecks[m(7)] = 3;
+    /* And one month that breaks the pattern, typed — the override the schedule
+       leaves alone: December's holiday bonus is paid as half a check on top. */
+    paychecks[m(12)] = paydaysInMonth(m(12), { step: 14, anchor: payAnchor }) + 0.5;
 
     const seeds = { cash: 5200, mid: 18400, emergency: 9100, long: 62500, college: 14300 };
     /* A pinned balance — the statement said this, so the projection bends to it. */
@@ -9721,6 +9798,7 @@ function sampleState() {
         accounts, currency: 'USD', tagline: 'A sample household — not real figures',
         midTermRateAnnual: 0.03, retirementReturnAnnual: 0.05,
         ptoAllowance: 25, paycheckRule: true, givingFund: true,
+        payCadence: 'biweekly', payAnchor,
         rowSort: 'manual', filingStatus: 'joint', compPerson: 'rosa',
       },
       people,
@@ -19164,6 +19242,7 @@ function rolloverYear(st, computed, fromKey) {
   const carried = src.categories.filter(cat =>
     !(typeof cat.until === 'string' && cat.until < start));
   const cells = {}, paychecks = {};
+  const schedule = payScheduleOf(st);
   for (const m of months12) {
     for (const cat of carried) {
       const old = src.cells[`${cat.id}|${m}`];
@@ -19171,7 +19250,11 @@ function rolloverYear(st, computed, fromKey) {
       if (old && (old.kind === 'manual' || old.kind === 'mixed'))
         cells[`${cat.id}|${m}`] = JSON.parse(JSON.stringify(old));
     }
-    if (src.paychecks[m] !== undefined) paychecks[m] = src.paychecks[m];
+    /* With a pay schedule, a count the calendar already gives is not carried:
+       copied, it would come back as a TYPED figure and pin the month. */
+    if (src.paychecks[m] !== undefined && !(schedule
+        && src.paychecks[m] === paydaysInMonth(m, schedule)))
+      paychecks[m] = src.paychecks[m];
   }
   const dec = `${fromKey}-12`;
   const c = computed[fromKey];
@@ -23163,6 +23246,19 @@ const EDITORS = {
       { sec: 'What Each Tab Offers' },
       { key: 'paycheckRule', label: 'Paychecks vary by month', type: 'check',
         hint: 'Three some months, two in others. Rows can then be an amount per check.' },
+      /* The schedule that COUNTS them, so nobody types the calendar out by hand.
+         Only offered once the per-check machinery is on — and off, it is ignored
+         by the engine too, not just hidden. */
+      { key: 'payCadence', label: 'Pay schedule', type: 'select', options: [
+        ['', 'None — I’ll type the counts'],
+        ['biweekly', 'Every other week'],
+        ['weekly', 'Every week'],
+      ], showIf: (v) => !!v.paycheckRule,
+        hint: 'Counts each month’s paychecks from the calendar. A count you type '
+          + 'still wins for that month.' },
+      { key: 'payAnchor', label: 'A payday you know', type: 'date',
+        showIf: (v) => !!v.paycheckRule && !!v.payCadence,
+        hint: 'Any real payday, past or future — the rest follow from it.' },
       { key: 'givingFund', label: 'Donor-advised fund', type: 'check',
         hint: 'Shows its holdings on Giving. Donations are tracked either way.' },
       { key: 'ptoAllowance', label: 'PTO days a year', type: 'number', step: 1,
@@ -23249,6 +23345,8 @@ const EDITORS = {
                   ptoAllowance: state.settings.ptoAllowance,
                   rowSort: state.settings.rowSort || 'manual',
                   paycheckRule: !!state.settings.paycheckRule,
+                  payCadence: state.settings.payCadence || '',
+                  payAnchor: state.settings.payAnchor || '',
                   givingFund: !!state.settings.givingFund,
                   midTermRateAnnual: state.settings.midTermRateAnnual ?? 0.03,
                   retirementReturnAnnual: state.settings.retirementReturnAnnual ?? 0.07,
@@ -23259,6 +23357,7 @@ const EDITORS = {
                   dueLeadDays: leadDaysOf(state),
                   priceApiKey: priceKey() }),
     save(ds, v) {
+      let scheduleNote = '';
       const code = (v.currency || 'USD').trim().toUpperCase();
       /* Intl accepts any well-formed 3-letter code and renders unknown ones
          literally ("ZZZ 12,345"), so a syntax check isn't enough — ask the
@@ -23295,6 +23394,31 @@ const EDITORS = {
         state.settings.dueLeadDays = Math.min(60, Math.max(0, Math.round(v.dueLeadDays)));
       state.settings.rowSort = v.rowSort === 'alpha' ? 'alpha' : 'manual';
       state.settings.paycheckRule = !!v.paycheckRule;
+      /* The pay schedule. Kept as typed even while the per-check switch is off
+         (the engine ignores it then), and checked here as at the boundary. A
+         schedule that is NEW or CHANGED retires the typed counts it agrees
+         with, and says so — a figure that moves must be shown moving. */
+      const scheduleBefore = JSON.stringify(payScheduleOf(state));
+      const cadenceBefore = state.settings.payCadence;
+      if (payStepOf(v.payCadence)) state.settings.payCadence = v.payCadence;
+      else delete state.settings.payCadence;
+      if (validIsoDate(v.payAnchor)) state.settings.payAnchor = v.payAnchor;
+      else delete state.settings.payAnchor;
+      const scheduleNow = payScheduleOf(state);
+      if (scheduleNow && JSON.stringify(scheduleNow) !== scheduleBefore) {
+        const { cleared, kept } = clearScheduleMatches(state);
+        const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+        scheduleNote = 'Pay schedule set — '
+          + (cleared ? `${plural(cleared, 'typed count')} now come${cleared === 1 ? 's' : ''} from it`
+            : 'the Paychecks row now counts itself')
+          + (kept ? `; ${plural(kept, 'typed count')} that differ${kept === 1 ? 's' : ''} `
+            + `${kept === 1 ? 'is' : 'are'} kept as your override${kept === 1 ? '' : 's'}` : '');
+      } else if (!scheduleNow && v.paycheckRule && payStepOf(v.payCadence)
+          && v.payCadence !== cadenceBefore) {
+        /* Only on the change that chose the cadence: this window saves as you
+           go, and every later box would otherwise say it again. */
+        scheduleNote = 'Pay schedule needs a payday date — nothing is counted until it has one';
+      }
       state.settings.givingFund = !!v.givingFund;
       if (v.midTermRateAnnual !== null) state.settings.midTermRateAnnual = v.midTermRateAnnual;
       if (v.retirementReturnAnnual !== null)
@@ -23313,6 +23437,7 @@ const EDITORS = {
       /* Same device-only story as the zoom, and applied the same way. A check
          is never null, so it needs no guard of its own. */
       applyPin(!!v.pinBars);
+      if (scheduleNote) return scheduleNote;
     },
   },
 
@@ -30738,6 +30863,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
      pure, so the suite pins the three-way answer and its prose together rather
      than reading one and trusting the other. */
   resolvePaychecks, PAYCHECKS_DEFAULT, PAYCHECK_SOURCE_TIP,
+  paydaysInMonth, payScheduleOf, clearScheduleMatches, validIsoDate,
   nextUnplannedYear, isLeapYear, reDate, cloneDonationsForward, dropDonationYear,
   hasNote,
   cleanBoxKeys, isBoxShut, withBox, boxKey,
