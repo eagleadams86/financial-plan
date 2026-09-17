@@ -7644,3 +7644,9 @@ the foot of `tests.html`.
   landed on `<body>`. A banked context (`ctx.banked`) now gets the hand-back
   on that exit too; a window opened only to read still leaves the native return
   alone.
+- **Clearing the payday date silently switched the schedule off.** The
+  Preferences save had a sentence for a cadence chosen without a date, but
+  none for the date being emptied afterwards — `payScheduleOf` went null and
+  every untyped Paychecks cell fell back to last year with no word. A third
+  branch says "Payday date cleared — …". Unticking *Paychecks vary by month*
+  stays silent: that hides the row on purpose.
