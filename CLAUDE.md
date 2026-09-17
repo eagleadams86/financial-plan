@@ -7636,3 +7636,11 @@ the foot of `tests.html`.
   `javascript:` still fails), and a paste that is still not a web address is
   refused with the row editor's own sentence and leaves the saved link alone.
   An empty box still clears it. The property `save` returns the refusal.
+- **Done on a saves-as-you-go editor dropped the focus once every box had
+  committed.** The `close` handler returned at `!rowMoved(ctx)`, and the only
+  caller of `refocusEditRow` was `commitRow(ctx, true)` — reached only when the
+  last box was still uncommitted. After a `change` had committed, the render
+  had rebuilt the row the window opened from, so the browser's own return
+  landed on `<body>`. A banked context (`ctx.banked`) now gets the hand-back
+  on that exit too; a window opened only to read still leaves the native return
+  alone.
