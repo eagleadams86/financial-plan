@@ -912,6 +912,11 @@ you owe. The giving fund is deliberately left out — that money is
 already given — and a part with nothing recorded shows no tile rather than a
 $0.00.
 
+**Each part's tile opens the tab it comes from** — Liquid the Budget, Invested
+the Investments tab, Retirement the Retirement tab, and Property and Owed the
+Household tab. Click it, or Tab to it and press Enter. With the calculator's
+**Pick** on, a click takes the figure onto the tape instead.
+
 **Which month it is read at is yours to choose**, once the two answers differ.
 The month in progress is not settled — every figure in it is the plan's own
 estimate until you mark it entered — so Liquid and Total are drawn in *italics*

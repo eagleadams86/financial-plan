@@ -305,6 +305,17 @@ family names as well as balances.
   quota problem and a stale-copy problem. Undone state still passes
   coerceShape/migrate on the way back in. ⌘Z is gated off inputs and open
   dialogs (the browser's own undo owns a text box).
+- **Net Worth's part tiles open their tabs** (2026-09-17, Charles): Liquid →
+  budget, Invested → investments, Retirement → retirement, Property and Owed →
+  household; Total opens nothing. `data-goview` on the `.goal`, routed by
+  `goToView()` from the #views and #chartMaxi click listeners (plus a keydown
+  on #views). Drawn only for a view in `allowedViews()`, so a share link never
+  offers a dead press. It is a div with `role="link"`, NOT a `<button>`, on
+  purpose: Pick mode's capture listener skips buttons, and a tile must still
+  pick with Pick on. Lands like a tab press (top, only when moved, focus on the
+  tab button) and closes a maximised card first. The aria-label reads the tab
+  name off the tab button, not `viewLabel()` — that const is declared ~16k
+  lines below and a boot-time render would hit its TDZ.
 - **The Net Worth card is read AT A MONTH, and the reader picks which**
   (2026-09-01). `worthAsOf(st, liveKey, cur)` is the one answer — pure, pinned —
   and the card, the tiles' estimate mark and the Record button all read it, so a

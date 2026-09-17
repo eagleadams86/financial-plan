@@ -2379,6 +2379,11 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   font-variant-numeric: tabular-nums; }
 .goal .value .of { font-size: var(--fs-sm); font-weight: 500; color: var(--text-secondary); }
 .goal .foot { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 6px; }
+/* A tile that opens its tab (Net Worth's parts): the month rows' press grammar
+   — pointer, the hover lift a clickable row gets, and the focus ring. */
+.goal[data-goview] { cursor: pointer; }
+.goal[data-goview]:hover { border-color: var(--border-strong); border-left-color: var(--accent); }
+.goal[data-goview]:focus-visible { outline: 2px solid var(--focus-border); outline-offset: 2px; }
 /* A tile carrying a projection says so in ITALIC, and its meter rail is
    DASHED — the estimate convention the grid's auto cells, a planned donation's
    row and the charts' projected bars already use, and the only one available
@@ -13421,10 +13426,20 @@ function netWorthCard(liquid, cur, c, choice) {
      balance and the total that adds it up. Holdings, retirement and property
      are stated values: no month makes an estimate of them, and marking them
      would say the reader had guessed at figures they typed. */
-  const tile = (label, value, foot, est) => `<div class="goal${est ? ' est' : ''}">
+  /* A tile naming the tab its figure comes from OPENS that tab (Charles,
+     2026-09-17) — a `data-goview` on the tile, routed by goToView(). Drawn as
+     a link only where that tab can be opened: a shared view offers fewer tabs,
+     and a tile promising one it cannot reach would be a dead press. Total has
+     no tab of its own and stays a plain tile. Pick mode's capture listener
+     runs first, so with Pick on a press still takes the figure instead. */
+  const tile = (label, value, foot, est, view) => {
+    const go = view && allowedViews().includes(view);
+    return `<div class="goal${est ? ' est' : ''}"${go ? ` data-goview="${view}" role="link"
+      tabindex="0" aria-label="${esc(label)} ${esc(fmtMoney(value))} — open the ${esc((F(`tab-${view}`) || {}).textContent || view)} tab"` : ''}>
     <div class="label">${label}</div>
     <div class="value">${fmtMoney(value)}</div>
     ${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
+  };
   const { nw, overlap, total } = netWorthTotals(state, liquid, c, cur);
   const linkedNames = nw.linkedAccounts
     .map(id => (accountById(state, id) || {}).name).filter(Boolean);
@@ -13472,18 +13487,18 @@ function netWorthCard(liquid, cur, c, choice) {
         : 'Everything below, added up', choice.est)}
       ${tile('Liquid', liquid, choice.est
         ? 'The budget grid’s accounts, as this month is projected to end'
-        : 'The budget grid’s accounts at the end of that month', choice.est)}
-      ${nw.hasInvested ? tile('Invested', nw.invested, 'The Investments tab’s holdings') : ''}
-      ${nw.hasRetirement ? tile('Retirement', nw.retirement, 'Traditional and Roth together') : ''}
+        : 'The budget grid’s accounts at the end of that month', choice.est, 'budget')}
+      ${nw.hasInvested ? tile('Invested', nw.invested, 'The Investments tab’s holdings', false, 'investments') : ''}
+      ${nw.hasRetirement ? tile('Retirement', nw.retirement, 'Traditional and Roth together', false, 'retirement') : ''}
       ${nw.hasProperty ? tile('Property', nw.property, nw.propertyOwed
         ? `Value minus the ${fmtMoney(nw.propertyOwed)} still owed — the Household tab lists it`
-        : 'What it would sell for — the Household tab lists it') : ''}
+        : 'What it would sell for — the Household tab lists it', false, 'household') : ''}
       ${/* Written as a positive figure with the word Owed doing the work, not
             as a minus number: a tile reading −$18,400 beside four positives is
             the one place in this card a reader has to stop and check the sign.
             The foot says which way it goes. */''}
       ${nw.hasDebts ? tile('Owed', nw.debts,
-        'Comes off the total — the Household tab lists what you owe') : ''}
+        'Comes off the total — the Household tab lists what you owe', false, 'household') : ''}
     </div>
     ${(() => {
       /* The history: dated snapshots you chose to record, drawn once there are
@@ -25682,10 +25697,35 @@ F('views').addEventListener('click', (e) => {
   if (e.target.closest('#startFreshBtn')) { startFresh(); return; }
   if (e.target.closest('#welcomeSampleBtn')) { loadSample(); return; }
   if (e.target.closest('#welcomeRestoreBtn')) { openModal(F('dataDialog')); return; }
+  const go = e.target.closest('[data-goview]');
+  if (go) { goToView(go.dataset.goview); return; }
   const add = e.target.closest('[data-add]');
   if (add) { openRowEditor(add.dataset.add, add.dataset, true); return; }
   const row = e.target.closest('[data-edit]');
   if (row) openRowEditor(row.dataset.edit, row.dataset, false);
+});
+
+/* A tile that names a tab opens it (Net Worth's Liquid, Invested, Retirement,
+   Property and Owed — 2026-09-17). A tab press by another route, so it lands
+   the way one does: at the top, only when the view changed, with the keyboard
+   on the tab's own button. From a card filling the window, the window closes
+   first — the tab being opened is not the one that card lives on. */
+function goToView(view) {
+  if (!allowedViews().includes(view)) return;
+  if (document.body.classList.contains('maxi-open')) closeMaxi();
+  const moved = state.ui.activeTab !== view;
+  state.ui.activeTab = view;
+  save();   // ui-only, so nothing joins the undo ring
+  render();
+  if (moved) window.scrollTo(0, 0);
+  F(`tab-${view}`)?.focus({ preventScroll: true });
+}
+F('views').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const go = e.target.closest && e.target.closest('[data-goview]');
+  if (!go || e.target !== go) return;
+  e.preventDefault();
+  goToView(go.dataset.goview);
 });
 
 /* THE SAME THREE LINES FOR A MAXIMISED CARD (2026-09-04). attachMaxi() MOVES
@@ -25702,6 +25742,8 @@ F('views').addEventListener('click', (e) => {
    backdrop-close listener on this same element is unaffected either way: its
    press did not start outside the card. */
 F('chartMaxi').addEventListener('click', (e) => {
+  const go = e.target.closest('[data-goview]');
+  if (go) { e.stopPropagation(); goToView(go.dataset.goview); return; }
   const help = e.target.closest('[data-help]');
   if (!help) return;
   e.stopPropagation();
