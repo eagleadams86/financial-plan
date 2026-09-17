@@ -7568,3 +7568,9 @@ the foot of `tests.html`.
   band — with a message pointing at the wrong mistake. The `not over` phrase
   is stripped before the floor words are looked for; "Over $100,525" alone is
   still the top band.
+- **Rolling over a grid that stopped before December opened every account at
+  $0.** `rolloverYear` seeded from `balances[id|YYYY-12]`; a six-month imported
+  grid has no December, so `seeds` was empty and `priorOf` fell to 0. It reads
+  the source grid's last month of its own now — December for every grid the
+  app builds. Import-shape only (`startFresh` and the rollover build Jan–Dec),
+  like `monthlySpend`'s `/ 12`, which is pinned as the design and was left.
