@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1111;
+const EXPECTED = 1112;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -16532,6 +16532,37 @@ async function auditFrame(width, height, tag) {
   await new Promise((r) => setTimeout(r, 400));
   return { f, W, D: W.document };
 }
+
+/* ── The month header survives a redraw on a scrolled budget (2026-09-17) ────
+   wireBudget pinned the header mid-render, and the wiring after it still moved
+   the table — 15px on the sample plan — with no scroll event to put it right.
+   Charles: "sometimes the column headers are missing like when switching
+   between month/year view and closing some windows, when the budget is
+   scrolled". Read SYNCHRONOUSLY after the click, before any observer could
+   have tidied it up, because that is the frame the reader saw. */
+t('the grid\'s month header stays pinned when the lens is switched on a scrolled budget', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'pinredraw');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    D.getElementById('tab-budget').click();
+    await wait(300);
+    const table = () => D.querySelector('.gridwrap table.grid');
+    W.scrollTo(0, W.scrollY + table().getBoundingClientRect().top + 400);
+    W.dispatchEvent(new W.Event('scroll'));
+    await wait(200);
+    const gap = () => D.querySelector('.gridwrap table.grid thead th').getBoundingClientRect().top
+      - W.pinnedBottom();
+    ok(table().getBoundingClientRect().top < 0, 'fixture: the table top is scrolled out of sight');
+    ok(Math.abs(gap()) <= 1, 'fixture: the header is pinned before anything changes', gap());
+    D.querySelector('.vswitch[data-mode="month"]').click();
+    await wait(300);
+    D.querySelector('.vswitch[data-mode="year"]').click();
+    ok(Math.abs(gap()) <= 1, 'straight after the switch back, the header sits under the '
+      + 'chrome — not where the table was halfway through the redraw', gap());
+    await wait(300);
+    ok(Math.abs(gap()) <= 1, 'and it is still there once the page settles', gap());
+  } finally { f.remove(); }
+});
 
 /* ── Fix 1: an arrow key must not drop the keyboard on the page underneath ──
    maxiStep() hands the focus back to the ARROW that was pressed, and only to
