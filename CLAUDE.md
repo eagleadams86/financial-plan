@@ -5298,6 +5298,13 @@ and it would then freeze that month against every earlier change.
   fault.
 - **Emptying the box is how it comes off**, since Revert and Clear speak for the
   figures and stay hidden on a month that only has words on it.
+- **THE NOTE IS THE LAST BLOCK OF THE TIP, AFTER A BLANK LINE** (`tipWithNote`,
+  shared by the balance tip and both lenses' untracked-month tips). The first
+  cut appended it to the head line with a ' · ', which put the sentence in
+  among the figures — on the very line that states one. Charles: *"the note
+  should be at the bottom with an empty line between like all of my other
+  notes"*, which is `cellTip`'s shape and now the only one. The old ' · note'
+  wording had a test pinning it; that test is the new shape's now.
 - **The box is only offered where a note can be kept, and says the right thing
   there.** Found in the same pass: `#cellDialog` is one reused dialog, so the
   Note box was on the PAYCHECKS branch too — and a paycheck count is a bare
