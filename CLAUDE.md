@@ -7555,3 +7555,10 @@ the foot of `tests.html`.
   came to" was next month's projection; and an unpaid current month holding an
   `auto` was summed with `estimated: false`, the line's plain figure a guess.
   `recent` now skips `auto` cells, and an `auto` in the sum sets `estimated`.
+- **A figure that rounded to nothing printed "-$0.00".** `round2` returns -0
+  for a tiny negative (its tie-break is pinned and stays), and three sinks
+  showed it: the money box on blur (`parseMoney`), the grid tooltip
+  (`cellTip`) and any `auto` estimate the engine minted from cents that cancel
+  (an `avg` of ±$0.01, a dividend on a slightly negative balance). All three
+  fold it with `|| 0` — the 2026-09-15 `avgTipLine` fix, applied where the
+  reviewers found the rest of it.

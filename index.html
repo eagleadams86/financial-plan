@@ -4222,7 +4222,10 @@ function parseMoney(raw) {
   if (t === '' || t === '-' || t === '.') return null;
   const n = parseFloat(t);
   if (Number.isNaN(n)) return null;
-  return round2(bracketed ? -Math.abs(n) : n);
+  /* `|| 0` folds the -0 that `round2` hands back for a tiny negative, which
+     `fmtMoney` would otherwise print as "-$0.00" the moment the box blurred
+     (2026-09-17). round2 itself is left alone — its tie-break is pinned. */
+  return round2(bracketed ? -Math.abs(n) : n) || 0;
 }
 function asMoneyInput(input) {
   input.type = 'text';
@@ -7892,8 +7895,11 @@ function computeYearWith(st, yearKey, prior, goals) {
          everywhere: it is somebody saying the money left. */
       const v = paysIn(cat, m) && targetRunning(st, yr, cat, m, hubId)
         ? RULES[cat.rule || 'none'](cat, m, ctx) : null;
+      /* `|| 0`: an average of cents that cancel, or a dividend on a slightly
+         negative balance, rounds to -0, which every money sink downstream
+         would print as "-$0.00" (2026-09-17). */
       resolved[key] = v === null ? { v: 0, kind: 'missing', ...noted }
-                                 : { v: round2(v), kind: 'auto', ...noted };
+                                 : { v: round2(v) || 0, kind: 'auto', ...noted };
     }
 
     /* 2 · balances (live model only — the account chain from the sheet) */
@@ -11430,7 +11436,7 @@ function cellTip(r) {
      one thing this app is careful to keep distinct from an absence. It only
      started mattering once a note could sit on a blank month (2026-08-26),
      which is when the tooltip on such a cell became a thing anybody sees. */
-  const head = [r.kind === 'missing' ? '' : fmtMoney(r.v),
+  const head = [r.kind === 'missing' ? '' : fmtMoney(r.v || 0),
     KIND_LABEL[r.kind]].filter(Boolean).join(' · ');
   const partNote = (r.parts || []).some(p => p.note);
   const split = !!(r.parts && (r.parts.length > 1 || partNote));
