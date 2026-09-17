@@ -7562,3 +7562,9 @@ the foot of `tests.html`.
   (an `avg` of ±$0.01, a dividend on a slightly negative balance). All three
   fold it with `|| 0` — the 2026-09-15 `avgTipLine` fix, applied where the
   reviewers found the rest of it.
+- **`parseBrackets` refused a real IRS schedule at its first line.** "Not over
+  $11,600 … 10%" matched the floor-word test (`\bover\b`), so a one-number line
+  became the open band and the whole table was refused as running past its top
+  band — with a message pointing at the wrong mistake. The `not over` phrase
+  is stripped before the floor words are looked for; "Over $100,525" alone is
+  still the top band.
