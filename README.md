@@ -782,14 +782,28 @@ the year before rather than a blank page:
 - "average so far" rows at last year's average
 - a cycle bill keeps its beat, so an annual renewal still lands in its own
   month
-- the paycheck counts repeat last year's pattern — which keeps the year's
-  total right if you're paid fortnightly, where assuming two a month would
-  lose you a fortnight's pay
+- the paycheck counts come from your **pay schedule** if you've set one, and
+  otherwise repeat last year's pattern — which keeps the year's total right if
+  you're paid fortnightly, where assuming two a month would lose you a
+  fortnight's pay
 
 Each hands over as soon as you type a real month in.
 
+**Paid every week or every other week? Let the calendar count.** In
+Preferences, under *Paychecks vary by month*, pick a **Pay schedule** and type
+**a payday you know** — any real one, past or future. Every month's paycheck
+count then works itself out from the calendar, in every year: every other
+Friday gives two checks most months and three in the two months that hold a
+third payday, and next year's threes land in the right months without you
+touching them. A count you type still wins for that month — useful when a
+holiday moves a payday, or an extra half-check lands. When you first set the
+schedule (or change it), counts you had typed that the calendar agrees with
+are cleared, since the schedule now gives them, and any that differ are kept
+as your overrides; a message says how many of each.
+
 **Every paycheck count says where it came from.** Hover one and it tells you
-whether it's a figure you entered, one taken from the same month a year ago, or
+whether it's a figure you entered, one from your pay schedule, one taken from
+the same month a year ago, or
 — where there's nothing to go on anywhere — **two a month assumed**, which it
 names outright and invites you to correct. An assumption inherited from last
 year still reads as an assumption, however many years along, rather than being
@@ -2036,6 +2050,7 @@ above it travels with the plan, and nothing in it does.
 | Setting | What it changes |
 | --- | --- |
 | **Paychecks vary by month** | Three some months, two in others — this is what lets a row be an amount per check |
+| **Pay schedule** · **A payday you know** | Every week or every other week, plus one real payday — the Paychecks row then counts each month from the calendar. Shown once *Paychecks vary by month* is ticked |
 | **Donor-advised fund** | Whether the Giving tab shows a fund's holdings. Donations are tracked either way |
 | **PTO days a year** | What each new holiday-planner year starts with |
 | **Warn about a due bill this many days ahead** | How early a hand-paid bill with a [due date](#due-dates) starts saying so on the Month page. 0 warns on the day itself |
