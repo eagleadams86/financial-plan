@@ -1524,12 +1524,19 @@ a figure wants a key — which a single-file page on a public site cannot keep
 secret. It also means the value on the row stays a figure **you** stated, which
 is what the Progress tab's net worth promises it is.
 
-A home can carry a **street address**, and it does exactly one thing: opens that
-link on your own house instead of on the site's search page. It is kept in this
-browser alone — never synced, never in a backup, never in a share link — and the
-box is a password box, so your password manager can offer to remember it and
-carry it to your other devices on a path the app never touches. That is the same
-arrangement the [price-lookup key](#prices) uses, and for the same reason.
+**The app cannot find your particular house, and does not pretend to.** Both
+sites key their real pages on an id of their own — Zillow on a `_zpid`, Redfin
+on a `propertyId` — and neither can be worked out from an address. So a property
+can carry a **value page link**: you find it once, paste the URL, and from then
+on that button goes straight there. A saved link leads, with the two tool pages
+still behind it for when you want to go looking again.
+
+The link is kept in this browser alone — never synced, never in a backup, never
+in a share link — and the box is a password box, so your password manager can
+offer to remember it and carry it to your other devices on a path the app never
+touches. That is the same arrangement the [price-lookup key](#prices) uses, and
+for the same reason. Only `http` and `https` links are accepted, and a saved one
+is labelled by its own hostname rather than by anything you type.
 
 ### What You Owe
 

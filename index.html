@@ -3740,43 +3740,35 @@ const PROPERTY_KIND_LABEL = Object.fromEntries(PROPERTY_KINDS);
 
 /* WHERE TO GO AND LOOK A VALUE UP. There is no free valuation API this app can
    use, and that was checked rather than assumed: Zillow retired its public API
-   in 2021 and its replacement does not expose the Zestimate at all, Redfin
-   publishes none, Edmunds closed its in 2018, and KBB, Black Book and J.D.
-   Power answer only to a partner agreement. The free tiers that do exist
-   (RentCast, Auto.dev, Vincario) all want a bearer token — and a key shipped in
-   a single-file page on a public origin is a key anybody can read, which is the
-   same rule that keeps PRICE_KEY out of state and out of this repo.
+   in 2021 and its replacement does not expose the Zestimate at all, Edmunds
+   closed its in 2018, and every free tier that does answer with a figure wants
+   a bearer token — which a single-file page on a public origin cannot hold.
+   What IS free is each tool's own web page, so this is a link out and a figure
+   back: no request, no credential, nothing in the CSP, and the value stays one
+   the reader STATED rather than one the app guessed.
 
-   What IS free is each tool's own web page. So the feature is a link out and a
-   figure back: no request, no credential, nothing added to the CSP, and the
-   value stays one the reader STATED rather than one the app guessed — which is
-   what keeps the Property tile's estimate rule (see netWorthParts) true.
+   THESE ARE LANDING PAGES, AND NOTHING IS BUILT OUT OF THE READER'S DATA —
+   which took two wrong guesses in one afternoon to arrive at (2026-09-17, both
+   reported by Charles against his own house):
+   - Redfin was given `?address=` and ignored it. EVERY search form on that
+     site is `method="post"`, so no query string can prefill one. Its real
+     deep link is `?propertyId=<an id of its own>` — an internal id.
+   - Zillow was given `/homes/<hyphen-slug>_rb/`, its search URL, in the hope it
+     would redirect. It did not land on the house. Its real deep link is
+     `/homedetails/<slug>/<a zpid>/` — an internal id again.
+   Neither id can be derived from an address, so the app CANNOT construct a link
+   to a particular property and must stop trying. A reader who wants one press
+   saves the link themselves (see PROP_LINK_KEY). Do not re-add a parameter here
+   without loading the result: both sites answer a wrong one with a perfectly
+   normal-looking page.
 
-   `url(addr)` hands back the tool's own LANDING page when there is nothing to
-   put in it. That is the always-safe target and the one that cannot rot when a
-   site changes its deep-link shape; an address only ever UPGRADES the link.
-   `other` lists nothing — a kind with no sensible tool says nothing rather than
-   guessing at one.
-
-   Loaded in the browser pane 2026-09-17: KBB, Redfin and J.D. Power answer.
-   Zillow and Edmunds answer an automated browser with a bot wall instead, so
-   their URLs are the published shapes rather than ones that session could
-   confirm — which is why each is SECOND in its list, behind one that was. */
+   Verified in the browser pane 2026-09-17: KBB, Redfin and J.D. Power load.
+   Zillow and Edmunds answer an automated browser with a bot wall, so those two
+   are the published addresses rather than ones this session could confirm. */
 const PROPERTY_LOOKUPS = {
   home: [
-    { label: 'Redfin', url: (a) => a
-      ? `https://www.redfin.com/what-is-my-home-worth?address=${encodeURIComponent(a)}`
-      : 'https://www.redfin.com/what-is-my-home-worth' },
-    /* Zillow's own address URLs are a HYPHEN SLUG, not a query string —
-       `.../homes/1600-Pennsylvania-Ave-NW-Washington-DC-20500_rb/` — so the
-       commas come out and the spaces become hyphens before encoding. Percent
-       escapes in that position are a different shape from the one the site
-       writes for itself, and this is the link that could not be loaded from
-       here to find out which it forgives. */
-    { label: 'Zillow', url: (a) => a
-      ? `https://www.zillow.com/homes/${encodeURIComponent(
-          a.replace(/,/g, '').replace(/\s+/g, '-'))}_rb/`
-      : 'https://www.zillow.com/how-much-is-my-home-worth/' },
+    { label: 'Redfin', url: () => 'https://www.redfin.com/what-is-my-home-worth' },
+    { label: 'Zillow', url: () => 'https://www.zillow.com/how-much-is-my-home-worth/' },
   ],
   vehicle: [
     { label: 'Kelley Blue Book', url: () => 'https://www.kbb.com/whats-my-car-worth/' },
@@ -22116,11 +22108,16 @@ function setOpensLinks(key, list) {
   box.textContent = '';
   for (const it of (list || [])) {
     const a = document.createElement('a');
-    a.className = 'btn small';
+    a.className = 'btn small' + (it.saved ? ' primary' : '');
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     a.href = it.href;
     a.textContent = it.label;
+    /* The SAVED link leads and wears the primary fill, because it is the press
+       the reader came for and the two behind it are a different offer — go and
+       find a page — rather than three equal choices. It says so in words as
+       well, since a fill alone is a colour carrying a meaning. */
+    if (it.saved) a.title = 'The link you saved for this property';
     box.appendChild(a);
   }
 }
@@ -23228,81 +23225,114 @@ const currencyField = (hint) => {
     hint: hint || 'Converted into ' + own + ' at the rate on the Household tab.' }];
 };
 
-/* A HOME'S ADDRESS, ON THIS DEVICE AND NOWHERE ELSE. The lookup needs one thing
-   the plan does not hold, and it is more personal than any figure in the file —
-   so it lives here rather than on the property row, for exactly PRICE_KEY's
-   reason: `state` syncs to Firestore, rides in every backup and is the baseline
-   a share link is built from, and an address belongs in none of the three.
-   `coerceShape` does not strip unknown keys off a property row, so a field put
-   there would reach all three without anything refusing it.
+/* THE LINK TO A PROPERTY'S VALUE PAGE, ON THIS DEVICE AND NOWHERE ELSE.
+   The app cannot build one — see PROPERTY_LOOKUPS: both sites key their real
+   pages on an internal id (a `_zpid`, a `propertyId`) that nothing
+   here can derive from an address. So the reader finds their property once and
+   pastes ITS url, and the button goes straight there ever after. A saved link
+   is exact by construction, needs no guess at a URL shape, and works for any
+   site — which is what the two wrong guesses cost before it.
+
+   It is kept OUT OF THE PLAN for PRICE_KEY's reason: `state` syncs to Firestore,
+   rides in every backup and is the baseline a share link is built from, and a
+   URL naming where somebody lives belongs in none of the three. `coerceShape`
+   does not strip unknown keys off a property row, so a field put there would
+   reach all three with nothing refusing it.
 
    What carries it between devices instead is the BROWSER: the editor's box is a
    `password` field, so a password manager offers to keep it and iCloud Keychain
    syncs it end to end encrypted, on a path this app never touches. This map is
-   then this device's copy of what the manager filled in — the same division of
+   then this device's copy of what the manager filled in — the division of
    labour the price key has had since 2026-08-26. */
-const PROP_ADDR_KEY = 'fin-propaddr';
-const PROP_ADDR_MAX = 200;              // the tax table's `source` cap
-const propAddrInHarness = (() => {
+const PROP_LINK_KEY = 'fin-proplink';
+const PROP_LINK_MAX = 400;              // a real estate URL is long; a page is not
+/* The address this started as (2026-09-17, replaced the same day once both
+   sites turned out to need an id). A stored address is not a URL, so it would
+   be dropped by the scheme check below anyway — removing the key outright means
+   it is not left sitting on a shared origin for the sake of a field that no
+   longer exists. */
+try { localStorage.removeItem('fin-propaddr'); } catch (e) { /* private mode */ }
+const propLinkInHarness = (() => {
   try { return !!(window.frameElement && window.frameElement.hasAttribute('data-fin-tests')); }
   catch (e) { return false; }
 })();
 
-/* The boundary. A value must be a real string and is trimmed and capped; a KEY
-   must satisfy ID_OK and is otherwise dropped.
+/* THE SCHEME CHECK IS THE LOAD-BEARING LINE HERE, not the length cap. This
+   string is written into an `href`, and `javascript:` in one is script running
+   on an origin five apps share — so http and https are the whole allowlist, and
+   anything else is dropped rather than tidied. `new URL` does the parsing,
+   because deciding what a scheme is with a regex is how that check gets got
+   round. A KEY must satisfy ID_OK and is otherwise dropped.
 
-   KEYS ARE NOT RE-SLUGGED, and that is the whole subtlety. `mintIds` leaves a
-   property id that passes ID_OK completely alone and only mints one that fails
-   it — and ID_OK admits capitals and underscores where `slugJs` does not, so
-   `Home` would slug to `home` and `My_House` to `my-house`. Re-slugging the map
-   to "follow" a repair that never happens would therefore detach the address
-   from every property whose id carries either, silently. Matching mintIds means
-   keeping an ID_OK key as it is. A reminted id — only ever a malformed one —
-   orphans its address instead, which is the safe direction: an address you
-   retype, never one pointing at somebody else's house. */
-function coercePropAddrs(raw) {
+   KEYS ARE NOT RE-SLUGGED, and that is the subtlety worth keeping: `mintIds`
+   leaves a property id that passes ID_OK completely alone and only mints one
+   that FAILS it — and ID_OK admits capitals and underscores where `slugJs` does
+   not, so `Home` would slug to `home` and `My_House` to `my-house`. Re-slugging
+   to "follow" a repair that never happens would quietly detach the link from
+   every property whose id carries either. A reminted id orphans its link, which
+   is the safe direction: one you paste again, never one pointing elsewhere. */
+function safePropLink(raw) {
+  const s = String(raw == null ? '' : raw).trim().slice(0, PROP_LINK_MAX);
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    return (u.protocol === 'https:' || u.protocol === 'http:') ? s : '';
+  } catch (e) { return ''; }          // not a URL at all, a bare address included
+}
+
+function coercePropLinks(raw) {
   const out = {};
   const src = (raw && typeof raw === 'object' && raw.byId && typeof raw.byId === 'object')
     ? raw.byId : {};
   for (const [k, v] of Object.entries(src)) {
     if (typeof v !== 'string' || !ID_OK.test(k)) continue;
-    const addr = v.trim().slice(0, PROP_ADDR_MAX);
-    if (addr) out[k] = addr;
+    const link = safePropLink(v);
+    if (link) out[k] = link;
   }
   return out;
 }
 
-function loadPropAddrs() {
-  try { return coercePropAddrs(JSON.parse(localStorage.getItem(PROP_ADDR_KEY) || 'null')); }
+function loadPropLinks() {
+  try { return coercePropLinks(JSON.parse(localStorage.getItem(PROP_LINK_KEY) || 'null')); }
   catch (e) { return {}; }            // private mode, or a hand-edited value
 }
 
-function savePropAddrs(map) {
-  if (propAddrInHarness) return;      // the suite must not write a real address
+function savePropLinks(map) {
+  if (propLinkInHarness) return;      // the suite must not write a real link
   try {
-    const byId = coercePropAddrs({ byId: map });
-    if (Object.keys(byId).length) localStorage.setItem(PROP_ADDR_KEY, JSON.stringify({ v: 1, byId }));
-    else localStorage.removeItem(PROP_ADDR_KEY);
+    const byId = coercePropLinks({ byId: map });
+    if (Object.keys(byId).length) localStorage.setItem(PROP_LINK_KEY, JSON.stringify({ v: 1, byId }));
+    else localStorage.removeItem(PROP_LINK_KEY);
   } catch (e) {}
 }
 
 /* One reader and one writer, so nothing else has to know the shape. An empty
-   address REMOVES the entry rather than storing '' — absent and empty are one
-   claim here, and the smaller footprint is the better one for this field. */
-function propAddrOf(id) { return loadPropAddrs()[id] || ''; }
-function setPropAddr(id, addr) {
+   box REMOVES the entry rather than storing '' — absent and empty are one claim
+   here, and the smaller footprint is the better one for this field. */
+function propLinkOf(id) { return loadPropLinks()[id] || ''; }
+function setPropLink(id, link) {
   if (!ID_OK.test(String(id || ''))) return;
-  const map = loadPropAddrs();
-  const clean = String(addr || '').trim().slice(0, PROP_ADDR_MAX);
+  const map = loadPropLinks();
+  const clean = safePropLink(link);
   if (clean) map[id] = clean; else delete map[id];
-  savePropAddrs(map);
+  savePropLinks(map);
+}
+
+/* What a saved link's button is CALLED: its own hostname, `www.` dropped, so a
+   Zillow link reads "zillow.com". Derived rather than typed, because a label
+   the reader wrote could say Zillow over a link to anywhere at all. Falls back
+   to a plain word if the URL will not parse, which `safePropLink` has already
+   made unlikely. */
+function propLinkLabel(link) {
+  try { return new URL(link).hostname.replace(/^www\./, ''); }
+  catch (e) { return 'the saved link'; }
 }
 
 /* The keychain entry is filed under origin + username, so two properties
-   sharing a username would have the second address overwrite the first. It is
-   built from the ID rather than the name because a rename must not orphan what
-   the manager already holds. */
-function propAddrAccount(id) { return `Money Map property ${id}`; }
+   sharing a username would have the second link overwrite the first. Built from
+   the ID rather than the name because a rename must not orphan what the manager
+   already holds. */
+function propLinkAccount(id) { return `Money Map property ${id}`; }
 
 const EDITORS = {
 
@@ -24475,50 +24505,62 @@ const EDITORS = {
       { key: 'value', label: 'What it would sell for', type: 'money', opens: true },
       ...currencyField('The currency it is worth that much IN — a flat abroad is priced '
         + 'where it stands, not where you bank.'),
-      /* THE ADDRESS, and it is offered only on a property that EXISTS — the
-         `until` rule in the budget row, for a sharper reason than tidiness: the
+      /* THE SAVED LINK, offered only on a property that EXISTS — the `until`
+         rule in the budget row, for a sharper reason than tidiness: the
          password manager files this under the property's ID, and a property
-         being created has not got one yet, so a keychain entry made here would
-         be filed against nothing. Add the property, then tell it where it is.
+         being created has not got one yet, so an entry made here would be filed
+         against nothing. Add the property, then tell it where its page is.
 
-         `password`, which is the whole reason this can be kept off the plan
-         without costing anything on a second device: masked and autocompleted,
-         a manager offers to save it and iCloud Keychain carries it end to end
-         encrypted, on a path this app never touches — exactly the arrangement
-         the Twelve Data key has. `wide` because the hint has a lot to say and
+         Offered on EVERY kind, unlike the address it replaced: a car has a KBB
+         page and a boat a J.D. Power one, and nothing about a saved URL is
+         particular to a house.
+
+         `password`, which is what lets it stay off the plan without costing
+         anything on a second device: masked and autocompleted, a manager offers
+         to keep it and the keychain carries it end to end encrypted, on a path
+         this app never touches — the arrangement the Twelve Data key has.
+         `wide` because the hint has a lot to say, because a URL is long, and
          because a password cell is a row taller than its neighbours (the Show
          button), so it wants a line of its own rather than a half-row that
          leaves the box beside it short. */
       ...((row && row.id) ? [{
-        key: 'addr', label: 'Address', type: 'password', wide: true,
-        account: propAddrAccount(row.id),
-        showIf: (v) => v.kind === 'home',
-        hint: 'Kept in this browser and nowhere else — never synced, never in a backup, '
-            + 'never in a share link. Save it to your password manager and that will '
-            + 'carry it to your other devices instead. It does one thing: opens the '
-            + 'lookup on your own house rather than on its search page.',
+        key: 'link', label: 'Value page link', type: 'password', wide: true,
+        account: propLinkAccount(row.id),
+        hint: 'Paste the page for THIS property — your house on Zillow, your car on '
+            + 'Kelley Blue Book — and the button above goes straight there. The app '
+            + 'cannot work one out for you: both sites key their pages on an id of '
+            + 'their own that an address will not give. Kept in this browser and '
+            + 'nowhere else — never synced, never in a backup, never in a share link '
+            + '— so save it to your password manager and that will carry it to your '
+            + 'other devices.',
       }] : []),
       noteField,
       ];
     },
     /* The address is merged in from its own store rather than read off the row,
-       because it is not ON the row — see PROP_ADDR_KEY. A missing row spreads
+       because it is not ON the row — see PROP_LINK_KEY. A missing row spreads
        to `{}` rather than throwing, which is what this `get` has always done
        and what `reprimeRow` reads as "the record is still there". */
     get: (ds) => {
       const row = state.side.property[+ds.idx];
-      return { ...row, addr: (row && row.id) ? propAddrOf(row.id) : '' };
+      return { ...row, link: (row && row.id) ? propLinkOf(row.id) : '' };
     },
-    /* One box filling in another: the lookup links follow the kind and the
-       address AS THEY ARE TYPED. It reads the form, never the state — nothing
-       is committed until the field is finished — which is what lets the links
-       be right for a kind the reader has picked but not yet saved. */
+    /* One box filling in another: the buttons follow the kind and the saved
+       link AS THEY ARE TYPED. It reads the form, never the state — nothing is
+       committed until the field is finished — so a link pasted a moment ago is
+       already the one the button would open.
+       A SAVED LINK LEADS, and the tools' own pages stay behind it: the saved one
+       is the press you came for, and the landing pages are how you go and find
+       a link in the first place, which is still worth having afterwards. */
     link() {
-      const kindBox = F('rf-kind'), addrBox = F('rf-addr');
+      const kindBox = F('rf-kind'), linkBox = F('rf-link');
       const kind = kindBox ? kindBox.value : '';
-      const addr = addrBox ? String(addrBox.value || '').trim() : '';
-      setOpensLinks('value', (PROPERTY_LOOKUPS[kind] || [])
-        .map((l) => ({ label: l.label, href: l.url(addr) })));
+      const saved = linkBox ? safePropLink(linkBox.value) : '';
+      const tools = (PROPERTY_LOOKUPS[kind] || [])
+        .map((l) => ({ label: l.label, href: l.url() }));
+      setOpensLinks('value', saved
+        ? [{ label: propLinkLabel(saved), href: saved, saved: true }, ...tools]
+        : tools);
     },
     blank: () => ({ kind: 'home' }),
     save(ds, v) {
@@ -24536,17 +24578,13 @@ const EDITORS = {
         const cur = state.side.property[+ds.idx];
         Object.assign(cur, row);
         if (row.cur === undefined) delete cur.cur;
-        /* The address goes to its OWN store, never onto the row: `row` above is
-           an explicit literal, so nothing can ride in by accident — which
-           matters, because coerceShape does not strip unknown keys off a
-           property and a field landing there would reach Firestore, every
-           backup and every share link.
-           Written only when the question was ASKED. `showIf` HIDES the box on a
-           kind that is not a home, it does not remove it, so the address is
-           still in the form — and a dialog that never asked must not answer:
-           without this, turning a home into a vehicle would file its address
-           against the vehicle, and turning it back would find it gone. */
-        if (cur.id && row.kind === 'home') setPropAddr(cur.id, v.addr);
+        /* The link goes to its OWN store, never onto the row: `row` above is an
+           explicit literal, so nothing can ride in by accident — which matters,
+           because coerceShape does not strip unknown keys off a property and a
+           field landing there would reach Firestore, every backup and every
+           share link. `v.link` is undefined while ADDING, when the field is not
+           offered at all, and `setPropLink` is not reached on that branch. */
+        if (cur.id) setPropLink(cur.id, v.link);
       }
       /* A new row is minted an id here rather than left to coerceShape,
          because a debt secured on it needs something to point at the moment
@@ -24564,11 +24602,11 @@ const EDITORS = {
          doing it here is what makes the card read right immediately. */
       if (gone) for (const l of state.side.liabilities || [])
         if (l.securedOn === gone.id) delete l.securedOn;
-      /* The address goes with it. Nothing else would ever clear it — the map is
-         keyed by an id no row has any more — and an address for a house that is
+      /* The saved link goes with it. Nothing else would ever clear it — the map
+         is keyed by an id no row has any more — and a link to a property that is
          not in the plan is the one thing in this store with no reason to exist.
          The keychain entry is the reader's own and is left to them. */
-      if (gone && gone.id) setPropAddr(gone.id, '');
+      if (gone && gone.id) setPropLink(gone.id, '');
     },
   },
 
@@ -29185,10 +29223,11 @@ F('clearConfirm').onclick = () => {
        must mean an emptied tape. CALC_KEY is declared further down the file
        and read here at click time, never at parse time. */
     localStorage.removeItem(CALC_KEY);
-    /* Every home's address. The same promise the price key is cleared under:
-       "every holding and table in this browser is gone" cannot leave an address
-       sitting on a shared origin for any page on it to read. */
-    localStorage.removeItem(PROP_ADDR_KEY);
+    /* Every saved value-page link. The promise the price key is cleared under:
+       "every holding and table in this browser is gone" cannot leave a URL
+       naming where somebody lives on a shared origin for any page to read. The
+       address key this replaced is removed at load, beside its own constant. */
+    localStorage.removeItem(PROP_LINK_KEY);
   } catch (e) {}
   calc = coerceCalc(null);
   renderTape();
@@ -31611,7 +31650,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tripPart, sumPart,
   /* Looking a property's value up: where each kind sends you, and the boundary
      for the one thing that store holds. */
-  PROPERTY_LOOKUPS, coercePropAddrs, propAddrAccount, PROP_ADDR_MAX,
+  PROPERTY_LOOKUPS, coercePropLinks, safePropLink, propLinkLabel, propLinkAccount, PROP_LINK_MAX,
   parseMoney, raiseFor, sinceLastYear,
   /* The calculator's arithmetic: the parser, the selection reader, the tape's
      stats, the figure under a click, and the boundary for fin-calc. */

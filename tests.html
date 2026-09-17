@@ -20105,13 +20105,11 @@ t('Net Worth’s part tiles open the tab each figure comes from', async () => {
 });
 
 group('Property value lookup (2026-09-17)');
-/* There is no free valuation API this app can use, and that was checked rather
-   than assumed: Zillow retired its public one in 2021 and its replacement does
-   not expose the Zestimate at all, Edmunds closed its in 2018, and every free
-   tier that does answer with a figure wants a bearer token — which a public
-   single-file page cannot hold. So the feature is a link OUT and a figure back.
-   Two things are worth pinning: that the links say the right thing, and that
-   the address they are built from never, ever reaches the plan. */
+/* There is no free valuation API this app can use — every one that answers with
+   a figure wants a bearer token, and a public single-file page cannot hold one.
+   So the feature is a link OUT and a figure back. The app does NOT build a link
+   to a particular property: it tried, twice, and both sites key their real pages
+   on an internal id an address will not give (a `_zpid`, a `propertyId`). The reader pastes the page once instead. */
 
 t('every kind of property says where to go and look its value up', () => {
   const kinds = H.PROPERTY_KINDS.map(([k]) => k);
@@ -20128,98 +20126,117 @@ t('every kind of property says where to go and look its value up', () => {
   }
 });
 
-t('with no address a lookup opens the tool’s own page, over https', () => {
+t('a tool link is a plain landing page, built out of nothing the reader typed', () => {
+  /* The rule that keeps the two wrong guesses from coming back. Redfin was
+     handed `?address=` and ignored it — every search form on that site is a
+     POST; Zillow was handed its search slug and did not land on the house. Both
+     answer a wrong parameter with a page that looks perfectly normal, which is
+     exactly how neither was caught before it shipped. */
   for (const [k, list] of Object.entries(H.PROPERTY_LOOKUPS))
     for (const l of list) {
-      const u = l.url('');
+      const u = l.url('12 Example Street, Somewhere, NY 14094');
       ok(/^https:\/\//.test(u), `${k}/${l.label} goes out over https`, u);
-      ok(!/undefined|\?address=$|_rb\/$/.test(u),
-        `${k}/${l.label} is a whole page, not a half-built query with nothing in it`, u);
+      eq(u, l.url(), `${k}/${l.label} ignores anything passed to it`);
+      ok(!/[?&=]/.test(u), `${k}/${l.label} carries no query string at all`, u);
+      ok(!/Example|Somewhere|14094/.test(u), `${k}/${l.label} carries nothing the reader typed`, u);
     }
 });
 
-t('an address goes into Redfin as a query and into Zillow as its own hyphen slug', () => {
-  const addr = '1600 Pennsylvania Ave NW, Washington, DC 20500';
-  const [redfin, zillow] = H.PROPERTY_LOOKUPS.home;
-  eq(redfin.url(addr),
-    'https://www.redfin.com/what-is-my-home-worth?address=' + encodeURIComponent(addr),
-    'Redfin takes it as a query parameter, encoded whole');
-  eq(zillow.url(addr),
-    'https://www.zillow.com/homes/1600-Pennsylvania-Ave-NW-Washington-DC-20500_rb/',
-    'Zillow writes its own address URLs as a hyphen slug, so the commas go and the spaces become hyphens');
-  ok(!/%20|%2C/.test(zillow.url(addr)),
-    'and no percent escape survives into that slug — it is a different shape from the one the site writes for itself, '
-    + 'and this is the link that could not be loaded from here to find out which it forgives');
+t('a saved link must be http or https, and anything else is dropped', () => {
+  /* The load-bearing check in the whole feature: this string goes into an href,
+     and `javascript:` in one is script running on an origin five apps share. */
+  const good = 'https://www.zillow.com/homedetails/1-Example-St-Somewhere-NY-14094/12345678_zpid/';
+  eq(H.safePropLink(good), good, 'an https link is kept whole');
+  eq(H.safePropLink('http://example.com/x'), 'http://example.com/x', 'and so is plain http');
+  eq(H.safePropLink('  ' + good + '  '), good, 'trimmed');
+  for (const bad of [
+    'javascript:alert(document.domain)',
+    'JavaScript:alert(1)',
+    ' javascript:alert(1)',
+    'data:text/html,<img src=x onerror=alert(1)>',
+    'vbscript:msgbox(1)',
+    'file:///etc/passwd',
+    '12 Example Street, Somewhere, NY 14094',
+    'www.zillow.com/homedetails/x',
+    '',
+    null,
+    undefined,
+  ]) eq(H.safePropLink(bad), '', `dropped: ${String(bad).slice(0, 40)}`);
+  eq(H.safePropLink('https://example.com/' + 'x'.repeat(H.PROP_LINK_MAX)).length, H.PROP_LINK_MAX,
+    'and a very long one is capped');
 });
 
-t('a vehicle and a boat lookup ignore an address they were never given', () => {
-  for (const k of ['vehicle', 'boat'])
-    for (const l of H.PROPERTY_LOOKUPS[k])
-      eq(l.url('12 Example Street'), l.url(''),
-        `${k}/${l.label} is the same page either way — only a home is asked where it is`);
-});
-
-t('the address store keeps a real string under a real id and drops the rest', () => {
-  const long = 'x'.repeat(H.PROP_ADDR_MAX + 50);
-  const got = H.coercePropAddrs({ byId: {
-    house: '  12 Example Street  ',
-    'flat-2': 'somewhere else',
-    long,
-    'bad key!': 'not an id shape',
-    'has space': 'nor is this',
+t('the link store keeps a real URL under a real id and drops the rest', () => {
+  const good = 'https://www.zillow.com/homedetails/x/1_zpid/';
+  const got = H.coercePropLinks({ byId: {
+    house: '  ' + good + '  ',
+    'flat-2': 'http://example.com/a',
+    evil: 'javascript:alert(1)',
+    plain: 'not a url at all',
+    'bad key!': good,
+    'has space': good,
     num: 42,
     nested: { a: 1 },
-    empty: '   ',
   } });
-  eq(got.house, '12 Example Street', 'trimmed');
-  eq(got['flat-2'], 'somewhere else', 'a hyphen-and-digit id is a real id');
-  eq(got.long.length, H.PROP_ADDR_MAX, 'capped, the tax table’s own `source` rule');
-  for (const k of ['bad key!', 'has space', 'num', 'nested', 'empty'])
+  eq(got.house, good, 'trimmed and kept');
+  eq(got['flat-2'], 'http://example.com/a', 'a hyphen-and-digit id is a real id');
+  for (const k of ['evil', 'plain', 'bad key!', 'has space', 'num', 'nested'])
     ok(!(k in got), `${k} is dropped`);
-  eq(Object.keys(H.coercePropAddrs(null)).length, 0, 'nothing at all coerces to nothing');
-  eq(Object.keys(H.coercePropAddrs({ byId: 'not an object' })).length, 0, 'and so does junk');
+  eq(Object.keys(H.coercePropLinks(null)).length, 0, 'nothing at all coerces to nothing');
+  eq(Object.keys(H.coercePropLinks({ byId: 'not an object' })).length, 0, 'and so does junk');
 });
 
 t('an id that is already valid is kept EXACTLY, capitals and underscores included', () => {
   /* The rule that must not drift. `mintIds` leaves a property id passing ID_OK
      completely alone and only mints one that FAILS it — and ID_OK admits
      capitals and underscores where slugJs does not. Re-slugging this map to
-     "follow" a repair that never happens would quietly detach the address from
+     "follow" a repair that never happens would quietly detach the link from
      every property whose id carries either: `Home` would go looking for `home`,
      `My_House` for `my-house`. */
-  const got = H.coercePropAddrs({ byId: { Home: 'a', My_House: 'b', 'home-2': 'c' } });
-  eq(got.Home, 'a', 'a capital is left where it is');
-  eq(got.My_House, 'b', 'and so is an underscore');
-  eq(got['home-2'], 'c');
+  const u = 'https://example.com/';
+  const got = H.coercePropLinks({ byId: { Home: u + 'a', My_House: u + 'b', 'home-2': u + 'c' } });
+  eq(got.Home, u + 'a', 'a capital is left where it is');
+  eq(got.My_House, u + 'b', 'and so is an underscore');
+  eq(got['home-2'], u + 'c');
   ok(!('home' in got) && !('my-house' in got),
     'nothing is re-slugged — a slugged key would point at a property that does not exist');
 });
 
-t('a keychain account names the property, so two homes cannot overwrite each other', () => {
-  const a = H.propAddrAccount('house'), b = H.propAddrAccount('flat');
+t('a saved link is labelled by its own hostname, never by anything typed', () => {
+  eq(H.propLinkLabel('https://www.zillow.com/homedetails/x/1_zpid/'), 'zillow.com',
+    'www. comes off');
+  eq(H.propLinkLabel('https://www.redfin.com/what-is-my-home-worth?propertyId=1'), 'redfin.com');
+  eq(H.propLinkLabel('https://kbb.com/x'), 'kbb.com');
+  ok(H.propLinkLabel('not a url'), 'an unparseable one still says something rather than nothing');
+});
+
+t('a keychain account names the property, so two cannot overwrite each other', () => {
+  const a = H.propLinkAccount('house'), b = H.propLinkAccount('flat');
   ok(a !== b, 'two properties, two entries', `${a} / ${b}`);
   ok(/house/.test(a) && /Money Map/.test(a),
     'and it says which app and which property — the origin is one five apps share', a);
 });
 
-t('deleting everything clears the saved addresses too', () => {
+t('deleting everything clears the saved links too', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   /* Anchored on CALC_KEY rather than on QUOTE_CACHE: the legacy-cache adopt has
      a `removeItem(QUOTE_CACHE)` in a one-line try of its own, further up, and a
      lazy match from there finds that `} catch` and never reaches this block. */
-  ok(/removeItem\(CALC_KEY\);[\s\S]{0,800}?removeItem\(PROP_ADDR_KEY\)/.test(APP_SRC),
-    'an address must not outlive "every holding and table in this browser is gone" on a shared origin');
+  ok(/removeItem\(CALC_KEY\);[\s\S]{0,800}?removeItem\(PROP_LINK_KEY\)/.test(APP_SRC),
+    'a link naming where somebody lives must not outlive "every holding and table in this browser is gone"');
+  ok(/removeItem\('fin-propaddr'\)/.test(APP_SRC),
+    'and the address key this replaced is removed on load, so it is not left behind either');
 });
 
-t('the property row is rebuilt from a literal with no address on it', () => {
+t('the property row is rebuilt from a literal with no link on it', () => {
   ok(APP_SRC, 'index.html was not read');
-  /* The LITERAL alone. Reaching back to `property: {` swept in the fields list,
-     which names `addr` quite legitimately — the field exists, it just must not
+  /* The LITERAL alone. Reaching back to `property: {` sweeps in the fields list,
+     which names the key quite legitimately — the field exists, it just must not
      be written onto the row. */
   const save = APP_SRC.match(/save\(ds, v\) \{\s*if \(!v\.name\) return;\s*const row = \{[\s\S]*?\n      \};/);
   ok(save, 'the property save still rebuilds its row from an explicit literal');
-  ok(save && !/addr/.test(save[0]),
-    'and no addr key is in it — coerceShape does not strip unknown keys off a property row, '
+  ok(save && !/link/.test(save[0]),
+    'and no link key is in it — coerceShape does not strip unknown keys off a property row, '
     + 'so a field landing there would reach Firestore, every backup and every share link');
 });
 
@@ -20237,12 +20254,12 @@ t('the lookup is a link that leaves the app, not a button pretending to be one',
         'an <a>, because it NAVIGATES — a <button> here would lie about what it does to everything reading this page by role');
       eq(a.target, '_blank', 'it opens away from the plan rather than over it');
       eq(a.rel, 'noopener noreferrer',
-        'noreferrer as well as noopener: the destination is somebody else’s site, and which page sent the reader is none of its business');
+        'noreferrer as well as noopener: the destination is somebody else\u2019s site, and which page sent the reader is none of its business');
     }
   } finally { f.remove(); }
 });
 
-t('the links follow the kind, and the address is asked for only on a home', async () => {
+t('the tool links follow the kind, and every property can save a link', async () => {
   const { f, W, D } = await auditFrame(1280, 900, 'propkinds');
   try {
     D.getElementById('tab-household').click();
@@ -20251,57 +20268,54 @@ t('the links follow the kind, and the address is asked for only on a home', asyn
     await new Promise((r) => setTimeout(r, 200));
     const kindBox = D.getElementById('rf-kind');
     const labels = () => [...D.querySelectorAll('#rf-opens-value a')].map((a) => a.textContent);
-    const addrShown = () => !D.getElementById('rf-addr').closest('.grid-fields > div').hidden;
-    for (const [kind, n, shown] of [['vehicle', 2, false], ['boat', 1, false],
-                                    ['other', 0, false], ['home', 2, true]]) {
+    for (const [kind, n] of [['vehicle', 2], ['boat', 1], ['other', 0], ['home', 2]]) {
       kindBox.value = kind;
       kindBox.dispatchEvent(new W.Event('change', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 150));
       eq(labels().length, n, `${kind} offers ${n}`, labels().join(', '));
-      eq(addrShown(), shown, `${kind}: the address is ${shown ? 'asked for' : 'not asked for'}`);
     }
-    ok(labels().join(' ').includes('Zillow'), 'and a home is back to its own two', labels().join(', '));
+    ok(D.getElementById('rf-link'),
+      'and the saved-link box is offered whatever the kind — a car has a Blue Book page too');
   } finally { f.remove(); }
 });
 
-t('typing an address moves the lookup onto the house', async () => {
-  const { f, W, D } = await auditFrame(1280, 900, 'propaddr');
+t('a saved link leads, and the tools stay behind it', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'propsaved');
+  const SAVED = 'https://www.zillow.com/homedetails/1-Example-St-Somewhere-NY-14094/12345678_zpid/';
   try {
     D.getElementById('tab-household').click();
     await new Promise((r) => setTimeout(r, 300));
     D.querySelector('tr[data-edit="property"][data-idx="0"]').click();
     await new Promise((r) => setTimeout(r, 200));
-    /* Typed TWICE, and never compared against whatever the box opened holding.
-       The harness frame shares localhost's own localStorage, so a browser that
-       has been used to try this feature by hand already has an address saved
-       against that very property — the ambient-state trap, which turned the
-       first version of this test red for a reason that had nothing to do with
-       the code. What is actually being pinned is that the links follow what is
-       in the box, so the box is SET and the links are read, twice. */
-    const hrefs = () => [...D.querySelectorAll('#rf-opens-value a')].map((a) => a.href);
-    const box = D.getElementById('rf-addr');
-    const type = (v) => {
-      box.value = v;
-      box.dispatchEvent(new W.Event('input', { bubbles: true }));
-      return hrefs();
-    };
-    const first = type('1600 Pennsylvania Ave NW, Washington, DC 20500');
-    ok(first.some((u) => /homes\/1600-Pennsylvania-Ave-NW-Washington-DC-20500_rb/.test(u)),
-      'Zillow lands on the house, as its own hyphen slug', first.join(' '));
-    ok(first.some((u) => /address=1600%20Pennsylvania%20Ave/.test(u)),
-      'and Redfin does too, as an encoded query', first.join(' '));
-    const second = type('350 Fifth Ave, New York, NY 10118');
-    ok(second.every((u, i) => u !== first[i]), 'every link moved when the address did',
-      first.join(' ') + ' -> ' + second.join(' '));
-    ok(second.some((u) => /350-Fifth-Ave-New-York-NY-10118/.test(u)),
-      'onto the new one', second.join(' '));
-    const empty = type('');
-    ok(empty.every((u) => !/Pennsylvania|Fifth/.test(u)),
-      'and emptying the box puts the links back to the tools\u2019 own pages', empty.join(' '));
+    const shown = () => [...D.querySelectorAll('#rf-opens-value a')]
+      .map((a) => ({ label: a.textContent, href: a.href, primary: a.classList.contains('primary') }));
+    const before = shown();
+    eq(before.length, 2, 'two tool links to start with');
+    ok(before.every((l) => !l.primary), 'and none of them leads');
+
+    const box = D.getElementById('rf-link');
+    box.value = SAVED;
+    box.dispatchEvent(new W.Event('input', { bubbles: true }));
+    const after = shown();
+    eq(after.length, 3, 'the saved link joins them');
+    eq(after[0].label, 'zillow.com', 'FIRST, and named by its own hostname');
+    eq(after[0].href, SAVED, 'going exactly where it was told');
+    ok(after[0].primary, 'and it leads — it is the press the reader came for');
+    eq(after.slice(1).map((l) => l.label).join(','), 'Redfin,Zillow',
+      'with the tools still behind it, for finding a link in the first place');
+
+    /* A link the boundary refuses never reaches the page at all. */
+    box.value = 'javascript:alert(1)';
+    box.dispatchEvent(new W.Event('input', { bubbles: true }));
+    const evil = shown();
+    eq(evil.length, 2, 'a refused scheme adds no button');
+    ok(evil.every((l) => !/javascript/i.test(l.href)),
+      'and nothing of it reaches an href — this is an origin five apps share',
+      evil.map((l) => l.href).join(' '));
   } finally { f.remove(); }
 });
 
-t('the address box is a password field with an account name of its own', async () => {
+t('the link box is a password field with an account name of its own', async () => {
   const { f, D } = await auditFrame(1280, 900, 'proppw');
   try {
     D.getElementById('tab-household').click();
@@ -20311,12 +20325,12 @@ t('the address box is a password field with an account name of its own', async (
       D.getElementById('rowDialog').close();
       D.querySelector(`tr[data-edit="property"][data-idx="${idx}"]`).click();
       await new Promise((r) => setTimeout(r, 150));
-      const box = D.getElementById('rf-addr');
+      const box = D.getElementById('rf-link');
       ok(box, `property ${idx} carries the box in its form`);
       eq(box.type, 'password', 'masked, which is what makes a password manager offer to keep it');
       eq(box.autocomplete, 'current-password',
-        'one address re-entered on a second device, not a secret being invented');
-      eq(box.spellcheck, false, 'or iOS autocorrects a street name');
+        'one link re-entered on a second device, not a secret being invented');
+      eq(box.spellcheck, false, 'or iOS autocorrects a URL');
       eq(box.getAttribute('autocapitalize'), 'off');
       const user = box.closest('.field-row').querySelector('input[autocomplete="username"]');
       ok(user, 'and it names its own account, or Safari files it under whichever box sits next to it');
@@ -20324,31 +20338,32 @@ t('the address box is a password field with an account name of its own', async (
     }
     D.getElementById('rowDialog').close();
     eq(new Set(accounts).size, accounts.length,
-      'three properties, three entries — one shared name and the second address would overwrite the first',
+      'three properties, three entries — one shared name and the second link would overwrite the first',
       accounts.join(' / '));
   } finally { f.remove(); }
 });
 
-t('an address typed into the dialog never reaches the plan', async () => {
+t('a saved link never reaches the plan', async () => {
   /* The one that matters. A share link, a backup and the Firestore document are
-     all built from this one object, so "not in the state" is the whole promise
-     — and it is kept by the row being rebuilt from a literal rather than by
+     all built from this one object, so "not in the state" is the whole promise —
+     and it is kept by the row being rebuilt from a literal rather than by
      anything refusing the field later. */
   const { f, W, D } = await auditFrame(1280, 900, 'propleak');
+  const SAVED = 'https://www.zillow.com/homedetails/1-Example-St-Somewhere-NY-14094/12345678_zpid/';
   try {
     D.getElementById('tab-household').click();
     await new Promise((r) => setTimeout(r, 300));
     D.querySelector('tr[data-edit="property"][data-idx="0"]').click();
     await new Promise((r) => setTimeout(r, 200));
-    const box = D.getElementById('rf-addr');
-    box.value = '1600 Pennsylvania Ave NW, Washington, DC 20500';
+    const box = D.getElementById('rf-link');
+    box.value = SAVED;
     box.dispatchEvent(new W.Event('input', { bubbles: true }));
     box.dispatchEvent(new W.Event('change', { bubbles: true }));   // finishing a field is what commits
     await new Promise((r) => setTimeout(r, 250));
     const st = W.finGet();
-    ok(!('addr' in st.side.property[0]), 'no addr key on the row',
+    ok(!('link' in st.side.property[0]), 'no link key on the row',
       Object.keys(st.side.property[0]).join(','));
-    ok(!JSON.stringify(st).includes('Pennsylvania'),
+    ok(!JSON.stringify(st).includes('zpid'),
       'and not a trace of it anywhere in the plan — which is what keeps it out of Firestore, '
       + 'every backup file and every share link, all three of which are built from this object');
   } finally { f.remove(); }
