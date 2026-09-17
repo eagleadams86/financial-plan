@@ -7589,3 +7589,9 @@ the foot of `tests.html`.
   reading "at today's prices" with no hint of a failed lookup. The quote side
   had always retried after `NO_QUOTE_TTL_MS` (a day); `closesWanted` now treats
   a `noClose` older than that as absent (an optional `now` keeps it pure).
+- **A close fetched by a run that lost the token was thrown away.**
+  `refreshMonthCloses` returned before saving `found` when `refreshPrices` had
+  started meanwhile, but `onAnswer` had already put those tickers in
+  `closeAutoTried` — fetched, discarded, not asked again that page load.
+  `saveCloses(found)` runs on that exit too; only the render and cool-off
+  belong to the current run.
