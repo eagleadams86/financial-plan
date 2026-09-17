@@ -7628,3 +7628,11 @@ the foot of `tests.html`.
   and the UA's `min-inline-size: min-content` on `fieldset` let it push the
   panel out. `fieldset, .formpanel { min-inline-size: 0 }` plus `#shareYears
   { max-width: 100% }` — the rule Sprint Velocity took on 2026-09-15.
+- **A value page link pasted without its scheme vanished silently.**
+  `safePropLink` returned `''` for anything `new URL` could not parse — a bare
+  `www.zillow.com/…` included — `setPropLink` deleted the saved link on `''`,
+  and `reprimeRow` refilled the box empty; no toast. Now a scheme-less host
+  path gets `https://` (a scheme of its own is judged as written, so
+  `javascript:` still fails), and a paste that is still not a web address is
+  refused with the row editor's own sentence and leaves the saved link alone.
+  An empty box still clears it. The property `save` returns the refusal.

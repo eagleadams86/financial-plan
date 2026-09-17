@@ -23438,12 +23438,17 @@ const propLinkInHarness = (() => {
    every property whose id carries either. A reminted id orphans its link, which
    is the safe direction: one you paste again, never one pointing elsewhere. */
 function safePropLink(raw) {
-  const s = String(raw == null ? '' : raw).trim().slice(0, PROP_LINK_MAX);
+  let s = String(raw == null ? '' : raw).trim().slice(0, PROP_LINK_MAX);
   if (!s) return '';
+  /* A link copied off the address bar often arrives as "www.zillow.com/…" —
+     no scheme, which `new URL` refuses. That is a web address missing four
+     characters, not junk, so it gets them (2026-09-17). Anything with a scheme
+     of its own is judged as written, so `javascript:` still fails below. */
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(s) && /^[\w-]+(\.[\w-]+)+(?:[/?#]|$)/.test(s)) s = `https://${s}`;
   try {
     const u = new URL(s);
     return (u.protocol === 'https:' || u.protocol === 'http:') ? s : '';
-  } catch (e) { return ''; }          // not a URL at all, a bare address included
+  } catch (e) { return ''; }          // not a URL at all
 }
 
 function coercePropLinks(raw) {
@@ -23476,12 +23481,22 @@ function savePropLinks(map) {
    box REMOVES the entry rather than storing '' — absent and empty are one claim
    here, and the smaller footprint is the better one for this field. */
 function propLinkOf(id) { return loadPropLinks()[id] || ''; }
+/* Returns the sentence to show when a pasted link was REFUSED — the row
+   editor's convention for a box it could not read (`unreadableFields`). The
+   saved link is left as it was: a paste that is not a web address used to
+   delete it silently and refill the box empty (2026-09-17). An empty box still
+   means "clear it". */
 function setPropLink(id, link) {
-  if (!ID_OK.test(String(id || ''))) return;
+  if (!ID_OK.test(String(id || ''))) return '';
+  const raw = String(link == null ? '' : link).trim();
   const map = loadPropLinks();
-  const clean = safePropLink(link);
-  if (clean) map[id] = clean; else delete map[id];
+  const clean = safePropLink(raw);
+  if (clean) map[id] = clean;
+  else if (!raw) delete map[id];
+  else return `“${raw.length > 40 ? raw.slice(0, 40) + '…' : raw}” isn’t a web address — `
+    + 'the value page link was left as it was';
   savePropLinks(map);
+  return '';
 }
 
 /* What a saved link's button is CALLED: its own hostname, `www.` dropped, so a
@@ -24750,7 +24765,10 @@ const EDITORS = {
            field landing there would reach Firestore, every backup and every
            share link. `v.link` is undefined while ADDING, when the field is not
            offered at all, and `setPropLink` is not reached on that branch. */
-        if (cur.id) setPropLink(cur.id, v.link);
+        if (cur.id) {
+          const refused = setPropLink(cur.id, v.link);
+          if (refused) return refused;
+        }
       }
       /* A new row is minted an id here rather than left to coerceShape,
          because a debt secured on it needs something to point at the moment

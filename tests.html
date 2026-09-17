@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1161;
+const EXPECTED = 1162;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -20716,6 +20716,42 @@ t('the Share window fits a 320px phone without scrolling sideways', async () => 
       'the years box stays inside the window', sel.getBoundingClientRect().right);
     dlg.close();
   } finally { f.remove(); }
+});
+
+t('a value page link pasted without its scheme is kept, and junk is refused out loud', async () => {
+  eq(H.safePropLink('www.zillow.com/homedetails/1-Example-St/12345678_zpid/'),
+    'https://www.zillow.com/homedetails/1-Example-St/12345678_zpid/', 'a bare address gets https://');
+  eq(H.safePropLink('kbb.com/toyota/camry/2019/'), 'https://kbb.com/toyota/camry/2019/');
+  eq(H.safePropLink('javascript:alert(1)'), '', 'a scheme of its own is judged as written');
+  eq(H.safePropLink('not a link'), '', 'words are not an address');
+  eq(H.safePropLink('localhost'), '', 'nor is a bare word');
+  const { f, W, D } = await auditFrame(1280, 900, 'proprefuse');
+  try {
+    D.getElementById('tab-household').click();
+    await new Promise((r) => setTimeout(r, 300));
+    D.querySelector('tr[data-edit="property"][data-idx="0"]').click();
+    await new Promise((r) => setTimeout(r, 200));
+    const box = D.getElementById('rf-link');
+    const type = (v) => { box.value = v; box.dispatchEvent(new W.Event('change', { bubbles: true })); };
+    type('www.zillow.com/homedetails/1-Example-St/12345678_zpid/');
+    await new Promise((r) => setTimeout(r, 150));
+    const saved = JSON.parse(W.localStorage.getItem('fin-proplink') || '{}');
+    const id = Object.keys(saved)[0];
+    ok(id, 'the scheme-less paste was saved', W.localStorage.getItem('fin-proplink'));
+    eq(saved[id], 'https://www.zillow.com/homedetails/1-Example-St/12345678_zpid/', 'with its scheme');
+    type('not a link');
+    await new Promise((r) => setTimeout(r, 150));
+    eq(JSON.parse(W.localStorage.getItem('fin-proplink'))[id],
+      'https://www.zillow.com/homedetails/1-Example-St/12345678_zpid/', 'junk leaves the saved link alone');
+    ok(/isn’t a web address/.test(D.getElementById('toast').textContent), 'and says so',
+      D.getElementById('toast').textContent);
+    eq(D.getElementById('rf-link').value, 'https://www.zillow.com/homedetails/1-Example-St/12345678_zpid/',
+      'the box shows what is still saved');
+    type('');
+    await new Promise((r) => setTimeout(r, 150));
+    eq(JSON.parse(W.localStorage.getItem('fin-proplink') || '{}')[id], undefined, 'an empty box still clears it');
+    D.getElementById('rowDialog').close();
+  } finally { W.localStorage.removeItem('fin-proplink'); f.remove(); }
 });
 
 async function run() {

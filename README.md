@@ -1547,8 +1547,10 @@ The link is kept in this browser alone — never synced, never in a backup, neve
 in a share link — and the box is a password box, so your password manager can
 offer to remember it and carry it to your other devices on a path the app never
 touches. That is the same arrangement the [price-lookup key](#prices) uses, and
-for the same reason. Only `http` and `https` links are accepted, and a saved one
-is labelled by its own hostname rather than by anything you type.
+for the same reason. Only `http` and `https` links are accepted — one pasted
+without its `https://` gets it added — and a saved one is labelled by its own
+hostname rather than by anything you type. A paste that is not a web address is
+refused with a message, and the link you had stays.
 
 ### What You Owe
 
