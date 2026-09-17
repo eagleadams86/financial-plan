@@ -7619,3 +7619,7 @@ the foot of `tests.html`.
   (one re-armed timer; renders only while the settled view is up) is armed on
   that exit as well as on the throttled one. A rejected key then resolves the
   way it always did inside a close run: tried, "at today's prices".
+- **The Paychecks dialog contradicted its own cell.** Its context sentence
+  was "Estimated from Jan 25 — …" for every untyped month, while the cell's
+  hover read `PAYCHECK_SOURCE_TIP` — "From your pay schedule" or "assumed".
+  The dialog reads `C[y].paycheckSource[m]` now and has a sentence for each.
