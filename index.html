@@ -7225,7 +7225,7 @@ const RULES = {
      rather than estimating $0. */
   avglastyear(cat, m, ctx) {
     const py = +m.slice(0, 4) - 1;
-    let sum = 0, n = 0;
+    let sum = 0, n = 0, eSum = 0, eN = 0;
     for (let i = 1; i <= 12; i++) {
       const mm = `${py}-${String(i).padStart(2, '0')}`;
       /* the grid may run long enough to cover last year itself; otherwise the
@@ -7233,9 +7233,21 @@ const RULES = {
       const cell = monthDiff(ctx.yr.startMonth, mm) >= 0
         ? ctx.yr.cells[`${cat.id}|${mm}`]
         : ctx.prior?.cells[`${cat.id}|${mm}`];
-      if (cell && cell.kind !== 'missing' && cell.kind !== 'auto') { sum += cell.v; n++; }
+      if (!cell || cell.kind === 'missing') continue;
+      if (cell.kind === 'auto') { eSum += cell.v; eN++; }
+      else { sum += cell.v; n++; }
     }
-    return n ? sum / n : null;
+    if (n) return sum / n;
+    /* A YEAR TWO AHEAD (Charles, 2026-09-17: "average of last year doesn't
+       carry forward into multiple projected years"). Every month of a
+       projected 2027 is an estimate, so 2028 found nothing recorded and went
+       blank for the whole year. Only when there is NOTHING recorded does it
+       fall back to last year's estimates — the same reach `priorYearRun` gives
+       `avg` and `carry` — and those are this very rule's own figures a year
+       earlier, so the chain hands the same number forward rather than
+       drifting. Any recorded month still wins, which keeps the live year's
+       successor exactly what it was. */
+    return eN ? eSum / eN : null;
   },
 
   /* Electric: same month a year earlier — from this grid when it reaches back
@@ -10273,7 +10285,7 @@ function yearPickerHtml(active) {
      year strip and earlier in the month strip, and nothing has to be read off a
      label to know which.
      It cost the thing the reverse was for: this year is no longer pinned to the
-     left-hand end where it needed no scrolling. `settle()` in wireYearStrip
+     left-hand end where it needed no scrolling. `settleRail()`
      covers it — the chosen year is centred whenever it sits off an end — and the
      app opens on the live year, so what moved is where the OLD years sit, not
      where the reader lands.
@@ -10281,15 +10293,20 @@ function yearPickerHtml(active) {
      Always rendered and only ever `disabled`, again like the month strip: a
      control that comes and goes changes the width of the nav and shoves whatever
      is beside it out from under the pointer that has just used it. */
-  const showNow = yearKeys().includes(nowY) && active !== nowY;
+  /* ALWAYS THERE WHILE THIS YEAR IS IN THE STRIP, and only ever `disabled` on
+     it (2026-09-17). It used to come and go, and its going widened the rail:
+     from a rail scrolled to its far end, picking this year pulled every chip
+     sideways by the button's width — the shift Charles reported. The arrows
+     beside it already follow this rule for exactly this reason. */
+  const showNow = yearKeys().includes(nowY);
   const at = order.indexOf(active);
   return `<div class="yearstrip">
     ${budgetSwitchHtml('year')}
     <div class="yearrail" id="yearRail" role="radiogroup"
       aria-label="Which year you're looking at">${chips}</div>
     <div class="yearnav" id="yearNav">
-      ${showNow ? `<button type="button" class="ynav ynow" id="yearNow"
-        data-year="${esc(nowY)}" title="Back to ${esc(nowY)}"><span class="now-long">This year</span><span class="now-short">Now</span></button>` : ''}
+      ${showNow ? `<button type="button" class="ynav ynow" id="yearNow"${active === nowY ? ' disabled' : ''}
+        data-year="${esc(nowY)}" title="${active === nowY ? `You're on ${esc(nowY)}` : `Back to ${esc(nowY)}`}"><span class="now-long">This year</span><span class="now-short">Now</span></button>` : ''}
       <button type="button" class="ynav snav" id="yearPrev"${at <= 0 ? ' disabled' : ''}
         aria-label="The year before" title="The year before">&#8249;</button>
       <button type="button" class="ynav snav" id="yearNext"${
@@ -10304,13 +10321,54 @@ function yearPickerHtml(active) {
    the chip list, so which of them is live is a fact about WHERE YOU ARE in the
    plan, and the redraw that moves you is the only thing that can change it —
    which is why it is written into the markup above and not measured here. The
-   rail still scrolls, by drag, by wheel and by `settle()` bringing the chosen
+   rail still scrolls, by drag, by wheel and by `settleRail()` bringing the chosen
    year into view; it just no longer has an opinion about a button. */
 
 /* Set by a keyboard move so the redraw can hand focus back. Choosing a year
    rebuilds the whole view, which blurs whatever you were on — without this the
    second arrow key press goes nowhere, the same trap the tab bar hit. */
 let yearKeyMove = false;
+
+/* WHERE EACH RAIL WAS LEFT, by id. Every year or month picked redraws the strip
+   from scratch, and a fresh rail starts scrolled to its left end — so until
+   2026-09-17 the years jumped under the pointer on every click: back to the
+   start, then re-centred if the chosen one had fallen off an edge (Charles:
+   "my year bar keeps shifting on me when i select different years"). The rail
+   now reopens where it was, and moves only when the chosen chip is not wholly
+   in view — and then only far enough to show it. A rail with no remembered
+   position (a reload, the other lens's first draw) centres the chip instead,
+   which is where a reader landing on the plan wants it. */
+const railScroll = {};
+function settleRail(rail, on) {
+  const id = rail.id;
+  const settle = () => {
+    if (!rail.isConnected) return;
+    /* The first layout after a reload can measure zero, and a zero-wide rail
+       says every chip is off the end. A frame later the real number is there. */
+    if (!rail.clientWidth) { requestAnimationFrame(settle); return; }
+    const had = railScroll[id] !== undefined;
+    if (had) rail.scrollLeft = railScroll[id];
+    /* Centred by hand rather than by scrollIntoView: that method is free to
+       scroll the PAGE as well to satisfy the vertical axis. Measured against
+       the rail's own box, not `offsetLeft`: the chips' offsetParent is the
+       PAGE, so those numbers and `scrollLeft` are in different frames. */
+    if (on) {
+      const chip = on.getBoundingClientRect(), box = rail.getBoundingClientRect();
+      const room = 8;
+      if (!had) {
+        if (chip.left < box.left || chip.right > box.right)
+          rail.scrollLeft += chip.left - box.left - (box.width - chip.width) / 2;
+      } else if (chip.left < box.left) {
+        rail.scrollLeft += chip.left - box.left - room;
+      } else if (chip.right > box.right) {
+        rail.scrollLeft += chip.right - box.right + room;
+      }
+    }
+    railScroll[id] = rail.scrollLeft;
+    rail.addEventListener('scroll', () => { railScroll[id] = rail.scrollLeft; }, { passive: true });
+  };
+  settle();
+}
 
 function wireYearStrip() {
   const rail = F('yearRail');
@@ -10348,37 +10406,14 @@ function wireYearStrip() {
   F('yearNext').onclick = () => step(1);
   /* Exactly what clicking this year's chip does — the button is a shortcut to a
      chip that may be scrolled off the end of the rail, not a second way of
-     choosing a year. `settle()` below then brings the chip into view. */
+     choosing a year. `settleRail()` below then brings the chip into view. */
   const nowBtn = F('yearNow');
   if (nowBtn) nowBtn.onclick = () => {
     state.ui.activeYear = nowBtn.dataset.year;
     save(); render();
   };
   const on = chips.find(c => c.getAttribute('aria-checked') === 'true');
-  /* Bring the chosen year into view, then say which arrows are live — both of
-     which need the rail to have a WIDTH. The first layout after a reload can
-     measure zero, and a zero-wide rail says every year is off the end, which
-     parks the strip against one edge with the year being read already scrolled
-     out of sight. A frame later the real number is there. */
-  const settle = () => {
-    if (!rail.isConnected) return;
-    if (!rail.clientWidth) { requestAnimationFrame(settle); return; }
-    /* Centred by hand rather than by scrollIntoView: that method is free to
-       scroll the PAGE as well to satisfy the vertical axis, and jumping the
-       reader down the page on a year change is not what was asked for. Only
-       when the year is actually off an end, though — a strip that re-centres
-       on a year you can already see would shuffle on every redraw, and the
-       years would never be where you left them. Measured against the rail's
-       own box, not `offsetLeft`: the chips' offsetParent is the PAGE, so those
-       numbers and `scrollLeft` are in different frames and comparing them
-       scrolls a year that was in plain sight. */
-    if (on) {
-      const chip = on.getBoundingClientRect(), box = rail.getBoundingClientRect();
-      if (chip.left < box.left || chip.right > box.right)
-        rail.scrollLeft += chip.left - box.left - (box.width - chip.width) / 2;
-    }
-  };
-  settle();
+  settleRail(rail, on);
   if (yearKeyMove) { yearKeyMove = false; on?.focus({ preventScroll: true }); }
 }
 
@@ -11468,7 +11503,7 @@ function ruleDesc(cat, st = state, goals = st === state ? liveGoals() : st.goals
   if (r === 'avg')
     return 'average of this year’s months so far, or last year’s until this one has any';
   if (r === 'avglastyear')
-    return 'average of last year’s recorded months, estimates not counted';
+    return 'average of last year’s recorded months, estimates not counted unless it has none';
   if (r === 'dividends') {
     const on = dividendAccounts(cat).map(id => accountName(st, id));
     return `${round2(((cat.rate ?? st.settings.midTermRateAnnual) || 0) * 100)}%/yr interest on ${
@@ -12274,8 +12309,9 @@ function monthPickerHtml(active, all) {
     <div class="yearrail" id="monthRail" role="radiogroup"
       aria-label="Which month you're looking at">${chips}</div>
     <div class="yearnav">
-      ${all.includes(now) && active !== now ? `<button type="button" class="ynav snav mnow"
-        id="monthNow" title="Back to ${esc(monthTitle(now))}"><span class="now-long">This month</span><span class="now-short">Now</span></button>` : ''}
+      ${all.includes(now) ? `<button type="button" class="ynav snav mnow"
+        id="monthNow"${active === now ? ' disabled' : ''} title="${active === now
+          ? `You're on ${esc(monthTitle(now))}` : `Back to ${esc(monthTitle(now))}`}"><span class="now-long">This month</span><span class="now-short">Now</span></button>` : ''}
       <button type="button" class="ynav snav" id="monthPrev"${i <= 0 ? ' disabled' : ''}
         aria-label="The month before" title="The month before">&#8249;</button>
       <button type="button" class="ynav snav" id="monthNext"${
@@ -13148,16 +13184,7 @@ function wireMonthStrip() {
   if (next) next.onclick = () => go(all[at + 1], false);
   if (now) now.onclick = () => go(thisMonth(), false);
   const on = chips[at];
-  const settle = () => {
-    if (!rail.isConnected) return;
-    if (!rail.clientWidth) { requestAnimationFrame(settle); return; }
-    if (on) {
-      const chip = on.getBoundingClientRect(), box = rail.getBoundingClientRect();
-      if (chip.left < box.left || chip.right > box.right)
-        rail.scrollLeft += chip.left - box.left - (box.width - chip.width) / 2;
-    }
-  };
-  settle();
+  settleRail(rail, on);
   if (monthKeyMove) { monthKeyMove = false; on?.focus({ preventScroll: true }); }
 }
 

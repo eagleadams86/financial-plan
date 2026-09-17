@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1109;
+const EXPECTED = 1111;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -7815,6 +7815,33 @@ t('averages the prior year’s stored months, ignoring what it estimated', () =>
   approx(c.cells['gas|2030-04'].v, -200, 'mean of the three recorded months');
   eq(c.cells['gas|2030-04'].kind, 'auto');
 });
+t('a year two ahead averages the projected year before it (2026-09-17)', () => {
+  /* Every month of a projected year is an estimate, so the year after it had
+     nothing recorded to average and went blank all twelve months. With nothing
+     recorded it falls back to those estimates — the same figure handed on. */
+  const s = H.coerceShape(fixtureState());
+  s.years['2029'].categories.push({ id: 'gas', name: 'Gas', role: 'normal', rule: 'none' });
+  s.years['2029'].cells['gas|2029-01'] = { v: -100, kind: 'actual' };
+  s.years['2029'].cells['gas|2029-02'] = { v: -300, kind: 'actual' };
+  const gas = { id: 'gas', name: 'Gas', role: 'normal', rule: 'avglastyear', section: 'expense' };
+  s.years['2030'].categories.push({ ...gas });
+  s.years['2031'] = { kind: 'grid', model: 'live', startMonth: '2031-01', monthCount: 12,
+    categories: [{ ...gas }], cells: {}, paychecks: {}, seeds: {}, overrides: {} };
+  const c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2031'];
+  approx(c.cells['gas|2031-01'].v, -200, 'January carries last year’s projected average');
+  approx(c.cells['gas|2031-12'].v, -200, 'and so does December');
+  eq(c.cells['gas|2031-06'].kind, 'auto');
+});
+t('a recorded month last year still beats its estimates', () => {
+  const s = H.coerceShape(fixtureState());
+  s.years['2029'].categories.push({ id: 'gas', name: 'Gas', role: 'normal', rule: 'avglastyear',
+    section: 'expense' });
+  s.years['2029'].cells['gas|2029-03'] = { v: -50, kind: 'actual' };
+  s.years['2030'].categories.push({ id: 'gas', name: 'Gas', role: 'normal',
+    rule: 'avglastyear', section: 'expense' });
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  approx(c.cells['gas|2030-04'].v, -50, 'the one real month, not the estimates around it');
+});
 t('a row with no history last year stays blank rather than estimating zero', () => {
   const s = H.coerceShape(fixtureState());
   s.years['2030'].categories.push({ id: 'new', name: 'New thing', role: 'normal',
@@ -11314,10 +11341,14 @@ t('the year strip offers "This year" on the same terms the month strip does', ()
   const nav = fn[0].slice(fn[0].indexOf('class="yearstrip"'));
   const at = (id) => nav.indexOf('id="' + id + '"');
   ok(at('yearNow') > -1, 'the strip has a "This year" button');
-  ok(/showNow\s*=\s*yearKeys\(\)\.includes\(nowY\)\s*&&\s*active !== nowY/.test(fn[0]),
-     'it is rendered only when this year is IN the strip and is not the one you are '
-     + 'reading — a button that does nothing is worse than no button, which is the '
-     + 'rule the month strip follows');
+  ok(/showNow\s*=\s*yearKeys\(\)\.includes\(nowY\);/.test(fn[0]),
+     'it is rendered whenever this year is IN the strip (2026-09-17) — coming and going '
+     + 'changed the rail\'s width and slid every year sideways');
+  ok(/id="yearNow"\$\{active === nowY \? ' disabled' : ''\}/.test(fn[0]),
+     'and on this year it is disabled rather than gone, like the arrows beside it');
+  const mfn = src.match(/function monthPickerHtml\([\s\S]*?\n\}/);
+  ok(mfn && /id="monthNow"\$\{active === now \? ' disabled' : ''\}/.test(mfn[0]),
+     'the month strip follows the same rule, so the pair still match');
   ok(at('yearNow') < at('yearPrev') && at('yearPrev') < at('yearNext'),
      'and it comes FIRST, so its arrival grows leftwards into the rail instead of '
      + 'shoving the arrows out from under the pointer');
@@ -19358,7 +19389,7 @@ t('on a phone the year or month being read shows whole in the strip, and the pag
           const shown = Math.min(rr.right, cr.right) - Math.max(rr.left, cr.left);
           ok(shown >= cr.width - 0.5, where + ': the chosen chip shows whole', shown.toFixed(1) + ' of ' + cr.width.toFixed(1));
           ok(D.documentElement.scrollWidth <= width, where + ': the page does not scroll sideways', D.documentElement.scrollWidth);
-          const jump = D.querySelector('#yearNow, #monthNow');
+          const jump = D.querySelector('#yearNow:not(:disabled), #monthNow:not(:disabled)');
           if (other && width >= 360) ok(jump && jump.getClientRects().length && jump.textContent.includes('Now') && jump.innerText.trim() === 'Now',
             where + ': the way back is still offered, as "Now"', jump && jump.innerText);
         }

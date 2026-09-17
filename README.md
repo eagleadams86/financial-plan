@@ -268,7 +268,10 @@ its name suggests. *Average of the months so far* falls back to **last year's**
 average while this year has no months of its own — which is every month of a
 year you've built ahead. *Average of last year* counts only the months actually
 recorded in it, so on a plan entered through August it's an average of eight
-months, not twelve. Hover a row's name to see which.
+months, not twelve — until a year has no recorded months at all, which is every
+year two or more ahead: then it averages last year's estimates, so the figure
+carries forward year after year instead of going blank. Hover a row's name to
+see which.
 
 **Same month last year rounds to the nearest whole dollar** — the spreadsheet
 wrapped that lookback in `ROUND()`, and on a bill nobody is pretending to know
@@ -1764,9 +1767,12 @@ pinned bars, never behind them.
 A year kept as a yearly summary is set in italics, one built before it has
 started is underlined with dots, **this year carries an underscore** wherever it
 has got to in the strip, and hovering any of them says which in words. A **This
-Year** button appears at the right-hand end once you have wandered off it — the
-Month lens's button, on the same terms — and takes you back in one click, from
-however far down the strip you have read. On a phone the strip tightens so the
+Year** button sits at the right-hand end — greyed out while you're on this year,
+live once you have wandered off it, the Month lens's button on the same terms —
+and takes you back in one click, from however far down the strip you have read.
+It stays put rather than coming and going, and the strip remembers where you
+scrolled it: picking a year never slides the others sideways, and a year half
+off an edge is scrolled only far enough to show it. On a phone the strip tightens so the
 year or month you're reading always shows whole: that button reads **Now**, and
 on the narrowest screens (under 360px) it steps aside — the underscore still
 marks this year, and the arrows still walk you back.
@@ -1775,7 +1781,7 @@ The same strip carries the Budget's **Year / Month** switch at its left end, and
 in the Month lens the years are replaced by the plan's months — the arrows step
 from one to the next in both lenses now, and the current month is
 marked with an underscore wherever it has got to. Both lenses put their way back
-to now in the same place, and neither shows it when you are already there. The
+to now in the same place, and both grey it out when you are already there. The
 switch, the strip and the arrows stay on ONE line at every width, a phone
 included — the strip scrolls, and the period you are reading is always brought
 into view.
