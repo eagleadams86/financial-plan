@@ -7600,3 +7600,7 @@ the foot of `tests.html`.
   "NaN-12" — nonsense on screen rather than a hole, since every render of the
   key is escaped, but the safety rested on sink escaping alone. The tax tables'
   keys were already `/^\d{4}$/`; the years' are now.
+- **A quote could be a negative or zero price.** `classifyQuote` and
+  `coerceQuotes` accepted any finite number where `classifyClose` and
+  `coerceCloses` required `> 0`; a supplier answer of `"-5"` valued a holding
+  at minus $42,250. Both now require a positive price.
