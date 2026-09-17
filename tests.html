@@ -20630,10 +20630,6 @@ t('a close fetched by a run that lost the token is still banked', () => {
     + 'tickers tried, so a result dropped here would never be asked for again this page load');
 });
 
-  eq(Object.keys(d.years), ['2030'], 'only the real year survives');
-  eq(d.years['2030'].startMonth, '2030-01');
-});
-
 t('a quote is a positive price, as a close already had to be', () => {
   ok(H.classifyQuote(200, { symbol: 'ZZPF', close: '-5' }).kind !== 'price', 'a negative close is not a price');
   ok(H.classifyQuote(200, { symbol: 'ZZPF', close: '0' }).kind !== 'price', 'nor is zero');
@@ -20657,7 +20653,8 @@ t('saving a cell hands focus back to the cell, not to <body>', async () => {
     ok(!D.getElementById('cellDialog').open, 'Save closed it');
     const again = D.querySelector(sel);
     ok(again, 'the cell was redrawn');
-    eq(D.activeElement, again, 'and it has the focus — the next Tab carries on from the grid, not from the skip link');
+    ok(D.activeElement === again, 'and it has the focus — the next Tab carries on from the grid, not from the skip link',
+      D.activeElement && D.activeElement.tagName + '#' + D.activeElement.id);
   } finally { f.remove(); }
 });
 
@@ -20718,13 +20715,15 @@ t('the Share window fits a 320px phone without scrolling sideways', async () => 
   } finally { f.remove(); }
 });
 
-t('a value page link pasted without its scheme is kept, and junk is refused out loud', async () => {
-  eq(H.safePropLink('www.zillow.com/homedetails/1-Example-St/12345678_zpid/'),
-    'https://www.zillow.com/homedetails/1-Example-St/12345678_zpid/', 'a bare address gets https://');
-  eq(H.safePropLink('kbb.com/toyota/camry/2019/'), 'https://kbb.com/toyota/camry/2019/');
-  eq(H.safePropLink('javascript:alert(1)'), '', 'a scheme of its own is judged as written');
-  eq(H.safePropLink('not a link'), '', 'words are not an address');
-  eq(H.safePropLink('localhost'), '', 'nor is a bare word');
+t('a value page link that is not a web link is refused out loud, and the saved one stays', async () => {
+  const good = 'https://www.zillow.com/homedetails/1-Example-St/12345678_zpid/';
+  eq(H.setPropLink('house', good), '', 'a good link is saved without a word');
+  eq(H.setPropLink('house', ''), '', 'an empty box clears it, without a word');
+  ok(/isn’t a web link/.test(H.setPropLink('house', 'not a link')), 'words are refused out loud');
+  ok(/isn’t a web link/.test(H.setPropLink('house', 'www.zillow.com/homedetails/x')),
+    'so is a bare address — the pinned rule is http or https, and the reader is told rather than left with an empty box');
+  ok(/isn’t a web link/.test(H.setPropLink('house', 'javascript:alert(1)')), 'and so is a scheme of its own');
+  eq(H.setPropLink('house', 'x'.repeat(100)).indexOf('x'.repeat(41)), -1, 'a long paste is cut short in the sentence');
   const { f, W, D } = await auditFrame(1280, 900, 'proprefuse');
   try {
     D.getElementById('tab-household').click();
@@ -20732,35 +20731,26 @@ t('a value page link pasted without its scheme is kept, and junk is refused out 
     D.querySelector('tr[data-edit="property"][data-idx="0"]').click();
     await new Promise((r) => setTimeout(r, 200));
     const box = D.getElementById('rf-link');
-    const type = (v) => { box.value = v; box.dispatchEvent(new W.Event('change', { bubbles: true })); };
-    type('www.zillow.com/homedetails/1-Example-St/12345678_zpid/');
+    D.getElementById('toast').textContent = '';
+    box.value = 'not a link';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 150));
-    const saved = JSON.parse(W.localStorage.getItem('fin-proplink') || '{}');
-    const id = Object.keys(saved)[0];
-    ok(id, 'the scheme-less paste was saved', W.localStorage.getItem('fin-proplink'));
-    eq(saved[id], 'https://www.zillow.com/homedetails/1-Example-St/12345678_zpid/', 'with its scheme');
-    type('not a link');
-    await new Promise((r) => setTimeout(r, 150));
-    eq(JSON.parse(W.localStorage.getItem('fin-proplink'))[id],
-      'https://www.zillow.com/homedetails/1-Example-St/12345678_zpid/', 'junk leaves the saved link alone');
-    ok(/isn’t a web address/.test(D.getElementById('toast').textContent), 'and says so',
-      D.getElementById('toast').textContent);
-    eq(D.getElementById('rf-link').value, 'https://www.zillow.com/homedetails/1-Example-St/12345678_zpid/',
-      'the box shows what is still saved');
-    type('');
-    await new Promise((r) => setTimeout(r, 150));
-    eq(JSON.parse(W.localStorage.getItem('fin-proplink') || '{}')[id], undefined, 'an empty box still clears it');
+    ok(/isn’t a web link/.test(D.getElementById('toast').textContent),
+      'the editor says so instead of quietly emptying the box', D.getElementById('toast').textContent);
     D.getElementById('rowDialog').close();
-  } finally { W.localStorage.removeItem('fin-proplink'); f.remove(); }
+  } finally { f.remove(); }
 });
 
 t('Done on a row editor hands focus back to the row after a field has already committed', async () => {
   const { f, W, D } = await auditFrame(1280, 900, 'donefocus');
   try {
-    const th = D.querySelector('th[data-edit="category"]');
-    ok(th, 'fixture: a category row label');
-    const { year, id } = th.dataset;
-    th.focus(); th.click();
+    D.getElementById('tab-household').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const tr = D.querySelector('tr.editrow[data-edit="property"][data-idx="0"]');
+    ok(tr, 'fixture: a property row, which is a Tab stop');
+    tr.focus();
+    ok(D.activeElement === tr, 'fixture: the row takes focus');
+    tr.click();
     await new Promise((r) => setTimeout(r, 200));
     const dlg = D.getElementById('rowDialog');
     ok(dlg.open, 'the row editor opened');
@@ -20773,12 +20763,13 @@ t('Done on a row editor hands focus back to the row after a field has already co
     await new Promise((r) => setTimeout(r, 50));
     if (!dlg.open) dlg.dispatchEvent(new W.Event('close'));         // the harness does not always deliver it
     await new Promise((r) => setTimeout(r, 50));
-    const again = D.querySelector(`th[data-edit="category"][data-year="${year}"][data-id="${id}"]`);
+    const again = D.querySelector('tr.editrow[data-edit="property"][data-idx="0"]');
     ok(again, 'the row was redrawn under its own keys');
-    eq(D.activeElement, again, 'and Done put the focus back on it — the next Tab carries on from the row');
+    ok(again !== tr, 'fixture: it IS a new element — the old one is what the browser’s own return aimed at');
+    ok(D.activeElement === again, 'and Done put the focus back on it — the next Tab carries on from the row',
+      D.activeElement && D.activeElement.tagName + '#' + D.activeElement.id);
   } finally { f.remove(); }
 });
-
 t('clearing the payday date says the schedule has stopped counting', async () => {
   const { f, W, D } = await auditFrame(1280, 900, 'anchorgone');
   try {

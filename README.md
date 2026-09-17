@@ -966,7 +966,9 @@ until the market next opens, so an end-of-August figure built from today's
 prices drifts from the first trading day of September on. With a Twelve Data key
 in Preferences, the settled view asks what each ticker **closed at on the
 month's last trading day** — one lookup per ticker, once, since a close never
-changes — and values Invested and Retirement with it. A month ending on a
+changes (a lookup that came back with no close is tried again the next day) —
+and values Invested and Retirement with it. Only the holdings Net Worth
+actually prices are looked up; the giving fund is not part of it. A month ending on a
 weekend or a market holiday takes the last day the market was open. Each tile
 says where its prices came from: all at the month's closes, some still at
 today's price, or "looking up…" while the answer is on its way. The month in
@@ -1547,10 +1549,10 @@ The link is kept in this browser alone — never synced, never in a backup, neve
 in a share link — and the box is a password box, so your password manager can
 offer to remember it and carry it to your other devices on a path the app never
 touches. That is the same arrangement the [price-lookup key](#prices) uses, and
-for the same reason. Only `http` and `https` links are accepted — one pasted
-without its `https://` gets it added — and a saved one is labelled by its own
-hostname rather than by anything you type. A paste that is not a web address is
-refused with a message, and the link you had stays.
+for the same reason. Only `http` and `https` links are accepted (paste the whole
+address, `https://` included), and a saved one is labelled by its own hostname
+rather than by anything you type. A paste that is not a web link is refused
+with a message, and the link you had stays.
 
 ### What You Owe
 

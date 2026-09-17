@@ -6623,7 +6623,8 @@ function coerceQuotes(raw) {
     const ts = typeof v.ts === 'number' && Number.isFinite(v.ts) ? v.ts : null;
     if (ts === null || ts > horizon) continue;
     if (v.noQuote === true) { out[t] = { noQuote: true, ts }; continue; }
-    if (typeof v.price === 'number' && Number.isFinite(v.price) && v.price > 0)
+    /* Never negative; a stored 0 is kept as the statement it is (pinned). */
+    if (typeof v.price === 'number' && Number.isFinite(v.price) && v.price >= 0)
       out[t] = { price: v.price, ts };
   }
   return out;
@@ -23124,6 +23125,7 @@ function commitRow(ctx, speak) {
      typed knows it has nothing to do. */
   ctx.opened = JSON.stringify(values);
   let said = EDITORS[ctx.section].save(ctx.ds, values);
+  ctx.committed = true;   // the row this window opened from is about to be redrawn
   if (refused) said = typeof said === 'string' ? `${refused}. ${said}` : refused;
   const wasUndoing = undoing;
   if (ctx.banked) undoing = true;
@@ -23197,7 +23199,7 @@ rowDialog.addEventListener('close', () => {
      render rebuilt the row the window was opened from, so the browser's own
      focus return has nothing to land on and drops to <body> (2026-09-17). The
      hand-back `commitRow(ctx, true)` does is owed here too. */
-  if (!rowMoved(ctx)) { if (ctx.banked) refocusEditRow(ctx); return; }
+  if (!rowMoved(ctx)) { if (ctx.committed) refocusEditRow(ctx); return; }
   commitRow(ctx, true);
 });
 F('rowCancelBtn').onclick = () => rowDialog.close();
@@ -23442,17 +23444,12 @@ const propLinkInHarness = (() => {
    every property whose id carries either. A reminted id orphans its link, which
    is the safe direction: one you paste again, never one pointing elsewhere. */
 function safePropLink(raw) {
-  let s = String(raw == null ? '' : raw).trim().slice(0, PROP_LINK_MAX);
+  const s = String(raw == null ? '' : raw).trim().slice(0, PROP_LINK_MAX);
   if (!s) return '';
-  /* A link copied off the address bar often arrives as "www.zillow.com/…" —
-     no scheme, which `new URL` refuses. That is a web address missing four
-     characters, not junk, so it gets them (2026-09-17). Anything with a scheme
-     of its own is judged as written, so `javascript:` still fails below. */
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(s) && /^[\w-]+(\.[\w-]+)+(?:[/?#]|$)/.test(s)) s = `https://${s}`;
   try {
     const u = new URL(s);
     return (u.protocol === 'https:' || u.protocol === 'http:') ? s : '';
-  } catch (e) { return ''; }          // not a URL at all
+  } catch (e) { return ''; }          // not a URL at all, a bare address included
 }
 
 function coercePropLinks(raw) {
@@ -23497,8 +23494,8 @@ function setPropLink(id, link) {
   const clean = safePropLink(raw);
   if (clean) map[id] = clean;
   else if (!raw) delete map[id];
-  else return `“${raw.length > 40 ? raw.slice(0, 40) + '…' : raw}” isn’t a web address — `
-    + 'the value page link was left as it was';
+  else return `“${raw.length > 40 ? raw.slice(0, 40) + '…' : raw}” isn’t a web link — it needs `
+    + 'to start with https:// — so the value page link was left as it was';
   savePropLinks(map);
   return '';
 }
@@ -31861,7 +31858,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tripPart, sumPart,
   /* Looking a property's value up: where each kind sends you, and the boundary
      for the one thing that store holds. */
-  PROPERTY_LOOKUPS, coercePropLinks, safePropLink, propLinkLabel, propLinkAccount, PROP_LINK_MAX,
+  PROPERTY_LOOKUPS, coercePropLinks, safePropLink, setPropLink, propLinkLabel, propLinkAccount, PROP_LINK_MAX,
   parseMoney, raiseFor, sinceLastYear,
   /* The calculator's arithmetic: the parser, the selection reader, the tape's
      stats, the figure under a click, and the boundary for fin-calc. */

@@ -7601,10 +7601,11 @@ the foot of `tests.html`.
   on purpose ("kept verbatim as a key"; a key of `(` still gathers notes) —
   every render of the key is escaped and that is the recorded safety. Not
   changed.
-- **A quote could be a negative or zero price.** `classifyQuote` and
-  `coerceQuotes` accepted any finite number where `classifyClose` and
-  `coerceCloses` required `> 0`; a supplier answer of `"-5"` valued a holding
-  at minus $42,250. Both now require a positive price.
+- **A quote could be a negative price.** `classifyQuote` accepted any finite
+  `close` where `classifyClose` required `> 0`; a supplier answer of `"-5"`
+  valued a holding at minus $42,250. The classifier now requires a positive
+  price; `coerceQuotes` refuses a negative one and keeps a stored 0, which a
+  test pins as a real statement.
 - **Saving a cell dropped the keyboard focus to `<body>`.** `cellForm.onsubmit`
   ran `save(); render(); refocusGridCell()` BEFORE `method="dialog"` closed the
   window, so the page was still inert, `td.focus()` was refused, and the
@@ -7628,22 +7629,25 @@ the foot of `tests.html`.
   and the UA's `min-inline-size: min-content` on `fieldset` let it push the
   panel out. `fieldset, .formpanel { min-inline-size: 0 }` plus `#shareYears
   { max-width: 100% }` — the rule Sprint Velocity took on 2026-09-15.
-- **A value page link pasted without its scheme vanished silently.**
-  `safePropLink` returned `''` for anything `new URL` could not parse — a bare
-  `www.zillow.com/…` included — `setPropLink` deleted the saved link on `''`,
-  and `reprimeRow` refilled the box empty; no toast. Now a scheme-less host
-  path gets `https://` (a scheme of its own is judged as written, so
-  `javascript:` still fails), and a paste that is still not a web address is
-  refused with the row editor's own sentence and leaves the saved link alone.
-  An empty box still clears it. The property `save` returns the refusal.
+- **A value page link that was not a web link vanished silently.**
+  `safePropLink` returns `''` for anything but an http(s) URL — a bare
+  `www.zillow.com/…` included, which a test pins on purpose — and `setPropLink`
+  deleted the saved link on `''` while `reprimeRow` refilled the box empty; no
+  toast. `setPropLink` now returns the row editor's own refusal sentence for a
+  non-empty paste it cannot take ("isn't a web link — it needs to start with
+  https://") and leaves the saved link alone; the property `save` returns it
+  and the box shows what is still saved. An empty box still clears it. The
+  allow-list itself is unchanged.
 - **Done on a saves-as-you-go editor dropped the focus once every box had
   committed.** The `close` handler returned at `!rowMoved(ctx)`, and the only
   caller of `refocusEditRow` was `commitRow(ctx, true)` — reached only when the
   last box was still uncommitted. After a `change` had committed, the render
   had rebuilt the row the window opened from, so the browser's own return
-  landed on `<body>`. A banked context (`ctx.banked`) now gets the hand-back
-  on that exit too; a window opened only to read still leaves the native return
-  alone.
+  landed on `<body>`. `commitRow` marks `ctx.committed` (not `banked` — the
+  harness stubs `save()`, and a commit redraws the row whether or not an undo
+  step was spent) and that exit hands the focus back; a window opened only to
+  read still leaves the native return alone.
+
 - **Clearing the payday date silently switched the schedule off.** The
   Preferences save had a sentence for a cadence chosen without a date, but
   none for the date being emptied afterwards — `payScheduleOf` went null and
