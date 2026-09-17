@@ -7605,3 +7605,9 @@ the foot of `tests.html`.
   `coerceQuotes` accepted any finite number where `classifyClose` and
   `coerceCloses` required `> 0`; a supplier answer of `"-5"` valued a holding
   at minus $42,250. Both now require a positive price.
+- **Saving a cell dropped the keyboard focus to `<body>`.** `cellForm.onsubmit`
+  ran `save(); render(); refocusGridCell()` BEFORE `method="dialog"` closed the
+  window, so the page was still inert, `td.focus()` was refused, and the
+  browser's own focus return aimed at a cell the render had destroyed. Revert
+  and Clear closed first and were fine; Save now does the same
+  (`cellDialog.close()` first — the form's own close is then a no-op).
