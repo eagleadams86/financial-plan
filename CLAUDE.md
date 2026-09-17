@@ -7595,3 +7595,8 @@ the foot of `tests.html`.
   `closeAutoTried` — fetched, discarded, not asked again that page load.
   `saveCloses(found)` runs on that exit too; only the render and cool-off
   belong to the current run.
+- **`coerceShape` never checked a year's KEY.** A backup with `years.abcd`
+  survived as a year whose `startMonth` was "abcd-01" and `enteredThrough`
+  "NaN-12" — nonsense on screen rather than a hole, since every render of the
+  key is escaped, but the safety rested on sink escaping alone. The tax tables'
+  keys were already `/^\d{4}$/`; the years' are now.
