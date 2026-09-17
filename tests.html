@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1116;
+const EXPECTED = 1124;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -3221,6 +3221,96 @@ t('a month page takes only the notes tied to that month', () => {
      'the row note has no month on it, so no month page can claim it');
 });
 
+/* ── A NOTE ON A BALANCE MONTH DOESN'T NEED A FIGURE (2026-09-17) ───────────
+   Charles: "i've tried to add comments to this account a couple of times and it
+   doesn't save". The balance editor kept the note on the OVERRIDE — the pin
+   that states what the account really held — so saving with the Amount box
+   empty deleted the pin and took the words with it. The box was empty in the
+   ordinary way: it shows the plan's own figure as a placeholder, and he had no
+   quarrel with the figure, only something to say about it.
+   It now lives on `balAdjust`, beside what the month earned, which states no
+   balance of its own. These pin the whole route: where it is written, what a
+   stale plan's note does on the way in, and what nothing else may read into it. */
+group('A note on an account month');
+function balNoteState(extra) {
+  return H.coerceShape({
+    settings: { accounts: [{ id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true },
+                           { id: 'mid', name: 'Brokerage', rate: 0.12, creditTo: 'mid' }] },
+    years: { '2030': Object.assign({
+      kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 12,
+      enteredThrough: '2030-12', categories: [], cells: {}, paychecks: {},
+      seeds: { cash: 1000, mid: 10000 }, overrides: {}, balAdjust: {} }, extra || {}) } });
+}
+t('a plan written before the move brings its notes forward', () => {
+  const s = balNoteState({ overrides: { 'cash|2030-03': { v: 500, note: 'off the statement' } } });
+  const yr = s.years['2030'];
+  eq(yr.overrides['cash|2030-03'], { v: 500 }, 'the pin keeps its figure and nothing else');
+  eq(H.balNoteOf(yr, 'cash', '2030-03'), 'off the statement', 'and the words are on balAdjust');
+  eq(H.migrate(s).schema, H.SCHEMA, 'the gate that stops an older build reading it is bumped');
+});
+t('a note already in its new home is the one kept', () => {
+  /* Both sides can only be filled by a hand-edited file, and the answer has to
+     be the field the editor has been writing since — not the stale one. */
+  const yr = balNoteState({
+    overrides: { 'cash|2030-03': { v: 500, note: 'the old one' } },
+    balAdjust: { 'cash|2030-03': { note: 'the one I typed' } } }).years['2030'];
+  eq(H.balNoteOf(yr, 'cash', '2030-03'), 'the one I typed');
+});
+t('a note with no figure survives the boundary, and an empty entry does not', () => {
+  const yr = balNoteState({ balAdjust: {
+    'cash|2030-04': { note: '  the statement came late  ' },
+    'cash|2030-05': { note: '   ' },
+    'cash|2030-06': {},
+    'mid|2030-07': { interest: 25, note: 'dividend reinvested', bogus: 'x' } } }).years['2030'];
+  eq(H.balNoteOf(yr, 'cash', '2030-04'), 'the statement came late', 'trimmed, kept');
+  eq(yr.balAdjust['cash|2030-05'], undefined, 'blank words state nothing, so nothing is stored');
+  eq(yr.balAdjust['cash|2030-06'], undefined, 'nor does an entry holding neither');
+  eq(yr.balAdjust['mid|2030-07'], { interest: 25, note: 'dividend reinvested' },
+    'and a figure keeps its note beside it — with anything else stripped');
+});
+t('a note is not a stated balance, and says so on hover', () => {
+  const s = balNoteState({ balAdjust: { 'cash|2030-04': { note: 'the statement came late' } } });
+  const yr = s.years['2030'];
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const acct = s.settings.accounts[0];
+  ok(!H.balanceTip(s, c, yr, acct, '2030-04').includes('stated balance'),
+     'the plan still owns the figure');
+  ok(H.balanceTip(s, c, yr, acct, '2030-04').includes('the statement came late'),
+     'and the note is read where every other detail on that cell is');
+  eq(H.notesOfYear(s, '2030').map(x => [x.where, x.m, x.note]),
+     [['Cash', '2030-04', 'the statement came late']],
+     'the year’s Notes list has it, which is the half that was unreachable');
+  eq(H.searchPlan(s, 'statement came').hits[0].cell, { type: 'bal', id: 'cash', m: '2030-04' },
+     'and Find opens the month it belongs to');
+});
+t('a note does not start an account earlier than its figures do', () => {
+  /* The one place a comment could have moved a number: `accountBeginsAt` reads
+     the earliest month an account is mentioned in, and every balance after it
+     chains off that. Words about a month are not evidence the account existed
+     in it. */
+  const beginsWith = (balAdjust) => {
+    const s2 = balNoteState({ balAdjust });
+    delete s2.years['2030'].seeds.mid;    // a SEEDED account runs from month one regardless
+    return H.accountBeginsAt(s2.years['2030'], s2.settings.accounts[1], 'cash');
+  };
+  eq(beginsWith({ 'mid|2030-02': { note: 'opened at the branch' } }), null,
+     'a note alone leaves the account running from month one');
+  eq(beginsWith({ 'mid|2030-02': { interest: 25 } }), '2030-02',
+     'a stated figure still begins it, exactly as before');
+});
+t('freezing a year keeps a noted month’s earnings as well as its note', () => {
+  /* A pinned year computes nothing, so the stamping is the only record of what
+     each month earned — and it used to skip any month that already had a
+     `balAdjust` entry, which a note-only month now has. */
+  const s = balNoteState({ balAdjust: { 'mid|2030-02': { note: 'read off the app' } } });
+  const c = H.computeAll(s, TODAY_FIX)['2030'];
+  const grew = H.round2(c.interest['mid|2030-02']);
+  ok(grew > 0, 'fixture: the account earned something that month', grew);
+  const pinned = H.gridToPinned(s, c, '2030');
+  eq(pinned.balAdjust['mid|2030-02'], { interest: grew, note: 'read off the app' },
+     'the month’s growth is frozen with the words still on it');
+});
+
 group('Which summary rows are money that moved');
 /* The shape the old bi-weekly sheets have: detail rows, then a closing block
    of balances and derived totals, with the income line often sitting inside
@@ -4827,7 +4917,7 @@ t('the keyed maps follow too, so no figure is orphaned', () => {
       cells: { 'rent|z|2026-01': { v: 100 }, 'rent|z|2026-02': { v: 200 },
                'food|2026-01': { v: 9 } },
       overrides: { 'sav|ings|2026-01': { v: 5 } },
-      balAdjust: { 'sav|ings|2026-02': { v: 7 } },
+      balAdjust: { 'sav|ings|2026-02': { interest: 7 } },
       seeds: { 'sav|ings': 1000 } } }
   });
   const yr = d.years['2026'];
@@ -4836,7 +4926,7 @@ t('the keyed maps follow too, so no figure is orphaned', () => {
   eq(yr.cells['rent|z|2026-01'], undefined, 'and the broken key is gone');
   eq(yr.cells['food|2026-01'].v, 9, 'a row that was already fine is untouched');
   eq(yr.overrides['sav-ings|2026-01'].v, 5, 'overrides follow the account');
-  eq(yr.balAdjust['sav-ings|2026-02'].v, 7, 'so do balance adjustments');
+  eq(yr.balAdjust['sav-ings|2026-02'].interest, 7, 'so do balance adjustments');
   eq(yr.seeds['sav-ings'], 1000, 'and the seed, which is keyed by the bare id');
 });
 t('a healthy plan is not touched at all', () => {
@@ -16606,6 +16696,109 @@ async function auditFrame(width, height, tag) {
   await new Promise((r) => setTimeout(r, 400));
   return { f, W, D: W.document };
 }
+
+/* ── A comment on an account month is saved (2026-09-17) ────────────────────
+   Charles: "i've tried to add comments to this account a couple of times and it
+   doesn't save". Through the real editor, because the fault was entirely in the
+   round trip: the note went into the same object as the pinned balance, so
+   pressing Save with the Amount box empty — which is how that box normally
+   sits, showing the plan's own figure as a placeholder — deleted the pin and
+   the note with it, and reopening the dialog showed an empty box with no word
+   of what had happened. The check that matters is the one he made: type it,
+   save, open it again, READ IT BACK. */
+t('a note typed on an account month with no amount is there when the dialog is reopened', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'balnote');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const st = W.finGet();
+    const key = Object.keys(st.years)
+      .filter((k) => st.years[k].kind === 'grid' && st.years[k].model === 'live').sort().pop();
+    ok(key, 'fixture: the sample has a live year');
+    const yr = st.years[key];
+    const acct = (st.settings.accounts || [])[0];
+    ok(acct, 'fixture: the sample plan has an account');
+    const m = W.yearMonths(yr)[2];
+    delete yr.overrides[acct.id + '|' + m];
+    delete (yr.balAdjust || {})[acct.id + '|' + m];
+    W.render();
+    const note = () => D.getElementById('cellNote');
+    const amount = () => D.getElementById('cellValue');
+
+    W.openCellEditor(key, 'bal', acct.id, m);
+    eq(amount().value, '', 'fixture: no balance is pinned, so the box is empty');
+    ok(amount().placeholder, 'fixture: and the plan’s own figure is showing in it');
+    note().value = 'statement came late — checked against the PDF';
+    D.getElementById('cellSaveBtn').click();
+    await wait(200);
+
+    W.openCellEditor(key, 'bal', acct.id, m);
+    eq(note().value, 'statement came late — checked against the PDF',
+       'the words he typed are still there');
+    eq(amount().value, '', 'and keeping them did not state a balance he never gave');
+    ok(W.finGet().years[key].overrides[acct.id + '|' + m] === undefined,
+       'nothing is pinned, so every later month still chains off the plan’s figure');
+    D.getElementById('cellCancelBtn').click();
+
+    /* The cell wears the dot the rest of the grid uses for a note, or the note
+       is saved somewhere nothing on screen admits to. */
+    D.getElementById('tab-budget').click();
+    await wait(300);
+    const cell = D.querySelector(`td[data-bal="${acct.id}"][data-m="${m}"]`);
+    ok(cell, 'fixture: the account’s month is on the grid');
+    ok(cell.classList.contains('noted'), 'the cell says it has something written on it');
+    ok((cell.dataset.tip || '').includes('statement came late'),
+       'and hovering reads it, like every other note on this grid');
+
+    /* Emptying the box is how it comes off again — the only way, since Revert
+       and Clear speak for the figures. */
+    W.openCellEditor(key, 'bal', acct.id, m);
+    note().value = '';
+    D.getElementById('cellSaveBtn').click();
+    await wait(200);
+    W.openCellEditor(key, 'bal', acct.id, m);
+    eq(note().value, '', 'cleared, and nothing left behind to keep the row on screen');
+    eq((W.finGet().years[key].balAdjust || {})[acct.id + '|' + m], undefined);
+    D.getElementById('cellCancelBtn').click();
+  } finally { f.remove(); }
+});
+
+/* ── The Note box is only offered where a note can be kept (2026-09-17) ─────
+   Found while fixing the balance note above: the box is part of one reused
+   dialog, so it was on the PAYCHECKS branch too — and the paycheck count is a
+   bare number in the year's map with nowhere for words beside it, so that
+   branch's save read the amount and nothing else. Type a note on a three-check
+   month and it went the same way his balance note did. Nothing to keep it in,
+   so the box is not offered there; the wording also has to follow the branch,
+   because an empty Amount means "nothing came" on a budget row and "the plan's
+   figure stands" on a balance. */
+t('the Note box is offered where a note can be kept, and says the right thing there', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'notebox');
+  try {
+    const st = W.finGet();
+    const key = Object.keys(st.years)
+      .filter((k) => st.years[k].kind === 'grid' && st.years[k].model === 'live').sort().pop();
+    const yr = st.years[key];
+    const m = W.yearMonths(yr)[1];
+    const wrap = () => D.getElementById('cellNoteWrap');
+    const said = () => D.getElementById('cellNote').placeholder;
+
+    W.openCellEditor(key, 'cat', yr.categories[0].id, m);
+    eq(wrap().hidden, false, 'a budget row keeps a note on its cell');
+    ok(/nothing came/.test(said()), 'and an empty amount there means nothing came', said());
+    D.getElementById('cellCancelBtn').click();
+
+    W.openCellEditor(key, 'bal', (st.settings.accounts[0] || {}).id, m);
+    eq(wrap().hidden, false, 'an account month keeps one beside what it earned');
+    ok(!/nothing came/.test(said()) && /statement|figure/i.test(said()),
+       'and an empty amount there leaves the figure to the plan', said());
+    D.getElementById('cellCancelBtn').click();
+
+    W.openCellEditor(key, 'pay', 'pay', m);
+    eq(wrap().hidden, true,
+       'the paycheck count has nowhere to keep one, so it does not ask for one');
+    D.getElementById('cellCancelBtn').click();
+  } finally { f.remove(); }
+});
 
 /* ── The month header survives a redraw on a scrolled budget (2026-09-17) ────
    wireBudget pinned the header mid-render, and the wiring after it still moved

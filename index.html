@@ -3627,13 +3627,19 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
         </div>
       </div>
     </div>
-    <div style="margin-top:12px">
+    <div id="cellNoteWrap" style="margin-top:12px">
       <label class="field" for="cellNote">Note</label>
       <!-- The placeholder answers both jobs the box has: explaining a figure,
            and — since 2026-08-26 — saying that nothing happened. Leaving the
            amount empty is the ONLY way to write the second down without
            stating a $0.00, which means the opposite, so the box has to say so
            where somebody about to type is looking. -->
+      <!-- The attribute is the budget row's wording AND the default the
+           accessibility sweep reads (it enumerates `[placeholder]`, so a box
+           that only gets one on open would quietly drop out of it).
+           `openCellEditor` swaps it per branch: leaving the amount empty means
+           "nothing came" on a budget row and "the plan's figure stands" on a
+           balance, which are not the same sentence. -->
       <textarea id="cellNote" rows="2"
         placeholder="Why this number? Or leave the amount empty to note that nothing came."></textarea>
     </div>
@@ -3841,7 +3847,7 @@ const STORAGE_KEY = 'fin-state';
    here is what lets `load` spot the opposite case — a plan from the FUTURE,
    saved by a newer build — which migrate cannot help with and must not guess
    at. Bump it in the same commit as the migration step that earns it. */
-const SCHEMA = 8;
+const SCHEMA = 9;
 
 /* The strapline beside the app's name in the header, and after it in the browser
    tab. Every other app in the family carries one — "· Charlie's Epic Sprint
@@ -4677,15 +4683,41 @@ const compPersonId = (st) => {
    interest adjustment, or money moving into it. Months before that are blank
    rather than zero, because "not tracked" and "held nothing" are different
    claims, and typing a figure into an earlier month simply moves the start. */
+/* THE NOTE ON A BALANCE MONTH. It lives on `balAdjust`, beside what the month
+   earned, rather than on the override that pins the balance — so writing one
+   states nothing: a reader can say "the statement came late" about a month
+   whose figure the plan worked out and still leave that figure to the plan.
+   Every reader comes through here — the cell's dot, its tip, the Notes list,
+   Find — so there is one answer to "does this month say anything". */
+function balNoteOf(yr, id, m) {
+  const n = ((yr.balAdjust || {})[`${id}|${m}`] || {}).note;
+  return typeof n === 'string' ? n : '';
+}
+
+/* An entry in `balAdjust` that states a FIGURE, as against one carrying only
+   that month's note. Both live in the same map, so every reader meaning "the
+   earnings here were typed in" has to say which of the two it means. A
+   function, not a const: the callers below include ones that run during load,
+   and this file has been bitten by temporal dead zones before. */
+function balAdjStatesFigure(adj) {
+  return !!adj && (typeof adj.interest === 'number' || typeof adj.dividend === 'number');
+}
+
 function accountBeginsAt(yr, a, hubId) {
   if (a.id === hubId) return null;                       // the hub is always running
   if ((yr.seeds || {})[a.id] !== undefined) return null;  // seeded: from month one
   let first = null;
-  for (const map of [yr.overrides || {}, yr.balAdjust || {}])
-    for (const k of Object.keys(map)) {
-      const [bid, m] = k.split('|');
-      if (bid === a.id && (!first || m < first)) first = m;
-    }
+  const earliest = (k) => {
+    const [bid, m] = k.split('|');
+    if (bid === a.id && (!first || m < first)) first = m;
+  };
+  for (const k of Object.keys(yr.overrides || {})) earliest(k);
+  /* A month carrying only a NOTE is not evidence the account existed then. The
+     words are about a figure the plan worked out, and letting one move the
+     start month would change every balance downstream — a comment with an
+     arithmetic side effect. Only a stated figure begins an account. */
+  for (const [k, adj] of Object.entries(yr.balAdjust || {}))
+    if (balAdjStatesFigure(adj)) earliest(k);
   return first;   // null means "from the first month"; a month means "from then"
 }
 
@@ -5336,8 +5368,9 @@ function coerceShape(data) {
          map. Shapes were forced above; this forces the VALUES: cells, seeds,
          overrides and paychecks reach the engine verbatim, and one string of
          markup in a hand-edited backup would otherwise ride into the page raw
-         and turn every balance downstream into NaN. (balAdjust needs no pass —
-         its sink already type-checks each field.) */
+         and turn every balance downstream into NaN. (`balAdjust`'s figures are
+         type-checked at their sink as well, but it carries prose now, so it
+         gets a pass of its own below.) */
       for (const [k, cell] of Object.entries(yr.cells)) {
         if (!cell || typeof cell !== 'object') { delete yr.cells[k]; continue; }
         const cv = num(cell.v);
@@ -5372,12 +5405,49 @@ function coerceShape(data) {
         if (typeof n === 'number') yr.seeds[k] = n; else delete yr.seeds[k];
       }
       for (const [k, ov] of Object.entries(yr.overrides)) {
+        /* A BALANCE MONTH'S NOTE LIVES ON `balAdjust`, NOT ON THE PIN (schema
+           9). It used to ride along on the override, which meant a note could
+           only exist where a balance had been stated: clear the amount, save,
+           and the words went with it — so "the statement came late" could only
+           be written down by first pinning a figure, which is a claim about the
+           account made to keep a sentence. The move happens here so that a plan
+           written before it comes forward on load, whichever door it came in
+           through. An existing note on the new side wins: that is the one the
+           editor has been writing since. */
+        if (ov && typeof ov === 'object') {
+          const carried = typeof ov.note === 'string' ? ov.note.trim() : '';
+          if (carried) {
+            const adj = yr.balAdjust[k] = obj(yr.balAdjust[k]);
+            if (!(typeof adj.note === 'string' && adj.note.trim())) adj.note = carried;
+          }
+          delete ov.note;
+        }
         /* Read STRICTLY (rateOrNone), not through num(): an override PINS a
            balance, and num would turn a corrupt field into a deliberate-
            looking $0 statement. One that states no figure states nothing —
            dropped, the same way the balance editor deletes a cleared one. */
         const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
         if (typeof n === 'number') ov.v = n; else delete yr.overrides[k];
+      }
+      /* THREE FIELDS AND NO MORE: what the month earned, what it paid out, and
+         the note. The two figures read STRICTLY for the override's reason — a
+         corrupt field must not become a stated $0, which the engine would read
+         as "the rate produced nothing this month" — and the note is trimmed,
+         absent rather than blank, like every other optional string in here.
+         An entry left holding none of the three is dropped: an empty one still
+         keeps its account's row on screen, which is a row with nothing in it.
+         (A no-notes share link makes exactly those: `stripNotes` walks the
+         whole payload, and a note-only month comes out of it as `{}`.) */
+      for (const [k, raw] of Object.entries(yr.balAdjust)) {
+        const was = obj(raw);
+        const adj = {};
+        const int = rateOrNone(was.interest), div = rateOrNone(was.dividend);
+        if (typeof int === 'number') adj.interest = int;
+        if (typeof div === 'number') adj.dividend = div;
+        const note = typeof was.note === 'string' ? was.note.trim() : '';
+        if (note) adj.note = note;
+        if (Object.keys(adj).length) yr.balAdjust[k] = adj;
+        else delete yr.balAdjust[k];
       }
       /* AND ONLY FOR THE MONTHS THIS YEAR SHOWS. A count is keyed by month,
          and until 2026-09-11 nothing asked whether that month belonged to the
@@ -6768,6 +6838,20 @@ function migrate(parsed) {
      so. That is precisely the case `load`'s from-the-FUTURE check exists for,
      and a wrong figure nobody is told about is worse than a refusal. */
   if ((parsed.schema || 1) < 8) parsed.schema = 8;
+  /* Schema 9 moves a BALANCE MONTH'S NOTE off the pin and onto `balAdjust`, the
+     map beside it that already holds that month's corrections. The re-filing
+     itself is `coerceShape`'s, for two reasons: Restore coerces BEFORE it
+     migrates, so a step written here would arrive after the field had been
+     read — and the move is a pure one that nothing in the app can undo, since
+     no editor writes the old field any more.
+
+     The gate earns its bump at the other end, exactly as schema 8's does. Open
+     a plan whose note has moved on a build that predates this and the note is
+     invisible: no dot on the cell, nothing in Notes, nothing in Find. Worse,
+     that build's balance editor rewrites `balAdjust` from its two number boxes
+     alone, so the first save on that month DELETES the note — silently, with
+     the words gone for good. A plan written before this has nothing to gate. */
+  if ((parsed.schema || 1) < 9) parsed.schema = 9;
   return parsed;
 }
 
@@ -10892,18 +10976,23 @@ function gridCard(y, yr) {
            reader has to learn to spot a month they typed themselves. */
         if (v === undefined) {
           const said = earningLines(state, c, yr, a, m);
-          return `<td class="cell ${m === thisM ? 'now' : ''}"
+          /* A month with no figure at all can still carry a note — in a past
+             year an account can hold one before its first stated balance — and
+             a note nothing draws is a note lost, which is the fault this whole
+             branch of the feature exists to fix. */
+          const note = balNoteOf(yr, a.id, m);
+          return `<td class="cell ${note ? 'noted' : ''} ${m === thisM ? 'now' : ''}"
             data-bal="${esc(a.id)}" data-m="${m}"
             data-tip="${esc([live
               ? `Not tracked yet — click to start this account from ${monthLabel(m)}`
               : `Nothing recorded — click to state what ${a.name} held in ${monthLabel(m)}`,
-              ...said].join('\n'))}">·</td>`;
+              note, ...said].filter(Boolean).join('\n'))}">·</td>`;
         }
         const kind = c.balanceKinds[`${a.id}|${m}`];
-        const ov = yr.overrides[`${a.id}|${m}`];
         /* Same rule as a category cell: a note earns the dot, and says what it
-           says on hover. A stated balance can carry one too. */
-        return `<td class="cell c-${kind} ${ov && ov.note ? 'noted' : ''} ${
+           says on hover. A COMPUTED balance can carry one too — the note sits
+           beside the month's earnings, not on the pin (see `balNoteOf`). */
+        return `<td class="cell c-${kind} ${balNoteOf(yr, a.id, m) ? 'noted' : ''} ${
           m === thisM ? 'now' : ''}"
           data-bal="${esc(a.id)}" data-m="${m}"
           data-tip="${esc(balanceTip(state, c, yr, a, m))}">${fmtCell(v || 0)}</td>`;
@@ -11080,9 +11169,12 @@ function notesOfYear(st, y) {
         if (p.note) items.push({ where: named(id), extra: fmtMoney(p.v || 0),
           note: p.note, m, edit: 'cat', id });
     }
-    for (const [key, ov] of Object.entries(yr.overrides || {})) {
+    /* An account month's note is filed with what that month earned rather than
+       with the pin, so a note about a balance the plan worked out is listed
+       here as well — which is the reason it moved. */
+    for (const [key, adj] of Object.entries(yr.balAdjust || {})) {
       const [id, m] = key.split('|');
-      if (ov.note) items.push({ where: acct(id), note: ov.note, m, edit: 'bal', id });
+      if (adj.note) items.push({ where: acct(id), note: adj.note, m, edit: 'bal', id });
     }
   }
   /* Whatever came in with the imported spreadsheet. Its `where` carries the
@@ -11273,8 +11365,8 @@ const avgTipLine = (v, span) => span < 2 ? ''
 function balanceTip(st, c, yr, a, m) {
   const key = `${a.id}|${m}`;
   const ov = (yr.overrides || {})[key];
-  const head = [fmtMoney(c.balances[key] || 0), ov ? 'stated balance' : '', ov && ov.note]
-    .filter(Boolean).join(' · ');
+  const head = [fmtMoney(c.balances[key] || 0), ov ? 'stated balance' : '',
+    balNoteOf(yr, a.id, m)].filter(Boolean).join(' · ');
   /* No esc() — the whole tip is escaped once at the sink and rendered through
      textContent, exactly like the account names above. */
   const lines = [...earningLines(st, c, yr, a, m)];
@@ -13002,15 +13094,15 @@ function renderMonthView() {
       esc(monthLabel(prevM))}`);
     if (v !== undefined) bits.push(kindWord(kind));
     for (const s of said) bits.push(esc(s));
-    const ov = yr.overrides[`${a.id}|${m}`];
+    const note = balNoteOf(yr, a.id, m);
     return `<div class="mrow${v === undefined ? ' mzero' : ''}${
-        ov && ov.note ? ' noted' : ''}"
+        note ? ' noted' : ''}"
       data-bal="${esc(a.id)}" data-m="${esc(m)}" data-year="${esc(y)}"
       role="button" tabindex="0"
       data-tip="${esc(v === undefined
         ? [live ? `Not tracked yet — click to start this account from ${monthLabel(m)}`
                 : `Nothing recorded — click to state what ${a.name} held in ${monthLabel(m)}`,
-           ...said].join('\n')
+           note, ...said].filter(Boolean).join('\n')
         : balanceTip(state, c, yr, a, m))}"
       aria-label="${esc(`${a.name}, ${v === undefined ? 'nothing recorded' : fmtMoney(v)}`)}">
       <span class="mname">${esc(a.name)}</span>
@@ -19494,7 +19586,8 @@ function gridToSummary(st, y) {
     if (last === null) continue;
     const ov = yr.overrides[`${a.id}|${last}`];
     const row = { name: a.name, total: round2(ov.v || 0), isBalance: true };
-    if (ov.note) row.note = ov.note;
+    const note = balNoteOf(yr, a.id, last);
+    if (note) row.note = note;
     categoryTotals.push(row);
   }
   return { kind: 'summary', convertedFrom: 'grid', categoryTotals,
@@ -19550,8 +19643,14 @@ function gridToPinned(st, computed, y) {
       if (round2(int[key] || 0)) earned.interest = round2(int[key]);
       else if (round2(grw[key] || 0)) earned.interest = round2(grw[key]);
       if (round2(div[key] || 0)) earned.dividend = round2(div[key]);
-      if (Object.keys(earned).length && balAdjust[key] === undefined)
-        balAdjust[key] = earned;
+      /* Left alone where the reader already typed a FIGURE over the computed
+         one — but a month carrying only its note has no figure to protect, and
+         reading the old `=== undefined` there would have frozen the year with
+         that month's earnings lost, because a pinned year computes none of its
+         own. The note comes across with them. */
+      const had = balAdjust[key];
+      if (Object.keys(earned).length && !balAdjStatesFigure(had))
+        balAdjust[key] = { ...earned, ...(had && had.note ? { note: had.note } : {}) };
       if (bal[key] === undefined || overrides[key] !== undefined) continue;
       overrides[key] = { v: round2(bal[key]) };
     }
@@ -19607,7 +19706,10 @@ function convertYearToSummary(y) {
   /* Said out loud because it is the one row the reader didn't type: stated
      earnings survive the conversion as a single flow total, and a confirm that
      listed everything else would read as if they didn't. */
-  const earns = Object.keys(yr.balAdjust || {}).length
+  /* Entries that state a FIGURE. The same map carries a month's note now, and
+     a year whose only entry is a sentence earns no Interest & Dividends row —
+     promising one would have the confirm describe a row that never appears. */
+  const earns = Object.values(yr.balAdjust || {}).some(balAdjStatesFigure)
     ? ` What the accounts earned becomes one "Interest & Dividends" row.` : '';
   /* The one thing a conversion genuinely drops, said before it happens rather
      than discovered afterwards. A summary year has two kinds of row — flows
@@ -27425,6 +27527,14 @@ function openCellEditor(yearKey, type, id, m) {
   const clearBtn = F('cellClearBtn');
   const hint = F('cellAutoHint');
   F('cellNote').value = '';
+  /* A note is offered wherever there is somewhere to keep one: a cell, or an
+     account month. The paycheck count is a bare number in the year's map with
+     no room for words beside it, so the box would take what you typed and drop
+     it on save — which is precisely the fault this pass fixed elsewhere. */
+  F('cellNoteWrap').hidden = type === 'pay';
+  F('cellNote').placeholder = type === 'bal'
+    ? 'Why this figure? Or what the statement said — the boxes above can stay empty.'
+    : 'Why this number? Or leave the amount empty to note that nothing came.';
   hint.textContent = '';
   F('cellBalWrap').hidden = true;
   F('cellValue').placeholder = '';   // the dialog is reused — no stale hint
@@ -27659,7 +27769,10 @@ function openCellEditor(yearKey, type, id, m) {
        has no business reaching back into the state for a fact settled here. */
     editing.isGrowth = isGrowth;
     editing.growth = round2(earned || 0);
-    F('cellNote').value = ov?.note || '';
+    /* From `balAdjust`, not the pin: on this branch the note belongs to the
+       month, not to a stated figure, so it is there to be read whether or not
+       a balance was ever typed. */
+    F('cellNote').value = adj.note || '';
     /* Shown on BOTH models, and the difference is the placeholder. A live year
        computes a figure, so the box shows it greyed and typing takes over. A
        pinned year computes nothing, so an empty box is the honest hint: there
@@ -27782,14 +27895,17 @@ F('cellForm').onsubmit = () => {
   } else if (type === 'bal') {
     const key = `${id}|${m}`;
     if (v === null || Number.isNaN(v)) delete yr.overrides[key];
-    else {
-      const ov = { v };
-      const note = F('cellNote').value.trim();
-      if (note) ov.note = note;
-      yr.overrides[key] = ov;
-    }
-    /* Interest and dividend are separate from the pin: the pin states the
-       balance outright, these two adjust how the computed one is built. */
+    else yr.overrides[key] = { v };
+    /* Interest, dividend and the note are separate from the pin: the pin states
+       the balance outright, these adjust how the computed one is built — and
+       the note says why, about a figure that may still be the plan's own.
+
+       A NOTE WITH NO FIGURE IS A THING YOU CAN SAVE (2026-09-17) — the balance
+       branch's half of what a category cell got on 2026-08-26. Saving with the
+       amount box empty used to throw the note away with the pin it was stored
+       on, so the note simply did not appear when the dialog was opened again;
+       the only way to keep the words was to state a balance, which is a claim
+       about the account made in order to keep a sentence. */
     yr.balAdjust = yr.balAdjust || {};
     const adj = {};
     const num = (elId) => {
@@ -27799,6 +27915,11 @@ F('cellForm').onsubmit = () => {
     const int = num('cellInterest'), div = num('cellDividend');
     if (int !== undefined) adj.interest = int;
     if (div !== undefined) adj.dividend = div;
+    const note = F('cellNote').value.trim();
+    if (note) adj.note = note;
+    /* Emptying all three is how a note is taken off again, since Revert and
+       Clear speak for the figures and stay hidden on a month that only has
+       words on it. */
     if (Object.keys(adj).length) yr.balAdjust[key] = adj;
     else delete yr.balAdjust[key];
   } else {
@@ -28485,12 +28606,12 @@ function searchPlan(st, query, allowed) {
         push({ view: 'budget', year: y, where: `${cat ? cat.name : id} · ${monthLabel(m)}`,
                snippet: note, cell: { type: 'cat', id, m } });
       }
-      for (const [key, ov] of Object.entries(yr.overrides || {})) {
-        if (!ov || !has(ov.note)) continue;
+      for (const [key, adj] of Object.entries(yr.balAdjust || {})) {
+        if (!adj || !has(adj.note)) continue;
         const [id, m] = key.split('|');
         push({ view: 'budget', year: y,
                where: `${accountName(st, id) || id} balance · ${monthLabel(m)}`,
-               snippet: ov.note, cell: { type: 'bal', id, m } });
+               snippet: adj.note, cell: { type: 'bal', id, m } });
       }
       for (const n of yr.extraNotes || [])
         if (has(n.text) || has(n.where))
@@ -31226,6 +31347,9 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   amortize, liabilityAt, payoffMonth, LIABILITY_KINDS, SECURED_KINDS,
   planRate, inPlanCurrency,
   SNAPSHOT_PARTS, SNAPSHOT_ASSETS, uniqueId, cellTip, balanceTip,
+  /* A balance month's note, and the month an account's figures begin in: the
+     one reader of `balAdjust` that must NOT count a note as a figure. */
+  balNoteOf, accountBeginsAt,
   receivedInto, earningsOver, earningLines, balanceYearTip, avgTipLine,
   flowTransferNote, internalRows,
   raisesKeyboard,

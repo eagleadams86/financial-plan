@@ -498,10 +498,16 @@ family names as well as balances.
   style). `blankState()`/`coerceShape()`/`migrate()` guard every entry point;
   Restore shape-checks the RAW parse before coercing, so a wrong file is
   refused rather than imported as nothing. coerceShape also forces the GRID's
-  own values — cells (v, kind whitelist, parts), seeds, overrides, paychecks
-  — since they reach the engine and the page verbatim; overrides are read
-  strictly (rateOrNone, not num): an override PINS a balance, and a corrupt
-  field must be dropped rather than become a deliberate-looking $0. A live
+  own values — cells (v, kind whitelist, parts), seeds, overrides, `balAdjust`,
+  paychecks — since they reach the engine and the page verbatim; overrides are
+  read strictly (rateOrNone, not num): an override PINS a balance, and a corrupt
+  field must be dropped rather than become a deliberate-looking $0. A
+  `balAdjust` entry is held to THREE fields (`interest`, `dividend`, `note`),
+  the figures read strictly for the same reason, and one left holding none of
+  them is dropped — an empty entry still keeps its account's row on screen.
+  This is also where a pre-schema-9 plan's balance note is moved off the pin
+  and onto `balAdjust` (see A Note On A Balance Month); it lives here and not
+  in `migrate` because Restore coerces BEFORE it migrates. A live
   year is also guaranteed an `enteredThrough` (the month before startMonth
   when absent) because gridCard calls monthAdd on it unguarded. **Paycheck
   counts are also held to the year's own span** (`yearMonths`) — a count for a
@@ -881,7 +887,9 @@ suite passed while the card was wrong.
   default) — the brokerage sweep. A payment carries the whole period, so the
   yearly rate means the same whichever frequency it's on. Both are earnings, so both raise Total
   wherever they land; a per-month `balAdjust.interest`/`.dividend` replaces
-  either with what really arrived — and in a PINNED year that map is not a
+  either with what really arrived (and `.note` — the same map carries the
+  month's words, which is why every reader meaning "a figure was typed here"
+  goes through `balAdjStatesFigure`) — and in a PINNED year that map is not a
   correction but the whole record, since nothing there is computed. `since` starts an account partway through, seeded from
   `yr.seeds`, blank and out of Total before it. It is set once — at migration,
   or to the current month when an account is added — and deliberately has NO
@@ -3689,8 +3697,9 @@ assumed retirement return, and the price-lookup key) live behind the header's
 Preferences button; `buildMoneyFormats()` rebuilds the formatters on every
 render.
 **Every note a year holds is gathered at its foot** by `notesOfYear(st, y)` —
-row notes, cell notes, the per-part notes of a split month, notes on a stated
-balance, and the `extraNotes` that arrived with the import (whose `where`
+row notes, cell notes, the per-part notes of a split month, the note on an
+account month (`balAdjust[bid|m].note`, stated balance or not — see A Note On A
+Balance Month), and the `extraNotes` that arrived with the import (whose `where`
 carries a redundant "2015!" sheet prefix, stripped on the way out). A note is
 written where it belongs and then impossible to find again: one dot in a
 twelve-by-forty grid. The collector is pure over state so it can be tested;
@@ -5247,6 +5256,62 @@ conspired, and every one of them was ours:
 - No schema bump: no existing plan has one, and a build that predates this
   reads a note-only cell as a stated $0.00 — the state it would have been in
   anyway.
+
+## A note on a balance month (2026-09-17)
+
+**The balance half of the same fault, sixteen days later.** Charles: *"i've
+tried to add comments to this account a couple of times and it doesn't save"* —
+about Cash Mgmt, September, with the Amount box sitting empty the way it
+normally does, the plan's own $36,745.55 showing in it as a placeholder. He had
+no quarrel with the figure; he had something to say about it.
+
+**The note was stored ON THE PIN** (`yr.overrides[bid|m].note`), so it could
+only exist where a balance had been stated. Save with the amount empty and the
+branch ran `delete yr.overrides[key]` — the pin went, and the words with it.
+Reopening the dialog showed an empty box and said nothing had happened, which
+is exactly what "it doesn't save" describes. The only way to keep a sentence
+was to pin a figure, which is a claim about the account made to keep a sentence,
+and it would then freeze that month against every earlier change.
+
+- **It lives on `balAdjust` now** — the map beside the pin that holds the
+  month's corrections and states no balance of its own. One home, not two:
+  `balNoteOf(yr, id, m)` is the single reader (the cell's dot, its tip, the
+  Notes list, Find, the summary conversion), and `coerceShape` moves a note
+  written before this off the override on the way in.
+- **Schema 9, and the bump is earned.** A build that predates this reads notes
+  only off the pin, so the note would be invisible there — and worse, its
+  balance editor rewrites `balAdjust` from its two number boxes alone, so the
+  first save on that month would DELETE the note silently. `SHARE_PAYLOAD_V`
+  stays at 3 deliberately: a shared view cannot write, so an older recipient
+  sees every figure correctly and simply no annotation.
+- **Three readers had to be told the difference between a figure and a
+  sentence** (`balAdjStatesFigure`): `accountBeginsAt`, or a note on an early
+  month would move when the account starts and change every balance downstream
+  — a comment with an arithmetic side effect; the convert-to-summary confirm,
+  which promised an "Interest & Dividends" row for a year whose only entry was
+  words; and `gridToPinned`, which skipped stamping the computed earnings of
+  any month that already had an entry, so freezing a year would have LOST a
+  noted month's earnings (a pinned year computes none of its own).
+- **A month with no tracked balance can carry one too** — a past year, before
+  the account's first stated figure. Both lenses draw the dot and read the note
+  on their `·` cell; a note nothing draws is a note lost, which is the whole
+  fault.
+- **Emptying the box is how it comes off**, since Revert and Clear speak for the
+  figures and stay hidden on a month that only has words on it.
+- **The box is only offered where a note can be kept, and says the right thing
+  there.** Found in the same pass: `#cellDialog` is one reused dialog, so the
+  Note box was on the PAYCHECKS branch too — and a paycheck count is a bare
+  number in `yr.paychecks` with nowhere for words beside it, so that branch's
+  save read the amount and dropped the note exactly as the balance branch did.
+  `#cellNoteWrap` is hidden there now. The placeholder also follows the branch,
+  because an empty Amount means two different things: "nothing came" on a
+  budget row, "the plan's figure stands" on a balance. The markup keeps the
+  budget row's wording as the attribute — the accessibility sweep enumerates
+  `[placeholder]`, so a box that only got one on open would quietly drop out of
+  it.
+- The regression test drives the real dialog and reads the note BACK through it
+  after a save — the check he made. It failed on the shipped page with
+  `got ""`, which is the empty box he saw.
 
 ## The month view can act, not just read (2026-08-31)
 

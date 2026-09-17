@@ -192,8 +192,8 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
   moved, and what it earned. **＋ Add Account** sits at the foot of that card.
 - **The month's notes**, gathered at the foot of the page the way a year's are
   gathered at the foot of the grid — everything you wrote on that month, on its
-  figures, on the amounts a split month is made of, and on the balances you
-  stated. Click one to open the cell it came from. A **row's own note** carries
+  figures, on the amounts a split month is made of, and on the accounts'
+  months — whether or not you stated a balance there. Click one to open the cell it came from. A **row's own note** carries
   no month, so it stays on the year's list rather than being repeated under all
   twelve. A month you wrote nothing on draws no card at all.
 - **A bar per month of the year**, so the month you are reading has somewhere to
@@ -685,6 +685,13 @@ Click any cell to edit it. Beyond typing a figure:
   editor says so, and "Clear this cell" empties the month's balance and its
   earnings together. Nothing is routed to another account there — where
   interest lands is today's arrangement, not 2021's.
+- **A note on an account month doesn't need a figure.** Write "statement came
+  late" on a month and leave the Amount box as you found it: the plan keeps the
+  balance it worked out, the cell wears the same little dot every other note
+  wears, and the words are there when you open it again, on the year's list of
+  notes and in Find. Saying something about a figure and replacing it are two
+  different things, and only one of them freezes the month. Clear the box and
+  save to take the note off again.
 - **"✓ Accept the Estimates" agrees with the plan in one press.** Every figure
   in a balance month is greyed, because typing is what states one — so saying
   "yes, that is what the account held" meant copying three numbers back into the
