@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1124;
+const EXPECTED = 1128;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -7973,6 +7973,82 @@ t('the frequency limit clears in about a minute', () => {
   eq(H.runIsRecent({ at: Date.now() - 5e3 }, 10 * 60e3), true);
   eq(H.runIsRecent({ at: Date.now() - 30 * 60e3 }, 10 * 60e3), false);
   eq(H.runIsRecent(null, 10 * 60e3), false);
+});
+
+group('Every holdings tab’s own price bar');
+/* Charles, 2026-09-17: "the donations tab doesn't appear to trigger the twelve
+   data lookup like investments and retirement". It didn't — the bar (Refresh,
+   the "as of" line, and the top-up when the tab opens) was written INSIDE
+   renderInvestments, so the fund's holdings were only ever fetched by a visit
+   to a different tab, and the Giving tab said nothing about how old the price
+   on screen was. The bar is shared now, and everything it says is measured over
+   the tables it actually sits above. */
+t('the Giving tab carries a Refresh of its own, counted over the fund alone', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'givingprices');
+  try {
+    const s = W.finGet();
+    s.settings.givingFund = true;
+    /* A ticker of the fund's own, so "the fund alone" is a real claim rather
+       than one the sample's shared VTI could satisfy by accident. */
+    s.side.daf = [{ ticker: 'FZROX', shares: 10, price: 20, lookup: true }];
+    s.quotes = { FZROX: { price: 20, ts: Date.now() } };   // fetched a moment ago
+    D.getElementById('tab-giving').click();
+    const btn = D.getElementById('refreshPricesBtn');
+    ok(btn, 'the fund has a Refresh where its holdings are');
+    ok(/fund/.test(btn.title), 'and it says it fetches the FUND, not every holding', btn.title);
+    const bar = btn.closest('.row').textContent.replace(/\s+/g, ' ');
+    ok(/Prices as of/.test(bar), 'the fund’s price is dated on the tab that shows it', bar);
+    ok(!/out of date/.test(bar),
+       'and nothing in the FUND is stale — the brokerage’s three untouched tickers '
+       + 'are not the giving tab’s to count', bar);
+    D.getElementById('tab-investments').click();
+    const inv = D.getElementById('refreshPricesBtn').closest('.row')
+      .textContent.replace(/\s+/g, ' ');
+    ok(/out of date/.test(inv),
+       'while the Investments bar goes on counting every holding in the plan', inv);
+  } finally { f.remove(); }
+});
+t('no fund section, no price bar on the tab', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'givingnofund');
+  try {
+    const s = W.finGet();
+    s.settings.givingFund = false;
+    D.getElementById('tab-giving').click();
+    ok(!D.getElementById('refreshPricesBtn'),
+       'a tab showing donations alone has no holdings to fetch, so it offers nothing '
+       + 'and spends nothing when it opens');
+  } finally { f.remove(); }
+});
+/* The Retirement tab had the identical gap and was fixed in the same pass: its
+   accounts list holdings, `shares × price` is only as good as the price, and
+   the tab could neither say how old one was nor ask for a new one. */
+t('the retirement accounts carry one bar, counted over their own holdings', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'retprices');
+  try {
+    const s = W.finGet();
+    const held = (s.side.retirementAccounts || []).find((a) => (a.rows || []).length);
+    ok(held, 'fixture: the sample has a retirement account with holdings');
+    held.rows = [{ ticker: 'FXAIX', shares: 10, price: 30, lookup: true }];
+    s.quotes = { FXAIX: { price: 30, ts: Date.now() } };   // fetched a moment ago
+    D.getElementById('tab-retirement').click();
+    const bars = D.querySelectorAll('#refreshPricesBtn');
+    eq(bars.length, 1, 'one bar above the accounts, not one per account');
+    ok(/accounts/.test(bars[0].title), 'it says what it fetches', bars[0].title);
+    const bar = bars[0].closest('.row').textContent.replace(/\s+/g, ' ');
+    ok(!/out of date/.test(bar),
+       'and the brokerage’s stale tickers are not this tab’s to count', bar);
+  } finally { f.remove(); }
+});
+t('an account using the balance typed on it gets no Refresh for nothing', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'retnoholdings');
+  try {
+    const s = W.finGet();
+    (s.side.retirementAccounts || []).forEach((a) => { a.rows = []; });
+    D.getElementById('tab-retirement').click();
+    ok(D.getElementById('tab-retirement'), 'the app booted');
+    ok(!D.getElementById('refreshPricesBtn'),
+       'no holdings anywhere on the tab, so there is nothing to fetch and no bar');
+  } finally { f.remove(); }
 });
 
 group('Average of last year');

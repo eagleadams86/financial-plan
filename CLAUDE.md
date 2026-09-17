@@ -3035,12 +3035,46 @@ re-testing CORS first.
   it was added to stop. Compare, don't assume. Pure over the cache entry with an
   injectable `now`, so the wording is pinned by tests without a clock.
 
-The price lookup records its result per ticker (`fin-quote-run`) and the
-Investments tab reports it: a count alone can't say WHICH ticker failed, and
+**The price bar is `priceBar(lists, whatItFetches)` and belongs to no one tab.**
+It lived inside `renderInvestments` until 2026-09-17, which is the whole of the
+bug Charles reported as "the donations tab doesn't appear to trigger the twelve
+data lookup like investments and retirement": the giving fund is a holdings
+table like any other and `priceLists()` always included it, so its ticker WAS
+fetched — but only by a visit to another tab, and the Giving tab itself offered
+no Refresh and said nothing about how old the price on screen was. Investments
+was the only place in the app that ever asked. **The Retirement tab had the
+identical gap and was fixed in the same pass** — its accounts list holdings and
+it could neither date them nor ask for a price — so the rule now reads: a tab
+that shows a holdings table carries the bar for it.
+- `allTickers`, `stalePrices`, `pricesAsOf`, `priceBar`, `wirePriceBar` (the old
+  `wireInvestments`) and `refreshPrices` all take the same optional `lists`, and
+  default to `priceLists()` — all three tables. Giving passes
+  `dafPriceLists()` and Retirement `retPriceLists()`, so each tab's count, its
+  "as of", its per-ticker notes and the allowance its Refresh spends are its
+  own. **Investments stays unscoped on purpose**: it is the price machinery's
+  home tab, its title says "every holding", and one press that fetches the whole
+  plan is worth having somewhere.
+- **Scope what is ASKED FOR, never what a price is written to.** The write-back
+  stays over `priceLists()` on purpose. Scoping it too was tried the same day
+  and left the fund's VTI at $400 beside the brokerage's $333 on the next tab
+  with nothing to reconcile them — the quiet pass looks up STALE tickers, and
+  that ticker's quote was now fresh. A price is a fact about the TICKER.
+- The three notes that are facts about the DEVICE — a rejected key, a throttle,
+  a spent allowance — are shown whole on every bar; `missing` and `left` are
+  per ticker and filtered to the scope. A fund whose one holding is fine must
+  not report a failure that belongs to a table it doesn't show.
+- **No holdings, no bar** — `state.settings.givingFund` on Giving, and
+  `accts.some(a => a.rows.length)` on Retirement, where an account using the
+  balance typed on it has no ticker to fetch. The quiet pass is wired either
+  way and costs nothing: an empty scope has nothing stale. Four tests in "Every
+  holdings tab's own price bar" pin the scoping and both empty cases.
+
+The price lookup records its result per ticker (`fin-quote-run`) and every price
+bar reports it: a count alone can't say WHICH ticker failed, and
 the reasons differ. A holding carries `lookup: false` when it shouldn't be
 quoted at all; a row called "Cash" otherwise fetches the real listed company
-CASH and overwrites the balance with its share price. The Investments tab tops
-up stale prices when it opens, but a ticker that can never be quoted (a wrong
+CASH and overwrites the balance with its share price. A tab with a bar tops
+up its own stale prices when it opens, but a ticker that can never be quoted (a wrong
 symbol, a wrong key, the daily limit, being offline) stays stale — and
 `refreshPrices()` ends in `render()`, which re-opens the tab. Two separate
 things keep that from becoming a request loop, and **they are not

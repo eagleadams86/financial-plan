@@ -1128,8 +1128,11 @@ appeal) beside the foundation receiving it, and is either done or
 and is counted up separately as what's still to go.
 
 Under the year tables sits a **donor-advised fund's holdings**, for those who
-have one — a Preferences switch, since plenty of people don't. Donations are
-tracked either way, and the giving-over-time chart is last.
+have one — a Preferences switch, since plenty of people don't. It is a holdings
+table like the Investments tab's, with the same [price lookup](#prices) above
+it: the fund's prices are dated there, topped up when the tab opens, and its
+Refresh covers the fund alone. Donations are tracked either way, and the
+giving-over-time chart is last.
 
 ### Giving as a Share of Income
 
@@ -1204,6 +1207,14 @@ device, cached six hours, and every price still editable by hand).
   visit.
 - Prices top themselves up automatically when they are more than six hours
   old; **Refresh prices** ignores that and fetches everything on the spot.
+- **Every tab that shows holdings has a bar of its own** — the giving fund on
+  [Giving](#giving), the accounts on [Retirement](#retirement), these panes.
+  Each one dates the prices under it, tops them up when its tab opens, and
+  refreshes those holdings and nothing else, so checking the fund doesn't spend
+  the day's allowance on the brokerage. (Investments is the exception by
+  design: its Refresh fetches every holding in the plan.) A price that comes
+  back is written to every holding of that ticker wherever it is held — it is a
+  fact about the ticker, not about the table.
 - **The six-hour cache syncs**, so a price fetched on the laptop is still
   fresh on the phone rather than being fetched again out of the same daily
   allowance. The key itself stays on each device — which is why you enter it
@@ -1308,8 +1319,9 @@ account.
   back into one, keeping every balance and treatment, and refuses outright
   rather than half-doing it.
 - **Holdings inside each account** — the same ticker/shares/price rows an
-  investment pane takes, priced by the same lookup. Once an account lists
-  them, its balance follows the holdings instead of a figure you typed.
+  investment pane takes, priced by the same [lookup](#prices), with its bar
+  above them once any account lists holdings. Once an account lists them, its
+  balance follows the holdings instead of a figure you typed.
 
 ### The Split, and the Calculators
 

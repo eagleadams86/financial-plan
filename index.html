@@ -9245,6 +9245,11 @@ const HELP = {
       + 'is cached for six hours, so opening this tab repeatedly costs nothing. The Refresh '
       + 'button ignores that cache and fetches everything on the spot — the six hours only '
       + 'ever held back the automatic top-up.'],
+    [b('Each bar covers the holdings under it'), ' — the giving fund’s fetches the fund, '
+      + 'the retirement one those accounts, and the Investments tab’s every holding in the '
+      + 'plan, so topping up one tab doesn’t spend the allowance on another. A price that '
+      + 'does come back is written to ', b('every holding of that ticker'), ', wherever it is '
+      + 'held: it is a fact about the ticker, not about the table.'],
     ['Every price stays ', b('editable by hand'), ', and typing one over a fetched price is '
       + 'fine; open a holding to see where its price came from and when.'],
     ['The key is ', b('never synced, never in a backup and never in a share link'), ' — it is '
@@ -15357,7 +15362,14 @@ function retHoldingsPanes() {
   /* A plain grid cell rather than a card wrapping cards: `wireBoxes` folds
      anything with `.card` and its own heading, and a card with neither would
      be furniture pretending to be content. */
-  return `<div class="cardrow" style="grid-column:1/-1"><div class="cards2">${panes}</div></div>`;
+  /* The bar goes above them, scoped to these tables — shares × price is only
+     as good as the price, and until 2026-09-17 this tab had no way to say how
+     old one was or to ask for a new one. Only once something here is actually
+     priced: an account using the balance typed on it has no ticker to fetch,
+     and a Refresh for nothing is furniture. */
+  const bar = accts.some(a => (a.rows || []).length)
+    ? priceBar(retPriceLists(), 'these accounts’ holdings') : '';
+  return `<div class="cardrow" style="grid-column:1/-1">${bar}<div class="cards2">${panes}</div></div>`;
 }
 
 /* Traditional against Roth at the moment the money starts being spent — the
@@ -17609,27 +17621,45 @@ function buildCompChart() {
 
 /* ═══════════════════════════ Investments view ═════════════════════════════ */
 
-function renderInvestments() {
-  const s = state.side;
-  const asOf = pricesAsOf();
-  const stale = stalePrices().length;
+/* ── The price bar ─────────────────────────────────────────────────────────
+   Refresh, an "as of" line, and whatever the last run has to say — ABOUT A
+   GIVEN SET OF TABLES. It was written for the Investments tab and lived inside
+   it, which is why the Giving tab — a holdings table like any other — had no
+   way to fetch a price and nothing saying how old the one on screen was:
+   opening it topped nothing up, and the fund's figure was whatever the last
+   visit to Investments happened to leave behind (Charles, 2026-09-17: "the
+   donations tab doesn't appear to trigger the twelve data lookup").
+   `lists` scopes every figure in it. The per-ticker notes are filtered to those
+   tables for the same reason the count is — "4 out of date" above a fund whose
+   one holding was fetched a minute ago is counting somebody else's tables. The
+   three that are facts about the DEVICE — a rejected key, a throttle, a spent
+   allowance — are shown whole, because they are as true above one table as
+   above three.
+
+   The whole bar goes in a shared view. Every line of it is about the READER's
+   own price cache, key and last run measured against the SENDER's tickers, so
+   each one would be either meaningless or an outright lie — "3 out of date"
+   about figures the reader can't refresh and shouldn't, and an invitation to
+   open a Preferences dialog that isn't there. A snapshot shows the prices it
+   was sent, which is the honest thing for a snapshot to do. */
+function priceBar(lists, whatItFetches) {
+  if (viewOnly) return '';
+  const asOf = pricesAsOf(lists);
+  const stale = stalePrices(undefined, lists).length;
   const run = lastPriceRun();
-  /* The whole bar goes in a shared view. Every line of it is about the READER's
-     own price cache, key and last run measured against the SENDER's tickers, so
-     each one would be either meaningless or an outright lie — "3 out of date"
-     about figures the reader can't refresh and shouldn't, and an invitation to
-     open a Preferences dialog that isn't there. A snapshot shows the prices it
-     was sent, which is the honest thing for a snapshot to do. */
-  const priceBar = viewOnly ? '' : `<div class="row" style="margin:0 0 18px;align-items:center">
+  const mine = new Set(allTickers(lists));
+  const missing = ((run && run.missing) || []).filter(t => mine.has(t));
+  const left = ((run && run.left) || []).filter(t => mine.has(t));
+  return `<div class="row" style="margin:0 0 18px;align-items:center">
     <button class="btn small" id="refreshPricesBtn"
-      title="Fetches every holding now, whether or not its price is still fresh"><span aria-hidden="true">↻</span> Refresh Prices</button>
+      title="Fetches ${esc(whatItFetches)} now, whether or not the price is still fresh"><span aria-hidden="true">↻</span> Refresh Prices</button>
     <span class="sub muted">${asOf
       ? `Prices as of ${new Date(asOf).toLocaleString()}${stale ? ` · ${stale} out of date` : ''}`
       : priceKey() ? 'No prices fetched yet' : 'Add a Twelve Data key in Preferences to fetch prices'}
       ${helpBtn('priceLookup', 'the price lookup')}</span>
   </div>
-  ${run && run.missing && run.missing.length ? `<p class="sub" style="margin:-6px 0 14px">
-    <strong>No quote came back for ${esc(run.missing.join(', '))}.</strong>
+  ${missing.length ? `<p class="sub" style="margin:-6px 0 14px">
+    <strong>No quote came back for ${esc(missing.join(', '))}.</strong>
     Twelve Data didn't recognise the symbol, so those stay as you typed them —
     check the ticker is right. If a row isn't a security at all — a cash balance,
     say — open it and turn its price lookup off so it stops being asked for.</p>` : ''}
@@ -17637,14 +17667,19 @@ function renderInvestments() {
     <strong>Twelve Data rejected the API key.</strong> Check it in Preferences —
     prices already fetched are kept, and every one stays editable by hand.</p>` : ''}
   ${run && run.throttled && runIsRecent(run, 10 * 60 * 1000) ? `<p class="sub" style="margin:-6px 0 14px"><strong>Twelve Data
-    only answers eight lookups a minute.</strong> ${run.left && run.left.length
-      ? `${plural(run.left.length, 'holding')} still to fetch — press Refresh again in a
+    only answers eight lookups a minute.</strong> ${left.length
+      ? `${plural(left.length, 'holding')} still to fetch — press Refresh again in a
          minute and it carries on from where it stopped.`
       : 'Press Refresh again in a minute for anything still out of date.'}
     Nothing already fetched is lost.</p>` : ''}
   ${run && run.limited && runIsToday(run) ? `<p class="sub" style="margin:-6px 0 14px"><strong>Twelve Data
     stopped answering.</strong> The free tier allows 800 lookups a day; the prices already
     fetched are kept. The allowance resets each day.</p>` : ''}`;
+}
+
+function renderInvestments() {
+  const s = state.side;
+  const priceBarHtml = priceBar(priceLists(), 'every holding');
   /* The reconcile line needs this month's computed balances — the same pair
      of coordinates the net worth card reads. No live grid year, no line. */
   const liveKey = latestGridYear();
@@ -17829,7 +17864,7 @@ function renderInvestments() {
   const chartRow = (concCard && driftCard)
     ? `<div class="cards2 pairs">${concCard}${driftCard}</div>`
     : `${concCard}${driftCard}`;
-  return priceBar
+  return priceBarHtml
     + (panes ? `<div class="cardrow"><div class="cards2">${panes}</div></div>${rollup}${chartRow}`
              : `<div class="card"><div class="empty"><h2>No Investment Accounts Yet</h2>
                 <p>Add one for each place you hold investments — a brokerage, an HSA, a
@@ -17944,13 +17979,17 @@ function buildDriftChart() {
       : `${fmtMoney(Math.abs(r.move))} ${r.move > 0 ? 'over' : 'under'}`}`).join('; ')}.`);
 }
 
-function wireInvestments() {
+/* The bar's two behaviours, scoped to the same tables it reports on: the button
+   fetches them, and opening the tab tops up whatever of them is stale. Both
+   take `lists` so the Giving tab spends the allowance on the fund it is showing
+   and nothing else. */
+function wirePriceBar(lists) {
   if (viewOnly) return;   // no button to wire, and nothing here is the reader's to fetch
   const btn = F('refreshPricesBtn');
-  if (btn) btn.onclick = () => refreshPrices(false);
+  if (btn) btn.onclick = () => refreshPrices(false, null, lists);
   /* Opening the tab is the natural moment to top up anything stale — quiet,
      because an automatic refresh shouldn't nag when it can't run. */
-  if (priceKey() && stalePrices().length) refreshPrices(true);
+  if (priceKey() && stalePrices(undefined, lists).length) refreshPrices(true, null, lists);
 }
 
 /* ═══════════════════════════ Vacations view ═══════════════════════════════ */
@@ -18743,6 +18782,7 @@ function renderGiving() {
     <h2>Giving Fund</h2>
     <p class="sub">A donor-advised fund's holdings. Grants come out of this balance —
       already donated for tax purposes, waiting to be granted to a cause.</p>
+    ${priceBar(dafPriceLists(), 'this fund’s holdings')}
     ${holdingsTable(s.daf || [], 'daf')}
   </div>`;
   /* One year of giving is a figure, not a trend — two lines and a row of bars
@@ -20002,10 +20042,20 @@ function wireView(view) {
       F('flowNoTransfers')?.focus({ preventScroll: true });
     };
   }
-  if (view === 'retirement') { buildRothChart(); buildRetirementChart(); }
+  if (view === 'retirement') {
+    buildRothChart(); buildRetirementChart();
+    /* Harmless with no holdings on the tab: an empty scope has nothing stale
+       and nothing to ask about. */
+    wirePriceBar(retPriceLists());
+  }
   if (view === 'comp') buildCompChart();
   if (view === 'giving') {
     buildGivingChart();
+    /* The fund is a holdings table like the Investments tab's, so it tops up
+       when the tab opens like one — scoped to itself. Only when the section is
+       actually on: no card, no bar, and nothing to fetch on a tab that is
+       showing donations alone. */
+    if (state.settings.givingFund) wirePriceBar(dafPriceLists());
     const csvBtn = F('csvDonationsBtn');
     if (csvBtn) csvBtn.onclick = () =>
       downloadCsv(`financial-plan-donations-${todayISO()}.csv`,
@@ -20064,7 +20114,7 @@ function wireView(view) {
   }
   if (view === 'vacations') buildVacationsChart();
   if (view === 'investments') {
-    wireInvestments();
+    wirePriceBar(priceLists());
     buildConcentrationChart();
     buildDriftChart();
     /* The drift chart's layer switch, built on the flow chart's: it RE-RENDERS
@@ -21158,9 +21208,20 @@ const priceLists = () => [
   ...(state.side.retirementAccounts || []).map(a => a.rows || []),
   state.side.daf || [],
 ];
-function allTickers() {
+/* The giving fund on its own. The Giving tab shows ONE of those three tables
+   and nothing else about prices, so its bar, its staleness count and its
+   Refresh all speak for the fund alone — "4 out of date" above a fund whose one
+   holding was fetched a minute ago would be counting somebody else's tables,
+   and pressing Refresh there would spend the day's allowance on holdings that
+   tab doesn't show. Everything below takes the lists it is asked about and
+   defaults to all three, so the Investments bar is unchanged. */
+const dafPriceLists = () => [state.side.daf || []];
+/* And the retirement accounts' holdings, for the same reason: that tab shows
+   its own tables and no others. */
+const retPriceLists = () => (state.side.retirementAccounts || []).map(a => a.rows || []);
+function allTickers(lists) {
   const out = new Set();
-  for (const rows of priceLists())
+  for (const rows of (lists || priceLists()))
     for (const h of rows) {
       const t = lookupTickerOf(h);
       if (t) out.add(t);
@@ -21219,18 +21280,18 @@ function priceProvenance(q, price, lookupOn, now) {
 }
 /* Default six hours — the "N out of date" count and the automatic pass both
    mean that one. A manual press passes MANUAL_FRESH_MS instead. */
-const stalePrices = (ttl) => {
+const stalePrices = (ttl, lists) => {
   const cache = quoteCache();
   const limit = ttl === undefined ? QUOTE_TTL_MS : ttl;
-  return allTickers().filter(t => !freshWithin(cache[t], limit));
+  return allTickers(lists).filter(t => !freshWithin(cache[t], limit));
 };
 /* When the oldest cached price was fetched — what the "as of" line reports.
    Only entries that actually HOLD a price count: a `noQuote` marker is stamped
    with the moment we asked, and letting that through would date the whole line
    from the last time a lookup FAILED. */
-function pricesAsOf() {
+function pricesAsOf(lists) {
   const cache = quoteCache();
-  const stamps = allTickers().map(t => cache[t])
+  const stamps = allTickers(lists).map(t => cache[t])
     .filter(q => q && typeof q.price === 'number')
     .map(q => q.ts).filter(Boolean);
   return stamps.length ? Math.min(...stamps) : null;
@@ -21255,7 +21316,7 @@ let priceRunToken = 0;
 /* Tickers the automatic (quiet) refresh has already attempted this page load.
    A lookup that can't return a price — a mutual fund on the free tier, a wrong
    key, the daily limit, or simply being offline — leaves its ticker "stale"
-   forever, and refreshPrices() ends in render(), which re-runs wireInvestments()
+   forever, and refreshPrices() ends in render(), which re-runs wirePriceBar()
    and its quiet auto-refresh. Without remembering what was already tried, that
    is a tight request loop. The manual Refresh button ignores this set, so it
    always retries. */
@@ -21267,7 +21328,7 @@ const priceAutoTried = new Set();
 const pendingLookups = new Set();
 /* When the quiet auto-refresh may next run. A throttled or failed batch stops
    the loop below part-way, and refreshPrices() ends in render(), which re-runs
-   wireInvestments() and its quiet pass — so SOMETHING has to stand between the
+   wirePriceBar() and its quiet pass — so SOMETHING has to stand between the
    two or a throttled key gets hammered in a tight loop. It used to be
    priceAutoTried, marked for the whole batch up front including tickers the
    loop never reached; that stopped the loop but it also meant a run cut short
@@ -21376,7 +21437,7 @@ const priceTimeout = () => (typeof AbortSignal !== 'undefined' && AbortSignal.ti
    one. It takes the same path as the manual button for every other reason:
    the latch, the key, the classify/cache/report machinery and its traps are all
    documented in here and must not be reimplemented beside it. */
-async function refreshPrices(quiet, only) {
+async function refreshPrices(quiet, only, lists) {
   /* A manual press says so out loud. A button that silently does nothing is
      indistinguishable from one that ran and found nothing to change, which is
      how a stranded latch stayed hidden for a whole day. */
@@ -21401,7 +21462,8 @@ async function refreshPrices(quiet, only) {
   const cache = quoteCache();
   /* A named ticker is asked about outright. Naming it IS the request, exactly
      as pressing Refresh is, so the freshness window does not apply. */
-  let want = only ? only.filter(Boolean) : stalePrices(quiet ? undefined : MANUAL_FRESH_MS);
+  let want = only ? only.filter(Boolean)
+    : stalePrices(quiet ? undefined : MANUAL_FRESH_MS, lists);
   /* A quiet auto-refresh skips anything it has already had a go at, so a ticker
      that can never be freshened can't drive the render→refresh loop — and skips
      anything the supplier has already answered "no price" for today, which is
@@ -21415,7 +21477,7 @@ async function refreshPrices(quiet, only) {
     /* Only reachable now when the last press was seconds ago, or when there is
        genuinely nothing with a ticker on it — two different things to be told. */
     if (!quiet) toast(only ? 'Nothing to look up'
-      : allTickers().length
+      : allTickers(lists).length
       ? 'Every price was fetched moments ago — give it a minute'
       : 'No holdings with a ticker to look up');
     return;
@@ -21500,6 +21562,14 @@ async function refreshPrices(quiet, only) {
        quietly restate the price on a row you typed over yourself somewhere
        else on the tab. */
     const touched = only ? new Set(run.updated.map(u => u.ticker)) : null;
+    /* A run for ONE TABLE still writes back to ALL of them, and that is
+       deliberate: `lists` scopes what is ASKED FOR — the allowance the Giving
+       tab spends and the count its bar claims — but a price is a fact about the
+       TICKER, not about the table it is shown in. Scoping the write-back too
+       was tried and left the fund's VTI at $400 beside the brokerage's $333 on
+       the next tab, with nothing to reconcile them: the quiet pass looks up
+       STALE tickers, and that ticker's quote was now fresh, so the disagreement
+       would have sat there until something else went out of date. */
     for (const rows of priceLists())
       for (const h of rows) {
         if (h.lookup === false) continue;
