@@ -7504,3 +7504,26 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   A merchant on either card breaks one of those claims, so this stays a
   question for Charles — the sample-data rule against the demo's own lesson
   that a column of nothing is left out.
+
+## Fixes From the 2026-09-17 Review
+
+A review of the whole app on the evening of 2026-09-17, after the month-end
+closes, the shared price bar, the property link and the pay schedule landed:
+four auditors (new features, the engine's figures, the data boundaries, the
+UI driven headless), each finding re-read in source before it was accepted.
+Charles asked for every bug fixed. Same routine as the 2026-09-15 review: one
+commit per finding, its test written first and proven red against `main`'s
+`index.html` (served with the new `tests.html` over it), README and this file
+in the commit. The tests are the group "Fixes from the 2026-09-17 review" at
+the foot of `tests.html`.
+
+- **A transfer estimate into a closed account debited the hub and credited
+  nothing.** The balance step only credits accounts RUNNING that month (begun,
+  not past `until`), but the hub side of a transfer — and the money-in side of
+  a pass-through — had no such check, so once the far account closed the
+  rule's estimate kept coming off the hub every month and landed nowhere. The
+  sweep step already refused both ends. `targetRunning(st, yr, cat, m, hubId)`
+  now sits beside `paysIn` at estimate time: for a transfer or pass-through row
+  whose target is closed or has not yet begun, the estimate is `missing`. A
+  TYPED figure is untouched — it wins above that line, as everywhere. A target
+  the plan no longer has keeps the old behaviour (an ordinary hub row).

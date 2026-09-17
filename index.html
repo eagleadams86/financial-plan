@@ -7813,6 +7813,7 @@ function computeYearWith(st, yearKey, prior, goals) {
   const live = yr.model === 'live';
   const running = {};   // account id -> tracking has begun
   const overflow = overflowOrder(yr.categories, goals);      // once — rows don't change mid-year
+  const hubId = (hubAccount(st) || {}).id;
 
   for (const m of months) {
     /* 1 · categories */
@@ -7848,7 +7849,18 @@ function computeYearWith(st, yearKey, prior, goals) {
          no schedules anywhere computes exactly what it always did. A TYPED
          figure is untouched either way — it wins above, before this line, the
          way a typed figure wins everywhere. */
-      const v = paysIn(cat, m) ? RULES[cat.rule || 'none'](cat, m, ctx) : null;
+      /* AND SO DOES THE ACCOUNT ON THE FAR SIDE (2026-09-17). A transfer or
+         pass-through row names an account, and the balance step below only
+         credits accounts that are RUNNING this month — begun, and not yet past
+         `until`. The hub side had no such check: an estimate into a closed
+         account came off the hub (or, for a pass-through, counted as money in)
+         and landed nowhere, so Total quietly lost the figure every month for the
+         rest of the year while the row went on showing money "moving". The sweep
+         step already refuses both ends; this is the same rule at the front door.
+         Only the ESTIMATE is withheld — a typed figure wins above this line, as
+         everywhere: it is somebody saying the money left. */
+      const v = paysIn(cat, m) && targetRunning(st, yr, cat, m, hubId)
+        ? RULES[cat.rule || 'none'](cat, m, ctx) : null;
       resolved[key] = v === null ? { v: 0, kind: 'missing', ...noted }
                                  : { v: round2(v), kind: 'auto', ...noted };
     }
@@ -12048,6 +12060,21 @@ function dueOn(cat, m) {
    Absent means every month, so a plan that has never set a schedule computes
    byte for byte what it always did — which is what keeps the real-data
    cross-check honest and is worth a test of its own. */
+/* Whether the account a transfer or pass-through row names is RUNNING in
+   month m — the balance step's own test (begun, and not past `until`), asked
+   at estimate time so a rule never invents money bound for an account that
+   cannot receive it. True for every other row, and for a target the plan no
+   longer has, which is the behaviour those rows always had. */
+function targetRunning(st, yr, cat, m, hubId) {
+  const r = normRole(cat);
+  if (!(r.role === 'transfer' || r.role === 'passthrough') || !r.transferTo) return true;
+  const a = accountById(st, r.transferTo);
+  if (!a) return true;
+  if (a.until && m > a.until) return false;
+  const from = accountBeginsAt(yr, a, hubId);
+  return from === null || m >= from;
+}
+
 function paysIn(cat, m) {
   /* Above the ticked list, because a stopped row is stopped whether or not it
      ever had a schedule — most rows have none, and the row Charlie stopped is
@@ -31683,6 +31710,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
      than reading one and trusting the other. */
   resolvePaychecks, PAYCHECKS_DEFAULT, PAYCHECK_SOURCE_TIP,
   paydaysInMonth, payScheduleOf, clearScheduleMatches, validIsoDate,
+  targetRunning,
   nextUnplannedYear, isLeapYear, reDate, cloneDonationsForward, dropDonationYear,
   hasNote,
   cleanBoxKeys, isBoxShut, withBox, boxKey,

@@ -483,6 +483,11 @@ measures its own projected expenses).
   goal's measured pot from the month after it closes, and the row keeps
   sweeping the accounts that are left. (Until 2026-09-05 the closed account
   poisoned the sum and the row went blank for the rest of the year.)
+- A **transfer row pointing at a closed account** stops estimating from the
+  month after it closes — an estimate there would take the money off the hub
+  and give it to nobody. A figure you type still leaves the hub: that is you
+  saying the money went. (Until 2026-09-17 the estimate kept going and the hub
+  lost it every month.)
 - Rows can **chain**: one row watching the account another fills, resolved in
   dependency order within the same month. Two rows sweeping into each other's
   accounts is a loop with no answer, so both stay blank and the cell editor

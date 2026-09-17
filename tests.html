@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1142;
+const EXPECTED = 1145;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -20379,6 +20379,67 @@ t('a saved link never reaches the plan', async () => {
       'and not a trace of it anywhere in the plan — which is what keeps it out of Firestore, '
       + 'every backup file and every share link, all three of which are built from this object');
   } finally { f.remove(); }
+});
+
+group('Fixes from the 2026-09-17 review');
+/* A live year with a hub and one account that closes in February; a transfer
+   row carrying a typed January figure forward. */
+function closedTargetState(extra) {
+  return H.coerceShape({
+    schema: H.SCHEMA,
+    settings: { accounts: [
+      { id: 'cash', name: 'Cash', rate: 0, hub: true },
+      { id: 'bank', name: 'Other bank', rate: 0, creditTo: 'bank', until: '2030-02' },
+    ] },
+    years: { 2030: { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 6,
+      enteredThrough: '2029-12',
+      categories: [{ id: 'tb', name: 'Bank', role: 'transfer', transferTo: 'bank', rule: 'carry' }],
+      cells: { 'tb|2030-01': { v: -500, kind: 'manual' }, ...(extra || {}) },
+      paychecks: {}, seeds: { cash: 10000, bank: 1000 }, overrides: {}, balAdjust: {} } },
+  });
+}
+t('a transfer estimate into a closed account is withheld rather than lost', () => {
+  const st = closedTargetState();
+  const c = H.computeYear(st, '2030', null);
+  eq(c.cells['tb|2030-02'], { v: -500, kind: 'auto' },
+    'February still carries the figure — the account is open through February');
+  eq(c.cells['tb|2030-03'].kind, 'missing',
+    'from March the account is closed, so the rule has nowhere to send the money');
+  eq(c.cells['tb|2030-06'].kind, 'missing', 'and stays that way');
+  eq(c.balances['cash|2030-02'], 9000, 'the two months it WAS open moved the hub as before');
+  eq(c.balances['cash|2030-06'], 9000,
+    'and the hub no longer loses $500 a month into an account that is not there');
+  eq(c.balances['bank|2030-02'], 2000, 'and the bank received them');
+});
+t('a typed transfer into a closed account is still the reader’s claim', () => {
+  const st = closedTargetState({ 'tb|2030-04': { v: -200, kind: 'manual' } });
+  const c = H.computeYear(st, '2030', null);
+  eq(c.cells['tb|2030-04'], { v: -200, kind: 'manual' }, 'a typed figure wins, as everywhere');
+  eq(c.balances['cash|2030-04'], c.balances['cash|2030-03'] - 200,
+    'and it leaves the hub — the reader said the money went');
+});
+t('a transfer estimate waits for an account that has not begun', () => {
+  /* The far account first states a balance in April; before that it is not
+     running, and the balance step would not have credited it. */
+  const st = H.coerceShape({
+    schema: H.SCHEMA,
+    settings: { accounts: [
+      { id: 'cash', name: 'Cash', rate: 0, hub: true },
+      { id: 'mid', name: 'Savings', rate: 0, creditTo: 'mid' },
+    ] },
+    years: { 2030: { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 6,
+      enteredThrough: '2029-12',
+      categories: [{ id: 'tm', name: 'Savings', role: 'transfer', transferTo: 'mid', rule: 'carry' }],
+      cells: { 'tm|2030-01': { v: -300, kind: 'manual' } }, paychecks: {}, seeds: { cash: 5000 },
+      overrides: { 'mid|2030-04': { v: 100 } },
+      balAdjust: {} } },
+  });
+  const c = H.computeYear(st, '2030', null);
+  eq(c.cells['tm|2030-03'].kind, 'missing', 'March: the account is not running yet');
+  eq(c.cells['tm|2030-05'], { v: -300, kind: 'auto' }, 'May: it is, so the rule estimates');
+  eq(c.balances['cash|2030-03'], 4700, 'and the hub kept the money the estimates would have taken');
+  eq(H.targetRunning(st, st.years['2030'], { role: 'normal', rule: 'carry' }, '2030-01', 'cash'), true,
+    'an ordinary row is never gated by this');
 });
 
 async function run() {
