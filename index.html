@@ -4824,6 +4824,13 @@ function blankState() {
        travels in every share link, and not in `side`, which is tab data.
        The KEY still lives in localStorage and must stay there — see PRICE_KEY. */
     quotes: {},
+    /* MONTH-END CLOSES: "TICKER|YYYY-MM" → {price, date, ts} or {noClose, ts}.
+       What the Net Worth card's SETTLED month prices holdings at (2026-09-17) —
+       see refreshMonthCloses. Beside `quotes` for the same reasons: a fact about
+       a security that is the same on every device, so it syncs, and machinery,
+       so it is not in `settings` (share links) or `side` (tab data). Unlike a
+       quote it never goes stale — a close that has happened cannot change. */
+    closes: {},
     side: {
       portfolios: [], taxable: [], rothContribs: {}, k401: {}, hsa: [],
       comp: {}, bonuses: {}, daf: [],
@@ -6428,6 +6435,7 @@ function coerceShape(data) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(d.ui.activeMonth || '')))
     delete d.ui.activeMonth;
   d.quotes = coerceQuotes(d.quotes);
+  d.closes = coerceCloses(d.closes);
   return d;
 }
 
@@ -6462,6 +6470,33 @@ function coerceQuotes(raw) {
     if (v.noQuote === true) { out[t] = { noQuote: true, ts }; continue; }
     if (typeof v.price === 'number' && Number.isFinite(v.price))
       out[t] = { price: v.price, ts };
+  }
+  return out;
+}
+
+/* The synced month-end closes, read by coerceQuotes' rules plus one of its own:
+   a close's DATE must fall inside the month its key names. The whole claim of an
+   entry is "this is what the ticker closed at at the end of August", and a July
+   date under an August key — a hand-edited file, a supplier answering with the
+   nearest day it had — would price August at the wrong month without a trace.
+   Junk drops the entry, which costs one lookup, never a wrong figure. */
+function coerceCloses(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  const horizon = Date.now() + 60 * 60 * 1000;
+  for (const [k, v] of Object.entries(raw)) {
+    const m = /^([^|]{1,24})\|(\d{4}-(?:0[1-9]|1[0-2]))$/.exec(String(k || '').trim().toUpperCase());
+    if (!m || !v || typeof v !== 'object' || Array.isArray(v)) continue;
+    const t = m[1].trim();
+    if (!t) continue;
+    const ts = typeof v.ts === 'number' && Number.isFinite(v.ts) ? v.ts : null;
+    if (ts === null || ts > horizon) continue;
+    const key = `${t}|${m[2]}`;
+    if (v.noClose === true) { out[key] = { noClose: true, ts }; continue; }
+    if (typeof v.price === 'number' && Number.isFinite(v.price) && v.price > 0
+        && typeof v.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.date)
+        && v.date.slice(0, 7) === m[2])
+      out[key] = { price: v.price, date: v.date, ts };
   }
   return out;
 }
@@ -6908,7 +6943,7 @@ let undoSnapshot = JSON.stringify(state);   // the state as of the last save/loa
    somebody actually regrets. The snapshot still carries the cache — restoring
    an older one at worst costs a re-fetch. */
 function coreOf(st) {
-  return JSON.stringify(Object.assign({}, st, { ui: null, quotes: null }));
+  return JSON.stringify(Object.assign({}, st, { ui: null, quotes: null, closes: null }));
 }
 let undoCore = coreOf(state);
 let undoing = false;
@@ -8681,11 +8716,15 @@ const HELP = {
       + 'are what the accounts actually ended that month holding, which is the figure worth '
       + 'recording once a month is closed. The months on offer are the two worth reading — '
       + 'there is no picker, because most months could not be read honestly (see below).'],
-    [b('What you hold and what you own are today\'s figures either way.'), ' A holding is '
-      + 'worth its price now, and a property is worth what you last said it would fetch — '
-      + 'neither has a month. So an end-of-August net worth is August\'s balances beside '
-      + 'today\'s prices, which is exactly right the morning after you settle a month and '
-      + 'refresh your quotes, and increasingly wrong the further back you go.'],
+    [b('A settled month prices holdings at its own close.'), ' A price only stays true '
+      + 'until the market next opens, so the settled view asks Twelve Data what each ticker '
+      + 'closed at on the month\'s last trading day — once, since a close never changes — and '
+      + 'values Invested and Retirement with it. It needs a Twelve Data key, and each tile '
+      + 'says which prices it used.'],
+    ['What it cannot turn back: ', b('share counts'), ', a price you typed by hand, a '
+      + 'retirement account kept as typed balances, and what a property would fetch. The plan '
+      + 'keeps no history of those, so they are today\'s figures — a purchase made after the '
+      + 'month ended still shows.'],
     ['Recording follows the switch, so a snapshot states exactly the figures the card was '
       + 'showing. A settled month is dated its ', b('last day'), ' — the end of August is '
       + 'recorded as the 31st, where it belongs on the line, not as the day you pressed the '
@@ -13392,8 +13431,44 @@ function inPlanCurrency(st, amount, code) {
   return { v: round2((amount || 0) * r.rate), rate: r.rate, asOf: r.asOf };
 }
 
-function netWorthParts(st, month) {
+/* A holding the price lookup can answer for — the one test allTickers() and the
+   month-end pricing both ask, so a ticker is never looked up by one and priced
+   as hand-typed by the other. Returns the upper-cased ticker, or ''. */
+function lookupTickerOf(h) {
+  const t = h && h.ticker ? String(h.ticker).trim().toUpperCase() : '';
+  return t && t !== '?' && h.lookup !== false ? t : '';
+}
+
+/* How a settled month prices a holding: the close cached for that ticker and
+   month, else the typed price. `tally` counts which, so the card can say how
+   many figures are month-end and how many are still today's. A holding with no
+   shares moves nothing and is not counted either way. Pure. */
+function closePricer(closes, month) {
+  const closeOf = (h) => {
+    const t = lookupTickerOf(h);
+    const c = t ? closes[`${t}|${month}`] : null;
+    return c && typeof c.price === 'number' ? c : null;
+  };
+  return {
+    priceOf: (h) => { const c = closeOf(h); return c ? c.price : h.price; },
+    tally: (rows) => {
+      let atClose = 0, atToday = 0, date = null;
+      for (const h of rows) {
+        if (!h || !h.shares) continue;
+        const c = closeOf(h);
+        if (c) { atClose++; if (!date || c.date > date) date = c.date; } else atToday++;
+      }
+      return { atClose, atToday, date };
+    },
+  };
+}
+
+function netWorthParts(st, month, closes) {
   const side = st.side || {};
+  /* A settled month prices every holding it can at that month's close. Without
+     `closes` this is the plain typed price, exactly as it always was. */
+  const pricer = closes ? closePricer(closes, month) : null;
+  const priceOf = pricer ? pricer.priceOf : undefined;
   const portfolios = side.portfolios || [];
   const retAccts = side.retirementAccounts || [];
   const property = side.property || [];
@@ -13407,12 +13482,22 @@ function netWorthParts(st, month) {
     if (got.unknown) unconverted.push(`${row.name || 'Untitled'} (${got.code})`);
     return got.v;
   };
-  const invested = round2(portfolios.reduce((s, p) => s + conv(p, holdingsValue(p.rows || [])), 0));
+  const invested = round2(portfolios.reduce((s, p) => s + conv(p, holdingsValue(p.rows || [], priceOf)), 0));
   /* Retirement accounts carry no currency of their own, deliberately: a 401(k)
      or an ISA is a creature of one country's tax code, and an app that shipped
      one country's contribution limits could not have offered the other's
      anyway. Nothing here pretends otherwise. */
-  const retirement = round2(retAccts.reduce((s, a) => s + retAcctBalance(a), 0));
+  const retirement = round2(retAccts.reduce((s, a) => s + retAcctBalance(a, priceOf), 0));
+  /* Where each figure's price came from, counted only when a month was asked
+     for — the card's feet say it in words. `retTyped` is the accounts no close
+     can reach: valued by their buckets or a typed balance, which are whatever
+     was last typed, whatever the month. */
+  const priced = pricer ? {
+    invested: pricer.tally(portfolios.flatMap(p => (p && p.rows) || [])),
+    retirement: pricer.tally(retAccts.filter(a => !(a.buckets || []).length)
+      .flatMap(a => a.rows || [])),
+    retTyped: retAccts.filter(a => (a.buckets || []).length || !(a.rows || []).length).length,
+  } : null;
   /* `p.owed` is the pre-schema-7 spelling. It is still added because a backup
      from before the split is coerced before it is migrated, and this function
      runs over both — dropping it for one tick would silently overstate a
@@ -13429,7 +13514,7 @@ function netWorthParts(st, month) {
   const loose = liabilities.filter(l => !securedTo(l, propIds));
   const debts = round2(loose.reduce((t, l) => t + conv(l, owedNow(l)), 0));
   return {
-    invested, hasInvested: portfolios.some(p => p && (p.rows || []).length),
+    invested, hasInvested: portfolios.some(p => p && (p.rows || []).length), priced,
     retirement, hasRetirement: retAccts.length > 0,
     property: round2(propertyValue - owed - secured), propertyOwed: round2(owed + secured),
     hasProperty: property.length > 0,
@@ -13487,8 +13572,8 @@ function worthAsOf(st, liveKey, cur) {
     est: monthAhead(yr, chosen ? settled : cur) };
 }
 
-function netWorthTotals(st, liquid, c, cur) {
-  const nw = netWorthParts(st, cur);
+function netWorthTotals(st, liquid, c, cur, closes) {
+  const nw = netWorthParts(st, cur, closes);
   /* Money a pane has claimed as its holdings (pf.accounts) is in the Liquid
      figure AND the Invested one — both tiles honestly match their tabs, so
      the dedupe lives in the TOTAL alone, subtracting the linked accounts'
@@ -13529,6 +13614,29 @@ function upsertSnapshot(list, snap) {
   return false;
 }
 
+/* The rest of a tile's foot in the settled month: where its prices came from.
+   Only ever said about the settled view — `tally` is null otherwise and this is
+   ''. Three honest states, and the middle one is why it reads the tried set:
+   a close still on its way is "looking up", not "today's price", or the tile
+   would call a figure stale a second before it is corrected. */
+function closeFoot(tally, month, typed) {
+  if (!tally) return '';
+  const day = (iso) => `${MONTH_ABBR[+iso.slice(5, 7) - 1]} ${+iso.slice(8, 10)}`;
+  const parts = [];
+  const pending = tally.atToday && closesWanted(state, month, todayISO(),
+    { key: priceKey(), shared: viewOnly }).length;
+  if (tally.atClose && !tally.atToday) parts.push(`at ${day(tally.date)} closing prices`);
+  else if (tally.atClose) parts.push(`at ${day(tally.date)} closes, ${tally.atToday} at ${
+    pending ? 'today’s price for now' : 'today’s price'}`);
+  else if (tally.atToday) parts.push(pending ? `looking up ${esc(monthLabelFull(month))}’s closes…`
+    : !viewOnly && !priceKey() ? 'at today’s prices — add a Twelve Data key in Preferences to '
+      + `use ${esc(monthLabelFull(month))}’s closes`
+    : 'at today’s prices');
+  if (typed) parts.push(typed === 1 ? 'one account’s typed balance is today’s'
+    : `${typed} accounts’ typed balances are today’s`);
+  return parts.length ? ` — ${parts.join('; ')}` : '';
+}
+
 function netWorthCard(liquid, cur, c, choice) {
   /* Nothing typed beyond the budget means nothing to add up — the Savings
      Goals card above already carries total liquidity, and a one-tile "net
@@ -13555,7 +13663,8 @@ function netWorthCard(liquid, cur, c, choice) {
     <div class="value">${fmtMoney(value)}</div>
     ${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
   };
-  const { nw, overlap, total } = netWorthTotals(state, liquid, c, cur);
+  const { nw, overlap, total } = netWorthTotals(state, liquid, c, cur,
+    choice.chosen ? (state.closes || {}) : undefined);
   const linkedNames = nw.linkedAccounts
     .map(id => (accountById(state, id) || {}).name).filter(Boolean);
   return `<div class="card">
@@ -13564,8 +13673,9 @@ function netWorthCard(liquid, cur, c, choice) {
       choice.est ? ` <strong>${esc(monthLabelFull(cur))} is not settled yet</strong>, so
       Liquid and Total are the plan's own estimate — every figure in that month is one
       until you mark it entered.` : choice.chosen ? ` That is the last month you marked
-      entered, so its balances are what happened. What you hold and what you own are
-      today's figures either way — a holding is only ever worth what it is worth now.`
+      entered, so its balances are what happened, and holdings with a ticker are priced
+      at what they closed at on its last trading day. Share counts, typed prices and
+      what you own are today's figures — the plan keeps no history of them.`
       : ''}${
       overlap ? ` ${esc(andList(linkedNames))} ${linkedNames.length === 1 ? 'is' : 'are'}
       the same money as ${linkedNames.length === 1 ? 'an' : 'their'} Investments pane${
@@ -13603,8 +13713,12 @@ function netWorthCard(liquid, cur, c, choice) {
       ${tile('Liquid', liquid, choice.est
         ? 'The budget grid’s accounts, as this month is projected to end'
         : 'The budget grid’s accounts at the end of that month', choice.est, 'budget')}
-      ${nw.hasInvested ? tile('Invested', nw.invested, 'The Investments tab’s holdings', false, 'investments') : ''}
-      ${nw.hasRetirement ? tile('Retirement', nw.retirement, 'Traditional and Roth together', false, 'retirement') : ''}
+      ${nw.hasInvested ? tile('Invested', nw.invested,
+        'The Investments tab’s holdings' + closeFoot(nw.priced && nw.priced.invested, cur),
+        false, 'investments') : ''}
+      ${nw.hasRetirement ? tile('Retirement', nw.retirement, 'Traditional and Roth together'
+        + closeFoot(nw.priced && nw.priced.retirement, cur, nw.priced && nw.priced.retTyped),
+        false, 'retirement') : ''}
       ${nw.hasProperty ? tile('Property', nw.property, nw.propertyOwed
         ? `Value minus the ${fmtMoney(nw.propertyOwed)} still owed — the Household tab lists it`
         : 'What it would sell for — the Household tab lists it', false, 'household') : ''}
@@ -14107,8 +14221,10 @@ function buildMixChart() {
 
 /* ═══════════════════════════ Retirement view ══════════════════════════════ */
 
-const holdingsValue = (rows) =>
-  round2(rows.reduce((s, h) => s + (h.shares || 0) * (h.price || 0), 0));
+/* `priceOf` is the Net Worth card's settled month asking at a month-end close
+   instead of the typed price (see closePricer); everywhere else leaves it off. */
+const holdingsValue = (rows, priceOf) =>
+  round2(rows.reduce((s, h) => s + (h.shares || 0) * ((priceOf ? priceOf(h) : h.price) || 0), 0));
 
 /* A holdings table is either one of the named investment panes ("pf:<id>") or
    the giving fund, which lives on its own tab. One resolver so the renderer,
@@ -14144,9 +14260,9 @@ const bucketsValue = (buckets) =>
    with the Traditional/Roth figures beside it. Where both are listed they are
    two statements of the same money, and `bucketGap` reports a disagreement
    rather than picking a winner quietly. */
-const retAcctBalance = (a) =>
+const retAcctBalance = (a, priceOf) =>
   (a && a.buckets && a.buckets.length) ? bucketsValue(a.buckets)
-  : (a && a.rows && a.rows.length) ? holdingsValue(a.rows)
+  : (a && a.rows && a.rows.length) ? holdingsValue(a.rows, priceOf)
   : round2((a && a.amount) || 0);
 
 /* Traditional against Roth over a list of accounts, reading each account's
@@ -19716,9 +19832,11 @@ function wireView(view) {
       /* The same month the card is being read at, so a snapshot states EXACTLY
          the figures that were on screen — two computations of one number is how
          a recorded fact drifts from the screen it came off. */
-      const { asOf } = worthAsOf(state, liveKey, cur);
+      const { asOf, chosen } = worthAsOf(state, liveKey, cur);
       const liquid = c.balances[`total|${asOf}`] || 0;
-      const { nw, total } = netWorthTotals(state, liquid, c, asOf);
+      /* The settled month's closes, exactly as the card is using them. */
+      const { nw, total } = netWorthTotals(state, liquid, c, asOf,
+        chosen ? (state.closes || {}) : undefined);
       /* The last day of the month being stated, capped at today — one rule that
          reads as "today" for the month in progress and as the month's final day
          for one already closed, which is where a figure stated FOR August
@@ -19736,6 +19854,15 @@ function wireView(view) {
         : `Recorded ${fmtMoney(total)} as of ${when}`);
     };
     wireWorthSwitch();
+    /* The settled month asks for its closes on its own — see refreshMonthCloses.
+       Nothing to ask (no key, a shared view, all answered) returns at once. */
+    {
+      const liveKey = latestGridYear();
+      if (liveKey && state.years[liveKey]) {
+        const w = worthAsOf(state, liveKey, currentMonthOf(state.years[liveKey], todayISO()));
+        if (w.chosen) refreshMonthCloses(w.asOf);
+      }
+    }
     /* The flow chart's own switch. It re-renders rather than rebuilding just
        that chart, because the card's opening sentence and the note under the
        switch both change with it — redrawing the bars alone would leave the prose
@@ -20918,9 +21045,10 @@ const priceLists = () => [
 function allTickers() {
   const out = new Set();
   for (const rows of priceLists())
-    for (const h of rows)
-      if (h.ticker && h.ticker !== '?' && h.lookup !== false)
-        out.add(h.ticker.trim().toUpperCase());
+    for (const h of rows) {
+      const t = lookupTickerOf(h);
+      if (t) out.add(t);
+    }
   return [...out];
 }
 const lastPriceRun = () => {
@@ -21070,6 +21198,55 @@ function classifyQuote(status, data) {
   /* A 200 carrying nothing usable — the symbol resolved but has no price. */
   return { kind: 'noQuote' };
 }
+
+/* A month-end close, from `/time_series` asked for one daily bar ending on the
+   month's last day. That shape answers with the last TRADING day on or before
+   it, so a month ending on a weekend or a market holiday needs no calendar here.
+   The answer counts only if its date is inside the month asked about: a ticker
+   that did not trade that month comes back with an older bar, and pricing
+   August at a July close would be the wrong figure wearing the right label.
+   Errors map exactly as classifyQuote maps them, except that "no data for those
+   dates" (a 400) is a determinate no, and so is anything else unusable. */
+function classifyClose(status, data, month) {
+  const bar = data && Array.isArray(data.values) ? data.values[0] : null;
+  if (bar) {
+    const price = parseFloat(bar.close);
+    const date = String(bar.datetime || '').slice(0, 10);
+    if (Number.isFinite(price) && price > 0 && /^\d{4}-\d{2}-\d{2}$/.test(date)
+        && date.slice(0, 7) === month)
+      return { kind: 'price', price: round2(price), date };
+    return { kind: 'noQuote' };
+  }
+  const verdict = classifyQuote(status, data && typeof data === 'object'
+    ? Object.assign({}, data, { close: undefined }) : data);
+  return verdict.kind === 'price' ? { kind: 'noQuote' } : verdict;
+}
+
+/* ONE LOOP FOR EVERY LOOKUP — the live quote and the month-end close both walk
+   their tickers through here, so the traps it carries are carried once:
+   - the body is read even when the status is NOT ok, which is the whole reason
+     this supplier is easier to live with: a 401, a 404 and a 429 each say
+     exactly what went wrong in the body. Bailing on `res.ok` would flatten all
+     three back into one shrug. Only an unreadable body is a genuine failure;
+   - a refusal (throttled, out of credits, bad key, their outage) BREAKS the
+     loop and marks nothing, so a later pass asks again;
+   - only a determinate answer — a price, or a genuine "none" — reaches
+     `onAnswer`, which is where the caller marks and caches.
+   Network trouble and the timeout throw, and the caller's catch reports them. */
+async function lookupEach(tickers, run, { url, classify, onAnswer }) {
+  for (const ticker of tickers) {
+    const res = await fetch(url(ticker), { signal: priceTimeout() });
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!data) { run.failed = true; break; }
+    const verdict = classify(res.status, data);
+    if (verdict.kind === 'throttled') { run.throttled = true; break; }
+    if (verdict.kind === 'limited') { run.limited = true; break; }
+    if (verdict.kind === 'badKey') { run.badKey = true; break; }
+    if (verdict.kind === 'failed') { run.failed = true; break; }
+    onAnswer(ticker, verdict);
+  }
+}
 /* Guarded rather than called outright: an older Safari without AbortSignal
    .timeout would throw a TypeError inside the try below, which the catch would
    dutifully report as a failed lookup — breaking prices entirely on the browsers
@@ -21146,40 +21323,29 @@ async function refreshPrices(quiet, only) {
      dropped from the tally even when this run's loop broke before reaching it. */
   const attempted = new Set();
   try {
-    for (const ticker of want) {
-      const url = 'https://api.twelvedata.com/quote'
-        + `?symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(key)}`;
-      const res = await fetch(url, { signal: priceTimeout() });
-      /* Read even when the status is NOT ok, which is the whole reason this
-         supplier is easier to live with: a 401, a 404 and a 429 each say
-         exactly what went wrong in the body. Bailing on `res.ok` would flatten
-         all three back into one shrug, which is the position the old prose-in-
-         a-200 left us in. Only an unreadable body is a genuine failure. */
-      let data = null;
-      try { data = await res.json(); } catch (e) { data = null; }
-      if (!data) { run.failed = true; break; }
-      const verdict = classifyQuote(res.status, data);
-      if (verdict.kind === 'throttled') { run.throttled = true; break; }
-      if (verdict.kind === 'limited') { run.limited = true; break; }
-      if (verdict.kind === 'badKey') { run.badKey = true; break; }
-      if (verdict.kind === 'failed') { run.failed = true; break; }
-      /* Marked only once there is a DETERMINATE answer — a price, or a genuine
-         "no quote for that". A ticker the loop broke on was refused rather than
-         answered, so it stays unmarked and a later pass asks again; that is the
-         difference between "there is no price for this" and "we weren't
-         answered just then". */
-      priceAutoTried.add(ticker);
-      attempted.add(ticker);
-      if (verdict.kind === 'noQuote') {
-        run.missing.push(ticker);
-        /* Recorded, not merely reported — see noQuoteFresh. This is the line
-           that stops the free tier being spent on questions already answered. */
-        cache[ticker] = { noQuote: true, ts: Date.now() };
-        continue;
-      }
-      cache[ticker] = { price: verdict.price, ts: Date.now() };
-      run.updated.push({ ticker, price: verdict.price });
-    }
+    await lookupEach(want, run, {
+      url: (ticker) => 'https://api.twelvedata.com/quote'
+        + `?symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(key)}`,
+      classify: classifyQuote,
+      onAnswer: (ticker, verdict) => {
+        /* Marked only once there is a DETERMINATE answer — a price, or a genuine
+           "no quote for that". A ticker the loop broke on was refused rather
+           than answered, so it stays unmarked and a later pass asks again; that
+           is the difference between "there is no price for this" and "we
+           weren't answered just then". */
+        priceAutoTried.add(ticker);
+        attempted.add(ticker);
+        if (verdict.kind === 'noQuote') {
+          run.missing.push(ticker);
+          /* Recorded, not merely reported — see noQuoteFresh. This is the line
+             that stops the free tier being spent on questions already answered. */
+          cache[ticker] = { noQuote: true, ts: Date.now() };
+          return;
+        }
+        cache[ticker] = { price: verdict.price, ts: Date.now() };
+        run.updated.push({ ticker, price: verdict.price });
+      },
+    });
   } catch (e) {
     /* An AbortError from the timeout arrives here like any other network
        trouble, which is right: "it didn't answer in ten seconds" and "it
@@ -21260,6 +21426,94 @@ async function refreshPrices(quiet, only) {
     pendingLookups.clear();
     setTimeout(() => refreshPrices(false, next), 0);
   }
+}
+
+/* ═══════════════════════════ Month-end closes ═════════════════════════════
+   THE SETTLED MONTH, PRICED AT ITS OWN CLOSE (Charles, 2026-09-17: "this
+   previous month view is only accurate until the start of the next open stock
+   market day after the last day of the month"). Net Worth's settled view reads
+   the month's entered balances, but a holding is shares × price, and the price
+   was today's — so an "end of August" figure was true only until the market
+   next opened, and Record wrote whatever it had drifted to into history.
+
+   So the settled view asks Twelve Data what each ticker closed at on the
+   month's last trading day, once, and keeps the answer for good: a close that
+   has happened cannot change, so there is no freshness clock. One lookup per
+   ticker per month, from the same allowance Refresh spends.
+
+   What a close CANNOT fix, and the card says so rather than hiding it:
+   - a holding with no ticker, or with lookups switched off — its price is
+     whatever was typed;
+   - a retirement account valued by its buckets or a typed balance;
+   - SHARE COUNTS, which are today's. A purchase after month end still shows.
+
+   Shares the price refresh's latch and cool-off, because both spend one
+   allowance and one per-minute limit: two runs at once would each think they
+   had eight lookups a minute to themselves. Quiet by design — it runs on its
+   own when the settled view is drawn, and a toast for every page view would be
+   noise; the card's words say what came back. */
+const closeAutoTried = new Set();   // "TICKER|YYYY-MM" asked this page load
+
+/* Which tickers a month still has no answer for — the card reads this to say
+   "looking up…" rather than calling a today's price a month-end one while the
+   answer is on its way. Empty whenever no lookup would actually run. Pure over
+   its arguments except for the page-load tried set. */
+function closesWanted(st, month, today, { key, shared } = {}) {
+  if (shared || !key || !month || today <= monthEndISO(month)) return [];
+  const have = st.closes || {};
+  return allTickers().filter(t => !have[`${t}|${month}`] && !closeAutoTried.has(`${t}|${month}`));
+}
+
+async function refreshMonthCloses(month) {
+  const key = priceKey();
+  const want = closesWanted(state, month, todayISO(), { key, shared: viewOnly });
+  if (!want.length) return;
+  if (refreshingPrices && Date.now() - priceRunStartedAt < PRICE_RUN_STALE_MS) return;
+  if (Date.now() < priceCoolOffUntil) return;
+  refreshingPrices = true;
+  priceRunStartedAt = Date.now();
+  const token = ++priceRunToken;
+  const run = { throttled: false, limited: false, failed: false, badKey: false };
+  const found = {};
+  const end = monthEndISO(month);
+  try {
+    await lookupEach(want, run, {
+      url: (ticker) => 'https://api.twelvedata.com/time_series'
+        + `?symbol=${encodeURIComponent(ticker)}&interval=1day&outputsize=1`
+        + `&end_date=${encodeURIComponent(end)}&apikey=${encodeURIComponent(key)}`,
+      classify: (status, data) => classifyClose(status, data, month),
+      onAnswer: (ticker, verdict) => {
+        closeAutoTried.add(`${ticker}|${month}`);
+        found[`${ticker}|${month}`] = verdict.kind === 'price'
+          ? { price: verdict.price, date: verdict.date, ts: Date.now() }
+          : { noClose: true, ts: Date.now() };
+      },
+    });
+  } catch (e) {
+    console.warn('month-end close lookup failed', e);
+    run.failed = true;
+  } finally {
+    if (token === priceRunToken) refreshingPrices = false;
+  }
+  if (token !== priceRunToken) return;
+  /* Refused rather than answered: the untried tickers stay untried, and the
+     cool-off stops the render below asking again straight away. */
+  if (run.throttled || run.limited || run.failed || run.badKey) {
+    priceCoolOffUntil = Date.now() + PRICE_COOL_OFF_MS;
+    /* Throttled is the per-minute limit, which a plan with more than eight
+       tickers hits on every first visit — so the rest are asked for again once
+       the minute is up, with nobody having to touch anything. The other three
+       will not clear in a minute, and are left for the next page load. */
+    if (run.throttled) setTimeout(() => {
+      if (!viewOnly && (state.ui || {}).worthAsOf === 'settled') render();
+    }, PRICE_COOL_OFF_MS + 1000);
+    else for (const t of want) if (!found[`${t}|${month}`]) closeAutoTried.add(`${t}|${month}`);
+  }
+  if (Object.keys(found).length) {
+    state.closes = coerceCloses(Object.assign({}, state.closes || {}, found));
+    save();
+  }
+  render();
 }
 
 
@@ -30929,7 +31183,9 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
      were got wrong in ways that only showed up a day later. */
   quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote,
   priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
-  coerceQuotes,
+  coerceQuotes, coerceCloses, classifyClose, closePricer, lookupTickerOf,
+  /* read-only: a frame test reads the live plan after driving the page */
+  get state() { return state; },
   fmtMoney, fmtMoneyIn, monthAdd, monthDiff, monthLabel, monthLabelFull, noBalanceReason,
   reconcileNote, impliedGrowth, growthOfferLabel, acceptedFigures,
   /* The Investments charts' readers — pure, so the suite pins the folding, the

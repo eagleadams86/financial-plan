@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1112;
+const EXPECTED = 1116;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -5823,6 +5823,76 @@ t('a rate converts the property, the debt on it and a whole pane', () => {
   eq(nw.property, 120, '(100 − 40) × 2');
   eq(nw.debts, 20, '10 × 2');
   eq(nw.invested, 100, '50 of holdings at 2');
+});
+/* ── A settled month prices holdings at its own close (2026-09-17) ───────────
+   Charles: "this previous month view is only accurate until the start of the
+   next open stock market day after the last day of the month". The settled
+   view now asks what each ticker closed at on the month's last trading day and
+   values holdings with it; what no close can reach stays as typed, and says so. */
+t('a month-end close is taken only if it is dated inside that month', () => {
+  const ok1 = H.classifyClose(200, { meta: { symbol: 'VTI' }, status: 'ok',
+    values: [{ datetime: '2026-08-31', close: '301.23456' }] }, '2026-08');
+  eq(ok1, { kind: 'price', price: 301.23, date: '2026-08-31' });
+  eq(H.classifyClose(200, { values: [{ datetime: '2026-07-31', close: '290' }] }, '2026-08').kind,
+     'noQuote', 'a ticker that did not trade in August answers with July — not August’s price');
+  eq(H.classifyClose(200, { values: [{ datetime: '2026-08-28', close: '0' }] }, '2026-08').kind,
+     'noQuote', 'a zero close is no close');
+  eq(H.classifyClose(400, { code: 400, status: 'error',
+    message: 'No data is available on the specified dates.' }, '2026-08').kind, 'noQuote');
+  eq(H.classifyClose(404, { code: 404, message: 'symbol not found' }, '2026-08').kind, 'noQuote');
+  eq(H.classifyClose(429, { code: 429, message: 'You have run out of API credits for the current minute.' },
+     '2026-08').kind, 'throttled');
+  eq(H.classifyClose(429, { code: 429, message: 'You have run out of API credits for the day.' },
+     '2026-08').kind, 'limited');
+  eq(H.classifyClose(401, { code: 401, message: 'bad key' }, '2026-08').kind, 'badKey');
+  eq(H.classifyClose(503, { code: 503 }, '2026-08').kind, 'failed', 'their outage is retried');
+  eq(H.classifyClose(200, { close: '12' }, '2026-08').kind, 'noQuote',
+     'a live-quote shaped body is not a close, however price-like it looks');
+});
+t('the synced closes are read strictly — a wrong month or a junk price drops the entry', () => {
+  const now = Date.now();
+  eq(H.coerceCloses({ 'vti|2026-08': { price: 301.23, date: '2026-08-31', ts: now } }),
+     { 'VTI|2026-08': { price: 301.23, date: '2026-08-31', ts: now } }, 'upper-cased');
+  eq(H.coerceCloses({ 'VTI|2026-08': { price: 301, date: '2026-07-31', ts: now } }), {},
+     'a July date under an August key');
+  eq(H.coerceCloses({ 'VTI|2026-13': { price: 301, date: '2026-13-01', ts: now } }), {}, 'no month 13');
+  eq(H.coerceCloses({ VTI: { price: 301, date: '2026-08-31', ts: now } }), {}, 'a key with no month');
+  eq(H.coerceCloses({ 'VTI|2026-08': { price: 'junk', date: '2026-08-31', ts: now } }), {});
+  eq(H.coerceCloses({ 'VTI|2026-08': { price: 301, date: '2026-08-31' } }), {}, 'no ts');
+  eq(H.coerceCloses({ 'VTI|2026-08': { price: 301, date: '2026-08-31', ts: now + 864e5 } }), {},
+     'a clock a day fast');
+  eq(H.coerceCloses({ 'VTI|2026-08': { noClose: true, price: 9, ts: now } }),
+     { 'VTI|2026-08': { noClose: true, ts: now } }, 'a "none" never carries a price');
+  eq(H.coerceShape({}).closes, {}, 'a plan that predates it gets the branch');
+});
+t('the settled month values holdings at their close, and counts what it could not reach', () => {
+  const now = Date.now();
+  const st = H.coerceShape({ settings: { currency: 'USD' }, side: {
+    portfolios: [{ id: 'brk', name: 'Brokerage', rows: [
+      { ticker: 'VTI', shares: 10, price: 300 },
+      { ticker: 'OLD', shares: 2, price: 50, lookup: false },
+      { ticker: '', shares: 1, price: 7 }] }],
+    retirementAccounts: [
+      { name: '401k', rows: [{ ticker: 'FXAIX', shares: 4, price: 200 }] },
+      { name: 'IRA', buckets: [{ kind: 'roth', amount: 1000 }] }] } });
+  const closes = H.coerceCloses({
+    'VTI|2030-04': { price: 280, date: '2030-04-30', ts: now },
+    'FXAIX|2030-04': { price: 190, date: '2030-04-30', ts: now },
+    'VTI|2030-03': { price: 1, date: '2030-03-29', ts: now } });
+  const live = H.netWorthParts(st, '2030-04');
+  eq(live.invested, 3107, 'no closes asked for: typed prices, as it always was');
+  eq(live.priced, null, 'and nothing to say about where the prices came from');
+  const nw = H.netWorthParts(st, '2030-04', closes);
+  eq(nw.invested, 2907, 'VTI at its April close; the hand-priced and ticker-less rows as typed');
+  eq(nw.retirement, 1760, 'the 401(k) holding at its close, the bucket account as typed');
+  eq(nw.priced.invested, { atClose: 1, atToday: 2, date: '2030-04-30' });
+  eq(nw.priced.retirement, { atClose: 1, atToday: 0, date: '2030-04-30' });
+  eq(nw.priced.retTyped, 1, 'the bucket account is named as out of reach');
+  eq(H.netWorthParts(st, '2030-03', closes).invested, 117,
+     'each month reads its own close — March’s VTI at $1, never April’s');
+  eq(H.lookupTickerOf({ ticker: ' vti ' }), 'VTI');
+  eq(H.lookupTickerOf({ ticker: '?' }), '');
+  eq(H.lookupTickerOf({ ticker: 'VTI', lookup: false }), '', 'the one test allTickers asks too');
 });
 t('the plan’s own currency needs no rate and never gets one', () => {
   const st = H.coerceShape({ settings: { currency: 'GBP' }, side: {
@@ -11947,8 +12017,12 @@ t('the Record button reads the same month the card was showing', () => {
      screen it came off — the rule the comment above netWorthTotals exists to
      protect, now that the card can be read at more than one month. */
   const src = stripComments(APP_SRC);
-  ok(/const \{ asOf \} = worthAsOf\(state, liveKey, cur\);/.test(src),
+  ok(/const \{ asOf, chosen \} = worthAsOf\(state, liveKey, cur\);/.test(src),
      'the handler resolves through the same pure function the card does');
+  ok(/netWorthTotals\(state, liquid, c, asOf,\s*chosen \? \(state\.closes \|\| \{\}\) : undefined\)/.test(src)
+     && /netWorthTotals\(state, liquid, c, cur,\s*choice\.chosen \? \(state\.closes \|\| \{\}\) : undefined\)/.test(src),
+     'and both price the settled month at the same closes, or the snapshot would state a '
+     + 'figure the card never showed');
   ok(/const end = monthEndISO\(asOf\), iso = todayISO\(\);[\s\S]{0,80}date: end < iso \? end : iso/
      .test(src),
      'and dates it the month end capped at today — which is today for the month in progress');
@@ -16561,6 +16635,76 @@ t('the grid\'s month header stays pinned when the lens is switched on a scrolled
       + 'chrome — not where the table was halfway through the redraw', gap());
     await wait(300);
     ok(Math.abs(gap()) <= 1, 'and it is still there once the page settles', gap());
+  } finally { f.remove(); }
+});
+
+/* ── The settled view looks its closes up, and Record states what it shows ───
+   Driven in a real frame because the whole path is wiring: the switch, the quiet
+   lookup it starts, the render that follows and the button reading the card.
+   The key is answered by stubbing THIS frame's Storage.getItem — never written,
+   since the frames share this origin's localStorage with the real page. */
+t('the settled month looks up its closes, prices the tiles with them, and Record writes the same figure', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'monthcloses');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const ST = () => W.__finTestHooks.state;   // a top-level `let`, so not a window property
+    const get = W.Storage.prototype.getItem;
+    let key = '';
+    W.Storage.prototype.getItem = function (k) { return k === 'fin-pricekey' ? (key || null) : get.call(this, k); };
+    const asked = [];
+    W.fetch = async (url) => {
+      const u = new URL(url);
+      asked.push(u.pathname + ':' + u.searchParams.get('symbol') + ':' + (u.searchParams.get('end_date') || ''));
+      return new W.Response(JSON.stringify({ status: 'ok', values: [{ datetime:
+        u.searchParams.get('end_date'), close: '10' }] }), { status: 200 });
+    };
+    D.getElementById('tab-goals').click();
+    await wait(300);
+    const settledBtn = D.querySelector('.asofswitch [data-asof="settled"]');
+    ok(settledBtn, 'fixture: the sample plan offers a settled month');
+    const tileOf = (label) => [...D.querySelectorAll('.goal')]
+      .find(g => (g.querySelector('.label') || {}).textContent === label);
+    const money = (label) => Number(tileOf(label).querySelector('.value').textContent.replace(/[^0-9.-]/g, ''));
+    await wait(200);
+    eq(asked.length, 0, 'the month in progress asks for nothing — it keeps live prices');
+
+    settledBtn.click();
+    await wait(300);
+    eq(asked.length, 0, 'with no key there is nothing to ask with');
+    ok(/add a Twelve Data key/.test(tileOf('Invested').textContent),
+       'and the tile says its prices are today’s, and how to change that', tileOf('Invested').textContent);
+
+    key = 'test-key';
+    D.querySelector('.asofswitch [data-asof="now"]').click();
+    await wait(200);
+    D.querySelector('.asofswitch [data-asof="settled"]').click();
+    await wait(600);
+    const month = W.worthAsOf(ST(), W.latestGridYear(),
+      W.currentMonthOf(ST().years[W.latestGridYear()], W.todayISO())).settled;
+    ok(asked.length > 0 && asked.every(a => a.startsWith('/time_series:') && a.endsWith(':' + W.monthEndISO(month))),
+       'each ticker is asked for its close on the settled month’s last day', asked.join(', '));
+    const shares = ST().side.portfolios.flatMap(p => p.rows || [])
+      .filter(h => W.lookupTickerOf(h)).reduce((s, h) => s + (h.shares || 0), 0);
+    const typed = ST().side.portfolios.flatMap(p => p.rows || [])
+      .filter(h => !W.lookupTickerOf(h)).reduce((s, h) => s + (h.shares || 0) * (h.price || 0), 0);
+    ok(Math.abs(money('Invested') - (shares * 10 + typed)) < 0.01,
+       'Invested is every looked-up holding at its $10 close', money('Invested'));
+    ok(/closing prices|closes/.test(tileOf('Invested').textContent), 'and its foot says so');
+
+    const n = asked.length;
+    D.querySelector('.asofswitch [data-asof="now"]').click();
+    await wait(200);
+    D.querySelector('.asofswitch [data-asof="settled"]').click();
+    await wait(300);
+    eq(asked.length, n, 'a close once answered is never asked for again');
+
+    const shown = money('Total');
+    D.getElementById('recordWorthBtn').click();
+    await wait(200);
+    const snap = ST().side.snapshots.find(r => r.date === W.monthEndISO(month));
+    ok(snap, 'Record dated the snapshot the settled month’s last day');
+    eq(snap.total, shown, 'and stated the total the card was showing');
+    eq(snap.invested, money('Invested'), 'with Invested at the same closes');
   } finally { f.remove(); }
 });
 

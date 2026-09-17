@@ -942,12 +942,22 @@ switch offers the **last month you marked entered** instead, whose balances are
 what the accounts really ended that month holding. Where the current month is
 itself entered there is one answer and no switch.
 
-What you hold and what you own are **today's figures either way**: a holding is
-worth its price now, a property what you last said it would fetch, and neither
-has a month. So an end-of-August net worth is August's balances beside today's
-prices — right the morning after you settle a month and refresh your quotes, and
-less so the further back you look. That is why there is no picker over every
-month in the plan.
+**A settled month prices your holdings at its own close.** A price is only true
+until the market next opens, so an end-of-August figure built from today's
+prices drifts from the first trading day of September on. With a Twelve Data key
+in Preferences, the settled view asks what each ticker **closed at on the
+month's last trading day** — one lookup per ticker, once, since a close never
+changes — and values Invested and Retirement with it. A month ending on a
+weekend or a market holiday takes the last day the market was open. Each tile
+says where its prices came from: all at the month's closes, some still at
+today's price, or "looking up…" while the answer is on its way. The month in
+progress keeps using live prices.
+
+What a close can't turn back stays **today's figure**, and the tile says so:
+share counts (a purchase after the month ended still shows), a price you typed
+by hand or a holding with lookups off, a retirement account kept as typed
+balances, and what a property would fetch. The plan keeps no history of those,
+which is why there is no picker over every month in the plan.
 
 Debt appears in one of two places and comes off the total either way. A debt
 **secured on a property** is inside that property's figure, which is the
