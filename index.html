@@ -21368,6 +21368,23 @@ const dafPriceLists = () => [state.side.daf || []];
 /* And the retirement accounts' holdings, for the same reason: that tab shows
    its own tables and no others. */
 const retPriceLists = () => (state.side.retirementAccounts || []).map(a => a.rows || []);
+/* The tickers a month-end close is worth asking for: the ones `netWorthParts`
+   prices — portfolio and retirement holdings. The giving fund is not part of
+   net worth, so asking for its closes spent the allowance on figures no tile
+   would ever draw and left a tile reading "looking up…" for a ticker it was
+   never going to use (2026-09-17). Over the state handed in, not the global,
+   so `closesWanted` is pure over its arguments. */
+function worthTickers(st) {
+  const side = (st && st.side) || {};
+  const out = new Set();
+  for (const rows of [...(side.portfolios || []).map(p => (p && p.rows) || []),
+                      ...(side.retirementAccounts || []).map(a => (a && a.rows) || [])])
+    for (const h of rows) {
+      const t = lookupTickerOf(h);
+      if (t) out.add(t);
+    }
+  return [...out];
+}
 function allTickers(lists) {
   const out = new Set();
   for (const rows of (lists || priceLists()))
@@ -21796,7 +21813,7 @@ const closeAutoTried = new Set();   // "TICKER|YYYY-MM" asked this page load
 function closesWanted(st, month, today, { key, shared } = {}) {
   if (shared || !key || !month || today <= monthEndISO(month)) return [];
   const have = st.closes || {};
-  return allTickers().filter(t => !have[`${t}|${month}`] && !closeAutoTried.has(`${t}|${month}`));
+  return worthTickers(st).filter(t => !have[`${t}|${month}`] && !closeAutoTried.has(`${t}|${month}`));
 }
 
 async function refreshMonthCloses(month) {
@@ -31794,7 +31811,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   /* Price lookup: the pure predicates only. What the free tier is spent on and
      which of a run's complaints are still true are both decided here, and both
      were got wrong in ways that only showed up a day later. */
-  quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote,
+  quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote, worthTickers, closesWanted,
   priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
   coerceQuotes, coerceCloses, classifyClose, closePricer, lookupTickerOf,
   /* read-only: a frame test reads the live plan after driving the page */

@@ -7574,3 +7574,11 @@ the foot of `tests.html`.
   the source grid's last month of its own now — December for every grid the
   app builds. Import-shape only (`startFresh` and the rollover build Jan–Dec),
   like `monthlySpend`'s `/ 12`, which is pinned as the design and was left.
+- **Closes were fetched for the giving fund, which Net Worth never prices.**
+  `closesWanted` walked `allTickers()` — every list, `side.daf` included — while
+  `netWorthParts` prices portfolios and retirement accounts only. It spent the
+  allowance (and the 8-a-minute window) on figures no tile draws, and
+  `closeFoot`'s `pending` counted them, so a tile could read "looking up…" for
+  a ticker it would never use. `worthTickers(st)` is the list now, over the
+  state handed in rather than the global, so the function is pure over its
+  arguments and the suite can build the plan it tests.
