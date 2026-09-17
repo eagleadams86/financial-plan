@@ -7527,3 +7527,15 @@ the foot of `tests.html`.
   whose target is closed or has not yet begun, the estimate is `missing`. A
   TYPED figure is untouched — it wins above that line, as everywhere. A target
   the plan no longer has keeps the old behaviour (an ordinary hub row).
+- **A pinned year's Paychecks row was recounted from today's schedule.**
+  `resolvePaychecks` consulted the schedule for every grid year, and
+  `clearScheduleMatches` deleted typed counts in pinned years too — so setting
+  the schedule retired a frozen 2026's typed counts, and moving the anchor a
+  week later rewrote its Paychecks row beside income cells stated with the old
+  count. Three changes: `gridToPinned` stamps the RESOLVED count into
+  `paychecks` for every month the year shows (source `'pinned'`, tip "Frozen
+  with the year") and puts the typed map into `pinnedFrom.paychecks`, which
+  `pinnedToLive` restores (falling back to the year's own map for a year frozen
+  before the stamp existed); `computeYearWith` hands a pinned year no schedule;
+  `clearScheduleMatches` skips `model === 'pinned'`. `coerceShape` guards
+  `pinnedFrom.paychecks` like the year's own map.

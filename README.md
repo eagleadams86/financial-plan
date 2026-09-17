@@ -814,7 +814,10 @@ touching them. A count you type still wins for that month — useful when a
 holiday moves a payday, or an extra half-check lands. When you first set the
 schedule (or change it), counts you had typed that the calendar agrees with
 are cleared, since the schedule now gives them, and any that differ are kept
-as your overrides; a message says how many of each.
+as your overrides; a message says how many of each. A **frozen year is left
+alone**: its counts are written down when you freeze it (hover one and it says
+"Frozen with the year"), so moving the schedule later never recounts a past
+year's row, and Re-open gives you back exactly the counts you had typed.
 
 **Every paycheck count says where it came from.** Hover one and it tells you
 whether it's a figure you entered, one from your pay schedule, one taken from

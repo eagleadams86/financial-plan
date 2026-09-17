@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1145;
+const EXPECTED = 1148;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -20440,6 +20440,63 @@ t('a transfer estimate waits for an account that has not begun', () => {
   eq(c.balances['cash|2030-03'], 4700, 'and the hub kept the money the estimates would have taken');
   eq(H.targetRunning(st, st.years['2030'], { role: 'normal', rule: 'carry' }, '2030-01', 'cash'), true,
     'an ordinary row is never gated by this');
+});
+
+/* A live 2026 on a fortnightly schedule, no counts typed. */
+function scheduledYear(anchor, extra) {
+  return H.coerceShape({
+    schema: H.SCHEMA,
+    settings: { paycheckRule: true, payCadence: 'biweekly', payAnchor: anchor,
+      accounts: [{ id: 'cash', name: 'Cash', rate: 0, hub: true }] },
+    years: { 2026: { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 12,
+      enteredThrough: '2026-12',
+      categories: [{ id: 'pay', name: 'Pay', role: 'normal', rule: 'paycheck', perCheck: 1000 }],
+      cells: {}, paychecks: { '2026-02': 3 }, seeds: { cash: 1000 }, overrides: {}, balAdjust: {},
+      ...(extra || {}) } },
+  });
+}
+t('freezing a year stamps its paycheck counts, and Re-open gives the typed ones back', () => {
+  const st = scheduledYear('2026-01-02');
+  const c = H.computeYear(st, '2026', null);
+  eq(c.paychecks['2026-07'], 3, 'fixture: the calendar gives July three checks');
+  const frozen = H.gridToPinned(st, c, '2026');
+  eq(Object.keys(frozen.paychecks).length, 12, 'every month the year shows has a count written down');
+  eq(frozen.paychecks['2026-07'], 3, 'the resolved one');
+  eq(frozen.paychecks['2026-02'], 3, 'a typed one is kept as typed');
+  eq(frozen.pinnedFrom.paychecks, { '2026-02': 3 }, 'and the typed map alone travels for Re-open');
+  /* The employer moves payday a week. A frozen year must not notice. */
+  const st2 = { ...st, settings: { ...st.settings, payAnchor: '2026-01-09' },
+    years: { 2026: frozen } };
+  const c2 = H.computeYear(st2, '2026', null);
+  eq(c2.paychecks, c.paychecks, 'the frozen row multiplies by what it did when it was frozen');
+  eq(c2.paycheckSource['2026-07'], 'pinned', 'and says so');
+  ok(H.PAYCHECK_SOURCE_TIP.pinned, 'with words for the hover');
+  const back = H.pinnedToLive(st2, '2026');
+  eq(back.paychecks, { '2026-02': 3 }, 'Re-open returns exactly the typed map');
+  eq(H.computeYear({ ...st2, years: { 2026: back } }, '2026', null).paychecks['2026-07'], 2,
+    'so the re-opened year counts from the moved schedule again');
+  /* The boundary carries the typed map. */
+  const again = H.coerceShape(JSON.parse(JSON.stringify(st2))).years['2026'];
+  eq(again.pinnedFrom.paychecks, { '2026-02': 3 }, 'coerceShape keeps it');
+  eq(H.coerceShape(JSON.parse(JSON.stringify({ ...st2, years: { 2026: { ...frozen,
+    pinnedFrom: { ...frozen.pinnedFrom, paychecks: { '2026-02': 'three', 'junk': 2, '2026-03': 2 } } } } })))
+    .years['2026'].pinnedFrom.paychecks, { '2026-03': 2 }, 'and drops what is not a count on a month');
+});
+t('setting a schedule leaves a frozen year’s typed counts alone', () => {
+  const st = scheduledYear('2026-01-02', { model: 'pinned', paychecks: { '2026-07': 3, '2026-02': 3 } });
+  st.years['2026'].pinnedFrom = { enteredThrough: '2026-12', overrides: {}, balAdjust: {}, eoyStamped: false };
+  const live = scheduledYear('2026-01-02', { paychecks: { '2026-07': 3 } });
+  eq(H.clearScheduleMatches(live), { cleared: 1, kept: 0 }, 'a live year’s matching count is retired');
+  eq(H.clearScheduleMatches(st), { cleared: 0, kept: 0 }, 'a frozen year is not touched');
+  eq(st.years['2026'].paychecks, { '2026-07': 3, '2026-02': 3 }, 'its counts are still there');
+});
+t('a year frozen before counts were stamped never reads today’s schedule', () => {
+  const st = scheduledYear('2026-01-02', { model: 'pinned', paychecks: {} });
+  st.years['2026'].pinnedFrom = { enteredThrough: '2026-12', overrides: {}, balAdjust: {}, eoyStamped: false };
+  const c = H.computeYear(st, '2026', null);
+  eq(c.paychecks['2026-07'], 2, 'no schedule for history: the default, as before schedules existed');
+  eq(c.paycheckSource['2026-07'], 'assumed');
+  eq(H.pinnedToLive(st, '2026').paychecks, {}, 'and Re-open keeps its own (empty) typed map');
 });
 
 async function run() {

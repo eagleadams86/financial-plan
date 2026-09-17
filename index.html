@@ -5558,6 +5558,17 @@ function coerceShape(data) {
           if (typeof n === 'number') ov.v = n; else delete pf.overrides[k];
         }
         pf.eoyStamped = !!pf.eoyStamped;
+        /* The typed counts Re-open restores: a number per month, nothing else.
+           Absent on a year frozen before 2026-09-17, which `pinnedToLive`
+           reads as "the stamped map is the typed one". */
+        if (pf.paychecks !== undefined) {
+          pf.paychecks = obj(pf.paychecks);
+          for (const [m, v] of Object.entries(pf.paychecks)) {
+            const n = rateOrNone(v);
+            if (typeof n === 'number' && /^\d{4}-\d{2}$/.test(m)) pf.paychecks[m] = n;
+            else delete pf.paychecks[m];
+          }
+        }
         yr.pinnedFrom = pf;
       }
       /* Rows classify into Income / Expenses / Transfers sections. Data from
@@ -7544,6 +7555,10 @@ function clearScheduleMatches(st) {
   if (!schedule) return out;
   for (const yr of Object.values(st.years || {})) {
     if (!yr || yr.kind !== 'grid' || !yr.paychecks) continue;
+    /* A FROZEN year is left alone (2026-09-17): its counts are history, stamped
+       when it was pinned or typed before that, and today's calendar has no say
+       over what a past year's Paychecks row multiplied by. */
+    if (yr.model === 'pinned') continue;
     for (const [m, v] of Object.entries(yr.paychecks)) {
       if (v === paydaysInMonth(m, schedule)) { delete yr.paychecks[m]; out.cleared++; }
       else out.kept++;
@@ -7583,7 +7598,7 @@ function resolvePaychecks(yr, months, prior, schedule) {
     const own = yr.paychecks[m];
     const back = monthAdd(m, -12);
     const last = prior?.paychecks?.[back];
-    if (own !== undefined) { out[m] = own; source[m] = 'entered'; }
+    if (own !== undefined) { out[m] = own; source[m] = yr.model === 'pinned' ? 'pinned' : 'entered'; }
     /* A PAY SCHEDULE is the calendar answering, so it outranks every guess
        below it — and only a typed count, which is somebody saying this month
        broke the pattern, outranks it (2026-09-17). */
@@ -7607,6 +7622,10 @@ function resolvePaychecks(yr, months, prior, schedule) {
    how to answer it, because the cell takes a number. */
 const PAYCHECK_SOURCE_TIP = {
   entered: 'Entered',
+  /* A pinned year's counts are stamped when it is frozen (`gridToPinned`), so
+     every one of them reads as this rather than as "Entered" — the same
+     honesty the balances have with their `pinned` kind. */
+  pinned: 'Frozen with the year',
   schedule: 'From your pay schedule (Preferences)',
   lastyear: 'Estimated from the same month last year',
   assumed: `No count recorded to go on — ${PAYCHECKS_DEFAULT} a month assumed. `
@@ -7807,8 +7826,13 @@ function computeYearWith(st, yearKey, prior, goals) {
              interest: {}, growth: {}, dividend: {}, paychecks: {},
              paycheckSource: {} };
 
+  /* A pinned year never reads today's schedule (2026-09-17): its counts were
+     stamped when it was frozen, and one pinned before that stamping existed
+     falls through to last year and the default exactly as it did then. Handing
+     it the schedule would let a payday moved THIS year recount a Paychecks row
+     beside income cells that were stated with the old count. */
   const { counts: paychecks, source: paycheckSource } = resolvePaychecks(yr, months, prior,
-    payScheduleOf(st));
+    yr.model === 'pinned' ? null : payScheduleOf(st));
   const ctx = { st, yr, months, resolved, balances, prior, paychecks };
   const live = yr.model === 'live';
   const running = {};   // account id -> tracking has begun
@@ -19790,10 +19814,22 @@ function gridToPinned(st, computed, y) {
     }
   const dec = bal[`total|${own[own.length - 1]}`];
   const stamp = yr.eoyCash === undefined && dec !== undefined;
-  return { ...yr, model: 'pinned', overrides, balAdjust,
+  /* THE PAYCHECK COUNTS ARE STAMPED TOO (2026-09-17). A count the year did not
+     type came from the pay schedule or from the year before, and a pinned year
+     computes none of its own — so left unstamped, the Paychecks row of a frozen
+     2026 was recounted from whatever the schedule said TODAY, and moving the
+     anchor a week rewrote a past year's row beside income cells stated with the
+     old count. The resolved count is written down for every month the year
+     shows, and the typed map goes into `pinnedFrom` so Re-open puts it back. */
+  const paychecks = { ...(yr.paychecks || {}) };
+  for (const m of yearMonths(yr))
+    if (paychecks[m] === undefined && computed && computed.paychecks
+        && typeof computed.paychecks[m] === 'number') paychecks[m] = computed.paychecks[m];
+  return { ...yr, model: 'pinned', overrides, balAdjust, paychecks,
     pinnedFrom: { enteredThrough: yr.enteredThrough,
       overrides: { ...(yr.overrides || {}) },
-      balAdjust: { ...(yr.balAdjust || {}) }, eoyStamped: stamp },
+      balAdjust: { ...(yr.balAdjust || {}) },
+      paychecks: { ...(yr.paychecks || {}) }, eoyStamped: stamp },
     ...(stamp ? { eoyCash: round2(dec) } : {}) };
 }
 
@@ -19814,6 +19850,9 @@ function pinnedToLive(st, y) {
   return { ...rest, model: 'live', enteredThrough: pf.enteredThrough,
     overrides: { ...(pf.overrides || {}) },
     balAdjust: { ...(pf.balAdjust || {}) },
+    /* A year frozen before the counts were stamped has none in `pinnedFrom`,
+       and its own map IS the typed one — keep it. */
+    paychecks: { ...(pf.paychecks || rest.paychecks || {}) },
     ...(pf.eoyStamped || eoyCash === undefined ? {} : { eoyCash }) };
 }
 
