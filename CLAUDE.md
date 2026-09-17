@@ -7539,3 +7539,12 @@ the foot of `tests.html`.
   before the stamp existed); `computeYearWith` hands a pinned year no schedule;
   `clearScheduleMatches` skips `model === 'pinned'`. `coerceShape` guards
   `pinnedFrom.paychecks` like the year's own map.
+- **`avglastyear` could not see estimates inside its own grid.** The rule
+  reads last year's months from the prior grid's COMPUTED cells, autos
+  included, but from this grid's STORED cells when the grid is long enough to
+  hold last year itself — and an auto never lives in `yr.cells`. So the
+  2026-09-17 estimate fallback worked across a grid boundary and not inside a
+  long grid: an import-shaped 24-month 2030 left the row blank for all of 2031
+  while a separate 2031 year filled in. Both branches read resolved cells now
+  (`ctx.resolved` in-grid — last year's months are all behind `m`, so they are
+  already there).
