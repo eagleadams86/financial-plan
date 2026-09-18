@@ -1137,7 +1137,8 @@ this year compares with the last few, and it gives the tab something to open on.
   a **✓ Paid** button that settles the rest in one click; each column appears
   once a line, or a part of a split line, has a figure in it. A line also names the
   **merchant** — who the money went to — in a column of its own, which appears
-  only once something in the trip has one.
+  only once something in the trip has one. On a phone the merchant moves under
+  the item's name instead, so the card's figures fit on the screen.
 - **A line that was several purchases splits into parts.** Three excursions
   booked separately, a flight and its seat fee: press **✂ Split into parts** in
   the line's window and each part keeps its own item, merchant, paid, credits,
