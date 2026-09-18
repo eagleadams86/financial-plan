@@ -18,7 +18,10 @@
      in a hidden same-origin iframe and calls its functions directly, so what's
      tested is exactly what ships — no copies, no build step. Serve over
      http://localhost (python3 -m http.server 8016); file:// iframes are blocked
-     in some browsers. Nothing here writes localStorage or calls save() — but
+     in some browsers. Nothing here keeps a write: the frames' save() is stubbed,
+     a test that plants `fin-state` puts the reader's own back in a `finally`, and
+     the one group that needs the REAL save() ("Two open copies of the app")
+     snapshots every key on the origin first and restores them all — but
      GitHub Pages publishes this file next to the app, and on that origin merely
      BOOTING the app in the iframe is a live session: if this browser has ever
      signed in there, the sync module would start real Firestore traffic — or
@@ -54,7 +57,7 @@
 <body>
 <div class="wrap">
   <h1>Financial Plan — Pure-Function Tests</h1>
-  <p class="sub">Runs against the real <code>index.html</code> in a hidden iframe. Read-only: nothing is saved.</p>
+  <p class="sub">Runs against the real <code>index.html</code> in a hidden iframe. Nothing of yours is changed: what a test writes to this browser’s storage, it puts back.</p>
   <div id="summary">Loading app…</div>
   <table><tbody id="out"></tbody></table>
 </div>
@@ -124,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1164;
+const EXPECTED = 1169;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -20789,6 +20792,310 @@ t('clearing the payday date says the schedule has stopped counting', async () =>
       D.getElementById('toast').textContent);
     D.getElementById('rowDialog').close();
   } finally { f.remove(); }
+});
+
+/* ── Two open copies of the app (2026-09-18) ─────────────────────────────────
+   save() writes the WHOLE in-memory plan and nearly every press saves, so with
+   the app open twice the window that had not been reloaded wrote its stale plan
+   over the other's work — and, signed in, pushed it to the cloud. Ported from
+   Sprint Predictability, with the difference that matters here: a byte
+   difference is not a foreign change (the other window's tab press, a price
+   cache, finAdopt writing the same plan back), so the guard compares PLANS.
+
+   REAL frames with the REAL save() — every other frame on this page stubs it —
+   so each test snapshots the whole of this origin's storage and puts every key
+   back in its `finally`, whatever happens. The `storage` LISTENER cannot be
+   driven here at all: it is top-level only, precisely because these frames
+   share storage with tests that plant fixtures in it, so it is pinned as source
+   and proven in a two-page headless run instead (see CLAUDE.md). */
+group('Two open copies of the app');
+const tcWait = (ms) => new Promise((r) => setTimeout(r, ms));
+function tcSnapshot() {
+  const all = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    all[k] = localStorage.getItem(k);
+  }
+  return all;
+}
+function tcPutBack(all) {
+  const now = [];
+  for (let i = 0; i < localStorage.length; i++) now.push(localStorage.key(i));
+  for (const k of now) if (!(k in all)) localStorage.removeItem(k);
+  for (const k of Object.keys(all))
+    if (localStorage.getItem(k) !== all[k]) localStorage.setItem(k, all[k]);
+}
+function tcPlan() {
+  const plan = H.migrate(H.coerceShape(H.sampleState()));
+  plan.ui = Object.assign({}, plan.ui, { activeTab: 'budget' });
+  return plan;
+}
+/* Window A: a frame booted on `plan` as a SAVED copy, its save() left real. */
+async function tcBoot(plan, tag) {
+  localStorage.setItem('fin-state', JSON.stringify(plan));
+  const f = document.createElement('iframe');
+  f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+  await new Promise((resolve) => {
+    f.onload = resolve;
+    f.src = 'index.html?' + tag + '=' + Date.now();
+    document.body.appendChild(f);
+  });
+  await tcWait(300);
+  const W = f.contentWindow;
+  W.confirm = () => true; W.alert = () => {};
+  return { f, W, D: W.document };
+}
+/* Window B's write: the same plan with one more goal, left on another tab. */
+function tcOtherCopy(plan) {
+  const other = JSON.parse(JSON.stringify(plan));
+  other.goals.push(Object.assign({}, other.goals[0], { id: 'new-roof', name: 'New roof' }));
+  other.ui.activeTab = 'tax';
+  return JSON.stringify(other);
+}
+
+t('a copy of the plan that is out of date adopts the other window’s plan instead of writing over it', async () => {
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'twocopies');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    /* The boot-time dead zone: load() assigns the marker while the script is
+       still being evaluated. Declared below `let state = load()` it would throw,
+       load()'s catch would hand back a brand-new plan, and every engine test
+       would stay green — only a real boot on a saved copy can see it. */
+    eq(W.finGet().goals.length, plan.goals.length,
+       'window A booted INTO the saved plan, not the welcome screen');
+    const otherRaw = tcOtherCopy(plan);
+    localStorage.setItem('fin-state', otherRaw);            // window B saves
+    /* A — never reloaded — makes a real change. */
+    const stale = W.finGet();
+    stale.goals[0].name = 'Renamed in the stale window';
+    stale.ui.activeTab = 'goals';
+    const banked = W.save();
+    W.toast('Saved');                                       // what most callers do next
+    eq(localStorage.getItem('fin-state'), otherRaw, 'byte for byte — A wrote nothing over B');
+    eq(banked, false, 'and save() says it banked no undo step');
+    const now = W.finGet();
+    ok(now !== stale, 'A is holding a different plan object now');
+    eq(now.goals.map(g => g.name).includes('New roof'), true, 'B’s goal is on A’s side');
+    eq(now.goals[0].name, plan.goals[0].name, 'and A’s own unsaved rename is gone with its stale plan');
+    eq(now.ui.activeTab, 'goals', 'but A stays on ITS tab — never dragged to the one B is showing');
+    await tcWait(60);
+    const said = D.getElementById('toast').textContent;
+    ok(/another tab or window/.test(said) && /not saved/.test(said),
+       'A says what happened and what did not land — and the caller’s own "Saved" does not replace it', said);
+    /* The ring starts over: a snapshot from before B's work must not come back. */
+    ok(D.getElementById('undoBtn').hidden, 'nothing is offered to undo');
+    W.undoLast();
+    eq(localStorage.getItem('fin-state'), otherRaw, 'and ⌘Z cannot write the old plan over B either');
+    /* From here A is current, and saves as it always did. */
+    W.finGet().goals[0].name = 'Renamed after';
+    W.save();
+    const stored = JSON.parse(localStorage.getItem('fin-state'));
+    eq(stored.goals[0].name, 'Renamed after', 'the next change is saved');
+    eq(stored.goals.map(g => g.name).includes('New roof'), true, 'on top of B’s plan');
+    /* A press that changes no figure loses nothing, and must not say it did. */
+    localStorage.setItem('fin-state', otherRaw);            // B saves again
+    W.finGet().ui.activeTab = 'vacations';                  // A clicks a tab
+    W.save();
+    await tcWait(60);
+    eq(localStorage.getItem('fin-state'), otherRaw, 'still nothing written over B');
+    eq(W.finGet().ui.activeTab, 'vacations', 'the tab press took');
+    const quiet = D.getElementById('toast').textContent;
+    ok(/another tab or window/.test(quiet) && !/not saved/.test(quiet),
+       'and the toast is only news — there was no change here to lose', quiet);
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+t('the other window changing tab, or the same plan in other bytes, is not another copy’s work', async () => {
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const mine = JSON.stringify(plan);
+    /* The rule itself, pure. */
+    const elsewhere = JSON.parse(mine);
+    elsewhere.ui = { activeTab: 'tax', activeYear: '2019', collapsed: { 'budget:notes': true } };
+    ok(!w.otherCopyIn(JSON.stringify(elsewhere), mine), 'a tab, a year and a folded box are `ui` — not the plan');
+    const cached = JSON.parse(mine);
+    cached.quotes = { VTI: { price: 301.5, ts: 1 } };
+    cached.closes = { 'VTI|2030-01': { price: 290, date: '2030-01-31', ts: 1 } };
+    ok(!w.otherCopyIn(JSON.stringify(cached), mine), 'nor are the price caches — coreOf() already says so');
+    const rekeyed = JSON.parse(mine);
+    rekeyed.settings = Object.fromEntries(Object.entries(rekeyed.settings).reverse());
+    rekeyed.goals = rekeyed.goals.map(g => Object.fromEntries(Object.entries(g).reverse()));
+    ok(JSON.stringify(rekeyed) !== mine, 'fixture: the bytes really do differ');
+    ok(!w.otherCopyIn(JSON.stringify(rekeyed), mine),
+       'the same plan written back in another key order — finAdopt in the other window — is the same plan');
+    /* Measured, not supposed: the state "Load Sample Data" holds in memory and
+       the state a reload makes of what it stored differ in exactly this way. */
+    const asLoaded = JSON.stringify(H.migrate(H.coerceShape(H.sampleState())));
+    const asRebooted = JSON.stringify(w.planFrom(H.migrate(H.coerceShape(JSON.parse(asLoaded)))));
+    ok(asLoaded !== asRebooted, 'fixture: two windows on one sample plan hold different bytes');
+    ok(!w.otherCopyIn(asRebooted, asLoaded), 'and are one plan');
+    ok(!w.otherCopyIn(null, mine), 'storage emptied under an open window holds no work to protect — the write goes ahead');
+    ok(!w.otherCopyIn('{not json', mine), 'nor does something that is not a plan');
+    ok(w.otherCopyIn(tcOtherCopy(plan), mine), 'a goal added in the other window IS another copy’s work');
+    ok(w.otherCopyIn(mine, null), 'and so is a plan where this window had found none');
+    const newer = JSON.parse(mine); newer.schema = H.SCHEMA + 1;
+    ok(w.otherCopyIn(JSON.stringify(newer), mine),
+       'a plan from a newer build is foreign whatever it holds — read before coerceShape could strip it');
+
+    /* And through the real save(): the write goes AHEAD and nothing is adopted. */
+    const booted = await tcBoot(plan, 'sameplan');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    const held = W.finGet();
+    D.getElementById('toast').textContent = '';
+    /* Each "other window" rewrites what A LAST WROTE — the same plan, as B would
+       be holding it — so the only thing that differs is the thing being tested. */
+    const rewrites = [
+      ['a tab press in the other window', (d) => { d.ui = elsewhere.ui; return d; }],
+      ['the same plan in other bytes', (d) => {
+        d.settings = Object.fromEntries(Object.entries(d.settings).reverse());
+        d.quotes = cached.quotes;
+        return Object.fromEntries(Object.entries(d).reverse());
+      }]];
+    for (const [what, rewrite] of rewrites) {
+      const was = localStorage.getItem('fin-state');
+      const raw = JSON.stringify(rewrite(JSON.parse(was)));
+      ok(raw !== was, what + ': fixture — the bytes differ');
+      localStorage.setItem('fin-state', raw);
+      held.goals[0].name = 'Kept: ' + what;
+      W.save();
+      ok(W.finGet() === held, what + ': nothing was adopted — A holds the plan it held');
+      eq(JSON.parse(localStorage.getItem('fin-state')).goals[0].name, 'Kept: ' + what,
+         what + ': and A’s edit is in storage');
+    }
+    localStorage.removeItem('fin-state');                   // site data cleared under A
+    held.goals[0].name = 'Kept: storage emptied';
+    W.save();
+    ok(W.finGet() === held, 'an emptied storage is not adopted as a blank plan');
+    eq(JSON.parse(localStorage.getItem('fin-state')).goals[0].name, 'Kept: storage emptied',
+       'A’s plan — perhaps the only copy left — is written back');
+    await tcWait(60);
+    eq(D.getElementById('toast').textContent, '', 'and none of it raised a word');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+t('a row editor open in the out-of-date copy is closed, and its late close commits nothing', async () => {
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    plan.ui.activeTab = 'goals';
+    const booted = await tcBoot(plan, 'staleeditor');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    const row = D.querySelector('[data-edit="goal"][data-idx="0"]');
+    ok(row, 'fixture: the first goal is on the page');
+    row.click();
+    await tcWait(200);
+    const dlg = D.getElementById('rowDialog');
+    ok(dlg.open, 'the saves-as-you-go editor is open in A');
+    /* B DELETES the first goal, so A's `ds.idx` 0 now names somebody else's row
+       — the case that makes leaving the window open unsafe. */
+    const other = JSON.parse(JSON.stringify(plan));
+    other.goals.shift();
+    const otherRaw = JSON.stringify(other);
+    localStorage.setItem('fin-state', otherRaw);
+    const name = D.getElementById('rf-name');
+    name.value = 'Typed into the stale window';
+    name.dispatchEvent(new W.Event('change', { bubbles: true }));   // a box commits
+    await tcWait(100);
+    eq(localStorage.getItem('fin-state'), otherRaw, 'the commit wrote nothing over B');
+    ok(!dlg.open, 'the window is closed — its boxes were filled from the plan that was replaced');
+    dlg.dispatchEvent(new W.Event('close'));                // the late close task (the harness does not always deliver it)
+    await tcWait(100);
+    eq(localStorage.getItem('fin-state'), otherRaw, 'and the close that follows commits no stale draft');
+    eq(W.finGet().goals.map(g => g.name).includes('Typed into the stale window'), false,
+       'nor did the draft land in A’s memory, in the row that now sits at that index');
+    eq(W.finGet().goals.length, plan.goals.length - 1, 'A shows B’s plan');
+    ok(D.activeElement && D.activeElement !== D.body,
+       'the focus is handed somewhere on the page, not dropped', D.activeElement && D.activeElement.tagName);
+    await tcWait(60);
+    ok(/not saved/.test(D.getElementById('toast').textContent),
+       'and the reader is told the box did not land', D.getElementById('toast').textContent);
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+t('a plan from a newer build in the other window halts this one once, and it never writes again', async () => {
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'newerbuild');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    const newer = JSON.parse(JSON.stringify(plan));
+    newer.schema = H.SCHEMA + 1;
+    newer.fieldThisBuildHasNeverHeardOf = { kept: true };
+    const newerRaw = JSON.stringify(newer);
+    localStorage.setItem('fin-state', newerRaw);
+    W.finGet().goals[0].name = 'Written by the older build';
+    let threw = false;
+    try { W.save(); } catch (e) { threw = /newer than this build/.test(String(e && e.message)); }
+    ok(threw, 'save() halts exactly as boot does');
+    eq(localStorage.getItem('fin-state'), newerRaw, 'the newer plan is untouched, unknown field and all');
+    /* The halt has to HOLD: mid-session the throw ends one handler, not the app. */
+    let again = false;
+    try { W.save(); W.undoLast(); } catch (e) { again = true; }
+    ok(!again, 'the next press is a no-op, not a second halt');
+    eq(localStorage.getItem('fin-state'), newerRaw, 'and still nothing is written');
+    eq([...D.querySelectorAll('h1')].filter(h => /Saved by a Newer Version/.test(h.textContent)).length, 1,
+       'one card, not one per press');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+t('an idle copy listens for the other window — top-level only, and it never answers a write with a write', () => {
+  const src = APP_SRC;
+  ok(/if \(window\.top === window\.self\) addEventListener\('storage'/.test(src),
+     'a storage listener, in top-level windows only — this suite’s frames share storage with planted fixtures');
+  const at = src.indexOf("addEventListener('storage'");
+  const listener = src.slice(at, src.indexOf('\n});', at));
+  ok(/if \(viewOnly \|\| e\.storageArea !== localStorage\) return;/.test(listener), 'never in a shared or halted view');
+  ok(/e\.key !== null && e\.key !== STORAGE_KEY/.test(listener), 'only for the plan’s own key (null is clear())');
+  ok(/dialog\[open\]'\)\) return;/.test(listener), 'an open window is a draft and is left alone');
+  ok(/if \(otherCopyIn\(there, storedRaw\)\) adoptOtherCopy\(false\);/.test(listener),
+     'and only a different PLAN is adopted — through the same function save() uses');
+  const strip = (code) => code.replace(/\/\*[\s\S]*?\*\//g, '');
+  const adoptAt = src.indexOf('function adoptOtherCopy(');
+  const adopt = strip(src.slice(adoptAt, src.indexOf('\n}\n', adoptAt)));
+  for (const [name, code] of [['the listener', strip(listener)], ['adoptOtherCopy()', adopt]]) {
+    ok(!/\bsave\(\)/.test(code), name + ' never calls save()');
+    ok(!/cloudPush|cloudFlush/.test(code), name + ' never pushes to the cloud');
+  }
+  ok(/const next = load\(\);/.test(adopt), 'the adoption reads through load() — boot’s gate and boot’s halt');
+  ok(/undoRing = \[\];/.test(adopt), 'and starts the undo ring over, as finAdopt does');
+  ok(adopt.indexOf('rowCtx = null;') > -1 && adopt.indexOf('rowCtx = null;') < adopt.indexOf('d.close()'),
+     'the row editor’s context is ended BEFORE its window is closed');
+  /* Every writer of fin-state keeps the marker true. */
+  ok(src.indexOf('let storedRaw = null;') > -1
+     && src.indexOf('let storedRaw = null;') < src.indexOf('let state = load();'),
+     'the marker is declared ABOVE the boot load that assigns it');
+  const fa = src.slice(src.indexOf('window.finAdopt ='), src.indexOf('window.finCounts'));
+  ok(/storedRaw = readStored\(\);/.test(fa), 'finAdopt writes storage, so it moves the marker');
+  ok(/storedRaw = readStored\(\);\s*\/\* The sync module/.test(src), 'save() reads the marker BACK after its write');
+  eq((src.match(/claimStorage\(\);\s*\/\/ a deliberate whole-plan replacement/g) || []).length, 2,
+     'Restore and Delete-all — and only they — write over whatever is there, on purpose');
+  eq((src.match(/localStorage\.setItem\(STORAGE_KEY/g) || []).length, 3,
+     'a NEW writer of fin-state has to keep the marker true too — then raise this count');
 });
 
 async function run() {

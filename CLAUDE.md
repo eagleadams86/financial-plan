@@ -5797,6 +5797,10 @@ never silently beats one with data**; sync failures surface in the button and
 privacy note, with no retry button by design; `save()` is the one chokepoint
 that calls `cloudPush()`. `privacy.html` must be
 updated in the same commit as any change to what sync stores.
+**Two windows of one browser are ONE device to sync** (shared `fin-updated`, so
+only the first adopts a snapshot) — the second is kept current by the `storage`
+listener, and `finAdopt` must keep `storedRaw` true: see *Two Open Copies No
+Longer Overwrite Each Other (2026-09-18)*.
 
 **Delete-all goes through `save()` + `window.cloudFlush`, NOT a document
 deletion — `window.cloudWipe` is gone and must not come back.** It called
@@ -7654,3 +7658,197 @@ the foot of `tests.html`.
   every untyped Paychecks cell fell back to last year with no word. A third
   branch says "Payday date cleared — …". Unticking *Paychecks vary by month*
   stays silent: that hides the row on purpose.
+
+## Two Open Copies No Longer Overwrite Each Other (2026-09-18)
+
+Ported from Sprint Predictability, which fixed it the same day. **`save()` writes
+the WHOLE in-memory plan, nearly every press saves (a tab click — `ui` lives in
+`state`), and nothing listened for the other window.** With the app open twice
+— two tabs, or Chrome's installed window plus a tab — the copy that had not been
+reloaded wrote its stale plan over the other's work on its next press: add a
+goal in B, click a tab in A, reload B, goal gone, no word from either.
+Reproduced headless before anything was changed (two pages, one Playwright
+context). **Signed in it was worse, and the reason is worth keeping:** `localTs()`
+reads `fin-updated` out of the SHARED storage, so when another device's change
+arrives, the first window to get the snapshot adopts it and stamps the key — and
+the second window's `r.updatedAt > localTs()` is then false, so it never adopts.
+It sat stale until its next press pushed the old plan to the cloud under a newer
+timestamp, over the phone's work too.
+
+**This was not a paste job.** Sprint Predictability compares BYTES
+(`getItem() !== storedRaw`); it has no sync and no second writer. Here three
+things rewrite `fin-state` without changing the plan, and a byte comparison
+would call each of them another copy's newer work — re-drawing the window under
+the reader, or worse, refusing their next save and discarding a real edit to
+protect nothing:
+
+1. the other window switching tab/year/month or folding a box (`ui`);
+2. a price lookup that learned only cache entries (`quotes`, `closes`);
+3. `finAdopt` in the other window writing back the plan THIS window pushed —
+   other key order, other `ui`, defaults merged in.
+
+### The pieces (all beside `save()`, all function declarations)
+
+- **`let storedRaw`** — the `fin-state` string this copy last READ (`load()`) or
+  WROTE. In memory only: **nothing new is stored**, no schema change, nothing in
+  the share payload, CSP and privacy policy untouched.
+- **`planKeyOf(raw)`** — what PLAN a stored string holds, as one comparable
+  string, or `null` for "no plan there" (absent, not JSON, not an object,
+  anything that throws on the way). The road is boot's:
+  `migrate(coerceShape(safeParse(raw)))` → `planFrom()` (the blankState merge,
+  now ONE function that `load()` uses too, so the guard can never disagree with
+  boot about what a copy boots into) → **`coreOf()`**, which is already the one
+  definition of "the plan minus `ui`, `quotes`, `closes`" → keys SORTED. A newer
+  schema is read BEFORE `coerceShape` can strip it and returns `'newer:N'`,
+  which equals nothing.
+- **`otherCopyIn(there, mine)`** — pure, pinned. Same bytes → no (nothing
+  parsed; the path every ordinary save takes). `planKeyOf(there) === null` → no.
+  Otherwise the two keys are compared. This window's key is memoised on
+  `otherCopyIn.memo`, since `mine` only moves when this window reads or writes.
+- **`adoptOtherCopy(lostChange)`** — the one adoption, two callers.
+- **`claimStorage()`** — `storedRaw = readStored()`, for the two deliberate
+  whole-plan replacements.
+
+### The choices, and why
+
+- **Both sides are compared FROM STRINGS, never from this window's live `state`,
+  and with sorted keys. Measured, not supposed:** the state *Load Sample Data*
+  holds in memory (`migrate(coerceShape(sampleState()))`, no merge) and the state
+  a reload makes of what it stored differ — `settings` comes back in
+  `blankState()`'s key order with a default filled in. `coreOf(state)` against
+  `coreOf(parsed storage)` called those two plans, 16 characters apart, so the
+  first tab press in a second window would have been "another copy's work". Going
+  through the same function from both strings needs only that the boundary is
+  deterministic and idempotent on its own output, which it is (checked on the
+  sample; a test pins the as-loaded/as-rebooted pair). This is also why the guard
+  does NOT reuse `undoCore` for the comparison, tempting as it is.
+- **Key ORDER is therefore not a change.** Nothing in the app reads meaning from
+  insertion order across a reload (years and cells are keyed and sorted on
+  read). If that ever stops being true, `planKeyOf` is the place that must know.
+- **Absent or unreadable storage is NOT adopted — the write goes ahead.** Sprint
+  Predictability adopts whatever `load()` makes of it, i.e. a blank board. Here
+  that is the one outcome that loses everything: storage cleared under an open
+  window (site data, a private window) holds no other copy's work to protect,
+  and this window may hold the only copy of the plan left.
+- **The other window's Delete-all IS adopted** (it writes a `newPlanState()`, a
+  readable plan that differs) without asking. The sync listener asks other
+  DEVICES before they follow; two windows of one browser share the storage that
+  was just emptied, so a reload would show the same thing.
+- **This window keeps its own `ui`** through an adoption (`next.ui = mine`) —
+  taking the other's would throw the reader onto the other window's tab, year and
+  month. Every `ui` reader already clamps a year/month the plan no longer holds.
+  The cost, accepted: `ui.tabOrder` and `ui.collapsed` are per-window while two
+  are open, and the last window to save decides what a reload sees.
+- **What was lost is ASKED, not assumed:** `save()` passes
+  `coreOf(state) !== undoCore`. The commonest press in a stale window is a tab,
+  which changes only `ui`, which this window keeps — so it loses nothing and gets
+  the "Updated — …" line. "Your last change here was not saved — make it again"
+  is kept for a press that changed a figure. (A quiet price refresh whose save is
+  refused is also "nothing lost": the cache it learned goes, and is re-fetched.)
+- **The lost-change toast is raised twice**, now and at the end of the task.
+  There is one toast, and most callers raise their own right after `save()`
+  ("Deleted", "Put back the way it was", a section's sentence) — which would
+  replace it in the same breath with a claim that is no longer true.
+- **The undo ring starts over on adoption**, `finAdopt`'s rule for `finAdopt`'s
+  reason: every snapshot predates the other copy's work, so one ⌘Z would write
+  the old plan over it under a newer timestamp — this same bug, by hand.
+  `undoSnapshot`/`undoCore` are reset through `coreOf()` (the 2026-09-01 lesson).
+- **The guard sits ABOVE the undo bookkeeping in `save()`**, so a save that did
+  not happen banks nothing, and returns `false` — `commitRow`'s "banked no step".
+- **The marker is read BACK after the write, whether or not it took** — a
+  browser that accepts a write and keeps nothing must not later look like another
+  window having emptied it; after a refused (quota) write, what is there is still
+  the last thing this copy saw.
+- **Every writer of `fin-state` keeps the marker true** (there are three
+  `setItem(STORAGE_KEY` sites and no `removeItem`; a test counts them):
+  `save()`; `finAdopt`'s normal branch (`storedRaw = readStored()` after its
+  write — or the next press would "adopt" this window's own write and lose
+  itself); and `finAdopt`'s newer-build branch, which **deliberately does NOT**
+  move it — that page has halted holding an older plan and must never write.
+- **Restore and Delete-all call `claimStorage()` first.** Both replace the whole
+  plan behind a confirm that says so; adopting the other copy instead would
+  answer "delete everything" with "here is your plan back" under a toast saying
+  it was deleted. *Load Sample Data* and *Start Fresh* do NOT claim: a stale
+  welcome screen must not flatten a plan made in the other window.
+- **The newer-build halt is boot's, because the reader is boot's:**
+  `adoptOtherCopy` calls `load()`, so an other-window copy from a newer build
+  halts exactly as at boot. **`haltForNewerData` now also sets `viewOnly`** (it
+  only set `window.finViewOnly`, which `save()` does not read). At boot the throw
+  stops everything; mid-session it ends ONE handler, and the next press came
+  back through `save()`, found the newer plan again and drew a second card.
+  Dialogs are closed BEFORE `load()` for a second reason: a modal is in the top
+  layer, above the halt card.
+
+### The idle half
+
+`if (window.top === window.self) addEventListener('storage', …)`: only
+`e.key === STORAGE_KEY` (or `null`, which is `clear()`); not `viewOnly`; **not
+while a `dialog[open]` exists** (an open editor is a draft — `save()` settles it
+on the next write); only when `otherCopyIn()` says the PLAN differs — and when it
+does not, the marker still moves to the bytes just read, so this window's next
+save stays on the byte-for-byte path. **Top-level only** because the suite's
+frames share this origin's storage with tests that plant fixtures in it (the
+rule the service-worker block keeps). **Never `save()` and never `cloudPush()`
+from the listener or from `adoptOtherCopy`** — Golf Handicap's recorded rule: the
+writing copy already pushed, the event fires only in OTHER windows, so nothing
+loops unless a write is answered with a write. A test strips the comments out of
+both bodies and fails on either call.
+
+### An adoption while a window is open (only `save()` can cause one)
+
+**The row editor's context is ended (`rowCtx = null`) and then EVERY dialog is
+closed, before anything is rendered** — except `syncChoiceDialog`.
+
+- Leaving the row editor open is not safe in any form: it finds its record by
+  POSITION (`ds.idx`), so over the adopted plan its next commit writes this form
+  into whatever row now sits at that index — the hazard Delete and the move
+  buttons already clear `rowCtx` for, and `reprimeRow` already ends the window
+  for. Re-priming the boxes from the adopted plan has the same identity problem.
+- `rowCtx = null` comes BEFORE `close()` because `close` arrives as a queued
+  task whose handler commits the context it finds (`if (rowDialog.open) return;`
+  guards the opposite race). With none, the late task does nothing — the test
+  dispatches that `close` by hand and reads storage byte for byte.
+- `commitRow` stops after `save()` if `state` is no longer the object it was
+  (`if (state !== planWas) return;`): everything below it would re-prime from, or
+  toast about, a row of a plan that is gone. `const planWas` sits ABOVE
+  `const wasUndoing` because a source pin requires
+  `if (ctx.banked) undoing = true;` and `const banked = save();` to be adjacent.
+- The cell editor already closes itself before `save()` (2026-09-17) and its own
+  `refocusGridCell()` then lands on the same coordinates of the adopted plan.
+- **Focus** (the 2026-09-17 rule — close first, then hand back): after the
+  render, `refocusEditRow(ctx)` (a focus, never a write), else the selected tab,
+  else `<main>`. The native return aims at a node `render()` destroyed.
+- **`syncChoiceDialog` is left alone**: it is a promise `startSync()` awaits and
+  closing it unanswered would leave sync never starting. Being modal, only a
+  timer's save (a quiet price refresh) could adopt under it; both of its answers
+  are still right afterwards.
+- What the reader sees, from the two-page run: the editor closes, the page shows
+  the other window's plan, focus is on the row the editor came from, Undo is
+  gone, and the toast says the change was not saved. Making it again works.
+
+### Tests, and what cannot be one
+
+Group **"Two open copies of the app"**, five tests, each red on the unfixed app.
+They boot their OWN frames with the REAL `save()` (every other frame stubs it;
+a function declaration's global cannot be deleted to get it back) and play
+window B by writing `fin-state` from the test page. **`tcSnapshot()`/`tcPutBack()`
+save and restore every key on the origin**, not just the two `save()` writes.
+The same-plan test would be GREEN on the old app if it only drove `save()` (the
+old app always wrote), so its red is the pure `otherCopyIn()` half. The listener
+is pinned as SOURCE — it cannot run in a frame by design — and was proven with
+two real pages: `mm-scripts/twotabs.mjs`, `editor.mjs`, `uionly.mjs` in the
+session scratchpad (server-free Playwright, fresh context, everything off-origin
+aborted). Before: A's tab press took stored goals 5 → 4. After: idle A shows 5
+and toasts "Updated", the tab press writes nothing over it, B's tab presses
+cause 0 re-renders in A.
+
+### Known, and left
+
+- A same-plan write from this window replaces the OTHER window's `quotes` /
+  `closes` with its own. Both are caches; the cost is a re-fetch, the tolerance
+  undo already records.
+- `finAdopt` itself still adopts under an open row editor without closing it
+  (the `ds.idx` hazard above, from another DEVICE's change) and its mid-session
+  halt can sit under an open modal. Not touched here — reported.
+- Sprint Predictability's note names Flow Metrics and Golf Handicap as saving the
+  same way. Not looked at from here.

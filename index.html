@@ -6965,6 +6965,16 @@ let sharedViews = new Set();
    scope, so the flag is mirrored for it to check before it initialises. */
 window.finViewOnly = viewOnly;
 
+/* The `fin-state` STRING this copy last READ or WROTE — what save() holds storage
+   up against before it writes over it (see save(), and "Two copies of the app
+   open at once" beside it). In memory only: nothing new is stored. Declared
+   ABOVE the boot load on purpose — load() assigns it while this script is still
+   being evaluated, and a `let` further down would not exist yet; load()'s catch
+   would turn that ReferenceError into a brand-new plan with every engine test
+   green (the boot-time dead zone that has bitten this file before). For the same
+   reason everything load() reaches on the way is a function DECLARATION. */
+let storedRaw = null;
+
 let state = load();
 
 function load() {
@@ -6991,13 +7001,12 @@ function load() {
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
+    /* What this copy has now READ — save()'s two-copies guard measures storage
+       against it. Set before anything below can throw: an unreadable copy has
+       still been read, and must not look like another window's work later. */
+    storedRaw = raw;
     if (!raw) return newPlanState();
-    const parsed = migrate(coerceShape(safeParse(raw)));
-    return Object.assign(blankState(), parsed, {
-      settings: Object.assign(blankState().settings, parsed.settings || {}),
-      side: Object.assign(blankState().side, parsed.side || {}),
-      ui: Object.assign(blankState().ui, parsed.ui || {})
-    });
+    return planFrom(migrate(coerceShape(safeParse(raw))));
   } catch (e) {
     /* Unreadable is not the same as absent, but the reader is looking at an empty
        app either way, so they get the same one a first visit does. Nothing is
@@ -7006,6 +7015,18 @@ function load() {
     console.warn('Could not read saved data', e);
     return newPlanState();
   }
+}
+
+/* A stored plan laid over the defaults — what load() hands back, and what
+   planKeyOf() measures, so "the plan this copy would boot into" is ONE merge and
+   the two-copies guard can never disagree with boot about it. A function
+   declaration: load() reaches it while the script is still being evaluated. */
+function planFrom(parsed) {
+  return Object.assign(blankState(), parsed, {
+    settings: Object.assign(blankState().settings, parsed.settings || {}),
+    side: Object.assign(blankState().side, parsed.side || {}),
+    ui: Object.assign(blankState().ui, parsed.ui || {})
+  });
 }
 
 /* Stop the app dead, with the plan untouched, and say why.
@@ -7023,6 +7044,15 @@ function load() {
       app with handlers attached is one stray click away from a save. */
 function haltForNewerData(found) {
   window.finViewOnly = true;
+  /* ...and the flag save() itself reads (2026-09-18). At boot the throw below is
+     what stops everything, so the mirror alone was enough; but the halt is also
+     reached MID-SESSION — finAdopt, and now adoptOtherCopy() from inside save()
+     when the other open window is running a newer build — where the throw only
+     ends the one handler and every other handler is still attached. Without
+     this the next press would come back through save(), find the newer plan
+     still in storage, and halt all over again with a second card on the first.
+     Declared above `let state = load()`, so it exists when boot gets here. */
+  viewOnly = true;
   const wrap = document.createElement('div');
   wrap.setAttribute('style', 'position:fixed;inset:0;z-index:99999;display:flex;'
     + 'align-items:center;justify-content:center;padding:24px;'
@@ -7158,6 +7188,35 @@ function undoLast() {
 
 function save() {
   if (viewOnly) return;   // someone else's figures — never write them over your own
+  /* ── Two copies of the app open at once (2026-09-18) ───────────────────────
+     save() writes the WHOLE in-memory plan, and nearly everything saves — a tab
+     press, a folded box, a quiet price refresh — and nothing listened for the
+     other window. So with the app open twice (two tabs, or the installed window
+     and a tab) the copy that had NOT been reloaded wrote its stale plan over the
+     other's work the next time anything in it was pressed: add a goal in one
+     window, click a tab in the other, reload — goal gone, not a word from
+     either. Signed in it was worse: that stale plan went to the cloud under a
+     newer timestamp, and only ONE window of a browser ever takes another
+     device's change from the cloud (the first to adopt stamps the shared
+     `fin-updated`, and the second then sees nothing newer), so the other sat
+     stale until its next press undid the phone's work too.
+     Storage is held up against what THIS copy last read or wrote. If another
+     copy's PLAN is there, it is adopted instead of overwritten and the one
+     change that did not land is said out loud — one press lost, announced,
+     against a goal lost in silence. "Another copy's plan" is a question of
+     MEANING, never of bytes: see otherCopyIn(). Ported from Sprint
+     Predictability, where there is no sync and bytes were enough.
+     BEFORE the undo bookkeeping below, so a save that did not happen banks
+     nothing. `false` is commitRow's "this banked no step".
+     WHAT WAS LOST is asked of the plan, not assumed: the commonest press in a
+     stale window is a tab, which changes only `ui` — and this window keeps its
+     own `ui` through the adoption, so that press loses nothing and "your last
+     change was not saved — make it again" would send the reader looking for a
+     change they never made. `undoCore` is the plan as of this copy's last save. */
+  if (otherCopyIn(readStored(), storedRaw)) {
+    adoptOtherCopy(coreOf(state) !== undoCore);
+    return false;
+  }
   /* Bank the state this save is REPLACING — except when the save is itself an
      undo (which must consume history, not mint it), and except when nothing
      outside `ui` moved: a tab switch is not a change anybody regrets. */
@@ -7179,12 +7238,180 @@ function save() {
     console.warn('Could not write saved data', e);
     toast('⚠️ This browser is blocking storage (full, or private mode?) — changes may be lost when the tab closes');
   }
+  /* The marker is read BACK, never remembered, and whether or not the write
+     took: a browser that accepts a write and keeps nothing (private mode) must
+     not look, next time, like another window having emptied it — and after a
+     refused write, what is there is still the last thing this copy saw. */
+  storedRaw = readStored();
   /* The sync module (foot of the file) registers this when signed in. */
   if (window.cloudPush) window.cloudPush();
   /* Whether THIS save minted history — commitRow's "one window, one undo"
      bookkeeping needs the fact, not a guess (2026-09-07 audit, fix 2). */
   return banked;
 }
+
+/* ── Two copies of the app open at once: the pieces ─────────────────────────
+   All function declarations, all pure except the last two. */
+function readStored() {
+  try { return localStorage.getItem(STORAGE_KEY); } catch (e) { return null; }
+}
+
+/* WHAT PLAN a stored string holds, as one comparable string — or null for "no
+   plan there at all" (nothing stored, or nothing this build can read).
+   A BYTE DIFFERENCE IS NOT A FOREIGN CHANGE, and this is what knows the
+   difference. Three things rewrite `fin-state` without changing the plan:
+   the other window switching tab or year (`ui` lives in state and a tab press
+   saves); a price lookup that learned only cache entries; and, signed in,
+   finAdopt in the other window writing back the very plan this window pushed
+   (other key order, other `ui`, defaults filled in). Taken for another copy's
+   newer work, any of them would re-draw this window under the reader's hands
+   — or refuse their next save and throw away a real edit to protect nothing.
+   So both sides go through the SAME road a booting copy takes —
+   migrate(coerceShape()) and planFrom() — then through coreOf(), which is
+   already the one definition of "the plan, minus `ui` and the price caches"
+   (the undo ring's), and then the keys are SORTED: measured on the sample plan,
+   the state "Load Sample Data" builds and the state a reload makes of it hold
+   the same figures with `settings` in a different key order, and a plain
+   JSON.stringify called those two plans. From strings on both sides, never
+   from this window's live `state`, for that same reason.
+   A plan from a NEWER build is checked before coerceShape can strip what makes
+   it newer, and never equals anything: it is foreign, and adopting it halts. */
+function planKeyOf(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = safeParse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if ((parsed.schema || 1) > SCHEMA) return 'newer:' + String(parsed.schema);
+    const sorted = (v) => {
+      if (Array.isArray(v)) return v.map(sorted);
+      if (!v || typeof v !== 'object') return v;
+      const out = {};
+      for (const k of Object.keys(v).sort()) out[k] = sorted(v[k]);
+      return out;
+    };
+    return JSON.stringify(sorted(JSON.parse(coreOf(planFrom(migrate(coerceShape(parsed)))))));
+  } catch (e) { return null; }
+}
+
+/* Is what storage holds (`there`) ANOTHER COPY'S PLAN, measured against the
+   string this copy last read or wrote (`mine`)? Pure, and pinned.
+   Identical bytes: no, and nothing is parsed — the path every ordinary save
+   takes. NOTHING READABLE THERE: no, and the write goes ahead. Storage that was
+   cleared under an open window (site data, a private window closing) holds no
+   other copy's work to protect, and this window may be holding the only copy
+   of the plan left — adopting the emptiness, which is what a byte comparison
+   would do, is the one outcome that loses everything. Otherwise: only if the
+   two plans differ. This window's own key is remembered, since `mine` moves
+   only when this window reads or writes. */
+function otherCopyIn(there, mine) {
+  if (there === mine) return false;
+  const theirs = planKeyOf(there);
+  if (theirs === null) return false;
+  const memo = otherCopyIn.memo;
+  const ours = memo && memo.raw === mine ? memo.key : planKeyOf(mine);
+  otherCopyIn.memo = { raw: mine, key: ours };
+  return theirs !== ours;
+}
+
+/* The other window's plan, taken in place of this one's. Two callers: save(),
+   which was about to write and did not (`lostChange` — it gets the sentence that
+   says so), and the `storage` listener below, for which it is only news.
+   In this order, each for a reason:
+   1. THE ROW EDITOR'S CONTEXT IS ENDED, THEN EVERY WINDOW IS CLOSED. Their boxes
+      were filled from the plan being replaced, and the row editor finds its
+      record by POSITION (`ds.idx`): left open over the adopted plan, its next
+      commit would write this form into whatever row now sits at that index —
+      the hazard Delete and the move buttons already clear `rowCtx` for. Ended
+      BEFORE close(), because `close` arrives as a queued task and its handler
+      commits whatever context it finds; with none, it does nothing, so no stale
+      draft can land on the adopted plan. What was in the boxes is lost, and the
+      toast says so; no window here has a safer way to stay open. Closed before
+      load() as well: a modal dialog is in the top layer, ABOVE the newer-build
+      card load() may be about to draw. The one exception is the sign-in "which
+      copy?" dialog — it holds no plan figures that a press writes back, and it
+      is a promise startSync() is awaiting; closing it unanswered would leave
+      sync never starting. (Reachable only from a timer's save, it being modal.)
+   2. load() IS BOOT'S OWN READER, so the other copy comes through
+      migrate(coerceShape()) like every outside shape, and a copy written by a
+      NEWER build halts exactly as it would at boot (it throws; nothing below
+      runs). It also moves `storedRaw`.
+   3. THIS WINDOW KEEPS ITS OWN `ui`. Taking the other window's would throw the
+      reader onto the tab, year and month the OTHER window is showing. Every
+      reader of `ui` already clamps a year or month the plan no longer holds.
+   4. THE UNDO RING STARTS OVER, finAdopt's rule for finAdopt's reason: every
+      snapshot in it predates the other copy's work, so one ⌘Z would write the
+      old plan over that work under a newer timestamp — this same bug, by hand.
+   5. NEVER save() AND NEVER cloudPush() FROM HERE (Golf Handicap's recorded
+      rule). The copy that wrote has already pushed, and the `storage` event
+      fires only in the OTHER windows, so nothing here can loop — unless this
+      answers a write with a write. */
+function adoptOtherCopy(lostChange) {
+  const mine = state.ui;
+  const ctx = rowCtx;
+  rowCtx = null;
+  let closed = 0;
+  document.querySelectorAll('dialog[open]').forEach((d) => {
+    if (d.id === 'syncChoiceDialog') return;
+    d.close();
+    closed += 1;
+  });
+  const next = load();
+  next.ui = mine;
+  state = next;
+  undoRing = [];
+  undoSnapshot = JSON.stringify(state);
+  undoCore = coreOf(state);
+  updateUndoBtn();
+  render();
+  /* A window closed from under the reader hands the focus somewhere they can
+     see: the row it was opened from if the adopted plan still draws one there
+     (a focus, never a write), else the tab they are on, else the page. The
+     native return aimed at a node render() has just destroyed. */
+  if (closed) {
+    refocusEditRow(ctx);
+    if (!document.activeElement || document.activeElement === document.body) {
+      const tab = document.querySelector('.tab[aria-selected="true"]');
+      const to = tab && tab.offsetParent ? tab : F('maincontent');
+      if (to) to.focus({ preventScroll: true });
+    }
+  }
+  const msg = lostChange
+    ? 'This plan was changed in another tab or window, so that copy is loaded here now. '
+      + 'Your last change here was not saved — make it again.'
+    : 'Updated — this plan was changed in another tab or window.';
+  toast(msg);
+  /* There is ONE toast, and most callers raise their own right after save() —
+     "Deleted", "Put back the way it was", a section's own sentence — which
+     would replace this one, in the same breath, with a claim that is no longer
+     true. Said again at the end of the task, so it is the one left standing. */
+  if (lostChange) setTimeout(() => toast(msg), 0);
+}
+
+/* The other half: an IDLE copy takes the other window's plan as it lands, so
+   what is on screen is never older than what is stored. Not in a shared view or
+   after a halt (neither owns the stored plan); not while a window is open here
+   (its boxes are a draft, and save() settles it on the next write); only when
+   the PLAN differs (the other window changing tab is none of this one's
+   business — but it has now been read, so the marker moves and the next save
+   here stays on the byte-for-byte path); and ONLY IN A TOP-LEVEL WINDOW: a
+   frame — the suite's — shares this origin's storage with frames and tests that
+   plant fixtures in it, the rule the service-worker block already keeps. */
+if (window.top === window.self) addEventListener('storage', (e) => {
+  if (viewOnly || e.storageArea !== localStorage) return;
+  if (e.key !== null && e.key !== STORAGE_KEY) return;      // null is clear()
+  if (document.querySelector('dialog[open]')) return;
+  const there = readStored();
+  if (otherCopyIn(there, storedRaw)) adoptOtherCopy(false);
+  else if (there !== null) storedRaw = there;
+});
+
+/* Restore and Delete-all REPLACE THE WHOLE PLAN ON PURPOSE, behind a confirm
+   that says so ("Replace everything in this browser…"). Whatever another window
+   wrote meanwhile is exactly what the reader has just agreed to lose, so these
+   two say they have seen it and their save() goes ahead — adopting the other
+   copy instead would answer "delete everything" with "here is your plan back".
+   The other window, idle, then takes the result through the listener above. */
+function claimStorage() { storedRaw = readStored(); }
 
 /* ── Domain helpers ─────────────────────────────────────────────────────── */
 
@@ -23127,10 +23354,19 @@ function commitRow(ctx, speak) {
   let said = EDITORS[ctx.section].save(ctx.ds, values);
   ctx.committed = true;   // the row this window opened from is about to be redrawn
   if (refused) said = typeof said === 'string' ? `${refused}. ${said}` : refused;
+  const planWas = state;   // save() may ADOPT another window's plan — see below
   const wasUndoing = undoing;
   if (ctx.banked) undoing = true;
   const banked = save();
   undoing = wasUndoing;
+  /* save() found another window's plan in storage and ADOPTED it instead of
+     writing (2026-09-18): `state` is a different object, this window has been
+     closed and its context ended, and the page already shows the other copy
+     with a toast saying this change did not land. Everything below would act
+     on a row of a plan that is no longer here — re-priming boxes from whatever
+     now sits at `ds.idx`, or toasting a sentence about the change that was
+     dropped. The suite's stubbed save() never gets here. */
+  if (state !== planWas) return;
   if (banked) ctx.banked = true;
   render();
   /* A section that did something the reader can't see on the page in front of
@@ -29440,6 +29676,7 @@ F('clearConfirm').onclick = () => {
   calc = coerceCalc(null);
   renderTape();
   closeCalc();
+  claimStorage();         // a deliberate whole-plan replacement — see claimStorage()
   save();                 // the one write path, so this pushes to the cloud too
   /* …but save() debounces its push, and a delete must not sit in that window:
      clearing then closing the tab inside 1.2s would leave the cloud copy intact,
@@ -29485,6 +29722,7 @@ F('importFile').onchange = (e) => {
         side: Object.assign(blankState().side, parsed.side || {}),
         ui: Object.assign(blankState().ui, parsed.ui || {})
       });
+      claimStorage();   // a deliberate whole-plan replacement — see claimStorage()
       save();
       render();
       toast('Data restored');
@@ -32024,6 +32262,12 @@ window.finAdopt = (incoming, ts) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     localStorage.setItem(UPDATED_KEY, String(ts || Date.now()));
   } catch (e) { console.warn('Could not write saved data', e); }
+  /* This copy WROTE storage, so save()'s two-copies marker moves with it — read
+     back, as save() does — or the next press here would find "somebody else's"
+     plan in storage, adopt it, and lose that press to this window's own write.
+     The newer-build branch above deliberately does NOT move it: that page has
+     halted holding an older plan, and the one thing it must never do is write. */
+  storedRaw = readStored();
   /* Another device's changes are now the state — an undo reaching back past
      them would clobber that device's work under a newer timestamp, so the
      ring starts over from here. */
