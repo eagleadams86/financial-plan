@@ -91,6 +91,31 @@ in the app lives in your browser's localStorage.
   through Google Identity Services (so it works on corporate networks that
   block firebaseapp.com), and "Delete all data" empties the synced copy too.
   See [Cross-Device Sync](#cross-device-sync).
+- **Open it twice, it stays one plan** (2026-09-18). Two tabs, or the installed
+  window and a tab, share the one saved plan — and each window keeps its own
+  whole copy in memory and writes ALL of it on nearly every press, a tab click
+  included. So the window you had not touched for a while used to write its
+  old copy over whatever you had just done in the other one: add a goal here,
+  click a tab there, and the goal was gone without a word from either. Now:
+  - **A window that is sitting idle updates itself** the moment the other one
+    saves, and says "Updated — this plan was changed in another tab or window."
+    It stays on its own tab and year; only the figures change.
+  - **A window that is behind never writes over the newer plan.** If it missed
+    the update — a row editor was open in it, which is a draft it will not
+    redraw under you — then the next thing you save there is NOT saved: the
+    window loads the newer plan instead, closes the editor, and tells you
+    "Your last change here was not saved — make it again." One press lost, out
+    loud, instead of the other window's work lost in silence. A press that
+    changes no figure, a tab click for instance, loses nothing and just gets
+    the "Updated" line.
+  - **The other window only changing tab is not a change to the plan**, so
+    nothing re-draws and nothing is refused. The plan is compared by what it
+    says, not by its bytes.
+  - **Restore and Delete All Data are the exceptions, on purpose**: you have
+    just confirmed replacing everything, so they do — and the other window
+    follows.
+  - Undo starts over in the window that took the other's plan, for the reason
+    it does when another device's changes arrive.
 - **The import files never get committed.** `financial-plan-data.json` and
   `expected-2026.json` are gitignored from the very first commit; `git
   status` must never show them.
@@ -1700,7 +1725,8 @@ straight back through them, one honest step at a time.
   row writes each field as you finish with it, so without this a window you
   changed six things in would have spent six of the twenty steps and ⌘Z would
   walk back a box at a time. One press puts the whole window back.
-- **It clears when another device's changes arrive**, since undoing past
+- **It clears when another device's changes arrive — or another tab's**
+  (2026-09-18), since undoing past
   somebody else's work would overwrite it — and stays clear until you change
   something (until 2026-09-01 the first tab click after a sync offered an undo
   of nothing).
@@ -2333,6 +2359,14 @@ of your data?" has no safe default.
 After that, whichever side changed most recently wins, and an update pushed
 from another device arrives live.
 
+**Two windows in one browser are one device.** They share one saved plan, so
+only the first of them takes an update off the cloud; the other picks it up
+from the browser's storage a moment later, the same way it picks up anything
+you change in the window next to it (see
+[Where Your Data Lives](#where-your-data-lives)). Before 2026-09-18 that second
+window simply stayed behind, and its next press sent its old plan back to the
+cloud under a newer date — over the phone's work as well as the other tab's.
+
 Underneath that, **an empty copy never beats a copy with data in it**,
 whichever looks newer — otherwise signing in on a fresh browser would push its
 emptiness, stamped `now`, over the device that actually holds the plan. Naming
@@ -2524,6 +2558,15 @@ cell's editor, presses every button that isn't destructive, and fails if the fra
 a view comes back empty. Verified by breaking `renderMonthView` on purpose. Nothing it does
 can write: `save()` and `confirm()` are replaced in that frame before anything is pressed,
 and the saved plan is read back at the end and compared.
+
+**One group does write, and cleans up after itself.** "Two open copies of the app"
+(2026-09-18) can only be tested with the REAL `save()`: it boots its own frames, plays the
+other window by writing `fin-state` directly, and checks that the stale frame adopts instead
+of overwriting. Each of those tests snapshots every key this origin holds first and puts all
+of them back in a `finally`, so the plan in the browser you run the suite in is untouched.
+The half that LISTENS for the other window cannot run in a frame at all (it is top-level
+only, because the suite's frames share storage with planted fixtures), so it is pinned as
+source and was proven in a two-page headless run.
 
 CI (`.github/workflows/tests.yml`) runs the same page headless on every push.
 
