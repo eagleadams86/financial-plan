@@ -8027,3 +8027,16 @@ newest date, over the newer build's work. After: 0 pushes, not listening.
   The module never starts in a test frame (`data-fin-tests`) and the suite cannot
   intercept Google's URLs, so none of that can live in `tests.html`. **Nothing
   here was run against the real Firestore.**
+
+### 4. A halted window adopts nothing
+
+Found by the agent that did the three above and closed by the supervisor the same evening, because
+it was the last road by which a halted window could cost the NEWER plan. `cloudHalt()` stops the
+module, but a `startSync()` that was mid-`await` when the halt came still calls `finAdopt` with
+whatever it fetched. If that plan is not newer, `finAdopt` went on to write it to `fin-state` —
+over the newer plan it had stored VERBATIM a moment earlier so the fresh build could migrate from
+it. `finAdopt` now returns `''` under `viewOnly`, placed BELOW the newer-schema block on purpose: a
+plan newer still is stored and halts again, as before (item 3's test relies on that second halt).
+A shared view never reaches `finAdopt` — the module does not start under `finViewOnly` — so the
+guard only ever means "halted". Proven by test: halt, hand over an older plan, storage byte for
+byte what it was, nothing taken into memory, no throw. EXPECTED 1173 → 1174.

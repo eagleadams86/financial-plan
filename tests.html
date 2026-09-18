@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1173;
+const EXPECTED = 1174;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -21310,6 +21310,41 @@ t('a newer-build halt reached with a window open is drawn ON TOP of it, and boot
        'and no caller keeps a close-everything of its own for the halt’s sake');
   } finally {
     frames.forEach((f) => f.remove());
+    tcPutBack(kept);
+  }
+});
+
+t('a window halted for a newer build adopts nothing afterwards — the newer plan in storage is never written over', async () => {
+  /* cloudHalt() stops the module, but a startSync() that was mid-await when the
+     halt came still calls finAdopt with what it fetched. If that plan is not
+     newer, finAdopt went on to write it to `fin-state` — over the newer plan it
+     had stored verbatim for the fresh build to migrate from. */
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'haltadopt');
+    f = booted.f;
+    const W = booted.W;
+    W.cloudHalt = () => {};
+    const newer = Object.assign(JSON.parse(JSON.stringify(plan)), { schema: H.SCHEMA + 1 });
+    newer.goals[0].name = 'Written by the NEWER build';
+    let threw = false;
+    try { W.finAdopt(newer, Date.now() + 1000); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'fixture: the page halted, with the newer plan stored verbatim');
+    const verbatim = localStorage.getItem('fin-state');
+    eq(JSON.parse(verbatim).goals[0].name, 'Written by the NEWER build');
+    /* The straggler: a sync that was already in flight hands over an OLDER plan. */
+    const older = JSON.parse(JSON.stringify(plan));
+    older.goals[0].name = 'The straggler’s older plan';
+    let said = null, threwAgain = false;
+    try { said = W.finAdopt(older, Date.now() + 5000); } catch (e) { threwAgain = true; }
+    ok(!threwAgain, 'it is refused quietly — there is nothing to halt for');
+    eq(localStorage.getItem('fin-state'), verbatim, 'and the newer plan in storage is byte for byte what it was');
+    eq(said, '', 'with nothing to tell the reader, because nothing happened');
+    ok(W.finGet().goals[0].name !== 'The straggler’s older plan', 'nor did the halted page take it into memory');
+  } finally {
+    if (f) f.remove();
     tcPutBack(kept);
   }
 });
