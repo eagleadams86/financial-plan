@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1169;
+const EXPECTED = 1174;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -21083,8 +21083,12 @@ t('an idle copy listens for the other window — top-level only, and it never an
   }
   ok(/const next = load\(\);/.test(adopt), 'the adoption reads through load() — boot’s gate and boot’s halt');
   ok(/undoRing = \[\];/.test(adopt), 'and starts the undo ring over, as finAdopt does');
-  ok(adopt.indexOf('rowCtx = null;') > -1 && adopt.indexOf('rowCtx = null;') < adopt.indexOf('d.close()'),
-     'the row editor’s context is ended BEFORE its window is closed');
+  /* The step itself moved into endStaleWindows() when finAdopt gained it too. */
+  ok(/const ended = endStaleWindows\(\);/.test(adopt), 'the windows filled from the old plan are ended first');
+  const endAt = src.indexOf('function endStaleWindows(');
+  const end = strip(src.slice(endAt, src.indexOf('\n}\n', endAt)));
+  ok(end.indexOf('rowCtx = null;') > -1 && end.indexOf('rowCtx = null;') < end.indexOf('.close()'),
+     'and the row editor’s context is ended BEFORE its window is closed');
   /* Every writer of fin-state keeps the marker true. */
   ok(src.indexOf('let storedRaw = null;') > -1
      && src.indexOf('let storedRaw = null;') < src.indexOf('let state = load();'),
@@ -21096,6 +21100,305 @@ t('an idle copy listens for the other window — top-level only, and it never an
      'Restore and Delete-all — and only they — write over whatever is there, on purpose');
   eq((src.match(/localStorage\.setItem\(STORAGE_KEY/g) || []).length, 3,
      'a NEW writer of fin-state has to keep the marker true too — then raise this count');
+});
+
+/* ── A change from another DEVICE, under an open window (2026-09-18) ─────────
+   The two-copies fix ended the row editor when another WINDOW's plan was
+   adopted; finAdopt — the same replacement, arriving through sync — did not, so
+   a goal deleted on the phone turned the laptop's open editor into a loaded gun
+   pointed at the next row down. Driven through the real finAdopt (it is a
+   window hook), which writes `fin-state` and `fin-updated`: every key is put
+   back. */
+group('A synced change under an open window');
+t('a change from another device closes the open row editor instead of letting it write into the wrong row', async () => {
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    plan.ui.activeTab = 'goals';
+    const booted = await tcBoot(plan, 'syncedunder');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    const dlg = D.getElementById('rowDialog');
+    const names = () => W.finGet().goals.map(g => g.name);
+    D.querySelector('[data-edit="goal"][data-idx="0"]').click();
+    await tcWait(200);
+    ok(dlg.open, 'fixture: the editor is open on the first goal');
+    /* The phone deletes that goal; the listener hands the laptop its plan. */
+    const phone = JSON.parse(JSON.stringify(plan));
+    const gone = phone.goals.shift().name, next = phone.goals[0].name;
+    const said = W.finAdopt(phone, Date.now() + 1000);
+    ok(!dlg.open, 'the editor is closed — its row is no longer the row at that position');
+    ok(/window you had open was closed/.test(said) && /Nothing in it was waiting to be saved/.test(said),
+       'finAdopt hands back what is TRUE for the sync toast: closed, and nothing was pending', String(said));
+    /* The reader finishes the box they were in — the old form must go nowhere. */
+    const box = D.getElementById('rf-name');
+    box.value = gone + ' (edited)';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    dlg.dispatchEvent(new W.Event('close'));                // and the late close task
+    await tcWait(100);
+    eq(names()[0], next, 'the goal that moved up into position 0 is untouched');
+    eq(names().includes(gone + ' (edited)'), false, 'and the stale form landed nowhere');
+    eq(JSON.parse(localStorage.getItem('fin-state')).goals[0].name, next, 'nor in storage');
+    ok(D.activeElement && D.activeElement !== D.body, 'the focus is handed somewhere on the page');
+    /* A box still under the cursor is the one thing a saves-as-you-go window
+       can lose, and the sentence says so only then. */
+    D.querySelector('[data-edit="goal"][data-idx="0"]').click();
+    await tcWait(200);
+    D.getElementById('rf-name').value = 'half typed';       // no `change`: not committed
+    const again = JSON.parse(JSON.stringify(phone));
+    again.goals[1].name = 'Renamed on the phone';
+    const lost = W.finAdopt(again, Date.now() + 2000);
+    ok(/still typing in it was not saved/.test(lost), 'typing that had not committed is said to be lost', String(lost));
+    eq(names().includes('half typed'), false, 'because it is');
+    /* And a row being ADDED has committed nothing at all. */
+    D.querySelector('[data-add="goal"]').click();
+    await tcWait(200);
+    D.getElementById('rf-name').value = 'A goal not yet saved';
+    const adding = W.finAdopt(again, Date.now() + 3000);
+    ok(/row you were adding was not saved/.test(adding), 'a new row is named as what was lost', String(adding));
+    ok(!dlg.open, 'and its window is closed too');
+    eq(W.finAdopt(again, Date.now() + 4000), '', 'with no window open there is nothing to add to the toast');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+t('a synced change closes only the windows filled from the plan — Find is re-run, Help stays', async () => {
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'syncedwindows');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    const phone = JSON.parse(JSON.stringify(plan));
+    const roof = phone.goals.find(g => /roof/i.test(g.name));
+    ok(roof, 'fixture: the sample has a roof goal to find');
+    roof.name = 'Garage door';
+    /* Find: the query is the reader's, the hits were the old plan's. */
+    D.getElementById('findBtn').click();
+    await tcWait(100);
+    const box = D.getElementById('searchBox');
+    box.value = 'roof replacement';
+    box.dispatchEvent(new W.Event('input', { bubbles: true }));
+    ok(/Roof replacement/.test(D.getElementById('searchResults').textContent), 'fixture: Find lists the goal');
+    eq(W.finAdopt(phone, Date.now() + 1000), '', 'nothing closed, so nothing to say');
+    ok(D.getElementById('searchDialog').open, 'Find is still open');
+    eq(box.value, 'roof replacement', 'with the reader’s query still in it');
+    ok(!/Roof replacement/.test(D.getElementById('searchResults').textContent),
+       'and its list has been run again over the adopted plan', D.getElementById('searchResults').textContent);
+    D.getElementById('searchDialog').close();
+    /* Help is words. */
+    W.openHelp(Object.keys(W.__finTestHooks.HELP)[0]);
+    await tcWait(100);
+    ok(D.getElementById('helpDialog').open, 'fixture: a Help window is open');
+    eq(W.finAdopt(plan, Date.now() + 2000), '', 'a sync says nothing about it');
+    ok(D.getElementById('helpDialog').open, 'and leaves it open');
+    D.getElementById('helpDialog').close();
+    /* The cell editor writes what its boxes HOLD, so it goes. */
+    const cell = D.querySelector('td.cell[data-cat]');
+    ok(cell, 'fixture: a budget cell');
+    cell.click();
+    await tcWait(200);
+    ok(D.getElementById('cellDialog').open, 'fixture: the cell editor is open');
+    const said = W.finAdopt(phone, Date.now() + 3000);
+    ok(!D.getElementById('cellDialog').open, 'the cell editor is closed');
+    ok(/closed/.test(said) && /not yet saved was not kept/.test(said),
+       'and the sentence is conditional — nothing in it is committed before Save', String(said));
+    /* One road for every adoption, so the sentence cannot be toasted over. */
+    const mod = APP_SRC.slice(APP_SRC.indexOf('<script type="module">'));
+    eq((mod.match(/window\.finAdopt\(/g) || []).length, 1, 'the sync module calls finAdopt in ONE place');
+    ok(/const said = window\.finAdopt\(data, ts\);\s*window\.toast\(typeof said === 'string' && said \? `\$\{news\} \$\{said\}` : news\);/.test(mod),
+       'and that place joins what finAdopt said onto the sync toast');
+    eq((mod.match(/adoptFrom\(/g) || []).length, 4, 'all four adoptions go through it');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+t('a newer-build halt reached with a window open is drawn ON TOP of it, and boot still halts as it did', async () => {
+  /* A modal <dialog> is in the top layer, above every z-index: the card was
+     drawn under the open editor and its Reload button was inert behind it. The
+     halt clears the top layer ITSELF now, whichever road reaches it. */
+  const kept = tcSnapshot();
+  const frames = [];
+  const newerOf = (plan) => Object.assign(JSON.parse(JSON.stringify(plan)), { schema: H.SCHEMA + 1 });
+  const onTop = (D) => {
+    const h = [...D.querySelectorAll('h1')].find(x => /Saved by a Newer Version/.test(x.textContent));
+    const wrap = h && h.parentElement.parentElement;
+    const btn = wrap && [...wrap.querySelectorAll('button')].find(b => b.textContent === 'Reload');
+    if (!btn) return 'no card';
+    const r = btn.getBoundingClientRect();
+    const hit = D.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return hit === btn ? 'yes' : 'covered by ' + (hit && (hit.closest('dialog') ? hit.closest('dialog').id : hit.tagName));
+  };
+  try {
+    /* Road one: finAdopt, under a row editor. */
+    const plan = tcPlan();
+    plan.ui.activeTab = 'goals';
+    let booted = await tcBoot(plan, 'haltunder');
+    frames.push(booted.f);
+    let W = booted.W, D = booted.D;
+    D.querySelector('[data-edit="goal"][data-idx="0"]').click();
+    await tcWait(200);
+    ok(D.getElementById('rowDialog').open, 'fixture: a row editor is open');
+    const newer = newerOf(plan);
+    let threw = false;
+    try { W.finAdopt(newer, Date.now() + 1000); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'fixture: finAdopt halted');
+    eq(D.querySelectorAll('dialog[open]').length, 0, 'no window is left open above the card');
+    eq(onTop(D), 'yes', 'and the card’s Reload button is what a press reaches');
+    ok(D.activeElement && D.activeElement.textContent === 'Reload', 'the keyboard is on it too');
+    /* The editor's late close, and a box finished in it, change nothing. */
+    const box = D.getElementById('rf-name');
+    box.value = 'typed after the halt';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    D.getElementById('rowDialog').dispatchEvent(new W.Event('close'));
+    await tcWait(100);
+    eq(localStorage.getItem('fin-state'), JSON.stringify(newer), 'the newer plan is in storage verbatim, and stays so');
+    eq(W.finGet().goals.map(g => g.name).includes('typed after the halt'), false, 'and nothing was rewritten in memory under the card');
+
+    /* Road two: adoptOtherCopy from save(), under a window endStaleWindows() LEAVES. */
+    booted = await tcBoot(plan, 'haltunderhelp');
+    frames.push(booted.f);
+    W = booted.W; D = booted.D;
+    W.openHelp(Object.keys(W.__finTestHooks.HELP)[0]);
+    await tcWait(100);
+    ok(D.getElementById('helpDialog').open, 'fixture: Help is open');
+    localStorage.setItem('fin-state', JSON.stringify(newer));   // the other window runs a newer build
+    threw = false;
+    try { W.save(); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'fixture: save() halted');
+    eq(D.querySelectorAll('dialog[open]').length, 0, 'Help — which an ordinary adoption leaves up — is closed by the halt');
+    eq(onTop(D), 'yes', 'so the card is on top here as well');
+
+    /* Boot: the halt runs inside `let state = load()`, where `rowCtx` does not
+       exist yet. Touching it there would throw a ReferenceError INSTEAD of the
+       halt — no card, and a test suite none the wiser. */
+    /* The halt THROWS at the top of the app's script, by design — and CI fails
+       the run on any uncaught page error, a frame's included. So this one boot
+       cancels the frame's `error` event for THAT message only. The listener
+       goes on the frame's first window, which the browser reuses for a
+       same-origin load; where it does not, the error is merely logged. */
+    localStorage.setItem('fin-state', JSON.stringify(newer));
+    const bf = document.createElement('iframe');
+    bf.setAttribute('data-fin-tests', '');
+    bf.setAttribute('aria-hidden', 'true');
+    bf.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+    frames.push(bf);
+    await new Promise((resolve) => {
+      bf.onload = resolve;
+      bf.src = 'index.html?haltboot=' + Date.now();
+      document.body.appendChild(bf);
+      bf.contentWindow.addEventListener('error', (e) => {
+        if (/newer than this build/.test(String(e.message))) e.preventDefault();
+      });
+    });
+    await tcWait(300);
+    booted = { f: bf, W: bf.contentWindow, D: bf.contentWindow.document };
+    eq(onTop(booted.D), 'yes', 'a plan from a newer build still halts at boot, card drawn');
+    eq(typeof booted.W.finGet, 'undefined', 'with the rest of the script never run');
+    eq(localStorage.getItem('fin-state'), JSON.stringify(newer), 'and the plan untouched');
+    const halt = APP_SRC.slice(APP_SRC.indexOf('function haltForNewerData('), APP_SRC.indexOf('/* ── Undo ──'));
+    ok(/if \(up\.length\) \{\s*rowCtx = null;\s*up\.forEach\(\(d\) => d\.close\(\)\);/.test(halt),
+       'the halt ends the row context and closes EVERY dialog — only when one is open, which is never at boot');
+    const adoptAt = APP_SRC.indexOf('function adoptOtherCopy(');
+    ok(!/\.close\(\)/.test(APP_SRC.slice(adoptAt, APP_SRC.indexOf('\n}\n', adoptAt)).replace(/\/\*[\s\S]*?\*\//g, '')),
+       'and no caller keeps a close-everything of its own for the halt’s sake');
+  } finally {
+    frames.forEach((f) => f.remove());
+    tcPutBack(kept);
+  }
+});
+
+t('a window halted for a newer build adopts nothing afterwards — the newer plan in storage is never written over', async () => {
+  /* cloudHalt() stops the module, but a startSync() that was mid-await when the
+     halt came still calls finAdopt with what it fetched. If that plan is not
+     newer, finAdopt went on to write it to `fin-state` — over the newer plan it
+     had stored verbatim for the fresh build to migrate from. */
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'haltadopt');
+    f = booted.f;
+    const W = booted.W;
+    W.cloudHalt = () => {};
+    const newer = Object.assign(JSON.parse(JSON.stringify(plan)), { schema: H.SCHEMA + 1 });
+    newer.goals[0].name = 'Written by the NEWER build';
+    let threw = false;
+    try { W.finAdopt(newer, Date.now() + 1000); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'fixture: the page halted, with the newer plan stored verbatim');
+    const verbatim = localStorage.getItem('fin-state');
+    eq(JSON.parse(verbatim).goals[0].name, 'Written by the NEWER build');
+    /* The straggler: a sync that was already in flight hands over an OLDER plan. */
+    const older = JSON.parse(JSON.stringify(plan));
+    older.goals[0].name = 'The straggler’s older plan';
+    let said = null, threwAgain = false;
+    try { said = W.finAdopt(older, Date.now() + 5000); } catch (e) { threwAgain = true; }
+    ok(!threwAgain, 'it is refused quietly — there is nothing to halt for');
+    eq(localStorage.getItem('fin-state'), verbatim, 'and the newer plan in storage is byte for byte what it was');
+    eq(said, '', 'with nothing to tell the reader, because nothing happened');
+    ok(W.finGet().goals[0].name !== 'The straggler’s older plan', 'nor did the halted page take it into memory');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+t('a window halted for a newer build cancels its pending sync push, and can never send one', async () => {
+  /* The sync module never starts in a frame (data-fin-tests) and no test can
+     reach Firestore, so what is pinned here is: LIVE, that the halt calls the
+     module's hook and that nothing afterwards asks for a push; and as SOURCE,
+     that the one sender refuses at send time and the hook cancels what is armed.
+     The whole road — edit, debounce running, newer plan arrives, nothing is
+     sent — was driven against a fake Firestore outside the suite (CLAUDE.md). */
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'haltpush');
+    f = booted.f;
+    const W = booted.W;
+    let halts = 0, pushes = 0;
+    W.cloudHalt = () => { halts += 1; };
+    W.cloudPush = () => { pushes += 1; };
+    W.finGet().goals[0].name = 'An edit whose push is still waiting';
+    W.save();
+    eq(pushes, 1, 'fixture: a save asks the module for a push');
+    const newer = Object.assign(JSON.parse(JSON.stringify(plan)), { schema: H.SCHEMA + 1 });
+    let threw = false;
+    try { W.finAdopt(newer, Date.now() + 1000); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'fixture: the page halted');
+    eq(halts, 1, 'the halt told the sync module to cancel what was pending');
+    W.cloudHalt = () => { throw new Error('a broken hook'); };
+    threw = false;
+    localStorage.setItem('fin-state', JSON.stringify(plan));   // (so the second halt has a road to it)
+    try { W.finAdopt(newer, Date.now() + 2000); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'and a hook that throws cannot replace the halt’s own stop');
+    W.save(); W.undoLast();
+    eq(pushes, 1, 'nothing on a halted page asks for a push again');
+
+    const mod = APP_SRC.slice(APP_SRC.indexOf('<script type="module">')).replace(/\/\*[\s\S]*?\*\//g, '');
+    eq((mod.match(/Fs\.setDoc\(/g) || []).length, 1, 'there is ONE sender — a second would need this gate too');
+    ok(/async function pushNow\(\) \{\s*if \(!user \|\| window\.finViewOnly\) return;\s*await Fs\.setDoc\(/.test(mod),
+       'and it refuses a halted page at SEND time, the line before the write — not when the timer was armed');
+    const hook = mod.slice(mod.indexOf('window.cloudHalt ='), mod.indexOf('window.cloudPush ='));
+    ok(/clearTimeout\(pushTimer\); pushTimer = null;/.test(hook), 'the hook cancels the armed push');
+    ok(/clearTimeout\(relistenTimer\); relistenTimer = null;/.test(hook), 'and the relisten retry');
+    ok(/if \(unsub\) \{ unsub\(\); unsub = null; \}/.test(hook), 'and stops listening');
+    ok(/function listen\(\) \{\s*if \(!user \|\| !Fs\) return;\s*if \(window\.finViewOnly\) return;/.test(mod),
+       'and a halted page cannot start listening again');
+    const halt = APP_SRC.slice(APP_SRC.indexOf('function haltForNewerData('), APP_SRC.indexOf('/* ── Undo ──'));
+    ok(/try \{ if \(typeof window\.cloudHalt === 'function'\) window\.cloudHalt\(\); \} catch \(e\) \{\}/.test(halt),
+       'the halt calls it only if the module has registered it — at boot it has not');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
 });
 
 async function run() {

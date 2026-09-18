@@ -7847,8 +7847,196 @@ cause 0 re-renders in A.
 - A same-plan write from this window replaces the OTHER window's `quotes` /
   `closes` with its own. Both are caches; the cost is a re-fetch, the tolerance
   undo already records.
-- `finAdopt` itself still adopts under an open row editor without closing it
+- `finAdopt` itself still adopted under an open row editor without closing it
   (the `ds.idx` hazard above, from another DEVICE's change) and its mid-session
-  halt can sit under an open modal. Not touched here — reported.
+  halt can sit under an open modal. Not touched in that commit — the first is
+  fixed in *Sync Adoption Follow-Ups* below, where the window step became one
+  function (`endStaleWindows()`) and the list of WHICH windows close replaced
+  "every dialog".
 - Sprint Predictability's note names Flow Metrics and Golf Handicap as saving the
   same way. Not looked at from here.
+
+## Sync Adoption Follow-Ups (2026-09-18)
+
+Three things the two-copies work noticed and left, each its own commit, each
+demonstrated headless before it was changed where that was possible.
+
+### 1. A change from another device closes the windows filled from the old plan
+
+**The fault, driven through the real `finAdopt` in a fresh page:** editor open
+on goal 0 (the emergency fund); the phone deletes that goal; the listener adopts;
+the editor stays up showing the old row; the next box finished in it writes the
+WHOLE form into position 0 — and "Roof replacement" became a second emergency
+fund, target and all, in memory and in storage, with a toast that said only
+"Synced from another device". The row editor finds its record by POSITION
+(`ds.idx`); `adoptOtherCopy` already ended it for that reason, `finAdopt` did not.
+
+- **One function, two callers: `endStaleWindows()`** — look at the draft, end
+  `rowCtx`, close the listed windows, return `{ ctx, closed, said }` — and
+  **`settleWindowsAfterAdopt(ended)`** once the adopted plan is drawn (bring the
+  windows that stayed up to date, then land the focus). Both adoptions call
+  both. `rowCtx = null` stays BEFORE `close()` (the queued `close` task).
+- **Which windows close is decided per window, by what it holds** — a Help
+  window shutting because the phone synced would be a fault of its own:
+
+  | Window | On an adoption | Why |
+  |---|---|---|
+  | `rowDialog` (every row editor, Preferences too) | closed | positional record → wrong-row write; re-priming has the same identity problem |
+  | `cellDialog` | closed | keyed by id+month, but Save writes what the boxes HOLD: opened on $120, the phone makes it $150, Save with nothing typed puts $120 back; a deleted year throws |
+  | `clearDialog` | closed | quotes how many years/goals will be deleted, counted from the old plan — a destructive confirm must not be agreed on a stale count |
+  | `compareDialog` | closed | writes nothing, but it is a table headed "This Plan" and this plan just changed; the file is gone so it cannot be redrawn |
+  | `helpDialog` | left | static words (stacked on a row editor, the editor still closes beneath it) |
+  | `searchDialog` | left, `renderSearchResults()` re-run | the query is the reader's; only the hits were the old plan's |
+  | `shareDialog` | left, `refreshShareLink()` re-run | the box held a finished link to the OLD figures and Copy would have handed it out |
+  | `dataDialog` | left | buttons only; each reads the plan when pressed |
+  | `syncChoiceDialog` | left, always | a promise `startSync()` awaits |
+
+  **A new `<dialog>` needs a row here and a line in `endStaleWindows()`.** The
+  default for an unlisted one is to stay open, so the rule for listing is:
+  anything whose boxes or figures came out of the plan closes unless it can be
+  redrawn. The list lives INSIDE the function, not in a top-level const (the
+  boot-time dead zone).
+- **`adoptOtherCopy` no longer closes every other window before `load()`.** It
+  did, for the newer-build card's sake (a modal is above it); item 2 moved that
+  duty into the halt itself, so Help and Find survive an ordinary adoption from
+  another tab exactly as they do one from another device.
+- **What the reader is told is exactly what is true, so the draft is read BEFORE
+  anything closes.** A row editor saves each box as it is finished, so usually
+  nothing is pending: `rowMoved(ctx)` is how the one box still under the cursor
+  (or a whole new, unsaved row) is known about. Sentences, all prefixed "The
+  window you had open was closed, because the plan under it changed.":
+  auto editor, nothing pending → "Nothing in it was waiting to be saved.";
+  auto editor, pending → "What you were still typing in it was not saved — make
+  that change again."; a row being added → "The row you were adding was not
+  saved — add it again."; the cell editor, where nothing is committed before
+  Save and no baseline exists → "Anything typed in it and not yet saved was not
+  kept." (conditional on purpose); Delete-all / Compare → the prefix alone. A
+  `rowMoved` that throws counts as pending — unreadable is not "nothing typed".
+- **NOT claimed, deliberately: that a committed box is IN the adopted plan.**
+  "Waiting to be saved" is about this browser. Sync is whole-plan, last writer
+  wins: a box committed here a second before the phone's newer write arrived was
+  saved, and then replaced along with everything else. That is sync's existing
+  rule for every edit, not this window's, and the sentence does not pretend
+  otherwise.
+- **`finAdopt` RETURNS the sentence; it does not toast.** Every caller in the
+  sync module raised its own toast straight after, and there is one toast. The
+  module's four adoptions now go through **`adoptFrom(data, ts, news)`**, which
+  joins the two; a test counts ONE `window.finAdopt(` in the module.
+  `adoptOtherCopy` appends the same sentence to its "Updated — …" line, and NOT
+  to the lost-change line: the refused press is usually that window's own
+  commit, which has just set `ctx.opened`, so its draft reads "nothing waiting"
+  — true, and beside the point.
+- Tests (group "A synced change under an open window", two, both red before):
+  the real `finAdopt` in an own frame, storage put back by `tcPutBack`. The
+  first replays the fault and then finishes the box and fires the late `close`
+  by hand; the second walks Find / Help / the cell editor and pins the module's
+  one road. `clearDialog`, `compareDialog` and `shareDialog` are covered by the
+  list and by reading only.
+
+### 2. The newer-build halt clears the top layer itself
+
+**The fault, driven headless:** row editor open, `finAdopt` handed a plan one
+schema ahead → the halt threw as designed, and `elementFromPoint` at the middle
+of the screen answered `rowDialog`; the card's Reload button was not reachable
+by a press and focus sat in an `<input>` of the editor. A modal `<dialog>` is in
+the browser's TOP LAYER, above every z-index, so `z-index: 99999` was never in
+the running. The app had stopped and the reader was looking at a live-seeming
+window whose every press did nothing. `adoptOtherCopy` dodged it by closing
+every dialog before `load()`; `finAdopt` did not, and the next caller would have
+had to remember.
+
+- **`haltForNewerData` does it itself**: `const up = querySelectorAll('dialog[open]')`;
+  if any, `rowCtx = null`, close EVERY one, focus Reload. `syncChoiceDialog`
+  included — a halted page must not go on to sync, and its unanswered promise is
+  exactly that. `adoptOtherCopy`'s own close-everything loop is gone (a test
+  fails if a `.close()` comes back into it).
+- **Closing, not "put the card in the top layer".** A popover or a second modal
+  would sit above the open window, but a modal makes everything outside itself
+  INERT, a popover included — the card's Reload button would be on top and dead.
+  The open windows have to go either way, and once they have, the fixed card is
+  on top with no new mechanism and no change to what boot draws.
+- **`if (up.length)` is load-bearing — the boot-time dead zone.** At boot the
+  halt runs inside `let state = load()`, and `rowCtx` is a `let` far below that
+  does not exist yet: touching it there throws a ReferenceError INSTEAD of the
+  halt, with no card. No dialog can be open at boot, so the branch never runs
+  then. The test boots a frame on a newer plan and asserts the card is drawn and
+  the rest of the script never ran.
+- `rowCtx = null` before `close()` for the usual reason (the queued `close` task
+  commits the context it finds). `save()` is a no-op by then, but that commit
+  would still rewrite a row in memory and re-render under the card.
+- **The toast goes too**, by the DOM alone (`matches(':popover-open')` →
+  `hidePopover()`, in a try): it is the page's only other top-layer element, and
+  `toast()`'s own bookkeeping (`toastRaised`) is a `let` the halt cannot reach at
+  boot. After a halt `toastRaised` may be stale; nothing toasts on a halted page.
+- Focus goes to Reload only when a window was closed — closing a modal hands
+  focus back to a control that is now behind the card. Boot is left as it was.
+- Test (one, red before): both roads — `finAdopt` under a row editor, `save()` →
+  `adoptOtherCopy` under Help (a window `endStaleWindows()` leaves) — assert no
+  `dialog[open]` and that `elementFromPoint` at the Reload button IS the button;
+  then the boot case; then the two source pins. **The boot case needs a trick,
+  and it is a trap for the next test like it:** the halt THROWS at the top of
+  the app's script by design, and CI (`tests.yml`) fails the run on ANY uncaught
+  page error, a frame's included — the first cut of this test was green in the
+  page and would have been red in CI. That one frame cancels its window's
+  `error` event for the halt's own message; the listener is added to the
+  frame's first (about:blank) window straight after `appendChild`, which
+  Chromium reuses for a same-origin load (probed: 1 pageerror without, 0 with).
+  **Not tested:** the toast
+  (the suite's 1×1-and-offscreen frames do raise popovers, but a toast above the
+  card is cosmetic and was read, not driven).
+
+### 3. A halted window cannot push
+
+**The fault is real, and it WAS driven end to end — against a fake Firestore.**
+`mm-scripts/haltpush.mjs` (session scratchpad) answers Google's three module URLs
+and the sign-in client from Playwright's router with stubs: a signed-in user, a
+`setDoc` that only records what it was asked to write, an `onSnapshot` whose
+callback the script can fire. No real network, no credentials, everything else
+off-origin aborted. Before the fix: an edit (debounce running) → a snapshot one
+schema ahead → the page halts → 1.2s later **`setDoc` is called with the halted
+page's schema-9 plan and `updatedAt` equal to the NEWER build's timestamp** —
+because `finAdopt` writes `fin-updated` before it halts and `pushNow` stamps
+`localTs()`. `cloudPush`, `pagehide` and `cloudFlush` on the halted page sent
+three more, and the listener was still open. The newer device itself does not
+adopt it (equal timestamp), but a third device would — the older plan at the
+newest date, over the newer build's work. After: 0 pushes, not listening.
+
+- **`pushNow()` is the ONE sender** (the debounce, `cloudFlush`, the
+  hide/unload flush, `startSync`, the listener's "keep this device" branch all
+  end there; there is one `Fs.setDoc(` in the module) and it now opens with
+  `if (!user || window.finViewOnly) return;` — **read at SEND time**, the line
+  before the write. `window.finViewOnly` is the classic script's mirror; the
+  module cannot see `viewOnly`.
+- **`window.cloudHalt`** (module) cancels `pushTimer` and `relistenTimer` and
+  unsubscribes. The gate is what makes a halted page INCAPABLE of sending; the
+  hook is what makes it quiet — no armed timer firing into a refusal, no
+  snapshots each drawing the card again. `listen()` refuses under `finViewOnly`
+  too, for the `startSync` that was mid-`await` when the halt came. No sign-out:
+  the reader reloads into the current build and carries on.
+- **`haltForNewerData` calls the hook in a `try`, `typeof`-guarded.** At boot the
+  module has not run (modules are deferred), so there is nothing to call and
+  nothing pending, and the module then declines to start under `finViewOnly`. A
+  hook that throws must never replace the halt's own throw.
+- **Proven by test** (one, red before): LIVE in a frame — the halt calls
+  `cloudHalt` exactly once, a throwing hook does not stop the halt, and nothing
+  on the halted page asks for `cloudPush` again. As SOURCE — one `setDoc`, the
+  send-time check immediately before it, the three cancellations, the `listen()`
+  guard, the guarded call in the halt.
+- **Proven only by the fake-Firestore run and by reading:** that the armed timer
+  really does not send, that the flush roads do not, that the listener closes.
+  The module never starts in a test frame (`data-fin-tests`) and the suite cannot
+  intercept Google's URLs, so none of that can live in `tests.html`. **Nothing
+  here was run against the real Firestore.**
+
+### 4. A halted window adopts nothing
+
+Found by the agent that did the three above and closed by the supervisor the same evening, because
+it was the last road by which a halted window could cost the NEWER plan. `cloudHalt()` stops the
+module, but a `startSync()` that was mid-`await` when the halt came still calls `finAdopt` with
+whatever it fetched. If that plan is not newer, `finAdopt` went on to write it to `fin-state` —
+over the newer plan it had stored VERBATIM a moment earlier so the fresh build could migrate from
+it. `finAdopt` now returns `''` under `viewOnly`, placed BELOW the newer-schema block on purpose: a
+plan newer still is stored and halts again, as before (item 3's test relies on that second halt).
+A shared view never reaches `finAdopt` — the module does not start under `finViewOnly` — so the
+guard only ever means "halted". Proven by test: halt, hand over an older plan, storage byte for
+byte what it was, nothing taken into memory, no throw. EXPECTED 1173 → 1174.

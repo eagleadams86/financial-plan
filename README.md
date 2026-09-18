@@ -2359,6 +2359,20 @@ of your data?" has no safe default.
 After that, whichever side changed most recently wins, and an update pushed
 from another device arrives live.
 
+**A change that arrives while a window is open closes that window — if the
+window was filled in from the plan** (2026-09-18). Edit a goal on the laptop
+while the phone deletes another one, and the laptop's editor used to stay up
+showing the old row; because a row editor finds its row by its position in the
+list, the next box you finished wrote the whole form into whichever row had
+moved up into that place. Now the row editor, the cell editor, the Delete All
+confirmation and a Compare table close when another device's plan arrives, and
+the sync message says so and says what became of your typing: a row editor
+saves each box as you leave it, so it is usually "Nothing in it was waiting to
+be saved"; if you were mid-box, or adding a row you had not saved yet, it tells
+you that was not kept. Help stays open (it is only words), Find stays open and
+searches again, Share stays open and rebuilds its link, and Back Up is only
+buttons. The same applies when the newer plan comes from another tab.
+
 **Two windows in one browser are one device.** They share one saved plan, so
 only the first of them takes an update off the cloud; the other picks it up
 from the browser's storage a moment later, the same way it picks up anything
@@ -2454,6 +2468,23 @@ older version from its cache and finds a plan saved by a newer one — another
 device updated first, then synced — it stops and says so rather than reading
 your figures with code that predates them. Nothing is changed or deleted;
 connect and reload and it picks up the current version.
+
+That stop can also happen while you are using the app — the newer plan arrives
+through sync, or from another tab running the newer version. If a window was
+open at that moment (a row editor, Help, anything), the message used to be
+drawn UNDERNEATH it: the app had stopped, and you were left looking at an
+editor whose every press did nothing, with the explanation and its Reload
+button hidden behind it. Since 2026-09-18 the stop closes whatever is open
+first, so the message and Reload are always what you see and what the keyboard
+is on.
+
+A stopped window also stops syncing, completely. A change you had made a moment
+before is normally sent to the cloud about a second later, and that send used to
+go ahead even though the window had just stopped — uploading its OLDER plan with
+the newer plan's date on it, which another of your devices could then have taken
+over the newer one. Now the waiting send is cancelled, nothing can be sent from a
+stopped window (it is checked at the moment of sending), and it stops listening
+for changes. Reload, and it carries on in the current version.
 
 If the worker ever misbehaves, `sw-kill.js` is the switch that removes it:
 copy it over `sw.js` and push, and every installed copy uninstalls itself and
