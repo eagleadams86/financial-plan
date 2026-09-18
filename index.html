@@ -1013,7 +1013,12 @@ dialog.twoup .grid-fields { column-gap: 20px; }
 dialog::backdrop { background: rgba(0,0,0,.55); }
 dialog h3 { margin: 0 0 12px; font-size: var(--fs-md); }
 fieldset, .formpanel { border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 12px; margin: 0; background: var(--bg-card-alt); }
+  padding: 12px; margin: 0; background: var(--bg-card-alt);
+  /* The UA gives a fieldset `min-inline-size: min-content`, so one wide
+     <select> inside it pushed the Share window sideways at 320px (2026-09-17;
+     Sprint Velocity met the same rule on 2026-09-15). */
+  min-inline-size: 0; }
+#shareYears { max-width: 100%; }
 /* The gap goes BETWEEN panels rather than onto every panel and then off the
    first one again. `.formpanel:first-of-type { margin-top: 0 }` did it the
    other way round and asked the wrong question: `:first-of-type` is about
@@ -4222,7 +4227,10 @@ function parseMoney(raw) {
   if (t === '' || t === '-' || t === '.') return null;
   const n = parseFloat(t);
   if (Number.isNaN(n)) return null;
-  return round2(bracketed ? -Math.abs(n) : n);
+  /* `|| 0` folds the -0 that `round2` hands back for a tiny negative, which
+     `fmtMoney` would otherwise print as "-$0.00" the moment the box blurred
+     (2026-09-17). round2 itself is left alone — its tie-break is pinned. */
+  return round2(bracketed ? -Math.abs(n) : n) || 0;
 }
 function asMoneyInput(input) {
   input.type = 'text';
@@ -5558,6 +5566,17 @@ function coerceShape(data) {
           if (typeof n === 'number') ov.v = n; else delete pf.overrides[k];
         }
         pf.eoyStamped = !!pf.eoyStamped;
+        /* The typed counts Re-open restores: a number per month, nothing else.
+           Absent on a year frozen before 2026-09-17, which `pinnedToLive`
+           reads as "the stamped map is the typed one". */
+        if (pf.paychecks !== undefined) {
+          pf.paychecks = obj(pf.paychecks);
+          for (const [m, v] of Object.entries(pf.paychecks)) {
+            const n = rateOrNone(v);
+            if (typeof n === 'number' && /^\d{4}-\d{2}$/.test(m)) pf.paychecks[m] = n;
+            else delete pf.paychecks[m];
+          }
+        }
         yr.pinnedFrom = pf;
       }
       /* Rows classify into Income / Expenses / Transfers sections. Data from
@@ -6604,7 +6623,8 @@ function coerceQuotes(raw) {
     const ts = typeof v.ts === 'number' && Number.isFinite(v.ts) ? v.ts : null;
     if (ts === null || ts > horizon) continue;
     if (v.noQuote === true) { out[t] = { noQuote: true, ts }; continue; }
-    if (typeof v.price === 'number' && Number.isFinite(v.price))
+    /* Never negative; a stored 0 is kept as the statement it is (pinned). */
+    if (typeof v.price === 'number' && Number.isFinite(v.price) && v.price >= 0)
       out[t] = { price: v.price, ts };
   }
   return out;
@@ -7415,8 +7435,15 @@ const RULES = {
       const mm = `${py}-${String(i).padStart(2, '0')}`;
       /* the grid may run long enough to cover last year itself; otherwise the
          prior year's own computed cells are the source (same as samemonth) */
+      /* RESOLVED cells on both branches (2026-09-17): the prior grid's are
+         computed ones, autos included, and the in-grid branch read STORED
+         cells, where an auto never lives — so the estimate fallback below
+         could see last year's estimates only across a grid boundary, and a
+         long grid's projection tail went blank for a row every separate year
+         would have filled. Last year's months are all behind `m`, so they are
+         already in `ctx.resolved` by the time this runs. */
       const cell = monthDiff(ctx.yr.startMonth, mm) >= 0
-        ? ctx.yr.cells[`${cat.id}|${mm}`]
+        ? ctx.resolved[`${cat.id}|${mm}`]
         : ctx.prior?.cells[`${cat.id}|${mm}`];
       if (!cell || cell.kind === 'missing') continue;
       if (cell.kind === 'auto') { eSum += cell.v; eN++; }
@@ -7544,6 +7571,10 @@ function clearScheduleMatches(st) {
   if (!schedule) return out;
   for (const yr of Object.values(st.years || {})) {
     if (!yr || yr.kind !== 'grid' || !yr.paychecks) continue;
+    /* A FROZEN year is left alone (2026-09-17): its counts are history, stamped
+       when it was pinned or typed before that, and today's calendar has no say
+       over what a past year's Paychecks row multiplied by. */
+    if (yr.model === 'pinned') continue;
     for (const [m, v] of Object.entries(yr.paychecks)) {
       if (v === paydaysInMonth(m, schedule)) { delete yr.paychecks[m]; out.cleared++; }
       else out.kept++;
@@ -7583,7 +7614,7 @@ function resolvePaychecks(yr, months, prior, schedule) {
     const own = yr.paychecks[m];
     const back = monthAdd(m, -12);
     const last = prior?.paychecks?.[back];
-    if (own !== undefined) { out[m] = own; source[m] = 'entered'; }
+    if (own !== undefined) { out[m] = own; source[m] = yr.model === 'pinned' ? 'pinned' : 'entered'; }
     /* A PAY SCHEDULE is the calendar answering, so it outranks every guess
        below it — and only a typed count, which is somebody saying this month
        broke the pattern, outranks it (2026-09-17). */
@@ -7607,6 +7638,10 @@ function resolvePaychecks(yr, months, prior, schedule) {
    how to answer it, because the cell takes a number. */
 const PAYCHECK_SOURCE_TIP = {
   entered: 'Entered',
+  /* A pinned year's counts are stamped when it is frozen (`gridToPinned`), so
+     every one of them reads as this rather than as "Entered" — the same
+     honesty the balances have with their `pinned` kind. */
+  pinned: 'Frozen with the year',
   schedule: 'From your pay schedule (Preferences)',
   lastyear: 'Estimated from the same month last year',
   assumed: `No count recorded to go on — ${PAYCHECKS_DEFAULT} a month assumed. `
@@ -7807,12 +7842,18 @@ function computeYearWith(st, yearKey, prior, goals) {
              interest: {}, growth: {}, dividend: {}, paychecks: {},
              paycheckSource: {} };
 
+  /* A pinned year never reads today's schedule (2026-09-17): its counts were
+     stamped when it was frozen, and one pinned before that stamping existed
+     falls through to last year and the default exactly as it did then. Handing
+     it the schedule would let a payday moved THIS year recount a Paychecks row
+     beside income cells that were stated with the old count. */
   const { counts: paychecks, source: paycheckSource } = resolvePaychecks(yr, months, prior,
-    payScheduleOf(st));
+    yr.model === 'pinned' ? null : payScheduleOf(st));
   const ctx = { st, yr, months, resolved, balances, prior, paychecks };
   const live = yr.model === 'live';
   const running = {};   // account id -> tracking has begun
   const overflow = overflowOrder(yr.categories, goals);      // once — rows don't change mid-year
+  const hubId = (hubAccount(st) || {}).id;
 
   for (const m of months) {
     /* 1 · categories */
@@ -7848,9 +7889,23 @@ function computeYearWith(st, yearKey, prior, goals) {
          no schedules anywhere computes exactly what it always did. A TYPED
          figure is untouched either way — it wins above, before this line, the
          way a typed figure wins everywhere. */
-      const v = paysIn(cat, m) ? RULES[cat.rule || 'none'](cat, m, ctx) : null;
+      /* AND SO DOES THE ACCOUNT ON THE FAR SIDE (2026-09-17). A transfer or
+         pass-through row names an account, and the balance step below only
+         credits accounts that are RUNNING this month — begun, and not yet past
+         `until`. The hub side had no such check: an estimate into a closed
+         account came off the hub (or, for a pass-through, counted as money in)
+         and landed nowhere, so Total quietly lost the figure every month for the
+         rest of the year while the row went on showing money "moving". The sweep
+         step already refuses both ends; this is the same rule at the front door.
+         Only the ESTIMATE is withheld — a typed figure wins above this line, as
+         everywhere: it is somebody saying the money left. */
+      const v = paysIn(cat, m) && targetRunning(st, yr, cat, m, hubId)
+        ? RULES[cat.rule || 'none'](cat, m, ctx) : null;
+      /* `|| 0`: an average of cents that cancel, or a dividend on a slightly
+         negative balance, rounds to -0, which every money sink downstream
+         would print as "-$0.00" (2026-09-17). */
       resolved[key] = v === null ? { v: 0, kind: 'missing', ...noted }
-                                 : { v: round2(v), kind: 'auto', ...noted };
+                                 : { v: round2(v) || 0, kind: 'auto', ...noted };
     }
 
     /* 2 · balances (live model only — the account chain from the sheet) */
@@ -11387,7 +11442,7 @@ function cellTip(r) {
      one thing this app is careful to keep distinct from an absence. It only
      started mattering once a note could sit on a blank month (2026-08-26),
      which is when the tooltip on such a cell became a thing anybody sees. */
-  const head = [r.kind === 'missing' ? '' : fmtMoney(r.v),
+  const head = [r.kind === 'missing' ? '' : fmtMoney(r.v || 0),
     KIND_LABEL[r.kind]].filter(Boolean).join(' · ');
   const partNote = (r.parts || []).some(p => p.note);
   const split = !!(r.parts && (r.parts.length > 1 || partNote));
@@ -12048,6 +12103,21 @@ function dueOn(cat, m) {
    Absent means every month, so a plan that has never set a schedule computes
    byte for byte what it always did — which is what keeps the real-data
    cross-check honest and is worth a test of its own. */
+/* Whether the account a transfer or pass-through row names is RUNNING in
+   month m — the balance step's own test (begun, and not past `until`), asked
+   at estimate time so a rule never invents money bound for an account that
+   cannot receive it. True for every other row, and for a target the plan no
+   longer has, which is the behaviour those rows always had. */
+function targetRunning(st, yr, cat, m, hubId) {
+  const r = normRole(cat);
+  if (!(r.role === 'transfer' || r.role === 'passthrough') || !r.transferTo) return true;
+  const a = accountById(st, r.transferTo);
+  if (!a) return true;
+  if (a.until && m > a.until) return false;
+  const from = accountBeginsAt(yr, a, hubId);
+  return from === null || m >= from;
+}
+
 function paysIn(cat, m) {
   /* Above the ticked list, because a stopped row is stopped whether or not it
      ever had a schedule — most rows have none, and the row Charlie stopped is
@@ -12161,6 +12231,10 @@ function outstandingDues(cat, months, at, todayIso) {
   for (let i = list.length - 1; i >= 0; i--) {
     const info = at(list[i]);
     if (!info || !info.has) continue;
+    /* A REAL figure: the engine's own estimate is not "what it last came to"
+       (2026-09-17) — read from the back with no date filter, the stand-in was
+       next month's projection whenever one existed. */
+    if (info.cell && info.cell.kind === 'auto') continue;
     const v = info.cell && info.cell.v;
     if (typeof v === 'number' && v !== 0) { recent = v; break; }
   }
@@ -12178,7 +12252,10 @@ function outstandingDues(cat, months, at, todayIso) {
     out.count++;
     out.months.push(m);
     const v = (cell && cell.v) || 0;
-    if (v) { sum += v; any = true; }
+    /* An unpaid month of the live year past its date can hold an AUTO cell —
+       the engine's estimate for a month not yet entered. It is a figure to add
+       up, but an estimated one, and the line must say so (2026-09-17). */
+    if (v) { sum += v; any = true; if (cell.kind === 'auto') out.estimated = true; }
     else if (recent) { sum += recent; any = true; out.estimated = true; }
     else out.estimated = true;
   }
@@ -16602,7 +16679,12 @@ function parseBrackets(text, filing) {
        not over $20,000". Its SECOND number is the upper edge. */
     const range = clean.match(
       /(\d[\d,]*(?:\.\d+)?)\s*(?:-|to|through|but not over|not over|under)\s*\$?\s*(\d[\d,]*(?:\.\d+)?)/i);
-    const lowerOnly = /\bover\b|\bexceeding\b|\bmore than\b|\bat least\b/i.test(cut);
+    /* "NOT over $11,600" is the IRS's own first line, and its one number is
+       an UPPER edge — so the phrase is taken out before the floor words are
+       looked for, or that line read as the open band and the whole schedule
+       was refused for "running on past its top band" (2026-09-17). */
+    const lowerOnly = /\bover\b|\bexceeding\b|\bmore than\b|\bat least\b/i
+      .test(cut.replace(/\bnot\s+over\b/ig, ' '));
 
     let upTo;
     if (explicitOpen) upTo = null;                    // the number names the FLOOR
@@ -19608,7 +19690,12 @@ function rolloverYear(st, computed, fromKey) {
         && src.paychecks[m] === paydaysInMonth(m, schedule)))
       paychecks[m] = src.paychecks[m];
   }
-  const dec = `${fromKey}-12`;
+  /* The old year's LAST month of its own, which is December for every grid
+     the app builds — and the last month a shorter, imported grid actually
+     computed. Reading `-12` regardless seeded every account at $0 when the
+     grid stopped in June (2026-09-17). */
+  const ownMonths = yearMonths(src).filter(m => m.startsWith(fromKey));
+  const dec = ownMonths[ownMonths.length - 1] || `${fromKey}-12`;
   const c = computed[fromKey];
   const seeds = {};
   for (const a of accountsOf(st)) {
@@ -19763,10 +19850,22 @@ function gridToPinned(st, computed, y) {
     }
   const dec = bal[`total|${own[own.length - 1]}`];
   const stamp = yr.eoyCash === undefined && dec !== undefined;
-  return { ...yr, model: 'pinned', overrides, balAdjust,
+  /* THE PAYCHECK COUNTS ARE STAMPED TOO (2026-09-17). A count the year did not
+     type came from the pay schedule or from the year before, and a pinned year
+     computes none of its own — so left unstamped, the Paychecks row of a frozen
+     2026 was recounted from whatever the schedule said TODAY, and moving the
+     anchor a week rewrote a past year's row beside income cells stated with the
+     old count. The resolved count is written down for every month the year
+     shows, and the typed map goes into `pinnedFrom` so Re-open puts it back. */
+  const paychecks = { ...(yr.paychecks || {}) };
+  for (const m of yearMonths(yr))
+    if (paychecks[m] === undefined && computed && computed.paychecks
+        && typeof computed.paychecks[m] === 'number') paychecks[m] = computed.paychecks[m];
+  return { ...yr, model: 'pinned', overrides, balAdjust, paychecks,
     pinnedFrom: { enteredThrough: yr.enteredThrough,
       overrides: { ...(yr.overrides || {}) },
-      balAdjust: { ...(yr.balAdjust || {}) }, eoyStamped: stamp },
+      balAdjust: { ...(yr.balAdjust || {}) },
+      paychecks: { ...(yr.paychecks || {}) }, eoyStamped: stamp },
     ...(stamp ? { eoyCash: round2(dec) } : {}) };
 }
 
@@ -19787,6 +19886,9 @@ function pinnedToLive(st, y) {
   return { ...rest, model: 'live', enteredThrough: pf.enteredThrough,
     overrides: { ...(pf.overrides || {}) },
     balAdjust: { ...(pf.balAdjust || {}) },
+    /* A year frozen before the counts were stamped has none in `pinnedFrom`,
+       and its own map IS the typed one — keep it. */
+    paychecks: { ...(pf.paychecks || rest.paychecks || {}) },
     ...(pf.eoyStamped || eoyCash === undefined ? {} : { eoyCash }) };
 }
 
@@ -21272,6 +21374,23 @@ const dafPriceLists = () => [state.side.daf || []];
 /* And the retirement accounts' holdings, for the same reason: that tab shows
    its own tables and no others. */
 const retPriceLists = () => (state.side.retirementAccounts || []).map(a => a.rows || []);
+/* The tickers a month-end close is worth asking for: the ones `netWorthParts`
+   prices — portfolio and retirement holdings. The giving fund is not part of
+   net worth, so asking for its closes spent the allowance on figures no tile
+   would ever draw and left a tile reading "looking up…" for a ticker it was
+   never going to use (2026-09-17). Over the state handed in, not the global,
+   so `closesWanted` is pure over its arguments. */
+function worthTickers(st) {
+  const side = (st && st.side) || {};
+  const out = new Set();
+  for (const rows of [...(side.portfolios || []).map(p => (p && p.rows) || []),
+                      ...(side.retirementAccounts || []).map(a => (a && a.rows) || [])])
+    for (const h of rows) {
+      const t = lookupTickerOf(h);
+      if (t) out.add(t);
+    }
+  return [...out];
+}
 function allTickers(lists) {
   const out = new Set();
   for (const rows of (lists || priceLists()))
@@ -21417,7 +21536,9 @@ const PRICE_TIMEOUT_MS = 10 * 1000;
      earns a ticker its remembered marker. Anything indeterminate must not. */
 function classifyQuote(status, data) {
   const price = parseFloat(data && data.close);
-  if (Number.isFinite(price)) return { kind: 'price', price: round2(price) };
+  /* Positive, as `classifyClose` and `coerceCloses` already require: a
+     supplier's "-5" priced a holding at minus $42,250 (2026-09-17). */
+  if (Number.isFinite(price) && price > 0) return { kind: 'price', price: round2(price) };
   const code = Number((data && data.code) || status);
   const msg = String((data && data.message) || '');
   if (code === 429) return { kind: /minute/i.test(msg) ? 'throttled' : 'limited' };
@@ -21697,10 +21818,18 @@ const closeAutoTried = new Set();   // "TICKER|YYYY-MM" asked this page load
    "looking up…" rather than calling a today's price a month-end one while the
    answer is on its way. Empty whenever no lookup would actually run. Pure over
    its arguments except for the page-load tried set. */
-function closesWanted(st, month, today, { key, shared } = {}) {
+function closesWanted(st, month, today, { key, shared, now } = {}) {
   if (shared || !key || !month || today <= monthEndISO(month)) return [];
   const have = st.closes || {};
-  return allTickers().filter(t => !have[`${t}|${month}`] && !closeAutoTried.has(`${t}|${month}`));
+  const at = typeof now === 'number' ? now : Date.now();
+  /* A PRICE is for ever — a close never changes. A "no close" is not: it is
+     whatever the supplier said that day (a hiccup, a fund it did not cover yet,
+     a ticker since corrected), and remembered without a horizon it priced that
+     month at today's price on every device permanently (2026-09-17). It gets
+     the quote side's own day, `NO_QUOTE_TTL_MS`; the page-load tried set still
+     stops a loop within the day. */
+  const settled = (k) => have[k] && (!have[k].noClose || at - (have[k].ts || 0) < NO_QUOTE_TTL_MS);
+  return worthTickers(st).filter(t => !settled(`${t}|${month}`) && !closeAutoTried.has(`${t}|${month}`));
 }
 
 async function refreshMonthCloses(month) {
@@ -21708,7 +21837,12 @@ async function refreshMonthCloses(month) {
   const want = closesWanted(state, month, todayISO(), { key, shared: viewOnly });
   if (!want.length) return;
   if (refreshingPrices && Date.now() - priceRunStartedAt < PRICE_RUN_STALE_MS) return;
-  if (Date.now() < priceCoolOffUntil) return;
+  /* SKIPPED IS NOT ANSWERED (2026-09-17). A quiet quote refresh that failed a
+     moment ago leaves a cool-off behind, and this used to return into it with
+     nothing tried and nothing scheduled — so the tile said "looking up…" for
+     ever, since `closesWanted` still wanted the tickers and nothing was ever
+     going to ask. The retry the throttled branch below already had. */
+  if (Date.now() < priceCoolOffUntil) { retryClosesAfterCoolOff(); return; }
   refreshingPrices = true;
   priceRunStartedAt = Date.now();
   const token = ++priceRunToken;
@@ -21734,7 +21868,7 @@ async function refreshMonthCloses(month) {
   } finally {
     if (token === priceRunToken) refreshingPrices = false;
   }
-  if (token !== priceRunToken) return;
+  if (token !== priceRunToken) { saveCloses(found); return; }
   /* Refused rather than answered: the untried tickers stay untried, and the
      cool-off stops the render below asking again straight away. */
   if (run.throttled || run.limited || run.failed || run.badKey) {
@@ -21743,16 +21877,32 @@ async function refreshMonthCloses(month) {
        tickers hits on every first visit — so the rest are asked for again once
        the minute is up, with nobody having to touch anything. The other three
        will not clear in a minute, and are left for the next page load. */
-    if (run.throttled) setTimeout(() => {
-      if (!viewOnly && (state.ui || {}).worthAsOf === 'settled') render();
-    }, PRICE_COOL_OFF_MS + 1000);
+    if (run.throttled) retryClosesAfterCoolOff();
     else for (const t of want) if (!found[`${t}|${month}`]) closeAutoTried.add(`${t}|${month}`);
   }
-  if (Object.keys(found).length) {
-    state.closes = coerceCloses(Object.assign({}, state.closes || {}, found));
-    save();
-  }
+  saveCloses(found);
   render();
+}
+/* One timer, re-armed rather than stacked: a render of the settled view once
+   the cool-off has passed, which asks `refreshMonthCloses` again. Only that
+   view — a reader who has moved on is not dragged back to Progress. */
+let closeRetryTimer = 0;
+function retryClosesAfterCoolOff() {
+  clearTimeout(closeRetryTimer);
+  closeRetryTimer = setTimeout(() => {
+    closeRetryTimer = 0;
+    if (!viewOnly && (state.ui || {}).worthAsOf === 'settled') render();
+  }, Math.max(0, priceCoolOffUntil - Date.now()) + 1000);
+}
+
+/* Whatever a run brought back is banked, whether or not the run is still the
+   current one — a close is a fact about a day, and `onAnswer` has already put
+   the ticker in the tried set, so a result dropped for losing the token was
+   fetched, discarded and not asked for again that page load (2026-09-17). */
+function saveCloses(found) {
+  if (!Object.keys(found).length) return;
+  state.closes = coerceCloses(Object.assign({}, state.closes || {}, found));
+  save();
 }
 
 
@@ -22975,6 +23125,7 @@ function commitRow(ctx, speak) {
      typed knows it has nothing to do. */
   ctx.opened = JSON.stringify(values);
   let said = EDITORS[ctx.section].save(ctx.ds, values);
+  ctx.committed = true;   // the row this window opened from is about to be redrawn
   if (refused) said = typeof said === 'string' ? `${refused}. ${said}` : refused;
   const wasUndoing = undoing;
   if (ctx.banked) undoing = true;
@@ -23044,7 +23195,11 @@ rowDialog.addEventListener('close', () => {
      catches the box that was under the cursor when the window ended: Enter
      submits without blurring, so that field never fired a `change` of its own
      and this comparison is the only thing that sees it. */
-  if (!rowMoved(ctx)) return;
+  /* Nothing left under the cursor — but if an earlier box DID commit, the
+     render rebuilt the row the window was opened from, so the browser's own
+     focus return has nothing to land on and drops to <body> (2026-09-17). The
+     hand-back `commitRow(ctx, true)` does is owed here too. */
+  if (!rowMoved(ctx)) { if (ctx.committed) refocusEditRow(ctx); return; }
   commitRow(ctx, true);
 });
 F('rowCancelBtn').onclick = () => rowDialog.close();
@@ -23327,12 +23482,22 @@ function savePropLinks(map) {
    box REMOVES the entry rather than storing '' — absent and empty are one claim
    here, and the smaller footprint is the better one for this field. */
 function propLinkOf(id) { return loadPropLinks()[id] || ''; }
+/* Returns the sentence to show when a pasted link was REFUSED — the row
+   editor's convention for a box it could not read (`unreadableFields`). The
+   saved link is left as it was: a paste that is not a web address used to
+   delete it silently and refill the box empty (2026-09-17). An empty box still
+   means "clear it". */
 function setPropLink(id, link) {
-  if (!ID_OK.test(String(id || ''))) return;
+  if (!ID_OK.test(String(id || ''))) return '';
+  const raw = String(link == null ? '' : link).trim();
   const map = loadPropLinks();
-  const clean = safePropLink(link);
-  if (clean) map[id] = clean; else delete map[id];
+  const clean = safePropLink(raw);
+  if (clean) map[id] = clean;
+  else if (!raw) delete map[id];
+  else return `“${raw.length > 40 ? raw.slice(0, 40) + '…' : raw}” isn’t a web link — it needs `
+    + 'to start with https:// — so the value page link was left as it was';
   savePropLinks(map);
+  return '';
 }
 
 /* What a saved link's button is CALLED: its own hostname, `www.` dropped, so a
@@ -24129,6 +24294,14 @@ const EDITORS = {
         /* Only on the change that chose the cadence: this window saves as you
            go, and every later box would otherwise say it again. */
         scheduleNote = 'Pay schedule needs a payday date — nothing is counted until it has one';
+      } else if (!scheduleNow && scheduleBefore !== 'null' && v.paycheckRule
+          && payStepOf(v.payCadence)) {
+        /* The DATE was cleared with the cadence still chosen: the schedule that
+           was counting a moment ago counts nothing now, and every Paychecks cell
+           it answered for falls back to last year — a figure that moves must be
+           shown moving (2026-09-17). */
+        scheduleNote = 'Payday date cleared — the pay schedule counts nothing until it has one, '
+          + 'so the Paychecks row is back to last year’s counts';
       }
       state.settings.givingFund = !!v.givingFund;
       if (v.midTermRateAnnual !== null) state.settings.midTermRateAnnual = v.midTermRateAnnual;
@@ -24601,7 +24774,10 @@ const EDITORS = {
            field landing there would reach Firestore, every backup and every
            share link. `v.link` is undefined while ADDING, when the field is not
            offered at all, and `setPropLink` is not reached on that branch. */
-        if (cur.id) setPropLink(cur.id, v.link);
+        if (cur.id) {
+          const refused = setPropLink(cur.id, v.link);
+          if (refused) return refused;
+        }
       }
       /* A new row is minted an id here rather than left to coerceShape,
          because a debt secured on it needs something to point at the moment
@@ -28193,8 +28369,17 @@ function openCellEditor(yearKey, type, id, m) {
     setParts(null, false);
     F('cellDialogTitle').textContent = `Paychecks — ${monthLabel(m)}`;
     const stored = yr.paychecks[m];
+    /* The SAME answer the cell's hover gives, read off the engine's source map
+       (2026-09-17): the dialog used to say "Estimated from Jan 25" over a
+       count the pay schedule had worked out, and over an assumed two. */
+    const src = C[yearKey]?.paycheckSource?.[m];
     F('cellContext').textContent = stored !== undefined
       ? 'How many paychecks land this month (2 most months, 3 in a three-check month).'
+      : src === 'schedule'
+        ? 'Counted from your pay schedule (Preferences) — type the real number if this '
+          + 'month breaks the pattern.'
+      : src === 'assumed'
+        ? `No count recorded to go on — ${PAYCHECKS_DEFAULT} a month assumed. Type the real number.`
       : `Estimated from ${monthLabel(monthAdd(m, -12))} — type the real number if `
         + 'the three-check month has moved.';
     F('cellValue').dataset.money = 'off';
@@ -28312,6 +28497,12 @@ F('cellForm').onsubmit = () => {
     if (v === null || Number.isNaN(v)) delete yr.paychecks[m];
     else yr.paychecks[m] = v;
   }
+  /* CLOSED FIRST, as Revert and Clear always did (2026-09-17). This handler
+     runs before `method="dialog"` closes the window, so the page was still
+     inert when the hand-back ran and `td.focus()` was refused; the browser's
+     own return then aimed at the cell the render had just destroyed and
+     landed on <body>. Closing here makes the second close a no-op. */
+  cellDialog.close();
   save(); render();
   refocusGridCell();
 };
@@ -31667,7 +31858,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   tripPart, sumPart,
   /* Looking a property's value up: where each kind sends you, and the boundary
      for the one thing that store holds. */
-  PROPERTY_LOOKUPS, coercePropLinks, safePropLink, propLinkLabel, propLinkAccount, PROP_LINK_MAX,
+  PROPERTY_LOOKUPS, coercePropLinks, safePropLink, setPropLink, propLinkLabel, propLinkAccount, PROP_LINK_MAX,
   parseMoney, raiseFor, sinceLastYear,
   /* The calculator's arithmetic: the parser, the selection reader, the tape's
      stats, the figure under a click, and the boundary for fin-calc. */
@@ -31683,6 +31874,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
      than reading one and trusting the other. */
   resolvePaychecks, PAYCHECKS_DEFAULT, PAYCHECK_SOURCE_TIP,
   paydaysInMonth, payScheduleOf, clearScheduleMatches, validIsoDate,
+  targetRunning,
   nextUnplannedYear, isLeapYear, reDate, cloneDonationsForward, dropDonationYear,
   hasNote,
   cleanBoxKeys, isBoxShut, withBox, boxKey,
@@ -31697,7 +31889,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   /* Price lookup: the pure predicates only. What the free tier is spent on and
      which of a run's complaints are still true are both decided here, and both
      were got wrong in ways that only showed up a day later. */
-  quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote,
+  quoteFresh, noQuoteFresh, runIsToday, runIsRecent, classifyQuote, worthTickers, closesWanted,
   priceProvenance, fetchedWhen, freshWithin, QUOTE_TTL_MS, MANUAL_FRESH_MS,
   coerceQuotes, coerceCloses, classifyClose, closePricer, lookupTickerOf,
   /* read-only: a frame test reads the live plan after driving the page */

@@ -406,7 +406,11 @@ whole point of having said you're still waiting.
 When the bill does finally arrive, **the waiting line opens the oldest period
 still unpaid** — it names that month first, since it is usually not the month
 you are reading — so the figure is recorded where the money should have left.
-Fill it in and the line moves on to the period behind it. A bill whose due date
+Fill it in and the line moves on to the period behind it. The line's figure
+is the periods' own amounts where they have one; a period with nothing
+recorded borrows **the last figure you actually recorded**, never one of the
+app's own estimates, and a total that leans on any estimate says so in italics.
+A bill whose due date
 has already gone by opens as **actual — it happened**, even in a month you have
 not marked entered yet, so recording it is what pays it.
 
@@ -483,6 +487,11 @@ measures its own projected expenses).
   goal's measured pot from the month after it closes, and the row keeps
   sweeping the accounts that are left. (Until 2026-09-05 the closed account
   poisoned the sum and the row went blank for the rest of the year.)
+- A **transfer row pointing at a closed account** stops estimating from the
+  month after it closes — an estimate there would take the money off the hub
+  and give it to nobody. A figure you type still leaves the hub: that is you
+  saying the money went. (Until 2026-09-17 the estimate kept going and the hub
+  lost it every month.)
 - Rows can **chain**: one row watching the account another fills, resolved in
   dependency order within the same month. Two rows sweeping into each other's
   accounts is a loop with no answer, so both stay blank and the cell editor
@@ -809,7 +818,10 @@ touching them. A count you type still wins for that month — useful when a
 holiday moves a payday, or an extra half-check lands. When you first set the
 schedule (or change it), counts you had typed that the calendar agrees with
 are cleared, since the schedule now gives them, and any that differ are kept
-as your overrides; a message says how many of each.
+as your overrides; a message says how many of each. A **frozen year is left
+alone**: its counts are written down when you freeze it (hover one and it says
+"Frozen with the year"), so moving the schedule later never recounts a past
+year's row, and Re-open gives you back exactly the counts you had typed.
 
 **Every paycheck count says where it came from.** Hover one and it tells you
 whether it's a figure you entered, one from your pay schedule, one taken from
@@ -954,7 +966,9 @@ until the market next opens, so an end-of-August figure built from today's
 prices drifts from the first trading day of September on. With a Twelve Data key
 in Preferences, the settled view asks what each ticker **closed at on the
 month's last trading day** — one lookup per ticker, once, since a close never
-changes — and values Invested and Retirement with it. A month ending on a
+changes (a lookup that came back with no close is tried again the next day) —
+and values Invested and Retirement with it. Only the holdings Net Worth
+actually prices are looked up; the giving fund is not part of it. A month ending on a
 weekend or a market holiday takes the last day the market was open. Each tile
 says where its prices came from: all at the month's closes, some still at
 today's price, or "looking up…" while the answer is on its way. The month in
@@ -1535,8 +1549,10 @@ The link is kept in this browser alone — never synced, never in a backup, neve
 in a share link — and the box is a password box, so your password manager can
 offer to remember it and carry it to your other devices on a path the app never
 touches. That is the same arrangement the [price-lookup key](#prices) uses, and
-for the same reason. Only `http` and `https` links are accepted, and a saved one
-is labelled by its own hostname rather than by anything you type.
+for the same reason. Only `http` and `https` links are accepted (paste the whole
+address, `https://` included), and a saved one is labelled by its own hostname
+rather than by anything you type. A paste that is not a web link is refused
+with a message, and the link you had stays.
 
 ### What You Owe
 

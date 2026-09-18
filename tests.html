@@ -124,7 +124,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1142;
+const EXPECTED = 1164;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -20378,6 +20378,416 @@ t('a saved link never reaches the plan', async () => {
     ok(!JSON.stringify(st).includes('zpid'),
       'and not a trace of it anywhere in the plan — which is what keeps it out of Firestore, '
       + 'every backup file and every share link, all three of which are built from this object');
+  } finally { f.remove(); }
+});
+
+group('Fixes from the 2026-09-17 review');
+/* A live year with a hub and one account that closes in February; a transfer
+   row carrying a typed January figure forward. */
+function closedTargetState(extra) {
+  return H.coerceShape({
+    schema: H.SCHEMA,
+    settings: { accounts: [
+      { id: 'cash', name: 'Cash', rate: 0, hub: true },
+      { id: 'bank', name: 'Other bank', rate: 0, creditTo: 'bank', until: '2030-02' },
+    ] },
+    years: { 2030: { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 6,
+      enteredThrough: '2029-12',
+      categories: [{ id: 'tb', name: 'Bank', role: 'transfer', transferTo: 'bank', rule: 'carry' }],
+      cells: { 'tb|2030-01': { v: -500, kind: 'manual' }, ...(extra || {}) },
+      paychecks: {}, seeds: { cash: 10000, bank: 1000 }, overrides: {}, balAdjust: {} } },
+  });
+}
+t('a transfer estimate into a closed account is withheld rather than lost', () => {
+  const st = closedTargetState();
+  const c = H.computeYear(st, '2030', null);
+  eq(c.cells['tb|2030-02'], { v: -500, kind: 'auto' },
+    'February still carries the figure — the account is open through February');
+  eq(c.cells['tb|2030-03'].kind, 'missing',
+    'from March the account is closed, so the rule has nowhere to send the money');
+  eq(c.cells['tb|2030-06'].kind, 'missing', 'and stays that way');
+  eq(c.balances['cash|2030-02'], 9000, 'the two months it WAS open moved the hub as before');
+  eq(c.balances['cash|2030-06'], 9000,
+    'and the hub no longer loses $500 a month into an account that is not there');
+  eq(c.balances['bank|2030-02'], 2000, 'and the bank received them');
+});
+t('a typed transfer into a closed account is still the reader’s claim', () => {
+  const st = closedTargetState({ 'tb|2030-04': { v: -200, kind: 'manual' } });
+  const c = H.computeYear(st, '2030', null);
+  eq(c.cells['tb|2030-04'], { v: -200, kind: 'manual' }, 'a typed figure wins, as everywhere');
+  eq(c.balances['cash|2030-04'], c.balances['cash|2030-03'] - 200,
+    'and it leaves the hub — the reader said the money went');
+});
+t('a transfer estimate waits for an account that has not begun', () => {
+  /* The far account first states a balance in April; before that it is not
+     running, and the balance step would not have credited it. */
+  const st = H.coerceShape({
+    schema: H.SCHEMA,
+    settings: { accounts: [
+      { id: 'cash', name: 'Cash', rate: 0, hub: true },
+      { id: 'mid', name: 'Savings', rate: 0, creditTo: 'mid' },
+    ] },
+    years: { 2030: { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 6,
+      enteredThrough: '2029-12',
+      categories: [{ id: 'tm', name: 'Savings', role: 'transfer', transferTo: 'mid', rule: 'carry' }],
+      cells: { 'tm|2030-01': { v: -300, kind: 'manual' } }, paychecks: {}, seeds: { cash: 5000 },
+      overrides: { 'mid|2030-04': { v: 100 } },
+      balAdjust: {} } },
+  });
+  const c = H.computeYear(st, '2030', null);
+  eq(c.cells['tm|2030-03'].kind, 'missing', 'March: the account is not running yet');
+  eq(c.cells['tm|2030-05'], { v: -300, kind: 'auto' }, 'May: it is, so the rule estimates');
+  eq(c.balances['cash|2030-03'], 4700, 'and the hub kept the money the estimates would have taken');
+  eq(H.targetRunning(st, st.years['2030'], { role: 'normal', rule: 'carry' }, '2030-01', 'cash'), true,
+    'an ordinary row is never gated by this');
+});
+
+/* A live 2026 on a fortnightly schedule, no counts typed. */
+function scheduledYear(anchor, extra) {
+  return H.coerceShape({
+    schema: H.SCHEMA,
+    settings: { paycheckRule: true, payCadence: 'biweekly', payAnchor: anchor,
+      accounts: [{ id: 'cash', name: 'Cash', rate: 0, hub: true }] },
+    years: { 2026: { kind: 'grid', model: 'live', startMonth: '2026-01', monthCount: 12,
+      enteredThrough: '2026-12',
+      categories: [{ id: 'pay', name: 'Pay', role: 'normal', rule: 'paycheck', perCheck: 1000 }],
+      cells: {}, paychecks: { '2026-02': 3 }, seeds: { cash: 1000 }, overrides: {}, balAdjust: {},
+      ...(extra || {}) } },
+  });
+}
+t('freezing a year stamps its paycheck counts, and Re-open gives the typed ones back', () => {
+  const st = scheduledYear('2026-01-02');
+  const c = H.computeYear(st, '2026', null);
+  eq(c.paychecks['2026-07'], 3, 'fixture: the calendar gives July three checks');
+  const frozen = H.gridToPinned(st, c, '2026');
+  eq(Object.keys(frozen.paychecks).length, 12, 'every month the year shows has a count written down');
+  eq(frozen.paychecks['2026-07'], 3, 'the resolved one');
+  eq(frozen.paychecks['2026-02'], 3, 'a typed one is kept as typed');
+  eq(frozen.pinnedFrom.paychecks, { '2026-02': 3 }, 'and the typed map alone travels for Re-open');
+  /* The employer moves payday a week. A frozen year must not notice. */
+  const st2 = { ...st, settings: { ...st.settings, payAnchor: '2026-01-09' },
+    years: { 2026: frozen } };
+  const c2 = H.computeYear(st2, '2026', null);
+  eq(c2.paychecks, c.paychecks, 'the frozen row multiplies by what it did when it was frozen');
+  eq(c2.paycheckSource['2026-07'], 'pinned', 'and says so');
+  ok(H.PAYCHECK_SOURCE_TIP.pinned, 'with words for the hover');
+  const back = H.pinnedToLive(st2, '2026');
+  eq(back.paychecks, { '2026-02': 3 }, 'Re-open returns exactly the typed map');
+  eq(H.computeYear({ ...st2, years: { 2026: back } }, '2026', null).paychecks['2026-07'], 2,
+    'so the re-opened year counts from the moved schedule again');
+  /* The boundary carries the typed map. */
+  const again = H.coerceShape(JSON.parse(JSON.stringify(st2))).years['2026'];
+  eq(again.pinnedFrom.paychecks, { '2026-02': 3 }, 'coerceShape keeps it');
+  eq(H.coerceShape(JSON.parse(JSON.stringify({ ...st2, years: { 2026: { ...frozen,
+    pinnedFrom: { ...frozen.pinnedFrom, paychecks: { '2026-02': 'three', 'junk': 2, '2026-03': 2 } } } } })))
+    .years['2026'].pinnedFrom.paychecks, { '2026-03': 2 }, 'and drops what is not a count on a month');
+});
+t('setting a schedule leaves a frozen year’s typed counts alone', () => {
+  const st = scheduledYear('2026-01-02', { model: 'pinned', paychecks: { '2026-07': 3, '2026-02': 3 } });
+  st.years['2026'].pinnedFrom = { enteredThrough: '2026-12', overrides: {}, balAdjust: {}, eoyStamped: false };
+  const live = scheduledYear('2026-01-02', { paychecks: { '2026-07': 3 } });
+  eq(H.clearScheduleMatches(live), { cleared: 1, kept: 0 }, 'a live year’s matching count is retired');
+  eq(H.clearScheduleMatches(st), { cleared: 0, kept: 0 }, 'a frozen year is not touched');
+  eq(st.years['2026'].paychecks, { '2026-07': 3, '2026-02': 3 }, 'its counts are still there');
+});
+t('a year frozen before counts were stamped never reads today’s schedule', () => {
+  const st = scheduledYear('2026-01-02', { model: 'pinned', paychecks: {} });
+  st.years['2026'].pinnedFrom = { enteredThrough: '2026-12', overrides: {}, balAdjust: {}, eoyStamped: false };
+  const c = H.computeYear(st, '2026', null);
+  eq(c.paychecks['2026-07'], 2, 'no schedule for history: the default, as before schedules existed');
+  eq(c.paycheckSource['2026-07'], 'assumed');
+  eq(H.pinnedToLive(st, '2026').paychecks, {}, 'and Re-open keeps its own (empty) typed map');
+});
+
+t('average of last year carries into a long grid’s second year, not only into a separate one', () => {
+  /* An import-shaped grid: 24 months from 2030-01 with 2029 recorded behind it
+     in a pinned year. 2030 is all estimates; 2031 sits inside the same grid. */
+  const st = H.coerceShape({
+    schema: H.SCHEMA,
+    settings: { accounts: [{ id: 'cash', name: 'Cash', rate: 0, hub: true }] },
+    years: {
+      2029: { kind: 'grid', model: 'pinned', startMonth: '2029-01', monthCount: 12,
+        categories: [{ id: 'gas', name: 'Gas', role: 'normal', rule: 'none' }],
+        cells: { 'gas|2029-03': { v: -100, kind: 'actual' }, 'gas|2029-09': { v: -200, kind: 'actual' } },
+        paychecks: {}, seeds: {}, overrides: {}, balAdjust: {} },
+      2030: { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 24,
+        enteredThrough: '2029-12',
+        categories: [{ id: 'gas', name: 'Gas', role: 'normal', rule: 'avglastyear' }],
+        cells: {}, paychecks: {}, seeds: { cash: 1000 }, overrides: {}, balAdjust: {} } },
+  });
+  const C = H.computeAll(st, TODAY_FIX);
+  eq(C['2030'].cells['gas|2030-05'], { v: -150, kind: 'auto' }, '2030 averages the recorded 2029');
+  eq(C['2030'].cells['gas|2031-05'], { v: -150, kind: 'auto' },
+    '2031, inside the same grid, carries the estimate on — as a separate 2031 year already did');
+});
+
+t('the waiting line calls an engine estimate an estimate, and never borrows one as the last real figure', () => {
+  const cat = { id: 'water', name: 'Water', duePay: 'manual', dueMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dueDay: 3 };
+  const cells = { '2030-04': { v: -123, kind: 'auto' } };
+  const at = (m) => ({ has: true, cell: cells[m] || { v: 0, kind: 'missing' } });
+  const one = H.outstandingDues(cat, ['2030-04'], at, '2030-04-15');
+  eq(one.count, 1);
+  eq(one.total, -123, 'the estimate is the figure to add up');
+  eq(one.estimated, true, 'but it is an estimate, and the line says so');
+  const two = H.outstandingDues(cat, ['2030-03', '2030-04'], at, '2030-04-15');
+  eq(two.count, 2);
+  eq(two.total, -123,
+    'March has nothing recorded and nothing real to stand in — April’s projection is not what it last came to');
+  eq(two.estimated, true);
+  cells['2030-01'] = { v: -100, kind: 'actual' };
+  eq(H.outstandingDues(cat, ['2030-01', '2030-03', '2030-04'], at, '2030-04-15').total, -223,
+    'a recorded January stands in for March; April keeps its own estimate');
+});
+
+t('a figure that rounds to nothing is $0.00, never -$0.00', () => {
+  eq(H.fmtMoney(H.parseMoney('-0.004')), '$0.00', 'the money box on blur');
+  ok(!Object.is(H.parseMoney('-0.004'), -0), 'parseMoney hands back a plain zero');
+  eq(H.cellTip({ v: -0, kind: 'auto' }), '$0.00 · auto estimate', 'the grid tooltip');
+  const st = H.coerceShape({
+    schema: H.SCHEMA,
+    settings: { accounts: [{ id: 'cash', name: 'Cash', rate: 0, hub: true }] },
+    years: { 2030: { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 4,
+      enteredThrough: '2030-03',
+      categories: [{ id: 'fx', name: 'Rounding', role: 'normal', rule: 'avg' }],
+      cells: { 'fx|2030-01': { v: -0.01, kind: 'actual' }, 'fx|2030-02': { v: 0.01, kind: 'actual' },
+               'fx|2030-03': { v: -0.01, kind: 'actual' } },
+      paychecks: {}, seeds: { cash: 100 }, overrides: {}, balAdjust: {} } },
+  });
+  const c = H.computeYear(st, '2030', null);
+  eq(c.cells['fx|2030-04'].kind, 'auto', 'fixture: April is the average');
+  ok(!Object.is(c.cells['fx|2030-04'].v, -0), 'and the engine never mints a -0 estimate');
+});
+
+t('it reads an IRS rate schedule whose first line is “Not over $11,600”', () => {
+  const r = H.parseBrackets(`Not over $11,600\t10% of the taxable income
+    Over $11,600 but not over $47,150\t$1,160 plus 12% of the amount over $11,600
+    Over $47,150 but not over $100,525\t$5,426 plus 22% of the amount over $47,150
+    Over $100,525\t$17,168.50 plus 24% of the amount over $100,525`);
+  eq(r.ok, true, r.why);
+  eq(r.bands.map((b) => b.upTo), [11600, 47150, 100525, null],
+    'the first line’s number is an upper edge, not the floor of an open band');
+  eq(r.bands.map((b) => b.rate), [0.1, 0.12, 0.22, 0.24]);
+  eq(H.parseBrackets('Over $100,525\t24%').bands, [{ upTo: null, rate: 0.24 }],
+    'a plain “Over” line is still the top band');
+});
+
+t('rolling over a grid that stops before December seeds the new year from its last month', () => {
+  const st = H.coerceShape({
+    schema: H.SCHEMA,
+    settings: { accounts: [{ id: 'cash', name: 'Cash', rate: 0, hub: true }] },
+    years: { 2030: { kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 6,
+      enteredThrough: '2030-06',
+      categories: [{ id: 'rent', name: 'Rent', role: 'normal', rule: 'carry' }],
+      cells: Object.fromEntries([1, 2, 3, 4, 5, 6].map((i) => [`rent|2030-0${i}`, { v: -1000, kind: 'actual' }])),
+      paychecks: {}, seeds: { cash: 20000 }, overrides: {}, balAdjust: {} } },
+  });
+  const C = H.computeAll(st, TODAY_FIX);
+  eq(C['2030'].balances['cash|2030-06'], 14000, 'fixture: June closes at 14,000');
+  eq(H.rolloverYear(st, C, '2030'), '2031');
+  eq(st.years['2031'].seeds, { cash: 14000 }, 'the new year opens where the old one stopped, not at $0');
+});
+
+/* A plan with one brokerage holding, one retirement holding and one giving-fund
+   holding, each on its own ticker nothing else in the suite looks up. */
+function closesState(closes) {
+  return { closes: closes || {}, side: {
+    portfolios: [{ id: 'brok', name: 'Brokerage', rows: [{ ticker: 'ZZPF', shares: 1, price: 10 }] }],
+    retirementAccounts: [{ id: 'k', name: '401k', rows: [{ ticker: 'ZZRT', shares: 1, price: 10 }] }],
+    daf: [{ ticker: 'ZZDAF', shares: 1, price: 10 }] } };
+}
+t('month-end closes are asked for only the tickers Net Worth prices', () => {
+  eq(H.worthTickers(closesState()).sort(), ['ZZPF', 'ZZRT'],
+    'portfolio and retirement holdings — the giving fund is not part of net worth');
+  eq(H.closesWanted(closesState(), '2030-08', '2030-09-15', { key: 'k' }).sort(), ['ZZPF', 'ZZRT'],
+    'so the fund’s ticker is never looked up for a close no tile would draw');
+  eq(H.closesWanted(closesState(), '2030-08', '2030-08-20', { key: 'k' }), [],
+    'nothing is wanted for a month still in progress');
+  eq(H.closesWanted(closesState(), '2030-08', '2030-09-15', { key: '' }), [], 'or without a key');
+  eq(H.closesWanted(closesState(), '2030-08', '2030-09-15', { key: 'k', shared: true }), [],
+    'or in a shared copy');
+});
+
+t('a “no close” answer is asked again after a day; a price is kept for ever', () => {
+  const now = Date.UTC(2030, 8, 15);
+  const day = 24 * 60 * 60 * 1000;
+  const st = closesState({
+    'ZZPF|2030-08': { noClose: true, ts: now - day - 1 },
+    'ZZRT|2030-08': { price: 12.5, date: '2030-08-30', ts: now - 400 * day } });
+  eq(H.closesWanted(st, '2030-08', '2030-09-15', { key: 'k', now }), ['ZZPF'],
+    'yesterday’s “no close” is worth another ask; a year-old price is not');
+  st.closes['ZZPF|2030-08'].ts = now - 60 * 1000;
+  eq(H.closesWanted(st, '2030-08', '2030-09-15', { key: 'k', now }), [],
+    'a “no close” from a minute ago is not asked again yet');
+});
+
+t('a close fetched by a run that lost the token is still banked', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const fn = src.slice(src.indexOf('async function refreshMonthCloses('), src.indexOf('function saveCloses('));
+  ok(fn.length > 0, 'refreshMonthCloses precedes saveCloses');
+  ok(/if \(token !== priceRunToken\) \{ saveCloses\(found\); return; \}/.test(fn),
+    'the lost-token exit banks what it fetched before leaving — onAnswer has already marked the '
+    + 'tickers tried, so a result dropped here would never be asked for again this page load');
+});
+
+t('a quote is a positive price, as a close already had to be', () => {
+  ok(H.classifyQuote(200, { symbol: 'ZZPF', close: '-5' }).kind !== 'price', 'a negative close is not a price');
+  ok(H.classifyQuote(200, { symbol: 'ZZPF', close: '0' }).kind !== 'price', 'nor is zero');
+  eq(H.classifyQuote(200, { symbol: 'ZZPF', close: '12.5' }), { kind: 'price', price: 12.5 });
+  eq(Object.keys(H.coerceQuotes({ ZZPF: { price: -5, ts: Date.now() }, ZZRT: { price: 3, ts: Date.now() } })),
+    ['ZZRT'], 'and the boundary drops a stored one');
+});
+
+t('saving a cell hands focus back to the cell, not to <body>', async () => {
+  const { f, D } = await auditFrame(1280, 900, 'cellfocus');
+  try {
+    const td = D.querySelector('td.cell[data-cat][data-m]');
+    ok(td, 'fixture: the Budget grid has a category cell');
+    const sel = `td.cell[data-cat="${td.dataset.cat}"][data-m="${td.dataset.m}"]`;
+    td.focus(); td.click();
+    await new Promise((r) => setTimeout(r, 150));
+    ok(D.getElementById('cellDialog').open, 'the cell editor opened');
+    D.getElementById('cellValue').value = '99';
+    D.getElementById('cellForm').requestSubmit();
+    await new Promise((r) => setTimeout(r, 150));
+    ok(!D.getElementById('cellDialog').open, 'Save closed it');
+    const again = D.querySelector(sel);
+    ok(again, 'the cell was redrawn');
+    ok(D.activeElement === again, 'and it has the focus — the next Tab carries on from the grid, not from the skip link',
+      D.activeElement && D.activeElement.tagName + '#' + D.activeElement.id);
+  } finally { f.remove(); }
+});
+
+t('a close lookup skipped for the price cool-off is asked again once it lifts', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const fn = src.slice(src.indexOf('async function refreshMonthCloses('), src.indexOf('function saveCloses('));
+  ok(/if \(Date\.now\(\) < priceCoolOffUntil\) \{ retryClosesAfterCoolOff\(\); return; \}/.test(fn),
+    'the cool-off exit arms the retry — returning bare left the tile saying “looking up…” with '
+    + 'nothing ever going to ask');
+  ok(/if \(run\.throttled\) retryClosesAfterCoolOff\(\);/.test(fn), 'and the throttled exit uses the same timer');
+  const timer = src.slice(src.indexOf('function retryClosesAfterCoolOff('), src.indexOf('function saveCloses('));
+  ok(/clearTimeout\(closeRetryTimer\)/.test(timer), 're-armed, never stacked — the settled view renders on every visit');
+  ok(/worthAsOf === 'settled'\) render\(\)/.test(timer), 'and only the settled view is redrawn');
+});
+
+t('the Paychecks dialog names the same source as the cell’s hover', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'paysrc');
+  try {
+    const st = W.__finTestHooks.state;
+    ok(W.__finTestHooks.payScheduleOf(st), 'fixture: the sample plan has a pay schedule');
+    const td = D.querySelector('td.cell[data-pay].c-auto');
+    ok(td, 'fixture: a month whose count was not typed');
+    eq(td.dataset.tip, W.__finTestHooks.PAYCHECK_SOURCE_TIP.schedule, 'its hover says the schedule');
+    td.click();
+    await new Promise((r) => setTimeout(r, 150));
+    const said = D.getElementById('cellContext').textContent;
+    ok(/pay schedule/i.test(said), 'so does the dialog', said);
+    ok(!/Estimated from/.test(said), 'and it does not attribute the count to last year', said);
+    D.getElementById('cellDialog').close();
+    /* No schedule and no year behind: the assumed two. */
+    delete st.settings.payCadence;
+    W.render();
+    await new Promise((r) => setTimeout(r, 150));
+    const td2 = D.querySelector('td.cell[data-pay].c-auto');
+    ok(td2, 'fixture: still an untyped month');
+    if (td2.dataset.tip === W.__finTestHooks.PAYCHECK_SOURCE_TIP.assumed) {
+      td2.click();
+      await new Promise((r) => setTimeout(r, 150));
+      ok(/assumed/.test(D.getElementById('cellContext').textContent), 'an assumed count says so in the dialog too');
+      D.getElementById('cellDialog').close();
+    }
+  } finally { f.remove(); }
+});
+
+t('the Share window fits a 320px phone without scrolling sideways', async () => {
+  const { f, D } = await auditFrame(320, 568, 'share320');
+  try {
+    D.getElementById('shareBtn').click();
+    await new Promise((r) => setTimeout(r, 200));
+    const dlg = D.getElementById('shareDialog');
+    ok(dlg.open, 'the Share window opened');
+    ok(dlg.scrollWidth <= dlg.clientWidth, 'nothing inside it is wider than it is', `${dlg.scrollWidth} > ${dlg.clientWidth}`);
+    const sel = D.getElementById('shareYears');
+    ok(sel.getBoundingClientRect().right <= dlg.getBoundingClientRect().right,
+      'the years box stays inside the window', sel.getBoundingClientRect().right);
+    dlg.close();
+  } finally { f.remove(); }
+});
+
+t('a value page link that is not a web link is refused out loud, and the saved one stays', async () => {
+  const good = 'https://www.zillow.com/homedetails/1-Example-St/12345678_zpid/';
+  eq(H.setPropLink('house', good), '', 'a good link is saved without a word');
+  eq(H.setPropLink('house', ''), '', 'an empty box clears it, without a word');
+  ok(/isn’t a web link/.test(H.setPropLink('house', 'not a link')), 'words are refused out loud');
+  ok(/isn’t a web link/.test(H.setPropLink('house', 'www.zillow.com/homedetails/x')),
+    'so is a bare address — the pinned rule is http or https, and the reader is told rather than left with an empty box');
+  ok(/isn’t a web link/.test(H.setPropLink('house', 'javascript:alert(1)')), 'and so is a scheme of its own');
+  eq(H.setPropLink('house', 'x'.repeat(100)).indexOf('x'.repeat(41)), -1, 'a long paste is cut short in the sentence');
+  const { f, W, D } = await auditFrame(1280, 900, 'proprefuse');
+  try {
+    D.getElementById('tab-household').click();
+    await new Promise((r) => setTimeout(r, 300));
+    D.querySelector('tr[data-edit="property"][data-idx="0"]').click();
+    await new Promise((r) => setTimeout(r, 200));
+    const box = D.getElementById('rf-link');
+    D.getElementById('toast').textContent = '';
+    box.value = 'not a link';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    ok(/isn’t a web link/.test(D.getElementById('toast').textContent),
+      'the editor says so instead of quietly emptying the box', D.getElementById('toast').textContent);
+    D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+
+t('Done on a row editor hands focus back to the row after a field has already committed', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'donefocus');
+  try {
+    D.getElementById('tab-household').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const tr = D.querySelector('tr.editrow[data-edit="property"][data-idx="0"]');
+    ok(tr, 'fixture: a property row, which is a Tab stop');
+    tr.focus();
+    ok(D.activeElement === tr, 'fixture: the row takes focus');
+    tr.click();
+    await new Promise((r) => setTimeout(r, 200));
+    const dlg = D.getElementById('rowDialog');
+    ok(dlg.open, 'the row editor opened');
+    const name = D.getElementById('rf-name');
+    name.value = name.value + ' x';
+    name.dispatchEvent(new W.Event('change', { bubbles: true }));   // commits, and the grid is redrawn
+    await new Promise((r) => setTimeout(r, 150));
+    ok(dlg.open, 'the window stays up after the commit');
+    D.getElementById('rowCancelBtn').click();                       // Done
+    await new Promise((r) => setTimeout(r, 50));
+    if (!dlg.open) dlg.dispatchEvent(new W.Event('close'));         // the harness does not always deliver it
+    await new Promise((r) => setTimeout(r, 50));
+    const again = D.querySelector('tr.editrow[data-edit="property"][data-idx="0"]');
+    ok(again, 'the row was redrawn under its own keys');
+    ok(again !== tr, 'fixture: it IS a new element — the old one is what the browser’s own return aimed at');
+    ok(D.activeElement === again, 'and Done put the focus back on it — the next Tab carries on from the row',
+      D.activeElement && D.activeElement.tagName + '#' + D.activeElement.id);
+  } finally { f.remove(); }
+});
+t('clearing the payday date says the schedule has stopped counting', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'anchorgone');
+  try {
+    const H2 = W.__finTestHooks;
+    ok(H2.payScheduleOf(H2.state), 'fixture: the sample plan has a pay schedule');
+    D.getElementById('prefsBtn').click();
+    await new Promise((r) => setTimeout(r, 200));
+    const box = D.getElementById('rf-payAnchor');
+    ok(box, 'the payday date box is in the window');
+    D.getElementById('toast').textContent = '';
+    box.value = '';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    eq(H2.payScheduleOf(H2.state), null, 'the schedule is off');
+    ok(/payday date cleared/i.test(D.getElementById('toast').textContent),
+      'and the window said so — the Paychecks row just changed in every untyped month',
+      D.getElementById('toast').textContent);
+    D.getElementById('rowDialog').close();
   } finally { f.remove(); }
 });
 

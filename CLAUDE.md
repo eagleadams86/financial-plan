@@ -7504,3 +7504,153 @@ from the 2026-09-15 review" at the foot of `tests.html`.
   A merchant on either card breaks one of those claims, so this stays a
   question for Charles — the sample-data rule against the demo's own lesson
   that a column of nothing is left out.
+
+## Fixes From the 2026-09-17 Review
+
+A review of the whole app on the evening of 2026-09-17, after the month-end
+closes, the shared price bar, the property link and the pay schedule landed:
+four auditors (new features, the engine's figures, the data boundaries, the
+UI driven headless), each finding re-read in source before it was accepted.
+Charles asked for every bug fixed. Same routine as the 2026-09-15 review: one
+commit per finding, its test written first and proven red against `main`'s
+`index.html` (served with the new `tests.html` over it), README and this file
+in the commit. The tests are the group "Fixes from the 2026-09-17 review" at
+the foot of `tests.html`.
+
+- **A transfer estimate into a closed account debited the hub and credited
+  nothing.** The balance step only credits accounts RUNNING that month (begun,
+  not past `until`), but the hub side of a transfer — and the money-in side of
+  a pass-through — had no such check, so once the far account closed the
+  rule's estimate kept coming off the hub every month and landed nowhere. The
+  sweep step already refused both ends. `targetRunning(st, yr, cat, m, hubId)`
+  now sits beside `paysIn` at estimate time: for a transfer or pass-through row
+  whose target is closed or has not yet begun, the estimate is `missing`. A
+  TYPED figure is untouched — it wins above that line, as everywhere. A target
+  the plan no longer has keeps the old behaviour (an ordinary hub row).
+- **A pinned year's Paychecks row was recounted from today's schedule.**
+  `resolvePaychecks` consulted the schedule for every grid year, and
+  `clearScheduleMatches` deleted typed counts in pinned years too — so setting
+  the schedule retired a frozen 2026's typed counts, and moving the anchor a
+  week later rewrote its Paychecks row beside income cells stated with the old
+  count. Three changes: `gridToPinned` stamps the RESOLVED count into
+  `paychecks` for every month the year shows (source `'pinned'`, tip "Frozen
+  with the year") and puts the typed map into `pinnedFrom.paychecks`, which
+  `pinnedToLive` restores (falling back to the year's own map for a year frozen
+  before the stamp existed); `computeYearWith` hands a pinned year no schedule;
+  `clearScheduleMatches` skips `model === 'pinned'`. `coerceShape` guards
+  `pinnedFrom.paychecks` like the year's own map.
+- **`avglastyear` could not see estimates inside its own grid.** The rule
+  reads last year's months from the prior grid's COMPUTED cells, autos
+  included, but from this grid's STORED cells when the grid is long enough to
+  hold last year itself — and an auto never lives in `yr.cells`. So the
+  2026-09-17 estimate fallback worked across a grid boundary and not inside a
+  long grid: an import-shaped 24-month 2030 left the row blank for all of 2031
+  while a separate 2031 year filled in. Both branches read resolved cells now
+  (`ctx.resolved` in-grid — last year's months are all behind `m`, so they are
+  already there).
+- **The waiting line took the engine's estimate for a recorded figure.**
+  `outstandingDues` read `recent` — the stand-in for a period with nothing
+  recorded — from the back of the month list with no kind check and no date
+  filter, so with February missing and April holding an `auto`, "what it last
+  came to" was next month's projection; and an unpaid current month holding an
+  `auto` was summed with `estimated: false`, the line's plain figure a guess.
+  `recent` now skips `auto` cells, and an `auto` in the sum sets `estimated`.
+- **A figure that rounded to nothing printed "-$0.00".** `round2` returns -0
+  for a tiny negative (its tie-break is pinned and stays), and three sinks
+  showed it: the money box on blur (`parseMoney`), the grid tooltip
+  (`cellTip`) and any `auto` estimate the engine minted from cents that cancel
+  (an `avg` of ±$0.01, a dividend on a slightly negative balance). All three
+  fold it with `|| 0` — the 2026-09-15 `avgTipLine` fix, applied where the
+  reviewers found the rest of it.
+- **`parseBrackets` refused a real IRS schedule at its first line.** "Not over
+  $11,600 … 10%" matched the floor-word test (`\bover\b`), so a one-number line
+  became the open band and the whole table was refused as running past its top
+  band — with a message pointing at the wrong mistake. The `not over` phrase
+  is stripped before the floor words are looked for; "Over $100,525" alone is
+  still the top band.
+- **Rolling over a grid that stopped before December opened every account at
+  $0.** `rolloverYear` seeded from `balances[id|YYYY-12]`; a six-month imported
+  grid has no December, so `seeds` was empty and `priorOf` fell to 0. It reads
+  the source grid's last month of its own now — December for every grid the
+  app builds. Import-shape only (`startFresh` and the rollover build Jan–Dec),
+  like `monthlySpend`'s `/ 12`, which is pinned as the design and was left.
+- **Closes were fetched for the giving fund, which Net Worth never prices.**
+  `closesWanted` walked `allTickers()` — every list, `side.daf` included — while
+  `netWorthParts` prices portfolios and retirement accounts only. It spent the
+  allowance (and the 8-a-minute window) on figures no tile draws, and
+  `closeFoot`'s `pending` counted them, so a tile could read "looking up…" for
+  a ticker it would never use. `worthTickers(st)` is the list now, over the
+  state handed in rather than the global, so the function is pure over its
+  arguments and the suite can build the plan it tests.
+- **A "no close" was remembered for ever, and synced.** Any determinate no (a
+  404, a 200 with `values: []`) became `{ noClose: true }` in `state.closes`,
+  which `coerceCloses` keeps and `closesWanted` never re-asked — one hiccup and
+  that month was priced at today's price on every device permanently, the foot
+  reading "at today's prices" with no hint of a failed lookup. The quote side
+  had always retried after `NO_QUOTE_TTL_MS` (a day); `closesWanted` now treats
+  a `noClose` older than that as absent (an optional `now` keeps it pure).
+- **A close fetched by a run that lost the token was thrown away.**
+  `refreshMonthCloses` returned before saving `found` when `refreshPrices` had
+  started meanwhile, but `onAnswer` had already put those tickers in
+  `closeAutoTried` — fetched, discarded, not asked again that page load.
+  `saveCloses(found)` runs on that exit too; only the render and cool-off
+  belong to the current run.
+- **Left as it is, deliberately: a year KEY is kept verbatim.** The boundary
+  reviewer noted `coerceShape` never shape-checks `Object.keys(d.years)`, so a
+  backup's `years.abcd` survives as a nonsense year. Two tests pin the keeping
+  on purpose ("kept verbatim as a key"; a key of `(` still gathers notes) —
+  every render of the key is escaped and that is the recorded safety. Not
+  changed.
+- **A quote could be a negative price.** `classifyQuote` accepted any finite
+  `close` where `classifyClose` required `> 0`; a supplier answer of `"-5"`
+  valued a holding at minus $42,250. The classifier now requires a positive
+  price; `coerceQuotes` refuses a negative one and keeps a stored 0, which a
+  test pins as a real statement.
+- **Saving a cell dropped the keyboard focus to `<body>`.** `cellForm.onsubmit`
+  ran `save(); render(); refocusGridCell()` BEFORE `method="dialog"` closed the
+  window, so the page was still inert, `td.focus()` was refused, and the
+  browser's own focus return aimed at a cell the render had destroyed. Revert
+  and Clear closed first and were fine; Save now does the same
+  (`cellDialog.close()` first — the form's own close is then a no-op).
+- **"Looking up Aug 2026's closes…" for ever.** A quiet quote refresh that
+  failed (a 500, a rejected key) leaves `priceCoolOffUntil` set, and
+  `refreshMonthCloses` returned into it with nothing tried and nothing
+  scheduled — `closesWanted` still wanted the tickers, `closeFoot` read that
+  as pending, and nothing was ever going to ask. `retryClosesAfterCoolOff()`
+  (one re-armed timer; renders only while the settled view is up) is armed on
+  that exit as well as on the throttled one. A rejected key then resolves the
+  way it always did inside a close run: tried, "at today's prices".
+- **The Paychecks dialog contradicted its own cell.** Its context sentence
+  was "Estimated from Jan 25 — …" for every untyped month, while the cell's
+  hover read `PAYCHECK_SOURCE_TIP` — "From your pay schedule" or "assumed".
+  The dialog reads `C[y].paycheckSource[m]` now and has a sentence for each.
+- **The Share window scrolled sideways at 320px.** `select#shareYears`'s
+  intrinsic width (its longest option) is wider than the fieldset's content box,
+  and the UA's `min-inline-size: min-content` on `fieldset` let it push the
+  panel out. `fieldset, .formpanel { min-inline-size: 0 }` plus `#shareYears
+  { max-width: 100% }` — the rule Sprint Velocity took on 2026-09-15.
+- **A value page link that was not a web link vanished silently.**
+  `safePropLink` returns `''` for anything but an http(s) URL — a bare
+  `www.zillow.com/…` included, which a test pins on purpose — and `setPropLink`
+  deleted the saved link on `''` while `reprimeRow` refilled the box empty; no
+  toast. `setPropLink` now returns the row editor's own refusal sentence for a
+  non-empty paste it cannot take ("isn't a web link — it needs to start with
+  https://") and leaves the saved link alone; the property `save` returns it
+  and the box shows what is still saved. An empty box still clears it. The
+  allow-list itself is unchanged.
+- **Done on a saves-as-you-go editor dropped the focus once every box had
+  committed.** The `close` handler returned at `!rowMoved(ctx)`, and the only
+  caller of `refocusEditRow` was `commitRow(ctx, true)` — reached only when the
+  last box was still uncommitted. After a `change` had committed, the render
+  had rebuilt the row the window opened from, so the browser's own return
+  landed on `<body>`. `commitRow` marks `ctx.committed` (not `banked` — the
+  harness stubs `save()`, and a commit redraws the row whether or not an undo
+  step was spent) and that exit hands the focus back; a window opened only to
+  read still leaves the native return alone.
+
+- **Clearing the payday date silently switched the schedule off.** The
+  Preferences save had a sentence for a cadence chosen without a date, but
+  none for the date being emptied afterwards — `payScheduleOf` went null and
+  every untyped Paychecks cell fell back to last year with no word. A third
+  branch says "Payday date cleared — …". Unticking *Paychecks vary by month*
+  stays silent: that hides the row on purpose.
