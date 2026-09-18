@@ -7896,9 +7896,10 @@ fund, target and all, in memory and in storage, with a toast that said only
   anything whose boxes or figures came out of the plan closes unless it can be
   redrawn. The list lives INSIDE the function, not in a top-level const (the
   boot-time dead zone).
-- **`adoptOtherCopy` still closes every other window too, before `load()`** —
-  that is about the newer-build card (a modal is above it), not staleness. Item
-  2 moves that duty into the halt itself.
+- **`adoptOtherCopy` no longer closes every other window before `load()`.** It
+  did, for the newer-build card's sake (a modal is above it); item 2 moved that
+  duty into the halt itself, so Help and Find survive an ordinary adoption from
+  another tab exactly as they do one from another device.
 - **What the reader is told is exactly what is true, so the draft is read BEFORE
   anything closes.** A row editor saves each box as it is finished, so usually
   nothing is pending: `rowMoved(ctx)` is how the one box still under the cursor
@@ -7931,3 +7932,55 @@ fund, target and all, in memory and in storage, with a toast that said only
   by hand; the second walks Find / Help / the cell editor and pins the module's
   one road. `clearDialog`, `compareDialog` and `shareDialog` are covered by the
   list and by reading only.
+
+### 2. The newer-build halt clears the top layer itself
+
+**The fault, driven headless:** row editor open, `finAdopt` handed a plan one
+schema ahead → the halt threw as designed, and `elementFromPoint` at the middle
+of the screen answered `rowDialog`; the card's Reload button was not reachable
+by a press and focus sat in an `<input>` of the editor. A modal `<dialog>` is in
+the browser's TOP LAYER, above every z-index, so `z-index: 99999` was never in
+the running. The app had stopped and the reader was looking at a live-seeming
+window whose every press did nothing. `adoptOtherCopy` dodged it by closing
+every dialog before `load()`; `finAdopt` did not, and the next caller would have
+had to remember.
+
+- **`haltForNewerData` does it itself**: `const up = querySelectorAll('dialog[open]')`;
+  if any, `rowCtx = null`, close EVERY one, focus Reload. `syncChoiceDialog`
+  included — a halted page must not go on to sync, and its unanswered promise is
+  exactly that. `adoptOtherCopy`'s own close-everything loop is gone (a test
+  fails if a `.close()` comes back into it).
+- **Closing, not "put the card in the top layer".** A popover or a second modal
+  would sit above the open window, but a modal makes everything outside itself
+  INERT, a popover included — the card's Reload button would be on top and dead.
+  The open windows have to go either way, and once they have, the fixed card is
+  on top with no new mechanism and no change to what boot draws.
+- **`if (up.length)` is load-bearing — the boot-time dead zone.** At boot the
+  halt runs inside `let state = load()`, and `rowCtx` is a `let` far below that
+  does not exist yet: touching it there throws a ReferenceError INSTEAD of the
+  halt, with no card. No dialog can be open at boot, so the branch never runs
+  then. The test boots a frame on a newer plan and asserts the card is drawn and
+  the rest of the script never ran.
+- `rowCtx = null` before `close()` for the usual reason (the queued `close` task
+  commits the context it finds). `save()` is a no-op by then, but that commit
+  would still rewrite a row in memory and re-render under the card.
+- **The toast goes too**, by the DOM alone (`matches(':popover-open')` →
+  `hidePopover()`, in a try): it is the page's only other top-layer element, and
+  `toast()`'s own bookkeeping (`toastRaised`) is a `let` the halt cannot reach at
+  boot. After a halt `toastRaised` may be stale; nothing toasts on a halted page.
+- Focus goes to Reload only when a window was closed — closing a modal hands
+  focus back to a control that is now behind the card. Boot is left as it was.
+- Test (one, red before): both roads — `finAdopt` under a row editor, `save()` →
+  `adoptOtherCopy` under Help (a window `endStaleWindows()` leaves) — assert no
+  `dialog[open]` and that `elementFromPoint` at the Reload button IS the button;
+  then the boot case; then the two source pins. **The boot case needs a trick,
+  and it is a trap for the next test like it:** the halt THROWS at the top of
+  the app's script by design, and CI (`tests.yml`) fails the run on ANY uncaught
+  page error, a frame's included — the first cut of this test was green in the
+  page and would have been red in CI. That one frame cancels its window's
+  `error` event for the halt's own message; the listener is added to the
+  frame's first (about:blank) window straight after `appendChild`, which
+  Chromium reuses for a same-origin load (probed: 1 pageerror without, 0 with).
+  **Not tested:** the toast
+  (the suite's 1×1-and-offscreen frames do raise popovers, but a toast above the
+  card is cosmetic and was read, not driven).

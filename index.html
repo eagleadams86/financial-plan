@@ -7113,6 +7113,42 @@ function haltForNewerData(found) {
   const attach = () => document.body.appendChild(wrap);
   if (document.body) attach();
   else document.addEventListener('DOMContentLoaded', attach, { once: true });
+  /* ── Nothing may sit ABOVE this card (2026-09-18) ──────────────────────────
+     A z-index, however large, orders the ordinary page. A modal <dialog> is in
+     the browser's TOP LAYER, above all of it — so a halt reached mid-session
+     with a window open (finAdopt under a row editor; adoptOtherCopy under a
+     Help window) drew this card BENEATH that window: the app had stopped, and
+     the reader was looking at a live-seeming editor whose every press did
+     nothing, with the explanation and its Reload button hidden and inert
+     behind it. The halt does the closing ITSELF, so no caller — present or
+     future — can forget to: EVERY open dialog, the sign-in "which copy?" one
+     included (a halted page must not go on to sync, and its unanswered promise
+     is exactly that).
+     THE `if` IS LOAD-BEARING, NOT TIDINESS. At boot this function runs while
+     the script is still being evaluated — inside `let state = load()` — and
+     `rowCtx` is a `let` thousands of lines further down that does not exist
+     yet: touching it there throws a ReferenceError INSTEAD of the halt, with no
+     card drawn. No window can be open at boot, so the branch never runs then
+     and boot is untouched; a test boots a frame on a newer plan to prove it.
+     Mid-session the row editor's context is ended before its window closes,
+     the rule endStaleWindows() keeps: `close` arrives as a queued task whose
+     handler commits the context it finds. (save() is already a no-op by now,
+     but that commit would still rewrite a row in memory and re-render under
+     the card.)
+     The toast is the page's one other top-layer element (a manual popover), so
+     it goes too — by the DOM alone, because toast()'s own bookkeeping is `let`s
+     this function cannot reach at boot. Focus goes to Reload: closing a modal
+     hands it back to a control that is now behind the card. */
+  const up = document.querySelectorAll('dialog[open]');
+  if (up.length) {
+    rowCtx = null;
+    up.forEach((d) => d.close());
+    if (document.body) btn.focus({ preventScroll: true });
+  }
+  try {
+    const t = document.getElementById('toast');
+    if (t && t.matches(':popover-open')) t.hidePopover();
+  } catch (e) { /* no popover support: the toast is an ordinary element, under the card */ }
   throw new Error('fin: plan schema ' + found + ' is newer than this build (' + SCHEMA + ')');
 }
 
@@ -7416,10 +7452,11 @@ function settleWindowsAfterAdopt(ended) {
    In this order, each for a reason:
    1. THE WINDOWS FILLED FROM THE PLAN BEING REPLACED ARE ENDED — the step
       shared with finAdopt, endStaleWindows() above, which says which windows
-      and why. What was in their boxes is lost, and the toast says so. Every
-      OTHER window but the sign-in "which copy?" one is closed here as well,
-      and that is about load(), not about staleness: a modal dialog is in the
-      top layer, ABOVE the newer-build card load() may be about to draw.
+      and why. What was in their boxes is lost, and the toast says so. (This
+      used to close every OTHER window too, because a modal is in the top layer
+      above the newer-build card load() may be about to draw. The halt now
+      clears the top layer itself — see haltForNewerData — so a Help or Find
+      window survives an ordinary adoption here as it does in finAdopt.)
    2. load() IS BOOT'S OWN READER, so the other copy comes through
       migrate(coerceShape()) like every outside shape, and a copy written by a
       NEWER build halts exactly as it would at boot (it throws; nothing below
@@ -7437,9 +7474,6 @@ function settleWindowsAfterAdopt(ended) {
 function adoptOtherCopy(lostChange) {
   const mine = state.ui;
   const ended = endStaleWindows();
-  document.querySelectorAll('dialog[open]').forEach((d) => {
-    if (d.id !== 'syncChoiceDialog') d.close();
-  });
   const next = load();
   next.ui = mine;
   state = next;

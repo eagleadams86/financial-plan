@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1171;
+const EXPECTED = 1172;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -21215,6 +21215,101 @@ t('a synced change closes only the windows filled from the plan — Find is re-r
     eq((mod.match(/adoptFrom\(/g) || []).length, 4, 'all four adoptions go through it');
   } finally {
     if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+t('a newer-build halt reached with a window open is drawn ON TOP of it, and boot still halts as it did', async () => {
+  /* A modal <dialog> is in the top layer, above every z-index: the card was
+     drawn under the open editor and its Reload button was inert behind it. The
+     halt clears the top layer ITSELF now, whichever road reaches it. */
+  const kept = tcSnapshot();
+  const frames = [];
+  const newerOf = (plan) => Object.assign(JSON.parse(JSON.stringify(plan)), { schema: H.SCHEMA + 1 });
+  const onTop = (D) => {
+    const h = [...D.querySelectorAll('h1')].find(x => /Saved by a Newer Version/.test(x.textContent));
+    const wrap = h && h.parentElement.parentElement;
+    const btn = wrap && [...wrap.querySelectorAll('button')].find(b => b.textContent === 'Reload');
+    if (!btn) return 'no card';
+    const r = btn.getBoundingClientRect();
+    const hit = D.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return hit === btn ? 'yes' : 'covered by ' + (hit && (hit.closest('dialog') ? hit.closest('dialog').id : hit.tagName));
+  };
+  try {
+    /* Road one: finAdopt, under a row editor. */
+    const plan = tcPlan();
+    plan.ui.activeTab = 'goals';
+    let booted = await tcBoot(plan, 'haltunder');
+    frames.push(booted.f);
+    let W = booted.W, D = booted.D;
+    D.querySelector('[data-edit="goal"][data-idx="0"]').click();
+    await tcWait(200);
+    ok(D.getElementById('rowDialog').open, 'fixture: a row editor is open');
+    const newer = newerOf(plan);
+    let threw = false;
+    try { W.finAdopt(newer, Date.now() + 1000); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'fixture: finAdopt halted');
+    eq(D.querySelectorAll('dialog[open]').length, 0, 'no window is left open above the card');
+    eq(onTop(D), 'yes', 'and the card’s Reload button is what a press reaches');
+    ok(D.activeElement && D.activeElement.textContent === 'Reload', 'the keyboard is on it too');
+    /* The editor's late close, and a box finished in it, change nothing. */
+    const box = D.getElementById('rf-name');
+    box.value = 'typed after the halt';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    D.getElementById('rowDialog').dispatchEvent(new W.Event('close'));
+    await tcWait(100);
+    eq(localStorage.getItem('fin-state'), JSON.stringify(newer), 'the newer plan is in storage verbatim, and stays so');
+    eq(W.finGet().goals.map(g => g.name).includes('typed after the halt'), false, 'and nothing was rewritten in memory under the card');
+
+    /* Road two: adoptOtherCopy from save(), under a window endStaleWindows() LEAVES. */
+    booted = await tcBoot(plan, 'haltunderhelp');
+    frames.push(booted.f);
+    W = booted.W; D = booted.D;
+    W.openHelp(Object.keys(W.__finTestHooks.HELP)[0]);
+    await tcWait(100);
+    ok(D.getElementById('helpDialog').open, 'fixture: Help is open');
+    localStorage.setItem('fin-state', JSON.stringify(newer));   // the other window runs a newer build
+    threw = false;
+    try { W.save(); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'fixture: save() halted');
+    eq(D.querySelectorAll('dialog[open]').length, 0, 'Help — which an ordinary adoption leaves up — is closed by the halt');
+    eq(onTop(D), 'yes', 'so the card is on top here as well');
+
+    /* Boot: the halt runs inside `let state = load()`, where `rowCtx` does not
+       exist yet. Touching it there would throw a ReferenceError INSTEAD of the
+       halt — no card, and a test suite none the wiser. */
+    /* The halt THROWS at the top of the app's script, by design — and CI fails
+       the run on any uncaught page error, a frame's included. So this one boot
+       cancels the frame's `error` event for THAT message only. The listener
+       goes on the frame's first window, which the browser reuses for a
+       same-origin load; where it does not, the error is merely logged. */
+    localStorage.setItem('fin-state', JSON.stringify(newer));
+    const bf = document.createElement('iframe');
+    bf.setAttribute('data-fin-tests', '');
+    bf.setAttribute('aria-hidden', 'true');
+    bf.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+    frames.push(bf);
+    await new Promise((resolve) => {
+      bf.onload = resolve;
+      bf.src = 'index.html?haltboot=' + Date.now();
+      document.body.appendChild(bf);
+      bf.contentWindow.addEventListener('error', (e) => {
+        if (/newer than this build/.test(String(e.message))) e.preventDefault();
+      });
+    });
+    await tcWait(300);
+    booted = { f: bf, W: bf.contentWindow, D: bf.contentWindow.document };
+    eq(onTop(booted.D), 'yes', 'a plan from a newer build still halts at boot, card drawn');
+    eq(typeof booted.W.finGet, 'undefined', 'with the rest of the script never run');
+    eq(localStorage.getItem('fin-state'), JSON.stringify(newer), 'and the plan untouched');
+    const halt = APP_SRC.slice(APP_SRC.indexOf('function haltForNewerData('), APP_SRC.indexOf('/* ── Undo ──'));
+    ok(/if \(up\.length\) \{\s*rowCtx = null;\s*up\.forEach\(\(d\) => d\.close\(\)\);/.test(halt),
+       'the halt ends the row context and closes EVERY dialog — only when one is open, which is never at boot');
+    const adoptAt = APP_SRC.indexOf('function adoptOtherCopy(');
+    ok(!/\.close\(\)/.test(APP_SRC.slice(adoptAt, APP_SRC.indexOf('\n}\n', adoptAt)).replace(/\/\*[\s\S]*?\*\//g, '')),
+       'and no caller keeps a close-everything of its own for the halt’s sake');
+  } finally {
+    frames.forEach((f) => f.remove());
     tcPutBack(kept);
   }
 });

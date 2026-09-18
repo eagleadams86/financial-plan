@@ -2469,6 +2469,15 @@ device updated first, then synced — it stops and says so rather than reading
 your figures with code that predates them. Nothing is changed or deleted;
 connect and reload and it picks up the current version.
 
+That stop can also happen while you are using the app — the newer plan arrives
+through sync, or from another tab running the newer version. If a window was
+open at that moment (a row editor, Help, anything), the message used to be
+drawn UNDERNEATH it: the app had stopped, and you were left looking at an
+editor whose every press did nothing, with the explanation and its Reload
+button hidden behind it. Since 2026-09-18 the stop closes whatever is open
+first, so the message and Reload are always what you see and what the keyboard
+is on.
+
 If the worker ever misbehaves, `sw-kill.js` is the switch that removes it:
 copy it over `sw.js` and push, and every installed copy uninstalls itself and
 goes back to being an ordinary online-only page.
