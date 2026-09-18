@@ -7313,24 +7313,113 @@ function otherCopyIn(there, mine) {
   return theirs !== ours;
 }
 
+/* ── The windows open over a plan that is being REPLACED ────────────────────
+   ONE step for both adoptions — adoptOtherCopy() (another window of this
+   browser) and finAdopt() (another DEVICE, through sync) — because the hazard
+   does not care which road the newer plan came by. Until 2026-09-18 only the
+   first had it: a change from the phone arrived under an open row editor on the
+   laptop, the editor stayed up showing the old row, and the next box finished in
+   it wrote the WHOLE form into whatever row now sat at that position — the
+   phone deleted the first goal, and "Roof replacement" became a second
+   emergency fund, target and all, without a word.
+
+   WHICH WINDOWS CLOSE IS DECIDED BY WHAT EACH ONE HOLDS, not by "all of them":
+   a Help window shutting under somebody because their phone synced would be a
+   fault of its own.
+   • rowDialog (every row editor, Preferences included) — CLOSED. Its boxes were
+     filled from the replaced plan, and it finds its record by POSITION
+     (`ds.idx`): the wrong-row write above. Its context is ended BEFORE close(),
+     because `close` arrives as a queued task whose handler commits whatever
+     context it finds; with none, it does nothing. Re-priming the boxes from the
+     adopted plan has the same identity problem, so there is no safe way to
+     leave it up.
+   • cellDialog — CLOSED. It is keyed by id and month, not position, but Save
+     writes what the boxes HOLD: opened on $120, the phone makes it $150, Save
+     pressed with nothing typed puts $120 back. (And a year the phone deleted
+     makes `yr.cells` throw.) Nothing in it is committed until Save, so whether
+     anything was typed is not known — the sentence says so conditionally.
+   • clearDialog — CLOSED. It quotes how many years and goals are about to be
+     deleted, counted from the replaced plan; a destructive confirm must not be
+     agreed to on a stale count.
+   • compareDialog — CLOSED. It writes nothing, but it is a table of THIS plan's
+     figures against a file, headed "This Plan", and this plan has just changed;
+     the file is gone, so it cannot be redrawn.
+   • helpDialog — LEFT. Static words. (Opened from a row editor's dot it sits on
+     top of that editor, which still closes underneath it.)
+   • searchDialog (Find) — LEFT, and its list is RUN AGAIN over the adopted
+     plan: the query is the reader's, only the hits were the old plan's.
+   • shareDialog — LEFT, and its link is BUILT AGAIN: the box held a finished
+     link to the replaced plan's figures, and Copy would have handed that out.
+   • dataDialog (Back Up) — LEFT. Buttons only; each reads the plan when pressed.
+   • syncChoiceDialog — LEFT, always: it is a promise startSync() is awaiting,
+     and closing it unanswered would leave sync never starting.
+   A NEW <dialog> must be given a line here. The default for one nobody listed
+   is to stay open, so the rule for listing is: anything whose boxes or figures
+   came out of the plan closes unless it can be redrawn.
+
+   WHAT THE READER IS TOLD is exactly what is true, which is why the draft is
+   looked at BEFORE anything is closed. A row editor saves each box as it is
+   finished, so usually nothing is waiting; `rowMoved()` is how the one box still
+   under the cursor — or a whole new row not yet saved — is known about.
+   Returns { ctx, closed, said }: the ended row context (for the focus), how
+   many windows closed, and the sentence ('' when none did). */
+function endStaleWindows() {
+  /* In here rather than a const beside it: this file's boot-time dead zone has
+     bitten often enough that nothing an adoption reaches is a top-level const. */
+  const STALE_WINDOWS = ['rowDialog', 'cellDialog', 'clearDialog', 'compareDialog'];
+  const ctx = rowCtx;
+  const open = (id) => { const d = F(id); return !!(d && d.open); };
+  let said = '';
+  if (open('rowDialog') && ctx) {
+    let moved = false;
+    try { moved = rowMoved(ctx); } catch (e) { moved = true; }   // unreadable is not "nothing typed"
+    said = !moved ? 'Nothing in it was waiting to be saved.'
+      : ctx.auto ? 'What you were still typing in it was not saved — make that change again.'
+      : 'The row you were adding was not saved — add it again.';
+  } else if (open('cellDialog')) {
+    said = 'Anything typed in it and not yet saved was not kept.';
+  }
+  rowCtx = null;
+  let closed = 0;
+  for (const id of STALE_WINDOWS) {
+    if (!open(id)) continue;
+    F(id).close();
+    closed += 1;
+  }
+  if (closed) said = ('The window you had open was closed, because the plan under it changed. '
+    + said).trim();
+  return { ctx, closed, said: closed ? said : '' };
+}
+
+/* The other half, once the adopted plan is drawn: the windows that stayed are
+   brought up to it, and a window closed from under the reader hands the focus
+   somewhere they can see — the row it was opened from if the adopted plan still
+   draws one there (a focus, never a write), else the tab they are on, else the
+   page. The native return aimed at a node render() has just destroyed. Left
+   alone while another window is still up: the focus belongs inside it, and the
+   page behind a modal refuses it anyway. */
+function settleWindowsAfterAdopt(ended) {
+  if (F('searchDialog').open) renderSearchResults();
+  if (F('shareDialog').open) refreshShareLink();
+  if (!ended || !ended.closed || document.querySelector('dialog[open]')) return;
+  refocusEditRow(ended.ctx);
+  if (!document.activeElement || document.activeElement === document.body) {
+    const tab = document.querySelector('.tab[aria-selected="true"]');
+    const to = tab && tab.offsetParent ? tab : F('maincontent');
+    if (to) to.focus({ preventScroll: true });
+  }
+}
+
 /* The other window's plan, taken in place of this one's. Two callers: save(),
    which was about to write and did not (`lostChange` — it gets the sentence that
    says so), and the `storage` listener below, for which it is only news.
    In this order, each for a reason:
-   1. THE ROW EDITOR'S CONTEXT IS ENDED, THEN EVERY WINDOW IS CLOSED. Their boxes
-      were filled from the plan being replaced, and the row editor finds its
-      record by POSITION (`ds.idx`): left open over the adopted plan, its next
-      commit would write this form into whatever row now sits at that index —
-      the hazard Delete and the move buttons already clear `rowCtx` for. Ended
-      BEFORE close(), because `close` arrives as a queued task and its handler
-      commits whatever context it finds; with none, it does nothing, so no stale
-      draft can land on the adopted plan. What was in the boxes is lost, and the
-      toast says so; no window here has a safer way to stay open. Closed before
-      load() as well: a modal dialog is in the top layer, ABOVE the newer-build
-      card load() may be about to draw. The one exception is the sign-in "which
-      copy?" dialog — it holds no plan figures that a press writes back, and it
-      is a promise startSync() is awaiting; closing it unanswered would leave
-      sync never starting. (Reachable only from a timer's save, it being modal.)
+   1. THE WINDOWS FILLED FROM THE PLAN BEING REPLACED ARE ENDED — the step
+      shared with finAdopt, endStaleWindows() above, which says which windows
+      and why. What was in their boxes is lost, and the toast says so. Every
+      OTHER window but the sign-in "which copy?" one is closed here as well,
+      and that is about load(), not about staleness: a modal dialog is in the
+      top layer, ABOVE the newer-build card load() may be about to draw.
    2. load() IS BOOT'S OWN READER, so the other copy comes through
       migrate(coerceShape()) like every outside shape, and a copy written by a
       NEWER build halts exactly as it would at boot (it throws; nothing below
@@ -7347,13 +7436,9 @@ function otherCopyIn(there, mine) {
       answers a write with a write. */
 function adoptOtherCopy(lostChange) {
   const mine = state.ui;
-  const ctx = rowCtx;
-  rowCtx = null;
-  let closed = 0;
+  const ended = endStaleWindows();
   document.querySelectorAll('dialog[open]').forEach((d) => {
-    if (d.id === 'syncChoiceDialog') return;
-    d.close();
-    closed += 1;
+    if (d.id !== 'syncChoiceDialog') d.close();
   });
   const next = load();
   next.ui = mine;
@@ -7363,22 +7448,16 @@ function adoptOtherCopy(lostChange) {
   undoCore = coreOf(state);
   updateUndoBtn();
   render();
-  /* A window closed from under the reader hands the focus somewhere they can
-     see: the row it was opened from if the adopted plan still draws one there
-     (a focus, never a write), else the tab they are on, else the page. The
-     native return aimed at a node render() has just destroyed. */
-  if (closed) {
-    refocusEditRow(ctx);
-    if (!document.activeElement || document.activeElement === document.body) {
-      const tab = document.querySelector('.tab[aria-selected="true"]');
-      const to = tab && tab.offsetParent ? tab : F('maincontent');
-      if (to) to.focus({ preventScroll: true });
-    }
-  }
+  settleWindowsAfterAdopt(ended);
+  /* A lost change already says why the window went and what did not land (the
+     press that was refused is usually that window's own commit, so its draft
+     reads as "nothing waiting" — true, and beside the point). Otherwise — a
+     timer's save adopting under an open editor — the window's own sentence is
+     the only account of why it closed. */
   const msg = lostChange
     ? 'This plan was changed in another tab or window, so that copy is loaded here now. '
       + 'Your last change here was not saved — make it again.'
-    : 'Updated — this plan was changed in another tab or window.';
+    : ('Updated — this plan was changed in another tab or window. ' + ended.said).trim();
   toast(msg);
   /* There is ONE toast, and most callers raise their own right after save() —
      "Deleted", "Put back the way it was", a section's own sentence — which
@@ -32249,6 +32328,13 @@ window.finAdopt = (incoming, ts) => {
     } catch (e) { console.warn('Could not write saved data', e); }
     haltForNewerData(incoming.schema);
   }
+  /* Another device's plan is about to replace this one, so the windows filled
+     from this one are ended first — the same step, and the same reasons, as a
+     change from another window of this browser: endStaleWindows() (2026-09-18).
+     What it has to say is RETURNED rather than toasted: every caller in the
+     sync module raises its own "Synced from another device" right after this,
+     there is one toast, and the module joins the two (see `adoptFrom`). */
+  const ended = endStaleWindows();
   incoming = migrate(coerceShape(incoming || {}));
   state = Object.assign(blankState(), incoming, {
     settings: Object.assign(blankState().settings, incoming.settings || {}),
@@ -32282,6 +32368,8 @@ window.finAdopt = (incoming, ts) => {
   undoCore = coreOf(state);
   updateUndoBtn();
   render();
+  settleWindowsAfterAdopt(ended);
+  return ended.said;
 };
 /* What the "which copy?" dialog counts. People belong here: someone who has
    named their family and nothing else has typed real data, and an empty copy
@@ -32699,6 +32787,15 @@ const remotePayload = (r) => {
   return r.data || null;
 };
 
+/* Every adoption goes through here, so the toast is ONE sentence made of two
+   facts: where the plan came from, and — when finAdopt had to close a window
+   that was open over the old plan — what became of it (2026-09-18). Raised
+   separately, the second would be replaced by the first in the same breath. */
+const adoptFrom = (data, ts, news) => {
+  const said = window.finAdopt(data, ts);
+  window.toast(typeof said === 'string' && said ? `${news} ${said}` : news);
+};
+
 /* Reconciling the two copies at sign-in. The rule under all four branches:
    AN EMPTY COPY NEVER BEATS A COPY WITH DATA IN IT, whatever the timestamps
    say — a fresh browser's empty push once emptied a device in the sibling
@@ -32716,21 +32813,18 @@ async function startSync() {
   if (remoteHas && localHas && firstSyncForAccount) {
     const keepGoogle = await chooseSyncSource(local, remoteData, remote.updatedAt);
     if (keepGoogle) {
-      window.finAdopt(remoteData, remote.updatedAt);
-      window.toast('Loaded your data from the cloud ☁️');
+      adoptFrom(remoteData, remote.updatedAt, 'Loaded your data from the cloud ☁️');
     } else {
       touchLocal();
       await pushNow();
       window.toast('Kept this device’s data');
     }
   } else if (remoteHas && !localHas) {
-    window.finAdopt(remoteData, remote.updatedAt);
-    window.toast('Loaded your data from the cloud ☁️');
+    adoptFrom(remoteData, remote.updatedAt, 'Loaded your data from the cloud ☁️');
   } else if (localHas && !remoteHas) {
     await pushNow();
   } else if (remoteHas && remote.updatedAt > localTs()) {
-    window.finAdopt(remoteData, remote.updatedAt);
-    window.toast('Loaded your data from the cloud ☁️');
+    adoptFrom(remoteData, remote.updatedAt, 'Loaded your data from the cloud ☁️');
   } else {
     await pushNow();
   }
@@ -32770,8 +32864,7 @@ function listen() {
         return;
       }
     }
-    window.finAdopt(rData, r.updatedAt);
-    window.toast('Synced from another device ☁️');
+    adoptFrom(rData, r.updatedAt, 'Synced from another device ☁️');
   }, (e) => {
     /* A listener that errors is dropped by Firestore and never fires again —
        without this callback, another device's updates would just stop. And

@@ -2359,6 +2359,20 @@ of your data?" has no safe default.
 After that, whichever side changed most recently wins, and an update pushed
 from another device arrives live.
 
+**A change that arrives while a window is open closes that window — if the
+window was filled in from the plan** (2026-09-18). Edit a goal on the laptop
+while the phone deletes another one, and the laptop's editor used to stay up
+showing the old row; because a row editor finds its row by its position in the
+list, the next box you finished wrote the whole form into whichever row had
+moved up into that place. Now the row editor, the cell editor, the Delete All
+confirmation and a Compare table close when another device's plan arrives, and
+the sync message says so and says what became of your typing: a row editor
+saves each box as you leave it, so it is usually "Nothing in it was waiting to
+be saved"; if you were mid-box, or adding a row you had not saved yet, it tells
+you that was not kept. Help stays open (it is only words), Find stays open and
+searches again, Share stays open and rebuilds its link, and Back Up is only
+buttons. The same applies when the newer plan comes from another tab.
+
 **Two windows in one browser are one device.** They share one saved plan, so
 only the first of them takes an update off the cloud; the other picks it up
 from the browser's storage a moment later, the same way it picks up anything

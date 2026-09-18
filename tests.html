@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1169;
+const EXPECTED = 1171;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -21083,8 +21083,12 @@ t('an idle copy listens for the other window — top-level only, and it never an
   }
   ok(/const next = load\(\);/.test(adopt), 'the adoption reads through load() — boot’s gate and boot’s halt');
   ok(/undoRing = \[\];/.test(adopt), 'and starts the undo ring over, as finAdopt does');
-  ok(adopt.indexOf('rowCtx = null;') > -1 && adopt.indexOf('rowCtx = null;') < adopt.indexOf('d.close()'),
-     'the row editor’s context is ended BEFORE its window is closed');
+  /* The step itself moved into endStaleWindows() when finAdopt gained it too. */
+  ok(/const ended = endStaleWindows\(\);/.test(adopt), 'the windows filled from the old plan are ended first');
+  const endAt = src.indexOf('function endStaleWindows(');
+  const end = strip(src.slice(endAt, src.indexOf('\n}\n', endAt)));
+  ok(end.indexOf('rowCtx = null;') > -1 && end.indexOf('rowCtx = null;') < end.indexOf('.close()'),
+     'and the row editor’s context is ended BEFORE its window is closed');
   /* Every writer of fin-state keeps the marker true. */
   ok(src.indexOf('let storedRaw = null;') > -1
      && src.indexOf('let storedRaw = null;') < src.indexOf('let state = load();'),
@@ -21096,6 +21100,123 @@ t('an idle copy listens for the other window — top-level only, and it never an
      'Restore and Delete-all — and only they — write over whatever is there, on purpose');
   eq((src.match(/localStorage\.setItem\(STORAGE_KEY/g) || []).length, 3,
      'a NEW writer of fin-state has to keep the marker true too — then raise this count');
+});
+
+/* ── A change from another DEVICE, under an open window (2026-09-18) ─────────
+   The two-copies fix ended the row editor when another WINDOW's plan was
+   adopted; finAdopt — the same replacement, arriving through sync — did not, so
+   a goal deleted on the phone turned the laptop's open editor into a loaded gun
+   pointed at the next row down. Driven through the real finAdopt (it is a
+   window hook), which writes `fin-state` and `fin-updated`: every key is put
+   back. */
+group('A synced change under an open window');
+t('a change from another device closes the open row editor instead of letting it write into the wrong row', async () => {
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    plan.ui.activeTab = 'goals';
+    const booted = await tcBoot(plan, 'syncedunder');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    const dlg = D.getElementById('rowDialog');
+    const names = () => W.finGet().goals.map(g => g.name);
+    D.querySelector('[data-edit="goal"][data-idx="0"]').click();
+    await tcWait(200);
+    ok(dlg.open, 'fixture: the editor is open on the first goal');
+    /* The phone deletes that goal; the listener hands the laptop its plan. */
+    const phone = JSON.parse(JSON.stringify(plan));
+    const gone = phone.goals.shift().name, next = phone.goals[0].name;
+    const said = W.finAdopt(phone, Date.now() + 1000);
+    ok(!dlg.open, 'the editor is closed — its row is no longer the row at that position');
+    ok(/window you had open was closed/.test(said) && /Nothing in it was waiting to be saved/.test(said),
+       'finAdopt hands back what is TRUE for the sync toast: closed, and nothing was pending', String(said));
+    /* The reader finishes the box they were in — the old form must go nowhere. */
+    const box = D.getElementById('rf-name');
+    box.value = gone + ' (edited)';
+    box.dispatchEvent(new W.Event('change', { bubbles: true }));
+    dlg.dispatchEvent(new W.Event('close'));                // and the late close task
+    await tcWait(100);
+    eq(names()[0], next, 'the goal that moved up into position 0 is untouched');
+    eq(names().includes(gone + ' (edited)'), false, 'and the stale form landed nowhere');
+    eq(JSON.parse(localStorage.getItem('fin-state')).goals[0].name, next, 'nor in storage');
+    ok(D.activeElement && D.activeElement !== D.body, 'the focus is handed somewhere on the page');
+    /* A box still under the cursor is the one thing a saves-as-you-go window
+       can lose, and the sentence says so only then. */
+    D.querySelector('[data-edit="goal"][data-idx="0"]').click();
+    await tcWait(200);
+    D.getElementById('rf-name').value = 'half typed';       // no `change`: not committed
+    const again = JSON.parse(JSON.stringify(phone));
+    again.goals[1].name = 'Renamed on the phone';
+    const lost = W.finAdopt(again, Date.now() + 2000);
+    ok(/still typing in it was not saved/.test(lost), 'typing that had not committed is said to be lost', String(lost));
+    eq(names().includes('half typed'), false, 'because it is');
+    /* And a row being ADDED has committed nothing at all. */
+    D.querySelector('[data-add="goal"]').click();
+    await tcWait(200);
+    D.getElementById('rf-name').value = 'A goal not yet saved';
+    const adding = W.finAdopt(again, Date.now() + 3000);
+    ok(/row you were adding was not saved/.test(adding), 'a new row is named as what was lost', String(adding));
+    ok(!dlg.open, 'and its window is closed too');
+    eq(W.finAdopt(again, Date.now() + 4000), '', 'with no window open there is nothing to add to the toast');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+t('a synced change closes only the windows filled from the plan — Find is re-run, Help stays', async () => {
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'syncedwindows');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    const phone = JSON.parse(JSON.stringify(plan));
+    const roof = phone.goals.find(g => /roof/i.test(g.name));
+    ok(roof, 'fixture: the sample has a roof goal to find');
+    roof.name = 'Garage door';
+    /* Find: the query is the reader's, the hits were the old plan's. */
+    D.getElementById('findBtn').click();
+    await tcWait(100);
+    const box = D.getElementById('searchBox');
+    box.value = 'roof replacement';
+    box.dispatchEvent(new W.Event('input', { bubbles: true }));
+    ok(/Roof replacement/.test(D.getElementById('searchResults').textContent), 'fixture: Find lists the goal');
+    eq(W.finAdopt(phone, Date.now() + 1000), '', 'nothing closed, so nothing to say');
+    ok(D.getElementById('searchDialog').open, 'Find is still open');
+    eq(box.value, 'roof replacement', 'with the reader’s query still in it');
+    ok(!/Roof replacement/.test(D.getElementById('searchResults').textContent),
+       'and its list has been run again over the adopted plan', D.getElementById('searchResults').textContent);
+    D.getElementById('searchDialog').close();
+    /* Help is words. */
+    W.openHelp(Object.keys(W.__finTestHooks.HELP)[0]);
+    await tcWait(100);
+    ok(D.getElementById('helpDialog').open, 'fixture: a Help window is open');
+    eq(W.finAdopt(plan, Date.now() + 2000), '', 'a sync says nothing about it');
+    ok(D.getElementById('helpDialog').open, 'and leaves it open');
+    D.getElementById('helpDialog').close();
+    /* The cell editor writes what its boxes HOLD, so it goes. */
+    const cell = D.querySelector('td.cell[data-cat]');
+    ok(cell, 'fixture: a budget cell');
+    cell.click();
+    await tcWait(200);
+    ok(D.getElementById('cellDialog').open, 'fixture: the cell editor is open');
+    const said = W.finAdopt(phone, Date.now() + 3000);
+    ok(!D.getElementById('cellDialog').open, 'the cell editor is closed');
+    ok(/closed/.test(said) && /not yet saved was not kept/.test(said),
+       'and the sentence is conditional — nothing in it is committed before Save', String(said));
+    /* One road for every adoption, so the sentence cannot be toasted over. */
+    const mod = APP_SRC.slice(APP_SRC.indexOf('<script type="module">'));
+    eq((mod.match(/window\.finAdopt\(/g) || []).length, 1, 'the sync module calls finAdopt in ONE place');
+    ok(/const said = window\.finAdopt\(data, ts\);\s*window\.toast\(typeof said === 'string' && said \? `\$\{news\} \$\{said\}` : news\);/.test(mod),
+       'and that place joins what finAdopt said onto the sync toast');
+    eq((mod.match(/adoptFrom\(/g) || []).length, 4, 'all four adoptions go through it');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
 });
 
 async function run() {
