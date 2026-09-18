@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1172;
+const EXPECTED = 1173;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -21310,6 +21310,58 @@ t('a newer-build halt reached with a window open is drawn ON TOP of it, and boot
        'and no caller keeps a close-everything of its own for the halt’s sake');
   } finally {
     frames.forEach((f) => f.remove());
+    tcPutBack(kept);
+  }
+});
+
+t('a window halted for a newer build cancels its pending sync push, and can never send one', async () => {
+  /* The sync module never starts in a frame (data-fin-tests) and no test can
+     reach Firestore, so what is pinned here is: LIVE, that the halt calls the
+     module's hook and that nothing afterwards asks for a push; and as SOURCE,
+     that the one sender refuses at send time and the hook cancels what is armed.
+     The whole road — edit, debounce running, newer plan arrives, nothing is
+     sent — was driven against a fake Firestore outside the suite (CLAUDE.md). */
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'haltpush');
+    f = booted.f;
+    const W = booted.W;
+    let halts = 0, pushes = 0;
+    W.cloudHalt = () => { halts += 1; };
+    W.cloudPush = () => { pushes += 1; };
+    W.finGet().goals[0].name = 'An edit whose push is still waiting';
+    W.save();
+    eq(pushes, 1, 'fixture: a save asks the module for a push');
+    const newer = Object.assign(JSON.parse(JSON.stringify(plan)), { schema: H.SCHEMA + 1 });
+    let threw = false;
+    try { W.finAdopt(newer, Date.now() + 1000); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'fixture: the page halted');
+    eq(halts, 1, 'the halt told the sync module to cancel what was pending');
+    W.cloudHalt = () => { throw new Error('a broken hook'); };
+    threw = false;
+    localStorage.setItem('fin-state', JSON.stringify(plan));   // (so the second halt has a road to it)
+    try { W.finAdopt(newer, Date.now() + 2000); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'and a hook that throws cannot replace the halt’s own stop');
+    W.save(); W.undoLast();
+    eq(pushes, 1, 'nothing on a halted page asks for a push again');
+
+    const mod = APP_SRC.slice(APP_SRC.indexOf('<script type="module">')).replace(/\/\*[\s\S]*?\*\//g, '');
+    eq((mod.match(/Fs\.setDoc\(/g) || []).length, 1, 'there is ONE sender — a second would need this gate too');
+    ok(/async function pushNow\(\) \{\s*if \(!user \|\| window\.finViewOnly\) return;\s*await Fs\.setDoc\(/.test(mod),
+       'and it refuses a halted page at SEND time, the line before the write — not when the timer was armed');
+    const hook = mod.slice(mod.indexOf('window.cloudHalt ='), mod.indexOf('window.cloudPush ='));
+    ok(/clearTimeout\(pushTimer\); pushTimer = null;/.test(hook), 'the hook cancels the armed push');
+    ok(/clearTimeout\(relistenTimer\); relistenTimer = null;/.test(hook), 'and the relisten retry');
+    ok(/if \(unsub\) \{ unsub\(\); unsub = null; \}/.test(hook), 'and stops listening');
+    ok(/function listen\(\) \{\s*if \(!user \|\| !Fs\) return;\s*if \(window\.finViewOnly\) return;/.test(mod),
+       'and a halted page cannot start listening again');
+    const halt = APP_SRC.slice(APP_SRC.indexOf('function haltForNewerData('), APP_SRC.indexOf('/* ── Undo ──'));
+    ok(/try \{ if \(typeof window\.cloudHalt === 'function'\) window\.cloudHalt\(\); \} catch \(e\) \{\}/.test(halt),
+       'the halt calls it only if the module has registered it — at boot it has not');
+  } finally {
+    if (f) f.remove();
     tcPutBack(kept);
   }
 });

@@ -7984,3 +7984,46 @@ had to remember.
   **Not tested:** the toast
   (the suite's 1×1-and-offscreen frames do raise popovers, but a toast above the
   card is cosmetic and was read, not driven).
+
+### 3. A halted window cannot push
+
+**The fault is real, and it WAS driven end to end — against a fake Firestore.**
+`mm-scripts/haltpush.mjs` (session scratchpad) answers Google's three module URLs
+and the sign-in client from Playwright's router with stubs: a signed-in user, a
+`setDoc` that only records what it was asked to write, an `onSnapshot` whose
+callback the script can fire. No real network, no credentials, everything else
+off-origin aborted. Before the fix: an edit (debounce running) → a snapshot one
+schema ahead → the page halts → 1.2s later **`setDoc` is called with the halted
+page's schema-9 plan and `updatedAt` equal to the NEWER build's timestamp** —
+because `finAdopt` writes `fin-updated` before it halts and `pushNow` stamps
+`localTs()`. `cloudPush`, `pagehide` and `cloudFlush` on the halted page sent
+three more, and the listener was still open. The newer device itself does not
+adopt it (equal timestamp), but a third device would — the older plan at the
+newest date, over the newer build's work. After: 0 pushes, not listening.
+
+- **`pushNow()` is the ONE sender** (the debounce, `cloudFlush`, the
+  hide/unload flush, `startSync`, the listener's "keep this device" branch all
+  end there; there is one `Fs.setDoc(` in the module) and it now opens with
+  `if (!user || window.finViewOnly) return;` — **read at SEND time**, the line
+  before the write. `window.finViewOnly` is the classic script's mirror; the
+  module cannot see `viewOnly`.
+- **`window.cloudHalt`** (module) cancels `pushTimer` and `relistenTimer` and
+  unsubscribes. The gate is what makes a halted page INCAPABLE of sending; the
+  hook is what makes it quiet — no armed timer firing into a refusal, no
+  snapshots each drawing the card again. `listen()` refuses under `finViewOnly`
+  too, for the `startSync` that was mid-`await` when the halt came. No sign-out:
+  the reader reloads into the current build and carries on.
+- **`haltForNewerData` calls the hook in a `try`, `typeof`-guarded.** At boot the
+  module has not run (modules are deferred), so there is nothing to call and
+  nothing pending, and the module then declines to start under `finViewOnly`. A
+  hook that throws must never replace the halt's own throw.
+- **Proven by test** (one, red before): LIVE in a frame — the halt calls
+  `cloudHalt` exactly once, a throwing hook does not stop the halt, and nothing
+  on the halted page asks for `cloudPush` again. As SOURCE — one `setDoc`, the
+  send-time check immediately before it, the three cancellations, the `listen()`
+  guard, the guarded call in the halt.
+- **Proven only by the fake-Firestore run and by reading:** that the armed timer
+  really does not send, that the flush roads do not, that the listener closes.
+  The module never starts in a test frame (`data-fin-tests`) and the suite cannot
+  intercept Google's URLs, so none of that can live in `tests.html`. **Nothing
+  here was run against the real Firestore.**

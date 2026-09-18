@@ -2478,6 +2478,14 @@ button hidden behind it. Since 2026-09-18 the stop closes whatever is open
 first, so the message and Reload are always what you see and what the keyboard
 is on.
 
+A stopped window also stops syncing, completely. A change you had made a moment
+before is normally sent to the cloud about a second later, and that send used to
+go ahead even though the window had just stopped — uploading its OLDER plan with
+the newer plan's date on it, which another of your devices could then have taken
+over the newer one. Now the waiting send is cancelled, nothing can be sent from a
+stopped window (it is checked at the moment of sending), and it stops listening
+for changes. Reload, and it carries on in the current version.
+
 If the worker ever misbehaves, `sw-kill.js` is the switch that removes it:
 copy it over `sw.js` and push, and every installed copy uninstalls itself and
 goes back to being an ordinary online-only page.
