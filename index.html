@@ -2237,8 +2237,11 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
   background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
 .mbar > i { display: block; height: 100%; background: var(--accent); }
 .mfoot { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-secondary); }
-.mrow[data-cat], .mrow[data-bal] { cursor: pointer; }
-.mrow[data-cat]:hover, .mrow[data-bal]:hover { background: var(--bg-card-alt); }
+/* The Close card's December list starts a second block under the month's. */
+.mrows + .sub.closeyear { margin-top: 16px; }
+.mrow[data-cat], .mrow[data-bal], .mrow[data-goview], .mrow[data-close] { cursor: pointer; }
+.mrow[data-cat]:hover, .mrow[data-bal]:hover,
+.mrow[data-goview]:hover, .mrow[data-close]:hover { background: var(--bg-card-alt); }
 .mrow:focus-visible { outline: 2px solid var(--focus-border); outline-offset: -2px; }
 /* A row with nothing in it this month is `hidden` (2026-08-26), whatever the
    reason — the one that stays is a bill this month says is due, which says so
@@ -2946,6 +2949,9 @@ body.maxi-open { overflow: hidden; }
      `.gridactions-wrap` they were already covered, on a `<p class="sub">` they
      are not, and a printed month would carry a "Mark Aug 26 entered" button. */
   #closeMonthBtn, #reopenMonthBtn,
+  /* The Close card is a list of chores for the screen, not part of the plan,
+     and its pointer line on the current month goes with it. */
+  [data-box="month-close"], [data-close],
   /* A full-screen chart is a thing you do to a SCREEN. On paper the page is
      the window, so the buttons go — and the overlay goes too, but NOT with the
      card in it: printForPaper() closes the overlay on `beforeprint`, which puts
@@ -5897,6 +5903,9 @@ function coerceShape(data) {
     p.value = num(p.value);
     const owedNum = num(p.owed);
     if (typeof owedNum === 'number') p.owed = owedNum; else delete p.owed;
+    /* The day its value was last confirmed — see "Closing a month". A date
+       only, and a real one; anything else goes. */
+    if (stampDay(p.checkedOn)) p.checkedOn = stampDay(p.checkedOn); else delete p.checkedOn;
   }
   /* What is owed. The balance goes through num() like every other figure that
      reaches a total; the RATE and the PAYMENT do not — they go through
@@ -5983,8 +5992,10 @@ function coerceShape(data) {
       pf.accounts = pf.accounts.filter(id => acctIds.has(id));
       if (!pf.accounts.length) delete pf.accounts;
     } else delete pf.accounts;
+    if (!stampDay(pf.checkedOn)) delete pf.checkedOn;
   }
   s.daf.forEach(numHolding);
+  if (!stampDay(s.dafCheckedOn)) delete s.dafCheckedOn;
   /* Retirement accounts used to be six fixed fields (k401) with labels from
      Charlie's employer. They're a generic list now — any number of accounts,
      each Traditional or Roth. One-time migration; k401 is emptied so deleting
@@ -6039,6 +6050,7 @@ function coerceShape(data) {
      unescaped fields above: coerce on the way in. */
   for (const a of s.retirementAccounts) {
     a.amount = num(a.amount);
+    if (!stampDay(a.checkedOn)) delete a.checkedOn;
     /* An account may assume its OWN real return — a bond-heavy rollover and an
        all-equity Roth do not grow at one rate. ABSENT means "use the one in
        Preferences", so a non-number is deleted rather than defaulted: storing
@@ -6624,6 +6636,10 @@ function coerceShape(data) {
     delete d.ui.activeMonth;
   d.quotes = coerceQuotes(d.quotes);
   d.closes = coerceCloses(d.closes);
+  /* The days a backup and each year's CSV were last downloaded — dates only,
+     and ABSENT until the first download, the flowNoTransfers rule. */
+  const ex = coerceExported(d.exported);
+  if (ex) d.exported = ex; else delete d.exported;
   return d;
 }
 
@@ -6688,6 +6704,20 @@ function coerceCloses(raw) {
       out[key] = { price: v.price, date: v.date, ts };
   }
   return out;
+}
+
+/* `state.exported`: `{ backup?: day, csv?: { 'YYYY': day } }`, or null when
+   nothing in it survives. Pure; a declaration because coerceShape runs it. */
+function coerceExported(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = {};
+  if (stampDay(raw.backup)) out.backup = raw.backup;
+  const csv = {};
+  if (raw.csv && typeof raw.csv === 'object' && !Array.isArray(raw.csv))
+    for (const [y, day] of Object.entries(raw.csv))
+      if (/^\d{4}$/.test(y) && stampDay(day)) csv[y] = day;
+  if (Object.keys(csv).length) out.csv = csv;
+  return Object.keys(out).length ? out : null;
 }
 
 /* Which rows of a yearly summary are money that MOVED, and which are closing
@@ -7223,7 +7253,16 @@ let undoSnapshot = JSON.stringify(state);   // the state as of the last save/loa
    somebody actually regrets. The snapshot still carries the cache — restoring
    an older one at worst costs a re-fetch. */
 function coreOf(st) {
-  return JSON.stringify(Object.assign({}, st, { ui: null, quotes: null, closes: null }));
+  return JSON.stringify(Object.assign({}, st, { ui: null, quotes: null, closes: null, exported: null }));
+}
+/* The backup and CSV download days ride through an undo: `coreOf` leaves them
+   out, so a download never makes an undo step, and putting back an older plan
+   must keep the downloads that happened since. Pure. */
+function carryExported(restored, current) {
+  const ex = current && current.exported;
+  if (ex) restored.exported = JSON.parse(JSON.stringify(ex));
+  else delete restored.exported;
+  return restored;
 }
 let undoCore = coreOf(state);
 let undoing = false;
@@ -7254,7 +7293,9 @@ function undoLast() {
   /* Its own serialization a moment ago — still through the same gate every
      outside shape passes, because a cheap check here is cheaper than trusting
      memory over a discipline. */
-  state = migrate(coerceShape(safeParse(snap) || {}));
+  /* A download is not an edit, so undoing an earlier edit must not make one
+     look like it never happened — see carryExported. */
+  state = carryExported(migrate(coerceShape(safeParse(snap) || {})), state);
   undoing = true;
   save();
   undoing = false;
@@ -9223,6 +9264,24 @@ const HELP = {
       + 'late moved every future estimate with it. A figure you type is never affected: it '
       + 'wins wherever you put it.'],
   ] },
+  monthClose: { title: 'Closing a Month, Explained', body: [
+    ['The jobs that finish a month, as a list that ', b('ticks itself'), '. Nothing here is a box '
+      + 'you tick by hand: each line asks the plan whether the thing it names has been done, so a '
+      + 'line can only say Done when it is. Click a line to go to where that job is done.'],
+    ['The card appears on the month that has just ended, and on the current month for its last '
+      + 'week. A line is left out when there is nothing for it to be about — no bills with a due '
+      + 'date, no debts, no holdings. On December a second list covers the year: building the '
+      + 'next one, carrying its figures across, marking the old one as history and saving a CSV '
+      + 'copy. That list stays on last December until it is done.'],
+    ['Share counts, retirement balances and property values carry no month of their own, so each '
+      + 'remembers the day its figures last changed. A line ticks when every one of them was '
+      + 'checked on or after the first of the month. If nothing changed, press ',
+      b('✓ Checked, No Change'), ' on that card to say so. Downloading a backup or a year’s CSV '
+      + 'is remembered the same way.'],
+    ['Net worth for a month is a snapshot dated its last day. The Record button can date one '
+      + 'there on the last day itself, or afterwards with the Net Worth card set to the last month '
+      + 'you marked entered — which is why that line may ask you to mark the month entered first.'],
+  ] },
   monthDue: { title: 'Due and Waiting, Explained', body: [
     ['Only a row you mark ', b('paid by hand'), ' is ever warned about. One on autopay just '
       + 'says when it goes out — that is a note about your arrangement, and the app has no way '
@@ -10549,7 +10608,9 @@ function sampleState() {
            inside Rosa's Roth IRA also give the rollup the several pots it is
            gated on — see the retirement accounts below. */
         portfolios: [
-          { id: 'brokerage', name: 'Brokerage', accounts: ['long'], rows: [
+          /* `checkedOn` on this pane and not the next, so the Close card's
+             "Investment holdings checked" line shows one of two done. */
+          { id: 'brokerage', name: 'Brokerage', accounts: ['long'], checkedOn: m(8) + '-29', rows: [
             { ticker: 'VTI',  shares: 210, price: 268.4, cost: 41200, lookup: true },
             { ticker: 'VXUS', shares: 180, price: 64.2,  cost: 10800, lookup: true },
             /* A HOLDING'S NOTE in the demo, since the window grew one: the
@@ -10626,6 +10687,10 @@ function sampleState() {
             retirement: 341000, property: 175000 },
           { date: `${Y}-06-30`,     total: 271500, liquid: 34700, invested: 62500,
             retirement: 384000, property: 181000 },
+          /* The last day of the month the sample is entered through, so that
+             month's Close card has a net worth line already done. */
+          { date: `${Y}-08-31`,     total: 276900, liquid: 35200, invested: 64100,
+            retirement: 391000, property: 182000 },
         ],
         /* `type` is the account kind (the list the editor offers) and `kind` is
            only ever 'traditional' or 'roth' — both are written out here rather
@@ -10643,7 +10708,7 @@ function sampleState() {
           { id: 'rosa-401k', name: '401(k)', type: '401k', kind: 'traditional',
             owner: 'rosa', amount: 268000, rate: 0.05 },
           { id: 'rosa-roth', name: 'Roth IRA', type: 'roth-ira', kind: 'roth',
-            owner: 'rosa', rate: 0.05,
+            owner: 'rosa', rate: 0.05, checkedOn: m(8) + '-30',
             contribs: { [PREV2]: 6500, [PREV]: 7000, [y]: 7000 },
             rows: [
               { ticker: 'VTI',  shares: 210, price: 268.4, cost: 38400, lookup: true },
@@ -12224,6 +12289,265 @@ function monthActionsFor(yr, m, started) {
   return { close: roomLeft && toEnter === m, reopen: yr.enteredThrough === m };
 }
 
+/* ── Closing a month (2026-09-19) ────────────────────────────────────────────
+   The chores that end a month — the bills in, the balances stated, the month
+   marked entered, net worth recorded, the other statements checked, a backup
+   taken — and, on December, the ones that end a year. Each line TICKS ITSELF:
+   it is a question asked of the plan, never a box somebody ticks, so it cannot
+   say "done" about something that isn't.
+
+   PURE: it reads only what it is handed, `today` included, which is what lets
+   every rule below be pinned against a fixture rather than against the clock.
+
+   WHEN THERE IS A CARD AT ALL is the part that stops it nagging:
+   - the month that just ended, always — that is the month being closed;
+   - the current month, in its last CLOSE_LEAD_DAYS only, so the list is there
+     while the month-end figures are still to be had (a snapshot dated the
+     last day can only be recorded ON the last day, or once it is entered);
+   - LAST calendar year's December while any year-end line is open, because a
+     year is closed in January. Only last year's: an imported 2015 December has
+     no CSV stamp and never will, and a card on every old December would be a
+     list of chores nobody is going to do.
+   Older months get nothing. A plan that never uses the entered marker would
+   otherwise grow an open card on every month it has.
+
+   A LINE IS LEFT OUT when there is nothing for it to be about — no bills with a
+   date, no debts, no holdings — rather than drawn ticked. A tick is a claim that
+   something was done. */
+const CLOSE_LEAD_DAYS = 7;
+
+/* A calendar day, 'YYYY-MM-DD', and a real one: the date stamps below arrive
+   from Firestore, a backup and a hand-edited file, and '2026-02-30' compares
+   as a perfectly good string. A function DECLARATION that reaches for NOTHING
+   else, because coerceShape calls it during load(): `daysInMonth` leans on
+   `isLeapYear`, a const thousands of lines below, and a ReferenceError there is
+   swallowed by load() and brings the whole workbook up blank. */
+function stampDay(s) {
+  if (typeof s !== 'string') return null;
+  const m = /^(\d{4})-(0[1-9]|1[0-2])-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const last = mo === 2 ? (leap ? 29 : 28) : [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
+  return d >= 1 && d <= last ? s : null;
+}
+
+function closeChecklist(st, computed, y, m, today) {
+  const yr = st && st.years ? st.years[y] : null;
+  const c = computed ? computed[y] : null;
+  if (!yr || yr.kind !== 'grid' || !c || typeof m !== 'string' || typeof today !== 'string')
+    return null;
+  const TM = today.slice(0, 7);
+  if (m > TM) return null;
+  if (!yearStarted(st, y, today)) return null;
+  const from = `${m}-01`;
+  const isDec = m === `${y}-12`;
+  const lastMonth = monthAdd(TM, -1);
+  const inLastWeek = m === TM && daysBetween(today, monthEndISO(m)) < CLOSE_LEAD_DAYS;
+  const lastYearsDec = isDec && +y === +TM.slice(0, 4) - 1;
+  if (m !== lastMonth && !inLastWeek && !lastYearsDec) return null;
+
+  const side = st.side || {};
+  const live = yr.model === 'live';
+  const items = [];
+  const add = (group, id, label, done, detail, go) =>
+    items.push({ group, id, label, done: !!done, detail: detail || '', go: go || null });
+  const count = (open, all, noun) =>
+    !open ? (all === 1 ? `The one ${noun} is done` : all === 2 ? `Both ${noun} done` : `All ${all} ${noun} done`)
+    : open === all ? (all === 1 ? 'Still to do' : `None of the ${all} ${noun} done yet`)
+    : `${open} of ${all} ${noun} still to do`;
+
+  /* ── Bills: every row with a deadline this month carries a real figure ──
+     `dueOn` owns the pay-a-month-ahead shift and a row's `until`, so a bill is
+     asked about in the month its money moves. A stated $0.00 is an `actual`
+     and counts — the bill came and was nothing. A held row is waiting on a
+     bill that has not been issued, which is not a chore that can be done yet;
+     it is named in the detail instead of counted. */
+  const cats = yr.categories || [];
+  const billed = cats.filter(cat => dueOn(cat, m));
+  const held = billed.filter(cat => cat.duePay === 'manual' && cat.dueHold && cat.dueHold >= m);
+  const bills = billed.filter(cat => !held.includes(cat));
+  if (bills.length) {
+    const open = bills.filter(cat => ((c.cells[`${cat.id}|${m}`] || {}).kind) !== 'actual');
+    add('month', 'bills', 'Bills with a due date recorded', !open.length,
+      count(open.length, bills.length, bills.length === 1 ? 'bill' : 'bills')
+        + (open.length ? ` — next: ${open[0].name}` : '')
+        + (held.length ? ` · ${held.length} waiting on the bill` : ''),
+      open.length ? { kind: 'cell', cat: open[0].id, m, year: y } : null);
+  }
+
+  /* ── Balances: every account the month shows has a stated figure ──
+     The month page's own set of accounts, so the two cannot disagree: the
+     grid's answer in a live year (and only months it has a balance for — an
+     account opened later has nothing to state yet), "states a figure" in a
+     pinned one. */
+  const accts = accountsOf(st);
+  const stated = (a) => [yr.overrides || {}, yr.balAdjust || {}]
+    .some(map => Object.keys(map).some(k => k.startsWith(a.id + '|')));
+  const shown = accts.filter(live
+    ? (a) => accountShowsInYear(a, yr, c, c.months, accts)
+      && c.balances[`${a.id}|${m}`] !== undefined
+    : stated);
+  if (shown.length) {
+    const open = shown.filter(a => !(yr.overrides || {})[`${a.id}|${m}`]);
+    add('month', 'balances', 'Account balances stated', !open.length,
+      count(open.length, shown.length, shown.length === 1 ? 'account' : 'accounts')
+        + (open.length ? ` — next: ${open[0].name}` : ''),
+      open.length ? { kind: 'bal', id: open[0].id, m, year: y } : null);
+  }
+
+  /* ── The month marked entered ──
+     A string comparison, and that is what makes coerceShape's backfill safe:
+     a year nobody has entered anything in carries the month BEFORE it starts,
+     which is less than every month the year holds. Months go in ORDER, so an
+     earlier month still open is named rather than offered a button that
+     cannot act. */
+  const et = yr.enteredThrough || '';
+  const enteredDone = !live || et >= m;
+  const toEnter = live && et ? monthAdd(et, 1) : m;
+  const acts = monthActionsFor(yr, m, true);
+  add('month', 'entered', `${monthLabelFull(m)} marked entered`, enteredDone,
+    enteredDone ? 'Its estimates are now the figures that happened'
+      : acts.close ? 'Turns this month’s estimates into entered figures'
+      : `${monthLabelFull(toEnter)} has to be entered first`,
+    enteredDone ? null : acts.close ? { kind: 'enter' } : { kind: 'month', m: toEnter });
+
+  /* ── Net worth recorded for the month ──
+     A snapshot dated the month's LAST DAY, which is where the Record button
+     puts one: on the last day itself, or — for a month already over — with the
+     Net Worth card set to the last month entered. After that a month can no
+     longer be dated by the button at all, and the line is left out rather
+     than drawn as a chore nobody can do. December of last year is that case
+     once January begins: the new year is the live one and its entered marker
+     is still the backfilled December, which the card will not offer. */
+  const end = monthEndISO(m);
+  const snaps = Array.isArray(side.snapshots) ? side.snapshots : [];
+  const recorded = snaps.some(s => s && s.date === end);
+  const liveKeys = startedGridYears(st, today);
+  const liveKey = liveKeys[liveKeys.length - 1] || null;
+  const liveYr = liveKey ? st.years[liveKey] : null;
+  const settled = liveYr && liveYr.model === 'live' && liveYr.enteredThrough === m
+    && yearMonths(liveYr).includes(m);
+  const canStillEnter = live && !enteredDone && liveKey === y;
+  if (recorded || m === TM || settled || canStillEnter)
+    add('month', 'worth', 'Net worth recorded', recorded,
+      recorded ? `A snapshot dated ${fullDayLabel(end)}`
+        : m === TM ? `Record it on ${dayLabel(end, true)}, the last day, or once ${
+            monthLabelFull(m)} is entered`
+        : settled ? `Record it with the Net Worth card set to ${monthLabelFull(m)}`
+        : `Mark ${monthLabelFull(m)} entered first`,
+      recorded ? null
+        : { kind: 'view', view: 'goals', settled: !!settled && m < TM });
+
+  /* ── Debts brought up to date ──
+     "At or after": a statement for October replaces September's, so a debt
+     updated later is not behind on this month. A paid-off debt has nothing to
+     state. */
+  const debts = (Array.isArray(side.liabilities) ? side.liabilities : [])
+    .filter(l => l && Number(l.balance) > 0);
+  if (debts.length) {
+    const open = debts.filter(l => !(typeof l.asOf === 'string' && l.asOf >= m));
+    add('month', 'debts', 'Debts brought up to date', !open.length,
+      count(open.length, debts.length, debts.length === 1 ? 'debt' : 'debts')
+        + (open.length ? ` — next: ${open[0].name || 'a debt'}` : ''),
+      { kind: 'view', view: 'household' });
+  }
+
+  /* ── The statements with no month of their own ──
+     Share counts, retirement balances and property values are typed with no
+     date, so each carries `checkedOn` — written when a figure really changes,
+     or by ✓ Checked, No Change — and a line ticks when every one is dated on
+     or after the first of the month. */
+  const fresh = (d) => typeof d === 'string' && d >= from;
+  const stampLine = (id, label, list, noun, view) => {
+    if (!list.length) return;
+    const open = list.filter(x => !fresh(x.checkedOn));
+    add('month', id, label, !open.length,
+      count(open.length, list.length, noun(list.length))
+        + (open.length ? ` — next: ${open[0].name || '?'}` : ''),
+      { kind: 'view', view });
+  };
+  stampLine('invested', 'Investment holdings checked',
+    (Array.isArray(side.portfolios) ? side.portfolios : []).filter(p => p && (p.rows || []).length),
+    n => n === 1 ? 'account' : 'accounts', 'investments');
+  stampLine('retirement', 'Retirement accounts checked',
+    (Array.isArray(side.retirementAccounts) ? side.retirementAccounts : []).filter(Boolean),
+    n => n === 1 ? 'account' : 'accounts', 'retirement');
+  if ((st.settings || {}).givingFund && (side.daf || []).length)
+    add('month', 'giving', 'Giving fund checked', fresh(side.dafCheckedOn),
+      fresh(side.dafCheckedOn) ? `Checked ${fullDayLabel(side.dafCheckedOn)}` : 'Not checked this month',
+      { kind: 'view', view: 'giving' });
+  stampLine('property', 'Property values checked',
+    (Array.isArray(side.property) ? side.property : []).filter(p => p && typeof p.value === 'number'),
+    n => n === 1 ? 'property' : 'properties', 'household');
+
+  const ex = st.exported || {};
+  add('month', 'backup', 'Backup downloaded', fresh(ex.backup),
+    fresh(ex.backup) ? `Last one ${fullDayLabel(ex.backup)}` : 'None since the month began',
+    { kind: 'backup' });
+
+  /* ── December: the year ──
+     These lines only ever NAVIGATE. Building a year, marking one as history
+     and its CSV are year-scoped actions that live on the grid, and a second
+     copy of them on a page about one month is the mistake the month view was
+     built to avoid. */
+  if (isDec) {
+    const ny = String(+y + 1);
+    add('year', 'nextYear', `${ny} built`, !!(st.years || {})[ny],
+      (st.years || {})[ny] ? `The ${ny} grid is there` : `Build it from the ${y} grid`,
+      (st.years || {})[ny] ? null : { kind: 'grid', year: y, btn: 'rolloverBtn' });
+
+    /* Next year's figures, asked only where THIS year had them — a plan that
+       never typed a tax table is not missing one. The tax tables are read at
+       the exact year: `taxTableFor` falls back to the newest older table,
+       which would pass last year's brackets off as next year's. Bonuses are
+       left out on purpose: one is recorded once it is paid, and asking for it
+       in January would ask for a made-up figure. */
+    const has = (v) => !!v && (typeof v !== 'object' || Object.keys(v).length > 0);
+    const status = (st.settings || {}).filingStatus || 'single';
+    const bands = (j, yy) => {
+      const t = ((((side.tax || {})[j] || {})[yy]) || {})[status];
+      return !!(t && (t.bands || []).length);
+    };
+    const pieces = [
+      ['pay', 'Pay', 'comp', has((side.comp || {})[y]), has((side.comp || {})[ny])],
+      ['limits', 'Contribution limits', 'retirement',
+        has((side.limits || {})[y]), has((side.limits || {})[ny])],
+      ['federal', 'Federal tax', 'tax', bands('federal', y), bands('federal', ny)],
+      ['state', 'State tax', 'tax', bands('state', y), bands('state', ny)],
+      ['pto', 'Time off', 'vacations',
+        has(((st.vacations || {}).pto || {})[y]), has(((st.vacations || {}).pto || {})[ny])],
+      ['donations', 'Giving', 'giving',
+        ((side.donations || {})[y] || []).length > 0, ((side.donations || {})[ny] || []).length > 0],
+    ].filter(p => p[3]);
+    if (pieces.length) {
+      const open = pieces.filter(p => !p[4]);
+      add('year', 'figures', `${ny} figures set up`, !open.length,
+        open.length ? `Still to add: ${open.map(p => p[1]).join(', ')}`
+          : `${pieces.map(p => p[1]).join(', ')} all carried into ${ny}`,
+        open.length ? { kind: 'view', view: open[0][2] } : null);
+    }
+
+    add('year', 'history', `${y} marked as history`, !live,
+      !live ? 'Its balances are kept as they stand'
+        : et < `${y}-12` ? 'Every month has to be entered first'
+        : 'Stops the year computing and keeps its balances',
+      live ? { kind: 'grid', year: y, btn: et < `${y}-12` ? null : 'freezeYearBtn' } : null);
+
+    const csvOn = (ex.csv || {})[y];
+    add('year', 'csv', `${y} CSV downloaded`, typeof csvOn === 'string' && csvOn >= `${y}-12-01`,
+      typeof csvOn === 'string' && csvOn >= `${y}-12-01`
+        ? `Downloaded ${fullDayLabel(csvOn)}` : 'A spreadsheet copy of the year, for your records',
+      { kind: 'grid', year: y, btn: 'csvYearBtn' });
+
+    /* Last year's December stays only while the YEAR is unfinished — the
+       month's own lines were last month's business. */
+    if (lastYearsDec && m !== lastMonth && !inLastWeek
+        && items.filter(i => i.group === 'year').every(i => i.done)) return null;
+  }
+  return { m, y, items };
+}
+
 /* ═══════════════════════════ The month view ═══════════════════════════════
 
    THE BUDGET'S SECOND LENS on exactly the same figures. The grid is a
@@ -13232,10 +13556,20 @@ function renderMonthView() {
       title="Move the entered-through marker back a month (your numbers stay put)">
       <span aria-hidden="true">↩</span> Re-open ${esc(monthLabel(m))}</button>` : '',
   ].filter(Boolean).join('');
+  /* ONE LINE ON THE PAGE YOU OPEN. The card belongs to last month, and the app
+     opens on this one — so while last month still has open lines, this month's
+     summary says so and takes you there. */
+  const lastM = monthAdd(today.slice(0, 7), -1);
+  const lastY = m === today.slice(0, 7) && !viewOnly ? yearOfMonth(state, lastM) : null;
+  const lastClose = lastY ? closeChecklist(state, C, lastY, lastM, today) : null;
+  const lastOpen = lastClose ? lastClose.items.filter(i => !i.done).length : 0;
+  const closePointer = !lastOpen ? '' : `<button type="button" class="revealrows"
+    data-close="month" data-m="${esc(lastM)}">${esc(monthLabelFull(lastM))} isn’t closed yet — ${
+      lastClose.items.length - lastOpen} of ${lastClose.items.length} done. Open it</button>`;
   const head = `<div class="card" data-box="month-summary">
     <h2>${esc(monthTitle(m))}${helpBtn('monthRows', 'how these lists are ordered')}</h2>
     <p class="sub">${status}${monthActs ? ` ${monthActs}` : ''}</p>
-    <div class="goalgrid">${tiles}</div>
+    <div class="goalgrid">${tiles}</div>${closePointer}
   </div>`;
 
   /* ── What is due, and what is waiting ────────────────────────────────────
@@ -13429,6 +13763,45 @@ function renderMonthView() {
       the moment its figure is recorded as something that happened.</p>
     <div class="mrows">${dueList.map(dueRow).join('')}${heldShown.map(heldLine).join('')}</div>
   </div>`;
+
+  /* ── Closing the month (2026-09-19) ──────────────────────────────────────
+     `closeChecklist` decides whether there is a card and what is on it; this
+     only draws it. Each line is a door to where the chore is done — a cell,
+     a balance, a tab, the Back Up window, a button on the grid — and none of
+     them does the chore itself. Never in a shared view: these are the
+     sender's chores, measured against the reader's clock. */
+  const close = viewOnly ? null : closeChecklist(state, C, y, m, today);
+  const closeRow = (it) => {
+    const g = it.go;
+    const act = !g ? ''
+      : g.kind === 'cell' ? ` data-cat="${esc(g.cat)}" data-m="${esc(g.m)}" data-year="${esc(g.year)}" role="button" tabindex="0"`
+      : g.kind === 'bal' ? ` data-bal="${esc(g.id)}" data-m="${esc(g.m)}" data-year="${esc(g.year)}" role="button" tabindex="0"`
+      : ` data-close="${esc(g.kind)}"${g.view ? ` data-view="${esc(g.view)}"` : ''}${
+          g.settled ? ' data-settled="1"' : ''}${g.m ? ` data-m="${esc(g.m)}"` : ''}${
+          g.year ? ` data-year="${esc(g.year)}"` : ''}${g.btn ? ` data-btn="${esc(g.btn)}"` : ''}
+          role="${g.kind === 'view' ? 'link' : 'button'}" tabindex="0"`;
+    return `<div class="mrow closerow"${act}
+      aria-label="${esc(`${it.label}, ${it.done ? 'done' : 'to do'}. ${it.detail}`)}">
+      <span class="mname">${esc(it.label)}</span>
+      <span class="mamt">${it.done
+        ? '<span class="pill good"><span aria-hidden="true">✓</span> Done</span>'
+        : '<span class="pill"><span aria-hidden="true">○</span> To do</span>'}</span>
+      <span class="mfoot">${esc(it.detail)}</span></div>`;
+  };
+  const closeCard = !close ? '' : (() => {
+    const mon = close.items.filter(i => i.group === 'month');
+    const yrs = close.items.filter(i => i.group === 'year');
+    const done = close.items.filter(i => i.done).length;
+    return `<div class="card" data-box="month-close">
+    <h2>Close ${esc(monthTitle(m))}${helpBtn('monthClose', 'closing a month')}</h2>
+    <p class="sub">${done} of ${close.items.length} done. Each line ticks itself once the
+      plan shows it is done — click one to go and do it.</p>
+    <div class="mrows">${mon.map(closeRow).join('')}</div>
+    ${yrs.length ? `<p class="sub closeyear"><strong>Closing ${esc(y)}</strong> — the
+      year-end jobs. Each opens the place it is done.</p>
+    <div class="mrows">${yrs.map(closeRow).join('')}</div>` : ''}
+  </div>`;
+  })();
 
   /* ── One section, biggest first ───────────────────────────────────────────
      That ordering is this view's whole argument. A grid keeps the order you
@@ -13694,7 +14067,7 @@ function renderMonthView() {
       figure is an estimate.</p>
   </div>`;
 
-  return `<div class="tipzone">${monthPickerHtml(m, all)}${head}${dueCard}
+  return `<div class="tipzone">${monthPickerHtml(m, all)}${head}${dueCard}${closeCard}
     <div class="monthcards"><div class="monthgrid">${['income', 'expense', 'transfer'].map(sectionCard).join('')}${
       acctCard}</div></div>${chartCard}${monthNotes(m, y)}</div>`;
 }
@@ -13885,8 +14258,43 @@ function wireMonthRows() {
     save(); render();
   }, true);
   zone.addEventListener('click', (e) => open(e.target.closest('.mrow[data-cat], .mrow[data-bal]')));
+  /* The Close card's lines, and the pointer to last month's card. Each goes to
+     where its job is done and does nothing there itself. */
+  const follow = (el) => {
+    if (!el) return;
+    const { close: kind, view, m, year, btn } = el.dataset;
+    if (kind === 'view') {
+      if (el.dataset.settled) state.ui.worthAsOf = 'settled';
+      goToView(view);
+    } else if (kind === 'month') {
+      if (pickMonth(m)) window.scrollTo(0, 0);
+    } else if (kind === 'backup') {
+      openModal(dataDialog);
+    } else if (kind === 'enter') {
+      const b = F('closeMonthBtn');
+      if (b) { b.scrollIntoView({ block: 'center' }); b.focus({ preventScroll: true }); }
+    } else if (kind === 'grid') {
+      delete state.ui.budgetView;
+      if (year && state.years[year]) state.ui.activeYear = year;
+      save(); render();
+      window.scrollTo(0, 0);
+      const target = btn && F(btn);
+      if (!target) return;
+      /* On a phone the grid's year buttons fold behind ⋯ Actions. */
+      const toggle = F('gridActionsBtn');
+      if (toggle && getComputedStyle(toggle).display !== 'none') {
+        F('gridActions').classList.add('open');
+        toggle.setAttribute('aria-expanded', 'true');
+      }
+      target.scrollIntoView({ block: 'center' });
+      target.focus({ preventScroll: true });
+    }
+  };
+  zone.addEventListener('click', (e) => follow(e.target.closest('[data-close]')));
   zone.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
+    const shut = e.target.closest('.mrow[data-close]');
+    if (shut) { e.preventDefault(); follow(shut); return; }
     const li = e.target.closest('.mrow[data-cat], .mrow[data-bal]');
     if (!li) return;
     e.preventDefault();
@@ -14869,6 +15277,45 @@ function holdingList(key) {
   return state.side[key] || [];
 }
 
+/* ── "Last checked" days (2026-09-19) ──────────────────────────────────────
+   Share counts, a retirement account's balance and a property's value carry
+   no month, so the Close card cannot ask whether this month's were looked at.
+   Each owner carries `checkedOn` instead, written when one of its figures
+   really changes and by ✓ Checked, No Change. A price refresh never writes
+   one: a fetched price is not somebody having looked.
+
+   The target is a holdings list's own key — `pf:<id>`, `ra:<index>`, `daf` —
+   or `property` for every valued property at once. Pure over the state it is
+   handed; true when something was stamped. */
+function markChecked(st, target, day) {
+  const side = (st && st.side) || {};
+  const t = String(target || '');
+  if (t === 'daf') { side.dafCheckedOn = day; return true; }
+  if (t === 'property') {
+    let n = 0;
+    for (const pr of side.property || []) if (pr && typeof pr.value === 'number') { pr.checkedOn = day; n++; }
+    return n > 0;
+  }
+  if (t.startsWith('pf:')) {
+    const pf = (side.portfolios || []).find(x => x && x.id === t.slice(3));
+    if (pf) { pf.checkedOn = day; return true; }
+    return false;
+  }
+  if (/^ra:\d+$/.test(t)) {
+    const a = (side.retirementAccounts || [])[+t.slice(3)];
+    if (a) { a.checkedOn = day; return true; }
+  }
+  return false;
+}
+/* Whether saving a holding changed a figure worth calling a check: a new row,
+   or its ticker, shares or price moved. A note or a cost basis is not. */
+function holdingChanged(before, row) {
+  if (!before) return true;
+  const tk = (h) => String((h && h.ticker) || '').trim().toUpperCase();
+  return tk(before) !== tk(row) || (before.shares ?? 0) !== (row.shares ?? 0)
+    || (before.price ?? 0) !== (row.price ?? 0);
+}
+
 const bucketsValue = (buckets) =>
   round2((buckets || []).reduce((s, b) => s + (b.amount || 0), 0));
 
@@ -15194,7 +15641,19 @@ function holdingsTable(rows, list) {
           rows.length - costed.length} without a basis left out</span>` : ''}</td>`}</tr></tfoot>
   </table></div>` : '<p class="sub">Nothing recorded.</p>'}
   <div class="addbar"><button class="btn small" data-add="holding"
-    data-list="${esc(list)}">＋ Add Holding</button></div>`;
+    data-list="${esc(list)}">＋ Add Holding</button>${
+    /* Said by hand when nothing changed — see markChecked. A retirement
+       account is checked even with no holdings, since its typed balance is
+       the thing being confirmed. */
+    rows.length || list.startsWith('ra:') ? checkedBtn(list) : ''}</div>`;
+}
+
+/* ✓ Checked, No Change — the one way to tell the Close card that a statement
+   was looked at and nothing on it moved. Inside `.addbar`, so a shared view
+   and a printed page lose it with the rest of the bar. */
+function checkedBtn(target) {
+  return `<button class="btn small" data-check="${esc(target)}"><span aria-hidden="true">✓</span>
+    Checked, No Change</button>`;
 }
 
 /* The imported free-form tables (contribution percentages, MAGI check) come
@@ -15279,7 +15738,8 @@ function propertyCard() {
              when it is true — which is where a caveat on a total belongs. */''}
         <td>${fmtMoney(totalEquity)}</td></tr></tfoot>` : ''}
     </table></div>` : '<p class="sub">Nothing listed yet.</p>'}
-    <div class="addbar"><button class="btn small" data-add="property">＋ Add Property</button></div>
+    <div class="addbar"><button class="btn small" data-add="property">＋ Add Property</button>${
+      list.some(pr => typeof pr.value === 'number') ? checkedBtn('property') : ''}</div>
   </div>`;
 }
 
@@ -25207,6 +25667,8 @@ const EDITORS = {
       };
       if (ds.idx !== undefined) {
         const cur = state.side.property[+ds.idx];
+        /* Asked BEFORE the assign — a changed value is somebody having looked. */
+        if (typeof row.value === 'number' && row.value !== cur.value) cur.checkedOn = todayISO();
         Object.assign(cur, row);
         if (row.cur === undefined) delete cur.cur;
         /* The link goes to its OWN store, never onto the row: `row` above is an
@@ -25223,7 +25685,8 @@ const EDITORS = {
       /* A new row is minted an id here rather than left to coerceShape,
          because a debt secured on it needs something to point at the moment
          the reader adds one — which is usually the very next thing they do. */
-      else state.side.property.push({ ...row, id: uniqueId(state.side.property, v.name, 'property') });
+      else state.side.property.push({ ...row, id: uniqueId(state.side.property, v.name, 'property'),
+        ...(typeof row.value === 'number' ? { checkedOn: todayISO() } : {}) });
     },
     del(ds) {
       const gone = state.side.property[+ds.idx];
@@ -25868,6 +26331,7 @@ const EDITORS = {
       if (typeof v.cost === 'number') row.cost = v.cost;
       if (v.note) row.note = v.note;       // the same trap, one field later
       if (ds.idx !== undefined) list[+ds.idx] = row; else list.push(row);
+      if (holdingChanged(before, row)) markChecked(state, ds.list, todayISO());
       /* A ticker the plan has not seen before is looked up ON THE SPOT, and the
          six-hour cache does not apply to it: that window exists to stop the
          QUIET pass spending the allowance re-asking about prices that cannot
@@ -25885,7 +26349,7 @@ const EDITORS = {
       if (t && t !== '?' && t !== was && row.lookup !== false && !viewOnly && priceKey())
         setTimeout(() => refreshPrices(false, [t]), 0);
     },
-    del: (ds) => holdingList(ds.list).splice(+ds.idx, 1),
+    del: (ds) => { holdingList(ds.list).splice(+ds.idx, 1); markChecked(state, ds.list, todayISO()); },
     move: (ds, dir) => listSwap(holdingList(ds.list), +ds.idx, dir),
   },
 
@@ -26107,6 +26571,10 @@ const EDITORS = {
         contribs: { ...(old?.contribs || {}) },
         rows: [...(old?.rows || [])],
         buckets: [...(old?.buckets || [])] };
+      /* The last-checked day, carried by hand for the same reason, and moved
+         on when the typed balance itself changed — see markChecked. */
+      if (old?.checkedOn) row.checkedOn = old.checkedOn;
+      if (!old || (v.amount !== undefined && v.amount !== old.amount)) row.checkedOn = todayISO();
       /* Empty DELETES rather than storing 0: a 0% account is a real statement
          (cash, say) and "follow Preferences" is a different one. */
       if (v.rate !== null && v.rate !== undefined) row.rate = v.rate;
@@ -26166,9 +26634,15 @@ const EDITORS = {
       a.buckets = a.buckets || [];
       const row = { label: v.label || 'Unnamed',
         kind: v.kind === 'roth' ? 'roth' : 'traditional', amount: v.amount ?? 0 };
+      const was = ds.bidx !== undefined ? a.buckets[+ds.bidx] : null;
       if (ds.bidx !== undefined) a.buckets[+ds.bidx] = row; else a.buckets.push(row);
+      if (!was || was.amount !== row.amount) a.checkedOn = todayISO();
     },
-    del: (ds) => state.side.retirementAccounts[+ds.idx].buckets.splice(+ds.bidx, 1),
+    del: (ds) => {
+      const a = state.side.retirementAccounts[+ds.idx];
+      a.buckets.splice(+ds.bidx, 1);
+      a.checkedOn = todayISO();
+    },
     move: (ds, dir) =>
       listSwap(state.side.retirementAccounts[+ds.idx].buckets, +ds.bidx, dir),
   },
@@ -26229,6 +26703,9 @@ const EDITORS = {
       const unlisted = all.find(a => !(a.rows || []).length && retAcctBalance(a));
       if (listed && unlisted)
         return `${unlisted.name} has no holdings listed but ${listed.name} does — the combined account would be valued by its holdings, which leave ${unlisted.name}’s money out. List what ${unlisted.name} holds first; nothing was folded.`;
+      /* The kept account was checked when the most recently checked of them was. */
+      const stamps = all.map(a => a.checkedOn).filter(Boolean).sort();
+      if (stamps.length) target.checkedOn = stamps[stamps.length - 1];
       /* Each source becomes a bucket carrying its own treatment and whatever
          its balance was, however that balance was arrived at. */
       target.buckets = target.buckets || [];
@@ -27238,6 +27715,16 @@ F('views').addEventListener('click', (e) => {
   if (e.target.closest('#welcomeRestoreBtn')) { openModal(F('dataDialog')); return; }
   const go = e.target.closest('[data-goview]');
   if (go) { goToView(go.dataset.goview); return; }
+  const chk = e.target.closest('[data-check]');
+  if (chk) {
+    const target = chk.dataset.check;
+    if (!viewOnly && markChecked(state, target, todayISO())) {
+      save(); render();
+      document.querySelector(`[data-check="${CSS.escape(target)}"]`)?.focus({ preventScroll: true });
+      toast('Marked as checked today — nothing changed');
+    }
+    return;
+  }
   const add = e.target.closest('[data-add]');
   if (add) { openRowEditor(add.dataset.add, add.dataset, true); return; }
   const row = e.target.closest('[data-edit]');
@@ -27595,6 +28082,13 @@ function wireBudget() {
   if (csvBtn) csvBtn.onclick = () => {
     const y = activeYearKey();
     downloadCsv(`financial-plan-${y}.csv`, gridToCsv(state, C[y], y));
+    /* Remembered for December's Close card — see "Closing a month". */
+    if (!viewOnly) {
+      const ex = Object.assign({}, state.exported);
+      ex.csv = Object.assign({}, ex.csv, { [y]: todayISO() });
+      state.exported = ex;
+      save(); render();
+    }
   };
   const actBtn = F('gridActionsBtn');
   if (actBtn) actBtn.onclick = () => {
@@ -29187,6 +29681,12 @@ F('dataCloseBtn').onclick = () => dataDialog.close();
    safety net — one press away from losing everything is exactly when a backup is
    worth taking. */
 function downloadBackup() {
+  /* Remembered for the Close card, and BEFORE the file is built so the file
+     carries its own day. Not an edit: `coreOf` leaves it out of undo. */
+  if (!viewOnly) {
+    state.exported = Object.assign({}, state.exported, { backup: todayISO() });
+    save();
+  }
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -29199,6 +29699,7 @@ function downloadBackup() {
      event loop settles it. A silent empty backup is the worst outcome here. */
   setTimeout(() => URL.revokeObjectURL(url), 0);
   toast('Exported');
+  if (!viewOnly) render();
 }
 F('exportBtn').onclick = downloadBackup;
 
@@ -31633,6 +32134,21 @@ function stripNotes(v) {
   return v;
 }
 
+/* The "last checked" days behind the Close card — when somebody last looked at
+   their holdings or valued their house. A reader of a shared plan has no use
+   for them and the sender never chose to send them, so they go on EVERY link,
+   not only one without notes. Walked for the reason stripNotes is walked. */
+function stripStamps(v) {
+  if (Array.isArray(v)) { v.forEach(stripStamps); return v; }
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) {
+      if (k === 'checkedOn' || k === 'dafCheckedOn' || k === 'exported') delete v[k];
+      else stripStamps(v[k]);
+    }
+  }
+  return v;
+}
+
 /* ── Keeping a trimmed link's balances honest ───────────────────────────────
    Every account's balance CHAINS: a month opens on the month before, a January
    opens on the previous grid year's December, and only the very first year
@@ -31822,6 +32338,7 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
       live && C[live] ? (id) => C[live].balances[`${id}|${at}`] || 0 : () => 0,
       accountsOf(state).map(a => a.id));
   }
+  stripStamps(data);
   if (!includeNotes) stripNotes(data);
   if (!includeNames) anonymisePeople(data);
 
@@ -32313,6 +32830,9 @@ applyPin(savedPin());
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDollar,
   EDITORS,
+  /* Closing a month (2026-09-19). */
+  closeChecklist, CLOSE_LEAD_DAYS, stampDay, coerceExported, stripStamps, carryExported,
+  markChecked, holdingChanged,
   tripPart, sumPart,
   /* Looking a property's value up: where each kind sends you, and the boundary
      for the one thing that store holds. */

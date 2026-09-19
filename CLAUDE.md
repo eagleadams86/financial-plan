@@ -5439,6 +5439,91 @@ Each action sits where the thing it acts on is:
   drawing an otherwise-empty card just to hold a button would contradict the
   rule that a section with nothing in it is not drawn.
 
+## Closing a month (2026-09-19)
+
+Charles: *"there are a lot of things to do at the end of each month/year to ensure
+data remains in sync. i'm thinking a checklist that automatically generates and
+checks items off as they are completed might be useful."* Decided with him: a card
+on the Month page (not a tab, not a header button), "last updated" dates for the
+chores that left no trace, a **✓ Checked, No Change** button, and a one-line pointer
+on the current month.
+
+- **`closeChecklist(st, computed, y, m, today)` is the whole rule, and it is PURE**
+  (beside `monthActionsFor`, hooked, 15 tests in "Closing a month"). Every line is a
+  QUESTION ASKED OF THE PLAN — never a stored tick — so it cannot say Done about
+  something that isn't. Returns `null` or `{m, y, items}`; each item carries a `go`
+  the renderer turns into a door (`cell`, `bal`, `view`, `enter`, `month`, `grid`,
+  `backup`). The rows DO nothing themselves.
+- **When there is a card:** the month that just ended; the current month in its last
+  `CLOSE_LEAD_DAYS` (7); last CALENDAR year's December while a year-end line is open.
+  Nothing older — a plan that never uses the entered marker would otherwise grow an
+  open card on every month, and an imported 2015 December would never close.
+- **Each line's rule, and the traps in them:**
+  - *bills* — every row with `dueOn(cat, m)` has an `actual` cell (a stated $0.00 is
+    one; `manual`/`auto`/`mixed`/`missing` are not). `dueOn` already applies
+    pay-a-month-ahead and `until`. A held row is NAMED, not counted.
+  - *balances* — the month page's own account set (`accountShowsInYear` and a balance
+    that month in a live year; "states a figure" in a pinned one), each with
+    `overrides[id|m]`.
+  - *entered* — `enteredThrough >= m` as a STRING, which is what makes coerceShape's
+    backfilled month-before-the-year read as not entered. Months go in order, so an
+    earlier open month is where the line goes.
+  - *worth* — a snapshot dated `monthEndISO(m)`. **The Record button can only write
+    that date on the last day itself, or with the card on the settled month**
+    (`worthAsOf`), so the line is LEFT OUT once neither is possible — never drawn as
+    a chore nobody can do. The case that hits: December of last year once January
+    begins (the new year is live and its entered marker is the backfilled December,
+    which the card will not offer). The last-week card is what catches it.
+  - *debts* — `asOf >= m`, "at or after": a later statement replaces the earlier one.
+  - *invested / retirement / giving / property / backup* — a date stamp on or after
+    the 1st.
+  - *December* — `nextYear` (a `years[y+1]`), `figures` (each of comp, limits, the
+    EXACT-YEAR federal/state bands, PTO, donations that year y had, present for
+    y+1 — **not `taxTableFor`, which falls back to older years**; bonuses are left out
+    because one is recorded when paid), `history` (`model !== 'live'`), `csv`.
+    **These only navigate** — the year's actions stay on the grid (the month lens
+    rule), and the `grid` door opens ⋯ Actions on a phone and focuses the button.
+- **The stamps: dates only, validated by `stampDay` (a real calendar day).**
+  `pf.checkedOn`, `a.checkedOn` (a retirement account — on the OBJECT, because these
+  accounts are addressed by index and a key would strand on a reorder), `p.checkedOn`,
+  `side.dafCheckedOn`, and a new top-level `state.exported = {backup?, csv?: {YYYY}}`.
+  Absent until first written (`flowNoTransfers`); `coerceShape` drops a bad one and
+  `coerceExported` an empty branch.
+  - **`stampDay` reaches for NOTHING** — it inlines the leap-year test. It runs inside
+    `load()`, and `daysInMonth` leans on `isLeapYear`, a const thousands of lines
+    below: the first cut called it, and a plan with a stamp would have opened blank.
+  - **Written only on a real change** (`holdingChanged`: new row, or ticker/shares/
+    price moved; a changed retirement `amount`; a bucket added, removed or re-amounted;
+    a property's value, compared BEFORE `Object.assign`), and by `markChecked` from
+    the button. **`retAcct.save` rebuilds the row, so it carries `checkedOn` by hand**
+    (the trap); `foldAccounts` keeps the newest. **A price refresh or a month-end
+    close never stamps** — a source test pins both bodies.
+  - `downloadBackup` stamps BEFORE the file is built (the file carries its own day);
+    the year CSV button stamps `csv[y]`; the donations CSV does not.
+- **No schema bump**, and that is the `keepCents`/`dueMonths` precedent: an older
+  build ignores unknown keys (and `retAcct.save` there drops one, which only un-ticks
+  a line). A bump would make every older cached copy halt for nothing.
+- **Never in a share link:** `stripStamps` walks the payload and runs on EVERY link,
+  not only one without notes; `exported` is also outside the whitelist.
+- **Not an undo step:** `coreOf` nulls `exported`, and `undoLast` runs
+  `carryExported` so undoing an older edit keeps the downloads since. A `checkedOn`
+  IS part of the edit that wrote it, and undoes with it. **Known limit:** the
+  two-copies guard compares through `coreOf`, so a download in one window can be
+  overwritten by the other's next save — the line un-ticks and a second download
+  fixes it (`closes` accepts the same trade).
+- **✓ Checked, No Change** (`checkedBtn(target)`, `data-check`, one delegated branch
+  on `#views` before `data-add`) sits in the holdings table's `.addbar` (a retirement
+  account's even with no holdings — its typed balance is what is confirmed) and the
+  Property card's, so shared views and print lose it with the bar. Undoable.
+- **Drawn** after the Due and Waiting card, `data-box="month-close"`, never in
+  `viewOnly`, hidden in print with the pointer (`[data-close]`). Rows are `.mrow`s:
+  `pill good` with ✓ for done, a plain pill with ○ for open — the tick is never colour
+  alone. December's list is a `.sub.closeyear` paragraph, not a second `<h2>` (the
+  fold machinery re-parents a second heading). `HELP.monthClose`.
+- **`closePointer` is declared ABOVE `head`** — the summary card reads it, and the
+  first cut declared it below and threw a TDZ error on every Month page. The smoke
+  walk caught it.
+
 ## Folding a box up
 
 **Every card on every tab collapses to its heading, and the renderers know
