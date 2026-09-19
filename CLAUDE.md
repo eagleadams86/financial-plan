@@ -5462,10 +5462,16 @@ on the current month.
   something that isn't. Returns `null` or `{m, y, items}`; each item carries a `go`
   the renderer turns into a door (`cell`, `bal`, `view`, `enter`, `month`, `grid`,
   `backup`). The rows DO nothing themselves.
-- **When there is a card:** the month that just ended; the current month in its last
-  `CLOSE_LEAD_DAYS` (7); last CALENDAR year's December while a year-end line is open.
-  Nothing older — a plan that never uses the entered marker would otherwise grow an
-  open card on every month, and an imported 2015 December would never close.
+- **When there is a card: every month up to this one** (never a month to come). It
+  shipped on last month and the current month's last week only, to stop old months
+  nagging, and Charles asked the same day why it was hidden. Right: an old month's
+  lines mostly tick themselves (a stamp or backup SINCE counts, `asOf >= m`, a pinned
+  year is entered, an undatable net worth is left out), so the hiding bought nothing.
+  **A month whose every line is done folds to ONE line** in the summary card
+  (`data-close="expand"`), unfolded by a press and remembered only in the page-level
+  `closeListOpen` — a glance, not a setting; another month folds it again.
+  **The year's lines are only on this December and last** (`recentDec`): an imported
+  2015 December has no CSV stamp and never will.
 - **Each line's rule, and the traps in them:**
   - *bills* — every row with `dueOn(cat, m)` has an `actual` cell (a stated $0.00 is
     one; `manual`/`auto`/`mixed`/`missing` are not). `dueOn` already applies

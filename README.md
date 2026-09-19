@@ -821,11 +821,12 @@ each line asks the plan whether its job is done, and a line only says ✓ Done
 when it is. Click a line to go to where that job is done; none of them does
 the job for you.
 
-- **When it appears:** on the month that has just ended, and on the current
-  month during its last week. While last month still has open lines, the
-  current month's summary says so in one line — *"Aug 2026 isn't closed yet —
-  4 of 10 done"* — and takes you there. Older months never grow a card, and
-  it is never drawn on a shared link or on paper.
+- **When it appears:** on every month up to the current one — a month still to
+  come has nothing to do yet. Once every line is done, the month folds its list
+  to one line (*"✓ Aug 2026 closed — all 10 done"*) that opens it again. While
+  last month still has open lines, the current month's summary says so in one
+  line — *"Aug 2026 isn't closed yet — 4 of 10 done"* — and takes you there. It
+  is never drawn on a shared link or on paper.
 - **The month's lines,** each left out when there is nothing for it to be
   about:
   - **Bills with a due date recorded** — every bill due that month holds a
@@ -850,8 +851,9 @@ the job for you.
 - **December adds the year's lines:** next year built, next year's figures
   set up (pay, contribution limits, tax tables, time off and giving — each
   asked only if this year had it), the year marked as history, and a CSV of
-  it saved. These open the grid's own buttons rather than repeating them.
-  Last December's card stays into the new year until those are done.
+  it saved. These open the grid's own buttons rather than repeating them. They
+  appear on this December and last only — an old December's CSV is nobody's
+  chore.
 
 ### Building Next Year
 

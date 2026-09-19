@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1193;
+const EXPECTED = 1194;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -21487,13 +21487,14 @@ const closeOf = (st, m, today) =>
   H.closeChecklist(st, H.computeAll(st, today), m.slice(0, 4), m, today);
 const closeItem = (list, id) => (list ? list.items.find(i => i.id === id) : undefined);
 
-t('the card is there for the month just ended, and a current month only in its last week', () => {
+t('every month up to this one has a list; a month still to come has none', () => {
+  /* It first shipped on last month and the current month's last week only.
+     Charles: "why do we hide the checklist?" — an old month's lines mostly tick
+     themselves, so the hiding bought nothing. */
   const st = closeFix();
-  ok(closeOf(st, '2030-08', '2030-09-10'), 'the month that has just ended has a card');
-  eq(closeOf(st, '2030-07', '2030-09-10'), null, 'two months back has none — older months never nag');
-  eq(closeOf(st, '2030-09', '2030-09-10'), null, 'the current month, three weeks from its end, has none');
-  ok(closeOf(st, '2030-09', '2030-09-25'), 'but its last week does');
-  eq(H.CLOSE_LEAD_DAYS, 7, 'a week');
+  ok(closeOf(st, '2030-08', '2030-09-10'), 'the month that has just ended');
+  ok(closeOf(st, '2030-03', '2030-09-10'), 'an older month too');
+  ok(closeOf(st, '2030-09', '2030-09-10'), 'and the current month, weeks from its end');
   eq(closeOf(st, '2030-10', '2030-09-25'), null, 'a future month never has one');
   eq(closeOf(st, '2029-12', '2030-01-05'), null, 'nor a month no grid year holds');
 });
@@ -21614,16 +21615,18 @@ t('December: the year’s lines, which only ever navigate', () => {
     ok(!i.go || ['grid', 'view'].includes(i.go.kind), i.id + ' goes somewhere and does nothing itself');
 });
 
-t('last December stays while the year is open, and goes once it is closed', () => {
+t('the year’s lines are on this December and last, never an older one', () => {
   const st = closeFix({ entered: '2030-12', exported: { csv: { '2030': '2030-12-20' } } });
-  ok(closeOf(st, '2030-12', '2031-03-10'), 'in March, last December is still open');
   st.years['2031'] = JSON.parse(JSON.stringify(st.years['2030']));
   Object.assign(st.years['2031'], { startMonth: '2031-01', enteredThrough: '2030-12', cells: {}, overrides: {} });
   st.years['2030'].model = 'pinned';
-  eq(closeOf(st, '2030-12', '2031-03-10'), null, 'built, frozen and saved — it goes');
-  ok(closeOf(st, '2030-12', '2031-01-10'), 'though in January it is last month, and still shown');
-  const old = closeFix({ entered: '2030-12' });
-  eq(closeOf(old, '2030-12', '2032-03-10'), null, 'an older December never has a card, open or not');
+  const years = (l) => l.items.filter(i => i.group === 'year');
+  const last = closeOf(st, '2030-12', '2031-03-10');
+  ok(years(last).length && years(last).every(i => i.done),
+     'in March last December still carries its year lines — built, frozen and saved, all ticked');
+  const old = closeOf(st, '2030-12', '2032-03-10');
+  ok(old, 'two years on, December still has a card');
+  eq(years(old).length, 0, 'but only its month lines — an old December’s CSV is nobody’s chore');
 });
 
 t('the stamps are days, and a bad one is dropped at the boundary', () => {
@@ -21795,6 +21798,52 @@ t('and December’s Close card keeps its net worth line into January', () => {
      open && open.detail);
 });
 
+t('a month whose every line is done folds to one line, and unfolds on a press', async () => {
+  const { f, W, D } = await auditFrame(1280, 1200, 'closefold');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const Y = new Date().getFullYear(), m = `${Y}-08`, day = `${Y}-09-01`;
+    const real = W.todayISO;
+    W.todayISO = (d) => (d ? real(d) : `${Y}-09-03`);
+    /* Every August line done, the way the app itself would have written it. */
+    const st = W.finGet();
+    const yr = st.years[String(Y)];
+    for (const a of st.settings.accounts) yr.overrides[`${a.id}|${m}`] = { v: 1000 };
+    for (const l of st.side.liabilities) l.asOf = `${Y}-09`;
+    for (const p of st.side.portfolios) W.markChecked(st, 'pf:' + p.id, day);
+    st.side.retirementAccounts.forEach((a, i) => W.markChecked(st, 'ra:' + i, day));
+    W.markChecked(st, 'daf', day);
+    W.markChecked(st, 'property', day);
+    st.exported = { backup: day };
+    D.getElementById('tab-budget').click();
+    D.querySelector('.vswitch[data-mode="month"]').click();
+    W.pickMonth(m);
+    W.render();
+    await wait(150);
+    eq(D.querySelector('[data-box="month-close"]'), null, 'no card on a closed month');
+    const line = D.querySelector('[data-close="expand"]');
+    ok(line && /Aug \d{4} closed — all \d+ done\. Show the list/.test(line.textContent),
+       'one line saying so', line && line.textContent.trim());
+    line.click();
+    await wait(150);
+    const card = D.querySelector('[data-box="month-close"]');
+    ok(card, 'the press unfolds the list');
+    ok(card.querySelectorAll('.mrow').length >= 6 && !/To do/.test(card.textContent), 'every line ticked');
+    const hide = card.querySelector('[data-close="collapse"]');
+    ok(hide, 'with a way to fold it again');
+    eq(D.activeElement, hide, 'the keyboard lands on it');
+    hide.click();
+    await wait(150);
+    ok(!D.querySelector('[data-box="month-close"]') && D.querySelector('[data-close="expand"]'),
+       'and it folds back to the one line');
+    D.querySelector('[data-close="expand"]').click();
+    await wait(100);
+    W.pickMonth(`${Y}-07`);
+    W.pickMonth(m);
+    await wait(100);
+    ok(!D.querySelector('[data-box="month-close"]'), 'going to another month and back folds it again');
+  } finally { f.remove(); }
+});
 t('the card and the pointer are never drawn in a shared view', () => {
   const src = stripComments(APP_SRC);
   const fn = src.slice(src.indexOf('function renderMonthView('), src.indexOf('function monthNetPoints('));

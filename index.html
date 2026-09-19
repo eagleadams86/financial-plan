@@ -9268,11 +9268,11 @@ const HELP = {
     ['The jobs that finish a month, as a list that ', b('ticks itself'), '. Nothing here is a box '
       + 'you tick by hand: each line asks the plan whether the thing it names has been done, so a '
       + 'line can only say Done when it is. Click a line to go to where that job is done.'],
-    ['The card appears on the month that has just ended, and on the current month for its last '
-      + 'week. A line is left out when there is nothing for it to be about — no bills with a due '
-      + 'date, no debts, no holdings. On December a second list covers the year: building the '
-      + 'next one, carrying its figures across, marking the old one as history and saving a CSV '
-      + 'copy. That list stays on last December until it is done.'],
+    ['Every month up to this one has its list; a month still to come has none. Once every line '
+      + 'is done the month folds it to one line, and a press opens it again. A line is left out '
+      + 'when there is nothing for it to be about — no bills with a due date, no debts, no '
+      + 'holdings. This December and last add the year: building the next one, carrying its '
+      + 'figures across, marking the old one as history and saving a CSV copy.'],
     ['Share counts, retirement balances and property values carry no month of their own, so each '
       + 'remembers the day its figures last changed. A line ticks when every one of them was '
       + 'checked on or after the first of the month. If nothing changed, press ',
@@ -12299,22 +12299,21 @@ function monthActionsFor(yr, m, started) {
    PURE: it reads only what it is handed, `today` included, which is what lets
    every rule below be pinned against a fixture rather than against the clock.
 
-   WHEN THERE IS A CARD AT ALL is the part that stops it nagging:
-   - the month that just ended, always — that is the month being closed;
-   - the current month, in its last CLOSE_LEAD_DAYS only, so the list is there
-     while the month-end figures are still to be had (a snapshot dated the
-     last day can only be recorded ON the last day, or once it is entered);
-   - LAST calendar year's December while any year-end line is open, because a
-     year is closed in January. Only last year's: an imported 2015 December has
-     no CSV stamp and never will, and a card on every old December would be a
-     list of chores nobody is going to do.
-   Older months get nothing. A plan that never uses the entered marker would
-   otherwise grow an open card on every month it has.
+   EVERY MONTH UP TO THIS ONE HAS A LIST; a month still to come has none, since
+   nothing in it can be done yet. It first shipped on last month and the current
+   month's last week only, to stop old months nagging — and Charles asked why it
+   was hidden, rightly: an old month's lines mostly tick themselves (a check or a
+   backup since then counts, a debt stated since counts, a finished year is
+   entered), so the hiding bought nothing. A month whose every line is done folds
+   to one line on its page (see renderMonthView).
+
+   THE YEAR'S LINES ARE ONLY ON THIS DECEMBER AND LAST: an imported 2015
+   December has no CSV stamp and never will, and a line nobody is going to tick
+   on every old December is exactly the nagging this avoids.
 
    A LINE IS LEFT OUT when there is nothing for it to be about — no bills with a
    date, no debts, no holdings — rather than drawn ticked. A tick is a claim that
    something was done. */
-const CLOSE_LEAD_DAYS = 7;
 
 /* A calendar day, 'YYYY-MM-DD', and a real one: the date stamps below arrive
    from Firestore, a backup and a hand-edited file, and '2026-02-30' compares
@@ -12342,10 +12341,7 @@ function closeChecklist(st, computed, y, m, today) {
   if (!yearStarted(st, y, today)) return null;
   const from = `${m}-01`;
   const isDec = m === `${y}-12`;
-  const lastMonth = monthAdd(TM, -1);
-  const inLastWeek = m === TM && daysBetween(today, monthEndISO(m)) < CLOSE_LEAD_DAYS;
-  const lastYearsDec = isDec && +y === +TM.slice(0, 4) - 1;
-  if (m !== lastMonth && !inLastWeek && !lastYearsDec) return null;
+  const recentDec = isDec && +y >= +TM.slice(0, 4) - 1;
 
   const side = st.side || {};
   const live = yr.model === 'live';
@@ -12497,7 +12493,7 @@ function closeChecklist(st, computed, y, m, today) {
      and its CSV are year-scoped actions that live on the grid, and a second
      copy of them on a page about one month is the mistake the month view was
      built to avoid. */
-  if (isDec) {
+  if (recentDec) {
     const ny = String(+y + 1);
     add('year', 'nextYear', `${ny} built`, !!(st.years || {})[ny],
       (st.years || {})[ny] ? `The ${ny} grid is there` : `Build it from the ${y} grid`,
@@ -12546,10 +12542,6 @@ function closeChecklist(st, computed, y, m, today) {
         ? `Downloaded ${fullDayLabel(csvOn)}` : 'A spreadsheet copy of the year, for your records',
       { kind: 'grid', year: y, btn: 'csvYearBtn' });
 
-    /* Last year's December stays only while the YEAR is unfinished — the
-       month's own lines were last month's business. */
-    if (lastYearsDec && m !== lastMonth && !inLastWeek
-        && items.filter(i => i.group === 'year').every(i => i.done)) return null;
   }
   return { m, y, items };
 }
@@ -13329,8 +13321,11 @@ function monthPickerHtml(active, all) {
    switching back does not teleport the reader to whatever the grid was last
    left on — which reads as the app losing the year you were reading rather than
    showing it differently. The other half is in the switch itself. */
+/* Which fully closed month's list is unfolded — see renderMonthView. */
+let closeListOpen = null;
 function pickMonth(m) {
   if (!m || m === activeMonthKey()) return false;
+  closeListOpen = null;
   state.ui.activeMonth = m;
   const y = yearOfMonth(state, m);
   if (y) state.ui.activeYear = y;
@@ -13572,10 +13567,21 @@ function renderMonthView() {
   const closePointer = !lastOpen ? '' : `<button type="button" class="revealrows"
     data-close="month" data-m="${esc(lastM)}">${esc(monthLabelFull(lastM))} isn’t closed yet — ${
       lastClose.items.length - lastOpen} of ${lastClose.items.length} done. Open it</button>`;
+  /* This month's own list. Never in a shared view: these are the sender's
+     chores, measured against the reader's clock. A month whose every line is
+     done FOLDS to one line in the summary card, a press from its list —
+     `closeListOpen` remembers the press for this page only (a glance, not a
+     setting), and picking another month folds it again. */
+  const close = viewOnly ? null : closeChecklist(state, C, y, m, today);
+  const closeAllDone = !!close && close.items.every(i => i.done);
+  const closeFolded = closeAllDone && closeListOpen !== m;
+  const closeDoneLine = !closeFolded ? '' : `<button type="button" class="revealrows"
+    data-close="expand" data-m="${esc(m)}"><span aria-hidden="true">✓</span> ${
+      esc(monthLabelFull(m))} closed — all ${close.items.length} done. Show the list</button>`;
   const head = `<div class="card" data-box="month-summary">
     <h2>${esc(monthTitle(m))}${helpBtn('monthRows', 'how these lists are ordered')}</h2>
     <p class="sub">${status}${monthActs ? ` ${monthActs}` : ''}</p>
-    <div class="goalgrid">${tiles}</div>${closePointer}
+    <div class="goalgrid">${tiles}</div>${closePointer}${closeDoneLine}
   </div>`;
 
   /* ── What is due, and what is waiting ────────────────────────────────────
@@ -13774,9 +13780,7 @@ function renderMonthView() {
      `closeChecklist` decides whether there is a card and what is on it; this
      only draws it. Each line is a door to where the chore is done — a cell,
      a balance, a tab, the Back Up window, a button on the grid — and none of
-     them does the chore itself. Never in a shared view: these are the
-     sender's chores, measured against the reader's clock. */
-  const close = viewOnly ? null : closeChecklist(state, C, y, m, today);
+     them does the chore itself. */
   const closeRow = (it) => {
     const g = it.go;
     const act = !g ? ''
@@ -13794,7 +13798,7 @@ function renderMonthView() {
         : '<span class="pill"><span aria-hidden="true">○</span> To do</span>'}</span>
       <span class="mfoot">${esc(it.detail)}</span></div>`;
   };
-  const closeCard = !close ? '' : (() => {
+  const closeCard = !close || closeFolded ? '' : (() => {
     const mon = close.items.filter(i => i.group === 'month');
     const yrs = close.items.filter(i => i.group === 'year');
     const done = close.items.filter(i => i.done).length;
@@ -13806,6 +13810,7 @@ function renderMonthView() {
     ${yrs.length ? `<p class="sub closeyear"><strong>Closing ${esc(y)}</strong> — the
       year-end jobs. Each opens the place it is done.</p>
     <div class="mrows">${yrs.map(closeRow).join('')}</div>` : ''}
+    ${closeAllDone ? `<button type="button" class="revealrows" data-close="collapse">Hide the list</button>` : ''}
   </div>`;
   })();
 
@@ -14269,7 +14274,12 @@ function wireMonthRows() {
   const follow = (el) => {
     if (!el) return;
     const { close: kind, view, m, year, btn } = el.dataset;
-    if (kind === 'view') {
+    if (kind === 'expand' || kind === 'collapse') {
+      closeListOpen = kind === 'expand' ? m : null;
+      render();
+      F('views').querySelector(`[data-close="${kind === 'expand' ? 'collapse' : 'expand'}"]`)
+        ?.focus({ preventScroll: true });
+    } else if (kind === 'view') {
       if (el.dataset.settled) state.ui.worthAsOf = 'settled';
       goToView(view);
     } else if (kind === 'month') {
@@ -32856,7 +32866,7 @@ applyPin(savedPin());
 window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDollar,
   EDITORS,
   /* Closing a month (2026-09-19). */
-  closeChecklist, CLOSE_LEAD_DAYS, stampDay, coerceExported, stripStamps, carryExported,
+  closeChecklist, stampDay, coerceExported, stripStamps, carryExported,
   markChecked, holdingChanged,
   tripPart, sumPart,
   /* Looking a property's value up: where each kind sends you, and the boundary
