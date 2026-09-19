@@ -14115,13 +14115,12 @@ function netWorthParts(st, month, closes) {
   const retirement = round2(retAccts.reduce((s, a) => s + retAcctBalance(a, priceOf), 0));
   /* Where each figure's price came from, counted only when a month was asked
      for — the card's feet say it in words. `retTyped` is the accounts no close
-     can reach: valued by their buckets or a typed balance, which are whatever
-     was last typed, whatever the month. */
+     can reach: with no holdings they are valued by their buckets or a typed
+     balance, which are whatever was last typed, whatever the month. */
   const priced = pricer ? {
     invested: pricer.tally(portfolios.flatMap(p => (p && p.rows) || [])),
-    retirement: pricer.tally(retAccts.filter(a => !(a.buckets || []).length)
-      .flatMap(a => a.rows || [])),
-    retTyped: retAccts.filter(a => (a.buckets || []).length || !(a.rows || []).length).length,
+    retirement: pricer.tally(retAccts.flatMap(a => a.rows || [])),
+    retTyped: retAccts.filter(a => !(a.rows || []).length).length,
   } : null;
   /* `p.owed` is the pre-schema-7 spelling. It is still added because a backup
      from before the split is coerced before it is migrated, and this function
@@ -14874,21 +14873,49 @@ const bucketsValue = (buckets) =>
   round2((buckets || []).reduce((s, b) => s + (b.amount || 0), 0));
 
 /* What an account is worth, in order of what the reader has actually said:
-   its contribution-type BUCKETS, then its HOLDINGS, then the balance typed on
+   its HOLDINGS, then its contribution-type BUCKETS, then the balance typed on
    it. Derived, never stored — the moment a figure is edited the total has to
    follow, and a copy of it sitting in `amount` would be the stale figure every
    other total on the tab was quietly adding up.
 
-   Buckets come first because they are the only one of the three that also
-   carries the TAX TREATMENT, so they are the statement the split depends on;
-   letting holdings outrank them would leave a balance nobody could reconcile
-   with the Traditional/Roth figures beside it. Where both are listed they are
-   two statements of the same money, and `bucketGap` reports a disagreement
-   rather than picking a winner quietly. */
+   Holdings come first (since 2026-09-19; buckets led before). They are the
+   statement that stays current on its own — shares change rarely and the price
+   lookup keeps the other half fresh — while the buckets are figures copied off
+   a statement by hand, and were going stale under the Net Worth total. What
+   the buckets still uniquely carry is the TAX TREATMENT, so where both are
+   listed the buckets say how the holdings' value SPLITS (`bucketValues`) and
+   the holdings say how much there is. `bucketGap` still states the difference,
+   so a stale bucket list is visible rather than silently rescaled. */
 const retAcctBalance = (a, priceOf) =>
-  (a && a.buckets && a.buckets.length) ? bucketsValue(a.buckets)
-  : (a && a.rows && a.rows.length) ? holdingsValue(a.rows, priceOf)
+  (a && a.rows && a.rows.length) ? holdingsValue(a.rows, priceOf)
+  : (a && a.buckets && a.buckets.length) ? bucketsValue(a.buckets)
   : round2((a && a.amount) || 0);
+
+/* What each contribution type is worth NOW, in bucket order, or null when the
+   account has none to go by. Without holdings that is each bucket's own typed
+   amount. With holdings, each bucket keeps its SHARE of the typed total and is
+   applied to the holdings' value — one 401(k) is invested one way, so its
+   parts rise and fall together (`retirementPots` makes the same assumption).
+   The rounding residue lands on the largest part, so the parts always add up
+   to the balance exactly. Null too when the typed amounts total nothing: there
+   are no shares to apply, and the account then counts on its own treatment
+   rather than its money vanishing from both sides of the split. */
+function bucketValues(a, priceOf) {
+  const bs = (a && a.buckets) || [];
+  if (!bs.length) return null;
+  const own = bs.map(b => round2(b.amount || 0));
+  if (!(a.rows || []).length) return own;
+  const stated = bucketsValue(bs);
+  if (!(stated > 0)) return null;
+  const held = holdingsValue(a.rows, priceOf);
+  const vals = own.map(v => round2(held * v / stated));
+  const residue = round2(held - vals.reduce((t, v) => t + v, 0));
+  if (residue) {
+    const big = vals.indexOf(Math.max(...vals));
+    vals[big] = round2(vals[big] + residue);
+  }
+  return vals;
+}
 
 /* Traditional against Roth over a list of accounts, reading each account's
    CONTRIBUTION TYPES where it lists them and its own treatment where it does
@@ -14897,22 +14924,25 @@ const retAcctBalance = (a, priceOf) =>
    whose halves don't add up to its total. It is the same question
    `retirementPots` answers a different way for the projection; there is a test
    that the two agree. */
-function kindTotals(accts) {
+function kindTotals(accts, priceOf) {
   let traditional = 0, roth = 0;
   for (const a of (accts || [])) {
-    if ((a.buckets || []).length) {
-      for (const b of a.buckets)
-        if (b.kind === 'roth') roth += (b.amount || 0); else traditional += (b.amount || 0);
-    } else if (retKind(a) === 'roth') roth += retAcctBalance(a);
-    else traditional += retAcctBalance(a);
+    const vals = bucketValues(a, priceOf);
+    if (vals) {
+      a.buckets.forEach((b, i) => {
+        if (b.kind === 'roth') roth += vals[i]; else traditional += vals[i];
+      });
+    } else if (retKind(a) === 'roth') roth += retAcctBalance(a, priceOf);
+    else traditional += retAcctBalance(a, priceOf);
   }
   return { traditional: round2(traditional), roth: round2(roth) };
 }
 
-/* The two statements disagreeing, or null. Stated and stopped at — the
-   `reconcileNote` rule: the app cannot know which is right, and a stale bucket
-   figure is exactly what this is for. Null when either list is absent, because
-   one statement cannot disagree with itself. */
+/* The two statements disagreeing, or null — the typed contribution types'
+   total minus the holdings' value. Stated, never resolved in the buckets'
+   favour: the holdings set the balance and the buckets only its split, and
+   this is how the reader learns the typed figures are due a refresh. Null when
+   either list is absent, because one statement cannot disagree with itself. */
 function bucketGap(a) {
   if (!a || !(a.buckets || []).length || !(a.rows || []).length) return null;
   const gap = round2(bucketsValue(a.buckets) - holdingsValue(a.rows));
@@ -15594,6 +15624,7 @@ function renderRetirement() {
         <th>Balance</th><th>${esc(year)} in</th></tr></thead>
       <tbody>${accts.map((a, idx) => {
         const bs = a.buckets || [];
+        const bvals = bucketValues(a) || bs.map(b => round2(b.amount || 0));
         const gap = bucketGap(a);
         const cols = 3 + (showOwner ? 1 : 0);
         /* A bucketed account's contribution types sit under it, indented and
@@ -15613,11 +15644,16 @@ function renderRetirement() {
             ${showOwner ? '<td></td>' : ''}
             <td style="text-align:left" class="muted">${
               b.kind === 'roth' ? 'Roth' : 'Pre-tax'}</td>
-            <td class="muted">${fmtMoney(b.amount || 0)}</td><td></td></tr>`).join('')
+            <td class="muted">${fmtMoney(bvals[bidx])}</td><td></td></tr>`).join('')
+        /* With holdings listed, the figures above are each type's SHARE of the
+           holdings' value, not what was typed — said here, where they are read,
+           along with what was typed, so a rescaled figure is never a silent one. */
         + (gap === null ? '' : `<tr><td colspan="${cols + 1}" class="muted"
-            style="padding-left:22px">The types come to ${fmtMoney(Math.abs(gap))} ${
-            gap > 0 ? 'more' : 'less'} than the holdings listed for this account — the
-            balance follows the types, and one of the two is out of date.</td></tr>`)
+            style="padding-left:22px">The balance follows the holdings, so each type
+            above is its share of ${fmtMoney(retAcctBalance(a))}. The amounts typed for
+            the types come to ${fmtMoney(bucketsValue(bs))}, ${fmtMoney(Math.abs(gap))} ${
+            gap > 0 ? 'more' : 'less'} — update them from your next statement to refresh
+            the split.</td></tr>`)
         /* A mixed account with nothing listed has no way to say what is Roth,
            so the whole balance would land on the pre-tax side. Ask, rather than
            count it quietly — the wrong answer here is invisible. */
@@ -16652,11 +16688,12 @@ function retirementPots(st, thisYear, span) {
        already splits the ongoing deferral by treatment, and typed contribution
        rows in practice live on IRAs, which have one treatment anyway. Said out
        loud on the tab rather than half-built. */
-    if ((a.buckets || []).length) {
+    const bvals = bucketValues(a);
+    if (bvals) {
       a.buckets.forEach((b, bidx) => pots.push({
         key: `a${idx}b${bidx}`, idx, bidx, label: `${a.name} — ${b.label || 'Unnamed'}`,
         kind: b.kind === 'roth' ? 'roth' : 'traditional',
-        rate, balance: round2(b.amount || 0), contribs: {} }));
+        rate, balance: bvals[bidx], contribs: {} }));
       if (Object.keys(contribs).length)
         pots.push({ key: `a${idx}c`, idx, label: `${a.name} — paid in`,
                     kind: retKind(a), rate, balance: 0, contribs });
@@ -26025,11 +26062,11 @@ const EDITORS = {
         const byBuckets = (a.buckets || []).length, byRows = (a.rows || []).length;
         return (byBuckets || byRows)
           ? [{ key: 'amountRead', label: 'Balance', type: 'readout',
-               hint: byBuckets
-                 ? 'Added up from the contribution types listed for this account. Edit one '
-                   + 'of those to change it.'
-                 : 'Shares × price, added up from the holdings listed for this account. '
-                   + 'Edit a holding to change it.' }]
+               hint: byRows
+                 ? 'Shares × price, added up from the holdings listed for this account. '
+                   + 'Edit a holding to change it.'
+                 : 'Added up from the contribution types listed for this account. Edit one '
+                   + 'of those to change it.' }]
           : [{ key: 'amount', label: 'Balance', type: 'money' }];
       })()),
       /* A retirement account is one person's — there is no joint 401(k) or
@@ -26115,7 +26152,11 @@ const EDITORS = {
         ['roth', 'Roth — already taxed'],
       ], hint: 'A rollover is usually pre-tax, but it can be a Roth one — which is why '
         + 'this is asked rather than guessed from the name.' },
-      { key: 'amount', label: 'Amount', type: 'money' },
+      { key: 'amount', label: 'Amount', type: 'money',
+        hint: (state.side.retirementAccounts[+ds.idx]?.rows || []).length
+          ? 'As on your statement. This account lists its holdings, so they set its '
+            + 'balance — this amount sets the SHARE of it that is this type.'
+          : undefined },
     ],
     get: (ds) => ({ ...(state.side.retirementAccounts[+ds.idx].buckets || [])[+ds.bidx] }),
     blank: (ds) => ({ kind: retKind(state.side.retirementAccounts[+ds.idx] || {}) }),
@@ -26178,6 +26219,16 @@ const EDITORS = {
             return `Both accounts record a contribution for ${y}. Those are two different payments, not one — nothing was folded.`;
           claimed.add(y);
         }
+      /* Holdings set a balance, so the kept account would be valued by the
+         holdings that came across — and an account folded in with NO holdings
+         but money typed on it would drop out of the total, its bucket shrunk
+         to a share of holdings that don't include it. Refused whole, like the
+         two checks above. */
+      const all = [target, ...sources];
+      const listed = all.find(a => (a.rows || []).length);
+      const unlisted = all.find(a => !(a.rows || []).length && retAcctBalance(a));
+      if (listed && unlisted)
+        return `${unlisted.name} has no holdings listed but ${listed.name} does — the combined account would be valued by its holdings, which leave ${unlisted.name}’s money out. List what ${unlisted.name} holds first; nothing was folded.`;
       /* Each source becomes a bucket carrying its own treatment and whatever
          its balance was, however that balance was arrived at. */
       target.buckets = target.buckets || [];
@@ -32261,6 +32312,7 @@ applyPin(savedPin());
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
 window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDollar,
+  EDITORS,
   tripPart, sumPart,
   /* Looking a property's value up: where each kind sends you, and the boundary
      for the one thing that store holds. */
@@ -32333,7 +32385,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   isIra, iraAccountsOf, latestContrib, contribStopMonth, iraOutlook,
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
-  retAcctBalance, holdingsValue, bucketsValue, bucketGap, kindTotals,
+  retAcctBalance, holdingsValue, bucketsValue, bucketValues, bucketGap, kindTotals,
   netWorthParts, PROPERTY_KINDS, vacationYearStats, vacationYearRunning,
   /* Debts: the schedule, where it lands in a given month, and when it ends.
      Pure over one row, so a test pins the arithmetic rather than the card. */

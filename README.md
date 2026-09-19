@@ -1361,7 +1361,13 @@ account.
 - **Holdings inside each account** — the same ticker/shares/price rows an
   investment pane takes, priced by the same [lookup](#prices), with its bar
   above them once any account lists holdings. Once an account lists them, its
-  balance follows the holdings instead of a figure you typed.
+  balance follows the holdings instead of a figure you typed — and that
+  includes an account that also lists contribution types. There, the holdings
+  say **how much** there is and the types say **how it splits**: each type
+  keeps its share of what you typed and is applied to the holdings' current
+  value, so a price refresh moves Net Worth and the Traditional/Roth split
+  together. When the typed types no longer add up to the holdings, the table
+  says by how much, so you know it's time to copy in a new statement.
 
 ### The Split, and the Calculators
 

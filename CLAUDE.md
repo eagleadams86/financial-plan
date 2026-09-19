@@ -710,6 +710,21 @@ right by accident.
   **The `retAcct` dialog's `sub` is a function** for the same reason: it used to
   say the TYPE decides the split, which stopped being true the moment buckets
   existed, and it was saying it in the one dialog where somebody is choosing one.
+- **Holdings outrank buckets for the BALANCE (flipped 2026-09-19).** Buckets
+  used to lead, so a 401(k) listing both was valued at its hand-typed statement
+  figures and Net Worth sat on a stale number while the priced holdings beside
+  it moved. Now `retAcctBalance` is rows → buckets → typed amount, and
+  `bucketValues(a, priceOf)` gives each bucket its SHARE of the typed total
+  applied to the holdings' value (residue on the largest part, so they add up
+  exactly; null when the typed total is ≤ 0, and the account then counts on its
+  own kind). `kindTotals` and `retirementPots` both read `bucketValues`, so the
+  card, the projection and a month-end close all agree. The accounts table
+  shows the scaled figures and says so under them with the typed total
+  (`bucketGap` — the figure-changed-must-be-shown rule). Two consequences:
+  closes now reach a bucketed account through its holdings (`retTyped` counts
+  only accounts with NO rows), and **the fold refuses when some of its accounts
+  list holdings and another has a typed balance with none** — the result would
+  be valued by holdings that leave the typed money out.
 - **`kindTotals(accts)` is the one reader** for the Traditional/Roth question on
   screen; the tab asks it twice (the bar and the per-person table) and the two
   drifting apart would show a household whose halves don't add up.
