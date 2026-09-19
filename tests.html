@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1176;
+const EXPECTED = 1191;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -4686,7 +4686,7 @@ t('it survives the boundary intact — every collection still there', () => {
   ok(n(d.goals) === 4, 'four goals — the kitchen queues behind the roof (2026-09-05)');
   ok(n(d.years) === 3, 'this year plus two of history');
   ok(n(d.side.retirementAccounts) === 4, 'four retirement accounts');
-  ok(n(d.side.snapshots) === 3, 'three net-worth snapshots');
+  ok(n(d.side.snapshots) === 4, 'four net-worth snapshots — the last closes the month the sample is entered through');
   ok(n(d.side.portfolios[0].rows) === 3, 'three holdings in the portfolio');
   ok(n(d.vacations.trips) === 2, 'two trips, one a year — the chart needs two bars (2026-09-04)');
   ok(n(d.side.drawdown.income) === 3, 'three retirement income rows');
@@ -21446,6 +21446,320 @@ t('a window halted for a newer build cancels its pending sync push, and can neve
     if (f) f.remove();
     tcPutBack(kept);
   }
+});
+
+group('Closing a month (2026-09-19)');
+/* ── A checklist that ticks itself ──────────────────────────────────────────
+   Charles: "a checklist that automatically generates and checks items off as
+   they are completed". `closeChecklist` is pure over what it is handed, the
+   date included, so every rule below is pinned against a fixture rather than
+   the clock. Built on a live 2030 with a hub, a second account and one that
+   only starts in October; a quarterly water bill paid by hand, rent on autopay
+   and a row with no schedule. */
+function closeFix(opts) {
+  opts = opts || {};
+  const blank = H.blankState();
+  const raw = Object.assign(blank, {
+    settings: Object.assign(blank.settings, {
+      accounts: [
+        { id: 'cash', name: 'Cash', rate: 0, creditTo: 'cash', hub: true },
+        { id: 'save', name: 'Savings', rate: 0, creditTo: 'save' },
+        { id: 'late', name: 'Later', rate: 0, creditTo: 'late', since: '2030-10' },
+      ] }, opts.settings || {}),
+    years: { '2030': {
+      kind: 'grid', model: 'live', startMonth: '2030-01', monthCount: 12,
+      ...(opts.entered === null ? {} : { enteredThrough: opts.entered || '2030-08' }),
+      categories: [
+        { id: 'water', name: 'Water', section: 'expense', role: 'normal', rule: 'none',
+          duePay: 'manual', dueMonths: [3, 6, 9, 12], dueDay: 3, ...(opts.water || {}) },
+        { id: 'rent', name: 'Rent', section: 'expense', role: 'normal', rule: 'none',
+          duePay: 'auto', dueDay: 1 },
+        { id: 'food', name: 'Food', section: 'expense', role: 'normal', rule: 'none' },
+      ],
+      cells: opts.cells || {}, paychecks: {}, seeds: { cash: 1000, save: 500, late: 200 },
+      overrides: opts.overrides || {}, balAdjust: {}, extraNotes: [] } },
+    side: Object.assign(blank.side, opts.side || {}),
+  });
+  if (opts.exported) raw.exported = opts.exported;
+  return H.migrate(H.coerceShape(raw));
+}
+const closeOf = (st, m, today) =>
+  H.closeChecklist(st, H.computeAll(st, today), m.slice(0, 4), m, today);
+const closeItem = (list, id) => (list ? list.items.find(i => i.id === id) : undefined);
+
+t('the card is there for the month just ended, and a current month only in its last week', () => {
+  const st = closeFix();
+  ok(closeOf(st, '2030-08', '2030-09-10'), 'the month that has just ended has a card');
+  eq(closeOf(st, '2030-07', '2030-09-10'), null, 'two months back has none — older months never nag');
+  eq(closeOf(st, '2030-09', '2030-09-10'), null, 'the current month, three weeks from its end, has none');
+  ok(closeOf(st, '2030-09', '2030-09-25'), 'but its last week does');
+  eq(H.CLOSE_LEAD_DAYS, 7, 'a week');
+  eq(closeOf(st, '2030-10', '2030-09-25'), null, 'a future month never has one');
+  eq(closeOf(st, '2029-12', '2030-01-05'), null, 'nor a month no grid year holds');
+});
+
+t('bills: a real figure ticks it — a stated $0.00 counts, an estimate does not', () => {
+  const open = closeOf(closeFix(), '2030-09', '2030-10-02');
+  const bills = closeItem(open, 'bills');
+  ok(bills && !bills.done, 'water and rent are due in September and neither has a figure');
+  eq(bills.go, { kind: 'cell', cat: 'water', m: '2030-09', year: '2030' },
+     'and the line opens the first one still missing');
+  const est = closeFix({ cells: { 'water|2030-09': { v: -80, kind: 'manual' },
+                                  'rent|2030-09': { v: 0, kind: 'actual' } } });
+  eq(closeItem(closeOf(est, '2030-09', '2030-10-02'), 'bills').done, false,
+     'an estimate is not a paid bill');
+  const paid = closeFix({ cells: { 'water|2030-09': { v: -80, kind: 'actual' },
+                                   'rent|2030-09': { v: 0, kind: 'actual' } } });
+  eq(closeItem(closeOf(paid, '2030-09', '2030-10-02'), 'bills').done, true,
+     'an actual and a stated $0.00 are both a bill that came');
+  const noBills = closeOf(closeFix(), '2030-08', '2030-09-10');
+  ok(closeItem(noBills, 'bills'), 'August still has the rent');
+  const held = closeOf(closeFix({ water: { dueHold: '2030-12' } }), '2030-09', '2030-10-02');
+  const hb = closeItem(held, 'bills');
+  ok(/1 waiting on the bill/.test(hb.detail), 'a held bill is named, not counted', hb.detail);
+  eq(hb.go.cat, 'rent', 'and the line skips it');
+});
+
+t('balances: every account the month shows, and only those', () => {
+  const st = closeFix();
+  const b = closeItem(closeOf(st, '2030-08', '2030-09-10'), 'balances');
+  ok(b && !b.done, 'nothing is stated yet');
+  ok(/None of the 2 accounts done yet/.test(b.detail),
+     'two accounts — the one starting in October has nothing to state', b.detail);
+  eq(b.go, { kind: 'bal', id: 'cash', m: '2030-08', year: '2030' }, 'the line opens the first');
+  const done = closeFix({ overrides: { 'cash|2030-08': { v: 900 }, 'save|2030-08': { v: 500 } } });
+  eq(closeItem(closeOf(done, '2030-08', '2030-09-10'), 'balances').done, true, 'both stated');
+});
+
+t('entered: the backfilled marker is not an entered month, and months go in order', () => {
+  const fresh = closeFix({ entered: null });
+  eq(fresh.years['2030'].enteredThrough, '2029-12', 'fixture: coerceShape backfilled the month before');
+  const jan = closeItem(closeOf(fresh, '2030-01', '2030-02-10'), 'entered');
+  eq(jan.done, false, 'so January is not entered');
+  eq(jan.go, { kind: 'enter' }, 'and it is the month the button enters');
+  const behind = closeItem(closeOf(closeFix({ entered: '2030-06' }), '2030-08', '2030-09-10'), 'entered');
+  eq(behind.go, { kind: 'month', m: '2030-07' }, 'with July still open, the line goes to July');
+  ok(/Jul 2030 has to be entered first/.test(behind.detail), 'and says so', behind.detail);
+  const st = closeFix();
+  st.years['2030'].model = 'pinned';
+  eq(closeItem(closeOf(st, '2030-08', '2030-09-10'), 'entered').done, true, 'a finished year is entered');
+});
+
+t('net worth: a snapshot dated the month’s last day, and a path to recording one', () => {
+  const at = (snaps, entered, today) => closeItem(
+    closeOf(closeFix({ entered, side: { snapshots: snaps } }), '2030-08', today || '2030-09-10'), 'worth');
+  eq(at([{ date: '2030-08-31', total: 1 }], '2030-08').done, true, 'the 31st counts');
+  const mid = at([{ date: '2030-08-15', total: 1 }], '2030-08');
+  eq(mid.done, false, 'the 15th does not');
+  eq(mid.go, { kind: 'view', view: 'goals', settled: true },
+     'and August, the last month entered, is recorded with the card set to it');
+  const early = at([], '2030-07');
+  ok(/Mark Aug 2030 entered first/.test(early.detail), 'unentered, it asks for that first', early.detail);
+  const cur = closeItem(closeOf(closeFix(), '2030-09', '2030-09-25'), 'worth');
+  ok(/Record it on September 30/.test(cur.detail), 'on the current month it names the last day', cur.detail);
+  eq(closeItem(closeOf(closeFix({ entered: '2030-09' }), '2030-08', '2030-10-02'), 'worth'), undefined,
+     'a month the button can no longer date is left out rather than drawn as a chore nobody can do');
+});
+
+t('debts, holdings, the giving fund and property: left out with nothing to be about', () => {
+  const none = closeOf(closeFix(), '2030-08', '2030-09-10');
+  for (const id of ['debts', 'invested', 'retirement', 'giving', 'property'])
+    eq(closeItem(none, id), undefined, id + ' is left out of a plan without one');
+  eq(closeItem(none, 'backup').done, false, 'the backup line is always there');
+  const side = {
+    liabilities: [{ id: 'car', name: 'Car', balance: 500, asOf: '2030-07' },
+                  { id: 'old', name: 'Old', balance: 0, asOf: '2029-01' }],
+    portfolios: [{ id: 'b', name: 'Brokerage', rows: [{ ticker: 'VTI', shares: 1, price: 1 }],
+                   checkedOn: '2030-08-01' },
+                 { id: 'e', name: 'Empty', rows: [] }],
+    retirementAccounts: [{ name: '401(k)', type: '401k', kind: 'traditional', amount: 5,
+                           checkedOn: '2030-07-31' }],
+    property: [{ id: 'h', name: 'House', kind: 'home', value: 100, checkedOn: '2030-08-20' }],
+    daf: [{ ticker: 'VTI', shares: 1, price: 1 }], dafCheckedOn: '2030-08-02',
+  };
+  /* Said outright: coerceShape turns the fund on by itself for a plan holding
+     something in it and saying nothing. */
+  const l = closeOf(closeFix({ side, settings: { givingFund: false }, exported: { backup: '2030-09-01' } }),
+                    '2030-08', '2030-09-10');
+  eq(closeItem(l, 'debts').done, false, 'July’s statement is behind August');
+  ok(/^Still to do — next: Car$/.test(closeItem(l, 'debts').detail),
+     'the paid-off one is not counted', closeItem(l, 'debts').detail);
+  eq(closeItem(l, 'invested').done, true, 'checked on the 1st counts — the empty pane is not asked');
+  eq(closeItem(l, 'retirement').done, false, 'the 31st of July is last month');
+  eq(closeItem(l, 'property').done, true, 'valued in August');
+  eq(closeItem(l, 'giving'), undefined, 'the giving fund only once Preferences turns it on');
+  eq(closeItem(l, 'backup').done, true, 'a backup since the month began');
+  const on = closeOf(closeFix({ side, settings: { givingFund: true } }), '2030-08', '2030-09-10');
+  eq(closeItem(on, 'giving').done, true, 'and then it is asked');
+  side.liabilities[0].asOf = '2030-09';
+  eq(closeItem(closeOf(closeFix({ side }), '2030-08', '2030-09-10'), 'debts').done, true,
+     'a later statement is not behind — "at or after", not "equal"');
+});
+
+t('December: the year’s lines, which only ever navigate', () => {
+  const side = { comp: { '2030': { salary: 100 } },
+    tax: { federal: { '2030': { single: { bands: [{ upTo: null, rate: 0.1 }] } } }, state: {} } };
+  const st = closeFix({ entered: '2030-11', side, exported: { csv: { '2030': '2030-11-30' } } });
+  const l = closeOf(st, '2030-12', '2031-01-10');
+  const year = l.items.filter(i => i.group === 'year').map(i => i.id);
+  eq(year, ['nextYear', 'figures', 'history', 'csv'], 'four lines, in that order');
+  eq(closeItem(l, 'nextYear').go, { kind: 'grid', year: '2030', btn: 'rolloverBtn' }, 'Build is on the grid');
+  const fig = closeItem(l, 'figures');
+  ok(/Pay, Federal tax/.test(fig.detail),
+     'next year’s tax table is missing even though taxTableFor would fall back to 2030’s', fig.detail);
+  eq(fig.go, { kind: 'view', view: 'comp' }, 'the first missing piece’s tab');
+  ok(/Every month has to be entered first/.test(closeItem(l, 'history').detail), 'December is not entered');
+  eq(closeItem(l, 'csv').done, false, 'a CSV from November is not December’s');
+  for (const i of l.items.filter(x => x.group === 'year'))
+    ok(!i.go || ['grid', 'view'].includes(i.go.kind), i.id + ' goes somewhere and does nothing itself');
+});
+
+t('last December stays while the year is open, and goes once it is closed', () => {
+  const st = closeFix({ entered: '2030-12', exported: { csv: { '2030': '2030-12-20' } } });
+  ok(closeOf(st, '2030-12', '2031-03-10'), 'in March, last December is still open');
+  st.years['2031'] = JSON.parse(JSON.stringify(st.years['2030']));
+  Object.assign(st.years['2031'], { startMonth: '2031-01', enteredThrough: '2030-12', cells: {}, overrides: {} });
+  st.years['2030'].model = 'pinned';
+  eq(closeOf(st, '2030-12', '2031-03-10'), null, 'built, frozen and saved — it goes');
+  ok(closeOf(st, '2030-12', '2031-01-10'), 'though in January it is last month, and still shown');
+  const old = closeFix({ entered: '2030-12' });
+  eq(closeOf(old, '2030-12', '2032-03-10'), null, 'an older December never has a card, open or not');
+});
+
+t('the stamps are days, and a bad one is dropped at the boundary', () => {
+  eq(H.stampDay('2030-08-31'), '2030-08-31');
+  eq(H.stampDay('2028-02-29'), '2028-02-29', 'a leap day');
+  for (const bad of ['2030-02-29', '2030-13-01', '2030-04-31', '2030-8-1', 20300801, 'Aug 1', null])
+    eq(H.stampDay(bad), null, 'refused: ' + JSON.stringify(bad));
+  eq(H.coerceExported({ backup: '2030-08-02', csv: { '2030': '2030-12-01', 'x': '2030-12-01', '2029': 'soon' } }),
+     { backup: '2030-08-02', csv: { '2030': '2030-12-01' } }, 'only real days under real years');
+  eq(H.coerceExported({ backup: 'yesterday' }), null, 'nothing left is nothing at all');
+  const d = H.coerceShape(Object.assign(H.blankState(), {
+    exported: { backup: 'nope' },
+    side: Object.assign(H.blankState().side, {
+      portfolios: [{ id: 'p', name: 'P', rows: [], checkedOn: '2030-02-30' }],
+      retirementAccounts: [{ name: 'R', type: 'ira', amount: 1, checkedOn: '2030-08-01' }],
+      property: [{ name: 'H', kind: 'home', value: 1, checkedOn: '<b>' }],
+      dafCheckedOn: 7 }) }));
+  ok(!('exported' in d), 'an emptied branch is deleted, not left as {}');
+  ok(!('checkedOn' in d.side.portfolios[0]), 'a day that does not exist is dropped');
+  eq(d.side.retirementAccounts[0].checkedOn, '2030-08-01', 'a real one is kept');
+  ok(!('checkedOn' in d.side.property[0]) && !('dafCheckedOn' in d.side), 'and junk is dropped');
+  const merged = Object.assign(H.blankState(), d);
+  ok(!Object.values(merged).includes(undefined), 'nothing undefined for Firestore to refuse');
+});
+
+t('share links carry no stamps, on every link', () => {
+  const v = H.stripStamps({ exported: { backup: '2030-01-01' },
+    side: { dafCheckedOn: '2030-01-01', portfolios: [{ id: 'p', checkedOn: '2030-01-01', rows: [] }],
+            property: [{ checkedOn: '2030-01-01', value: 1 }] } });
+  eq(JSON.stringify(v).includes('2030-01-01'), false, 'every stamp is gone');
+  eq(v.side.property[0].value, 1, 'and nothing else is');
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const fn = src.slice(src.indexOf('function buildSharePayload('), src.indexOf('async function encodeShare('));
+  ok(/\n\s*stripStamps\(data\);\n\s*if \(!includeNotes\) stripNotes\(data\);/.test(fn),
+     'stripped unconditionally, not only when notes are left out');
+});
+
+t('a download is not an edit: out of undo, and kept through one', () => {
+  const a = H.coreOf({ years: {}, exported: { backup: '2030-01-01' } });
+  eq(a, H.coreOf({ years: {}, exported: { backup: '2031-01-01' } }), 'coreOf ignores it');
+  const restored = H.carryExported({ years: {}, exported: { backup: '2029-01-01' } },
+                                    { exported: { backup: '2030-05-05', csv: { '2030': '2030-05-05' } } });
+  eq(restored.exported, { backup: '2030-05-05', csv: { '2030': '2030-05-05' } }, 'the newer downloads stand');
+  eq('exported' in H.carryExported({ exported: { backup: 'x' } }, {}), false, 'and none means none');
+});
+
+t('checked by hand, or by a real change — never by a price refresh', () => {
+  const st = { side: {
+    portfolios: [{ id: 'b', rows: [] }], retirementAccounts: [{}, {}],
+    property: [{ value: 5 }, { name: 'no value' }], daf: [] } };
+  ok(H.markChecked(st, 'pf:b', '2030-08-02'), 'a pane');
+  eq(st.side.portfolios[0].checkedOn, '2030-08-02');
+  ok(H.markChecked(st, 'ra:1', '2030-08-02') && st.side.retirementAccounts[1].checkedOn === '2030-08-02'
+     && !st.side.retirementAccounts[0].checkedOn, 'a retirement account, by index');
+  ok(H.markChecked(st, 'property', '2030-08-02'), 'the valued property');
+  ok(!('checkedOn' in st.side.property[1]), 'one with no value has nothing to check');
+  ok(H.markChecked(st, 'daf', '2030-08-02') && st.side.dafCheckedOn === '2030-08-02', 'the giving fund');
+  eq(H.markChecked(st, 'pf:missing', '2030-08-02'), false, 'nothing there, nothing marked');
+  eq(H.markChecked(st, 'ra:x', '2030-08-02'), false, 'and a malformed key marks nothing');
+  const h = { ticker: 'vti', shares: 2, price: 10, note: 'a' };
+  eq(H.holdingChanged(h, { ticker: 'VTI', shares: 2, price: 10 }), false, 'a note or the ticker’s case is not a check');
+  eq(H.holdingChanged(h, { ticker: 'VTI', shares: 3, price: 10 }), true, 'a share count is');
+  eq(H.holdingChanged(null, h), true, 'and so is a new row');
+  const src = stripComments(APP_SRC);
+  for (const fn of ['async function refreshPrices(', 'async function refreshMonthCloses(']) {
+    const at = src.indexOf(fn);
+    ok(at > -1, fn + ' is still there');
+    const body = src.slice(at, src.indexOf('\n}\n', at));
+    ok(!/checkedOn|markChecked/.test(body), fn + ' never stamps — a fetched price is not somebody looking');
+  }
+  const ret = src.slice(src.indexOf('  retAcct: {'), src.indexOf('  bucket: {'));
+  ok(/if \(old\?\.checkedOn\) row\.checkedOn = old\.checkedOn;/.test(ret),
+     'retAcct.save rebuilds the row, so it carries the day across by hand');
+});
+
+t('the sample plan shows the card half done, and the year’s lines in January', () => {
+  const Y = new Date().getFullYear();
+  const st = H.migrate(H.coerceShape(H.sampleState()));
+  const aug = closeOf(st, `${Y}-08`, `${Y}-09-03`);
+  ok(aug, 'the month the sample is entered through has a card');
+  eq(closeItem(aug, 'entered').done, true, 'entered');
+  eq(closeItem(aug, 'worth').done, true, 'net worth recorded on the 31st');
+  const inv = closeItem(aug, 'invested');
+  ok(inv && !inv.done && /1 of 2/.test(inv.detail), 'one brokerage pane checked, one not', inv && inv.detail);
+  ok(closeItem(aug, 'retirement') && !closeItem(aug, 'retirement').done, 'one retirement account checked of four');
+  eq(closeItem(aug, 'backup').done, false, 'no backup yet');
+  const dec = H.closeChecklist(st, H.computeAll(st, `${Y + 1}-01-10`), String(Y), `${Y}-12`, `${Y + 1}-01-10`);
+  ok(dec && closeItem(dec, 'nextYear'), 'in January, December has the year’s lines');
+});
+
+t('the card draws on last month, its lines go where they say, and this month points back', async () => {
+  const { f, W, D } = await auditFrame(1280, 1200, 'closecard');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const Y = new Date().getFullYear();
+    const real = W.todayISO;
+    W.todayISO = (d) => (d ? real(d) : `${Y}-09-03`);
+    D.getElementById('tab-budget').click();
+    D.querySelector('.vswitch[data-mode="month"]').click();
+    W.pickMonth(`${Y}-09`);
+    await wait(150);
+    const ptr = D.querySelector('button[data-close="month"]');
+    ok(ptr, 'the current month points back at August');
+    ok(/Aug \d{4} isn’t closed yet — \d+ of \d+ done/.test(ptr.textContent), ptr.textContent.trim());
+    ptr.click();
+    await wait(150);
+    eq(D.querySelector('[data-month][aria-checked="true"]').dataset.month, `${Y}-08`, 'and opens it');
+    const card = D.querySelector('[data-box="month-close"]');
+    ok(card, 'August has its Close card');
+    ok(/Close August/.test(card.querySelector('h2').textContent), 'headed for the month');
+    ok(card.querySelector('[data-help="monthClose"]'), 'with its info dot');
+    const rows = [...card.querySelectorAll('.mrow')];
+    ok(rows.length >= 6, 'one line per job', rows.length);
+    ok(rows.some(r => /✓ Done/.test(r.textContent)) && rows.some(r => /To do/.test(r.textContent)),
+       'some done, some not');
+    for (const r of rows) ok(r.getAttribute('aria-label'), 'every line says its state in words');
+    const backup = rows.find(r => r.dataset.close === 'backup');
+    backup.click();
+    await wait(100);
+    ok(D.getElementById('dataDialog').open, 'the backup line opens Back Up');
+    D.getElementById('dataDialog').close();
+    const inv = [...D.querySelectorAll('[data-box="month-close"] .mrow')]
+      .find(r => r.dataset.view === 'investments');
+    inv.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await wait(150);
+    eq(W.finGet().ui.activeTab, 'investments', 'and a tab line lands on its tab, from the keyboard too');
+    ok(D.querySelector('[data-check^="pf:"]'), 'where each pane offers ✓ Checked, No Change');
+  } finally { f.remove(); }
+});
+
+t('the card and the pointer are never drawn in a shared view', () => {
+  const src = stripComments(APP_SRC);
+  const fn = src.slice(src.indexOf('function renderMonthView('), src.indexOf('function monthNetPoints('));
+  ok(/const close = viewOnly \? null : closeChecklist\(/.test(fn), 'no card for somebody else’s chores');
+  ok(/m === today\.slice\(0, 7\) && !viewOnly \? yearOfMonth/.test(fn), 'and no pointer to one');
 });
 
 async function run() {

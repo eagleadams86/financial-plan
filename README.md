@@ -813,6 +813,46 @@ as figures you stated at the time rather than a chain to recompute, and an
 account you've since closed stops at its last month instead of following you
 into later years.
 
+### Closing a Month
+
+The Month page carries a **Close ⟨month⟩** card: the jobs that finish a month,
+as a list that **ticks itself**. Nothing on it is a box you tick by hand —
+each line asks the plan whether its job is done, and a line only says ✓ Done
+when it is. Click a line to go to where that job is done; none of them does
+the job for you.
+
+- **When it appears:** on the month that has just ended, and on the current
+  month during its last week. While last month still has open lines, the
+  current month's summary says so in one line — *"Aug 2026 isn't closed yet —
+  4 of 10 done"* — and takes you there. Older months never grow a card, and
+  it is never drawn on a shared link or on paper.
+- **The month's lines,** each left out when there is nothing for it to be
+  about:
+  - **Bills with a due date recorded** — every bill due that month holds a
+    real figure (a stated $0.00 counts; an estimate doesn't; a bill you are
+    waiting on is named, not counted).
+  - **Account balances stated** — every account the month shows has a
+    balance you read off a statement.
+  - **⟨Month⟩ marked entered** — and if an earlier month is still open, the
+    line goes there first, since months are entered in order.
+  - **Net worth recorded** — a snapshot dated the month's last day. The
+    Record button can date one there on the last day itself, or afterwards
+    with the Net Worth card set to the last month entered; the line opens
+    Progress set up that way.
+  - **Debts brought up to date** — each debt stated for this month or later.
+  - **Investment holdings, retirement accounts, the giving fund and property
+    values checked** — these figures carry no month, so each remembers the
+    day it last changed. Editing a share count, a price, a balance or a value
+    counts; so does **✓ Checked, No Change** on its card, for a month where
+    nothing moved. A price the app fetched never counts — that is not you
+    looking.
+  - **Backup downloaded** — a backup taken since the month began.
+- **December adds the year's lines:** next year built, next year's figures
+  set up (pay, contribution limits, tax tables, time off and giving — each
+  asked only if this year had it), the year marked as history, and a CSV of
+  it saved. These open the grid's own buttons rather than repeating them.
+  Last December's card stays into the new year until those are done.
+
 ### Building Next Year
 
 **"Build ⟨next year⟩"** duplicates the live grid the way Charlie used to
@@ -2223,7 +2263,9 @@ four palettes.
 **⇩ Back Up** in the header opens one dialog for everything to do with the
 file on disk.
 
-- **Export** writes `financial-plan-YYYY-MM-DD.json`.
+- **Export** writes `financial-plan-YYYY-MM-DD.json`. The app remembers the
+  day, which is what ticks **Backup downloaded** on the month's
+  [Close card](#closing-a-month); a year's CSV is remembered the same way.
 - **Restore JSON…** reads one back. It's the same path Charlie's one-time
   spreadsheet import uses.
 - **Import a year's CSV…** brings one budget year back from a spreadsheet —
