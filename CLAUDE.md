@@ -335,6 +335,14 @@ family names as well as balances.
     unguarded the switch offered it and the card came back with Liquid $0.00 and
     a total missing every dollar of it. Found on screen against the sample; a
     round-numbered fixture would never have shown it.
+    **EXCEPT across the year end (2026-09-19)**: that backfilled December is last
+    year's real, entered December when the year before holds it and has it
+    entered, and it is offered — Charles asked why 31 December could not be
+    recorded after New Year, and there was no reason. `worthAsOf` returns `year`,
+    the year HOLDING `asOf`; the card (`wc`) and the Record button read `C[year]`,
+    because the liquid total and the linked-account overlap are that year's
+    balances. The month-end closes price it at its own close, so there is no
+    market-open deadline; the window is until January is entered.
   - **`ui.worthAsOf` is a MODE (`'settled'`), never a month.** A stored
     `'2026-08'` is a stale answer by October; "the last month you marked
     entered" stays true for ever. Absent when off, the `flowNoTransfers` rule.
@@ -5470,10 +5478,10 @@ on the current month.
     earlier open month is where the line goes.
   - *worth* — a snapshot dated `monthEndISO(m)`. **The Record button can only write
     that date on the last day itself, or with the card on the settled month**
-    (`worthAsOf`), so the line is LEFT OUT once neither is possible — never drawn as
-    a chore nobody can do. The case that hits: December of last year once January
-    begins (the new year is live and its entered marker is the backfilled December,
-    which the card will not offer). The last-week card is what catches it.
+    (`worthAsOf`, whose answer the line ASKS rather than re-deriving), so the line
+    is LEFT OUT once neither is possible — never drawn as a chore nobody can do.
+    Last December stays recordable through January (see the Net Worth notes), so
+    its line survives the year end.
   - *debts* — `asOf >= m`, "at or after": a later statement replaces the earlier one.
   - *invested / retirement / giving / property / backup* — a date stamp on or after
     the 1st.

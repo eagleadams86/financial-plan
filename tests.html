@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1191;
+const EXPECTED = 1193;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -12231,7 +12231,7 @@ t('the Record button reads the same month the card was showing', () => {
      screen it came off — the rule the comment above netWorthTotals exists to
      protect, now that the card can be read at more than one month. */
   const src = stripComments(APP_SRC);
-  ok(/const \{ asOf, chosen \} = worthAsOf\(state, liveKey, cur\);/.test(src),
+  ok(/const \{ asOf, chosen, year \} = worthAsOf\(state, liveKey, cur\);/.test(src),
      'the handler resolves through the same pure function the card does');
   ok(/netWorthTotals\(state, liquid, c, asOf,\s*chosen \? \(state\.closes \|\| \{\}\) : undefined\)/.test(src)
      && /netWorthTotals\(state, liquid, c, cur,\s*choice\.chosen \? \(state\.closes \|\| \{\}\) : undefined\)/.test(src),
@@ -12240,8 +12240,8 @@ t('the Record button reads the same month the card was showing', () => {
   ok(/const end = monthEndISO\(asOf\), iso = todayISO\(\);[\s\S]{0,80}date: end < iso \? end : iso/
      .test(src),
      'and dates it the month end capped at today — which is today for the month in progress');
-  ok(/netWorthCard\(c\.balances\[`total\|\$\{worth\.asOf\}`\] \|\| 0,/.test(src),
-     'and the card is handed the balance for that same month');
+  ok(/netWorthCard\(wc\.balances\[`total\|\$\{worth\.asOf\}`\] \|\| 0,/.test(src),
+     'and the card is handed the balance for that same month — from the year holding it');
 });
 t('correcting a snapshot cannot drop what it says is owed', () => {
   /* `save` REBUILDS the row rather than merging, so a key missing from its list
@@ -21753,6 +21753,46 @@ t('the card draws on last month, its lines go where they say, and this month poi
     eq(W.finGet().ui.activeTab, 'investments', 'and a tab line lands on its tab, from the keyboard too');
     ok(D.querySelector('[data-check^="pf:"]'), 'where each pane offers ✓ Checked, No Change');
   } finally { f.remove(); }
+});
+
+/* ── 31 December after the year has turned (2026-09-19) ────────────────────
+   Charles: "why can't i update dec 31 up until the next market open?" There
+   was no reason — on 1 January the new year is the live one with nothing
+   entered, and the Net Worth card offered only the live year's own months, so
+   last December was unreachable however it was entered. It is offered now for
+   as long as the new year has nothing entered, and priced at its own closes. */
+const turnedYear = (decEntered) => {
+  const st = closeFix({ entered: decEntered });
+  st.years['2031'] = JSON.parse(JSON.stringify(st.years['2030']));
+  Object.assign(st.years['2031'], { startMonth: '2031-01', enteredThrough: '2030-12',
+    cells: {}, overrides: {} });
+  return st;
+};
+t('in January the Net Worth card offers last December, once December is entered', () => {
+  const st = turnedYear('2030-12');
+  const w = H.worthAsOf(st, '2031', '2031-01');
+  ok(w.canChoose, 'a choice is offered');
+  eq(w.settled, '2030-12', 'and it is last December');
+  eq(w.year, '2031', 'read at this month until it is chosen');
+  st.ui.worthAsOf = 'settled';
+  const c = H.worthAsOf(st, '2031', '2031-01');
+  eq([c.asOf, c.year, c.est], ['2030-12', '2030', false],
+     'chosen, it is December, in 2030’s figures, and settled');
+  eq(H.worthAsOf(turnedYear('2030-11'), '2031', '2031-01').canChoose, false,
+     'an unentered December is not offered — its estimates are not history');
+  const src = stripComments(APP_SRC);
+  ok(/const \{ asOf, chosen, year \} = worthAsOf\(state, liveKey, cur\);\s*const c = C\[year\] \|\| C\[liveKey\];/.test(src),
+     'the Record button reads the balances of the year that holds the month');
+  ok(/const wc = C\[worth\.year\] \|\| c;/.test(src), 'and so does the card');
+});
+t('and December’s Close card keeps its net worth line into January', () => {
+  const w = closeItem(closeOf(turnedYear('2030-12'), '2030-12', '2031-01-10'), 'worth');
+  ok(w, 'the line is there');
+  eq(w.go, { kind: 'view', view: 'goals', settled: true }, 'opening Progress on December');
+  ok(/set to Dec 2030/.test(w.detail), w.detail);
+  const open = closeItem(closeOf(turnedYear('2030-11'), '2030-12', '2031-01-10'), 'worth');
+  ok(open && /Mark Dec 2030 entered first/.test(open.detail), 'unentered, it asks for that first',
+     open && open.detail);
 });
 
 t('the card and the pointer are never drawn in a shared view', () => {

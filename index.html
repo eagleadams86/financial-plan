@@ -12426,9 +12426,15 @@ function closeChecklist(st, computed, y, m, today) {
   const liveKeys = startedGridYears(st, today);
   const liveKey = liveKeys[liveKeys.length - 1] || null;
   const liveYr = liveKey ? st.years[liveKey] : null;
-  const settled = liveYr && liveYr.model === 'live' && liveYr.enteredThrough === m
-    && yearMonths(liveYr).includes(m);
-  const canStillEnter = live && !enteredDone && liveKey === y;
+  /* The Net Worth card's own answer, never a second one — it offers last
+     December from January too. */
+  const offer = liveYr && liveYr.kind === 'grid'
+    ? worthAsOf(st, liveKey, currentMonthOf(liveYr, today)) : null;
+  const settled = !!offer && offer.canChoose && offer.settled === m;
+  /* Still to be entered, in the live year or — for December — the year just
+     gone, which becomes recordable the moment it is. */
+  const canStillEnter = live && !enteredDone
+    && (liveKey === y || (liveKey === String(+y + 1) && isDec));
   if (recorded || m === TM || settled || canStillEnter)
     add('month', 'worth', 'Net worth recorded', recorded,
       recorded ? `A snapshot dated ${fullDayLabel(end)}`
@@ -14593,15 +14599,32 @@ function worthAsOf(st, liveKey, cur) {
      '2025-12' on a 2026 grid — a month the year has no balance for, which
      offered a switch that read Liquid $0.00 and a total missing it entirely.
      Found on screen, not in a fixture. */
-  const holds = !!settled
+  let holds = !!settled
     && (yr && yr.kind === 'grid' ? yearMonths(yr) : []).includes(settled);
+  /* ACROSS THE YEAR END (2026-09-19). On 1 January the new year becomes the
+     live one with nothing entered, so its marker is that backfilled December —
+     which is LAST year's December, and a perfectly real month there. If the
+     year before holds it and has it entered, it is the settled month: without
+     this, 31 December could never be recorded once the year had turned, and
+     the month-end closes price it at its own close whenever it is read. */
+  let year = liveKey;
+  const prev = String(+liveKey - 1);
+  const pyr = (st.years || {})[prev];
+  if (!holds && settled === `${prev}-12` && pyr && pyr.kind === 'grid'
+      && yearMonths(pyr).includes(settled) && enteredThroughOf(st, prev) >= settled) {
+    holds = true;
+    year = prev;
+  }
   const canChoose = holds && monthAhead(yr, cur);
   const chosen = canChoose && ((st.ui || {}).worthAsOf === 'settled');
   return { asOf: chosen ? settled : cur, settled, now: cur, canChoose, chosen,
+    /* Which year's computed figures hold `asOf` — the live year's, except for
+       last December read from January. Every reader takes C[year]. */
+    year: chosen ? year : liveKey,
     /* The tiles that are month-derived wear the estimate mark when the month
        being read is still a projection. Asked once, here, so the mark and the
        sentence under the heading are the same claim. */
-    est: monthAhead(yr, chosen ? settled : cur) };
+    est: chosen ? monthAhead((st.years || {})[year], settled) : monthAhead(yr, cur) };
 }
 
 function netWorthTotals(st, liquid, c, cur, closes) {
@@ -14893,8 +14916,9 @@ function renderGoals() {
      that card's question, and silently re-dating the goals and the savings
      pulse beside it would be answering one somebody else asked. */
   const worth = worthAsOf(state, liveKey, cur);
-  const netWorthHtml = netWorthCard(c.balances[`total|${worth.asOf}`] || 0,
-    worth.asOf, c, worth);
+  const wc = C[worth.year] || c;
+  const netWorthHtml = netWorthCard(wc.balances[`total|${worth.asOf}`] || 0,
+    worth.asOf, wc, worth);
 
   /* Savings rate and runway — this year's flow beside the stocks above it.
      Skipped entirely on a year with nothing in it: two em-dash tiles would be
@@ -21030,12 +21054,13 @@ function wireView(view) {
     if (rec) rec.onclick = () => {
       const liveKey = latestGridYear();
       if (!liveKey) return;
-      const c = C[liveKey];
       const cur = currentMonthOf(state.years[liveKey], todayISO());
       /* The same month the card is being read at, so a snapshot states EXACTLY
          the figures that were on screen — two computations of one number is how
          a recorded fact drifts from the screen it came off. */
-      const { asOf, chosen } = worthAsOf(state, liveKey, cur);
+      const { asOf, chosen, year } = worthAsOf(state, liveKey, cur);
+      /* The year that HOLDS it — last year's, for December read in January. */
+      const c = C[year] || C[liveKey];
       const liquid = c.balances[`total|${asOf}`] || 0;
       /* The settled month's closes, exactly as the card is using them. */
       const { nw, total } = netWorthTotals(state, liquid, c, asOf,

@@ -1024,7 +1024,10 @@ estimate until you mark it entered — so Liquid and Total are drawn in *italics
 there, the same mark the grid puts on a figure it worked out. An **As of**
 switch offers the **last month you marked entered** instead, whose balances are
 what the accounts really ended that month holding. Where the current month is
-itself entered there is one answer and no switch.
+itself entered there is one answer and no switch. **Across the year end** the
+switch offers last December — once December is marked entered, and until you
+enter January — so 31 December can be recorded in January, priced at the year's
+closing prices.
 
 **A settled month prices your holdings at its own close.** A price is only true
 until the market next opens, so an end-of-August figure built from today's
