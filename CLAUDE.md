@@ -7378,6 +7378,13 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   substitution must not include a plain `x`: the first cut turned `max` into
   `ma*`. `numbersIn` skips a bare four-digit integer 1900–2100 with nothing
   money-like about it — a year off a column heading; `$2,026` is kept.
+  **`#calcExpr` carries NO `inputmode`** (2026-09-19, found on the iPhone Duo
+  simulator): it shipped `inputmode="decimal"`, and an iPhone's decimal pad is
+  digits and a point — no operators, no brackets, no letters — so on a phone
+  nothing but a bare number could be typed. The full keyboard's 123 layer has
+  them. `autocorrect="off"` rides with it (the price key's reason: iOS would
+  rewrite `total`/`max` mid-expression). The money boxes keep their decimal
+  pad on purpose; the minus key it lacks is a separate, open question.
 - **→ Field keeps the focus where it was.** A `pointerdown` on the button is
   `preventDefault`ed so the box the reader is IN is still the active element
   when the button acts — the belt to the `focusin` tracker, which turned out

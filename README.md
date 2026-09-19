@@ -1844,7 +1844,9 @@ with its ✕.
   `total*1.05` is the tape plus five percent. `%` is a percent, not a
   remainder: `200*5%` is 10. Enter works it out and puts the answer straight
   on the tape, labelled with what you typed, so a chain of workings reads
-  back as a list.
+  back as a list. On a phone the box brings up the full keyboard — its
+  **123** key has the digits and `+ - * / ( )` — with autocorrect off, so a
+  name like `total` is left as you typed it.
 - **Choose which figure the buttons use.** The four readouts — Total, Average,
   Count and Result — are a choice: click one and it fills, and **⎘ Copy** and
   **→ Field** act on that figure. Working something out chooses Result for
