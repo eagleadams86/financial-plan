@@ -5529,7 +5529,10 @@ on the current month.
   on `#views` before `data-add`) sits in the holdings table's `.addbar` (a retirement
   account's even with no holdings — its typed balance is what is confirmed) and the
   Property card's, so shared views and print lose it with the bar. Undoable.
-- **Drawn** after the Due and Waiting card, `data-box="month-close"`, never in
+- **Drawn UNDER the four month cards** (`.monthcards`, moved there at Charles's asking
+  the same day — the figures are what the page is for), its lines in `.closecols`:
+  the notes list's `columns: 2 290px`, `break-inside: avoid`, and the LAST line keeps
+  its rule so both columns end alike. `data-box="month-close"`, never in
   `viewOnly`, hidden in print with the pointer (`[data-close]`). Rows are `.mrow`s:
   `pill good` with ✓ for done, a plain pill with ○ for open — the tick is never colour
   alone. December's list is a `.sub.closeyear` paragraph, not a second `<h2>` (the

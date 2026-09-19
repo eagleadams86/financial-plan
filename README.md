@@ -815,7 +815,9 @@ into later years.
 
 ### Closing a Month
 
-The Month page carries a **Close ⟨month⟩** card: the jobs that finish a month,
+The Month page carries a **Close ⟨month⟩** card, under the month's Income,
+Expenses, Transfers and Accounts cards and split into two columns where there is
+room: the jobs that finish a month,
 as a list that **ticks itself**. Nothing on it is a box you tick by hand —
 each line asks the plan whether its job is done, and a line only says ✓ Done
 when it is. Click a line to go to where that job is done; none of them does
