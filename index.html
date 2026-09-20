@@ -3953,7 +3953,7 @@ const STORAGE_KEY = 'fin-state';
    here is what lets `load` spot the opposite case — a plan from the FUTURE,
    saved by a newer build — which migrate cannot help with and must not guess
    at. Bump it in the same commit as the migration step that earns it. */
-const SCHEMA = 9;
+const SCHEMA = 10;
 
 /* The strapline beside the app's name in the header, and after it in the browser
    tab. Every other app in the family carries one — "· Charlie's Epic Sprint
@@ -5787,6 +5787,35 @@ function coerceShape(data) {
     else {
       yr.kind = 'summary';
       yr.categoryTotals = arr(yr.categoryTotals);
+      /* A summary row was only ever filtered to "is it an object", so a total
+         of "1200" out of a hand-edited backup reached `fmtMoney` and printed
+         NaN across the card. Read like every other figure here, and the two
+         flags held to one answer: a row is a balance, or growth, or a flow —
+         never two of them, whatever a file says. */
+      for (const it of yr.categoryTotals) {
+        it.name = String(it.name || '');
+        const n = num(it.total);
+        it.total = typeof n === 'number' ? n : 0;
+        if (it.isBalance) { it.isBalance = true; delete it.isGrowth; }
+        else if (it.isGrowth) { it.isGrowth = true; delete it.isBalance; }
+        else { delete it.isBalance; delete it.isGrowth; }
+        if (typeof it.note === 'string' && it.note.trim()) it.note = it.note.trim();
+        else delete it.note;
+      }
+      /* THE STASHED GRID IS READ EXACTLY LIKE A REAL ONE, because on Re-open it
+         BECOMES one — a hand-edited backup that slipped an unsanitised grid in
+         here would otherwise be promoted straight into the engine. A stash that
+         cannot say it is a grid year restores nothing, so the marker goes and
+         the year is simply one-way, the discipline `pinnedFrom` already keeps.
+         A stash never nests: it is the year BEFORE the fold, and that year was
+         a grid. */
+      if (yr.foldedFrom !== undefined) {
+        const st = obj(yr.foldedFrom);
+        delete st.foldedFrom;
+        if (st.kind !== 'grid' || !/^\d{4}-\d{2}$/.test(st.startMonth || ''))
+          delete yr.foldedFrom;
+        else { coerceGridYear(st, y); yr.foldedFrom = st; }
+      }
     }
   }
   d.goals = arr(d.goals);
@@ -7035,6 +7064,21 @@ function migrate(parsed) {
      alone, so the first save on that month DELETES the note — silently, with
      the words gone for good. A plan written before this has nothing to gate. */
   if ((parsed.schema || 1) < 9) parsed.schema = 9;
+  /* Schema 10 is the lossless fold: a summary year keeps the grid it was made
+     from (`foldedFrom`), and the growth its accounts made becomes a row of its
+     own (`isGrowth`). It rewrites nothing either — a plan with no folded year
+     is exactly what it was — and the gate is earned at the other end three
+     times over.
+
+     An older build's summary-row editor REBUILDS a row as {name, total,
+     isBalance?, note?}, so it drops `isGrowth` on the first save: a paper gain
+     silently becomes a flow, counted as income in money in, in the savings
+     rate and in Where the Money Goes. That is schema 8's fault class exactly,
+     and it is the one that earns this on its own. It also lets you edit a
+     folded year's totals — edits the next re-open here would throw away — and
+     offers "Convert to a Summary" on any finished year, so it can interleave
+     summaries and grids behind the block rule's back. */
+  if ((parsed.schema || 1) < 10) parsed.schema = 10;
   return parsed;
 }
 
@@ -7699,6 +7743,39 @@ function latestGridYear() {
 function newestGridYear() {
   const ks = yearKeys().filter(y => state.years[y].kind === 'grid');
   return ks.length ? ks[ks.length - 1] : null;
+}
+/* Every summary year, oldest first — the Previous Years page, in the order the
+   year strip runs. */
+function summaryYears(st) {
+  return Object.keys(st.years).sort().filter(y => st.years[y].kind === 'summary');
+}
+/* ── The block rule ────────────────────────────────────────────────────────
+   Summaries are an unbroken block at the FRONT of the plan, with the years
+   that still have months after them — which is what makes one stacked page of
+   history make sense, and what stops a re-opened 2021 sitting between two
+   folded years in the strip.
+
+   Each answers WHICH YEAR rather than yes-or-no, because the renderer asks
+   once: two booleans over a list of years would be two chances to disagree
+   about the same rule. Only the OLDEST grid year folds, and only the NEWEST
+   summary re-opens — "the newest summary AND it kept its grid", never "the
+   newest summary that kept one", which would re-open a year out of the middle
+   and split the block in two.
+
+   A plan whose summaries are NOT a block (an import can leave one sitting
+   after a grid) degrades rather than throwing: both answer, folding the oldest
+   grid only ever improves matters, an imported summary at the end has no stash
+   and so gets no button, and the page lists every summary wherever it sits.
+   Nothing anywhere asserts the block at read time — it is a rule about what
+   the buttons OFFER. Pure, pinned by tests. */
+function foldableYear(st) {
+  const y = Object.keys(st.years).sort().find(k => st.years[k].kind === 'grid');
+  return y && st.years[y].model !== 'live' ? y : null;
+}
+function unfoldableYear(st) {
+  const sums = summaryYears(st);
+  const y = sums[sums.length - 1];
+  return y && st.years[y].foldedFrom ? y : null;
 }
 /* Years built beyond the current one, oldest first. They exist to be read, so
    every projection the app draws runs through them. */
@@ -19600,7 +19677,7 @@ function takeHomePay(st, computed, y, personId) {
   if (yr.kind === 'summary') {
     if (personId) return null;
     const rows = (yr.categoryTotals || [])
-      .filter(it => !it.isBalance && isPayRow(it.name));
+      .filter(it => !it.isBalance && !it.isGrowth && isPayRow(it.name));
     return rows.length
       ? round2(rows.reduce((t, it) => t + (it.total || 0), 0)) : null;
   }
@@ -19639,7 +19716,7 @@ function payRowsOf(st, y, personId) {
   if (yr.kind === 'summary') {
     if (personId) return [];
     return (yr.categoryTotals || [])
-      .filter(it => !it.isBalance && isPayRow(it.name))
+      .filter(it => !it.isBalance && !it.isGrowth && isPayRow(it.name))
       /* A summary year has no rules and no ticks — its rows are names and
          totals — so every one of them qualified by the list. */
       .map(it => ({ name: it.name, guessed: true }));
@@ -20098,7 +20175,7 @@ function yearFlows(yr, computed, y, noTransfers) {
   const add = (v) => { if (v > 0) inn += v; else out += v; };
   if (yr.kind === 'summary') {
     for (const item of yr.categoryTotals) {
-      if (item.isBalance) continue;
+      if (item.isBalance || item.isGrowth) continue;
       add(item.total);
     }
   } else {
@@ -20168,7 +20245,7 @@ function yearSpending(yr, computed, y) {
   let out = 0;
   if (yr.kind === 'summary') {
     for (const item of yr.categoryTotals || [])
-      if (!item.isBalance && item.total < 0) out += item.total;
+      if (!item.isBalance && !item.isGrowth && item.total < 0) out += item.total;
     return round2(-out);
   }
   /* The COMPUTED cells, for the reason yearFlows takes them: a year still
@@ -20211,7 +20288,7 @@ function categorySpend(yr, computed, y) {
   if (!yr) return [];
   if (yr.kind === 'summary')
     return (yr.categoryTotals || [])
-      .filter(it => !it.isBalance && (it.total || 0) < 0)
+      .filter(it => !it.isBalance && !it.isGrowth && (it.total || 0) < 0)
       .map(it => ({ id: null, name: String(it.name || 'Unnamed'), total: round2(-it.total) }));
   const cells = (computed && computed.cells) || yr.cells || {};
   const rows = (yr.categories || []).filter(c => (c.section || 'expense') === 'expense');
@@ -20290,7 +20367,7 @@ function yearIncome(yr, computed, y) {
   if (yr.kind === 'summary') {
     let inn = 0;
     for (const item of yr.categoryTotals || [])
-      if (!item.isBalance && item.total > 0) inn += item.total;
+      if (!item.isBalance && !item.isGrowth && item.total > 0) inn += item.total;
     return round2(inn);
   }
   const cells = (computed && computed.cells) || yr.cells || {};
@@ -20720,14 +20797,7 @@ function gridToSummary(st, y) {
      stored field for whatever an account's rate produced, so adding it blind
      would fold an investment account's paper gains into an income row and undo
      the whole distinction at the moment a year is frozen — the one place it
-     would never be noticed again.
-     It is not carried across as a row of its own either, and that is a real
-     loss stated out loud rather than hidden: a summary has two kinds of row,
-     flows and balances, and growth is neither. The MONEY is not lost — the
-     balance rows below are December's closing figures and already hold every
-     dollar of it — only the note saying how much of the year's climb was
-     appreciation. `convertYearToSummary`'s confirm says so before it happens,
-     which is the promise this trades on. */
+     would never be noticed again. */
   const own = new Set(months);
   const growthAcct = (k) => accountById(st, k.slice(0, k.indexOf('|')))?.earns === 'growth';
   const earned = round2(Object.entries(yr.balAdjust || {}).reduce((t, [k, adj]) =>
@@ -20736,6 +20806,29 @@ function gridToSummary(st, y) {
           + (typeof adj.dividend === 'number' ? adj.dividend : 0)
       : t, 0));
   if (earned) categoryTotals.push({ name: 'Interest & Dividends', total: earned });
+  /* GROWTH GETS A ROW OF ITS OWN (2026-09-20), one per account that made any.
+     It used to be the one thing a fold genuinely destroyed: a summary had two
+     kinds of row, flows and balances, and appreciation is neither, so the
+     figure saying how much of the year's climb was paper went and only the
+     balances below — December's closing figures, which hold every dollar of it
+     — were left. `isGrowth` is the third kind, a sibling of `isBalance` and
+     never both: the row is STATED and is kept out of income, out of spending
+     and out of money in vs money out, which is the whole reason it could not
+     wear `isBalance` instead.
+     Written down HERE rather than read later, for the reason `gridToPinned`
+     stamps its earnings: `computeAll` skips a summary year entirely, so there
+     is no `C[y]` for anything downstream to ask. The fold is only offered on a
+     pinned year, whose growth `gridToPinned` has already stamped into
+     `adj.interest` (or the reader typed), so that map is the whole source.
+     A zero earns no row — the silence the Interest & Dividends row keeps — and
+     a NEGATIVE total is kept, because a fall is half of what the row is for. */
+  for (const a of accountsOf(st)) {
+    if (a.earns !== 'growth') continue;
+    const t = round2(Object.entries(yr.balAdjust || {}).reduce((s, [k, adj]) =>
+      k.startsWith(a.id + '|') && own.has(k.slice(k.indexOf('|') + 1))
+        && typeof adj.interest === 'number' ? s + adj.interest : s, 0));
+    if (t) categoryTotals.push({ name: a.name, total: t, isGrowth: true });
+  }
   for (const a of accountsOf(st)) {
     let last = null;
     for (const m of months)
@@ -20747,9 +20840,29 @@ function gridToSummary(st, y) {
     if (note) row.note = note;
     categoryTotals.push(row);
   }
+  /* THE YEAR ITSELF GOES WITH IT (2026-09-20), whole and last in the object, so
+     a fold is a way of READING a year rather than the end of one:
+     `summaryToGrid` puts back exactly what was folded — every cell, every split
+     amount, every note, and the `pinnedFrom` marker, so fold → re-open →
+     "Re-open as live" still chains. A deep clone through JSON, which also
+     keeps the key order, is what lets the tests make the strongest claim there
+     is about a round trip: the same string out as in. */
   return { kind: 'summary', convertedFrom: 'grid', categoryTotals,
     extraNotes: (yr.extraNotes || []).slice(),
-    ...(yr.eoyCash !== undefined ? { eoyCash: yr.eoyCash } : {}) };
+    ...(yr.eoyCash !== undefined ? { eoyCash: yr.eoyCash } : {}),
+    foldedFrom: JSON.parse(JSON.stringify(yr)) };
+}
+
+/* The way back, and only for a year this app folded — `foldedFrom` is what it
+   was before, put back whole. NULL rather than an approximation for a summary
+   that has none: an imported year, or one folded by a build that predates the
+   stash, has no months to go back to, and the absence of a Re-open button is
+   how that is said — exactly as an imported pinned year is offered no "Re-open
+   as live". Pure, pinned by tests. */
+function summaryToGrid(st, y) {
+  const yr = st.years[y];
+  if (!yr || yr.kind !== 'summary' || !yr.foldedFrom) return null;
+  return JSON.parse(JSON.stringify(yr.foldedFrom));
 }
 
 /* Freezing a finished year: the balances the chain COMPUTED become balances
@@ -20869,11 +20982,16 @@ function rulesNeedingYear(st, y) {
 function convertYearToSummary(y) {
   const yr = state.years[y];
   if (!yr || yr.kind !== 'grid') return;
+  /* Re-checked here and not only in the button — `freezeYear`'s discipline.
+     The block rule is what makes the Previous Years page one unbroken run of
+     history, and a second way in (a stale page, a keyboard press on a button
+     the last render drew) must not be able to fold a year out of the middle. */
+  if (y !== foldableYear(state)) return;
   const needed = rulesNeedingYear(state, y);
   const warn = needed.length
     ? `\n\n${String(+y + 1)} has ${needed.length} row(s) that look back into ${y} — `
       + `${needed.slice(0, 4).join(', ')}${needed.length > 4 ? '…' : ''}. `
-      + `Their estimates will go blank.`
+      + `Their estimates will go blank until ${y} is opened up again.`
     : '';
   /* Said out loud because it is the one row the reader didn't type: stated
      earnings survive the conversion as a single flow total, and a confirm that
@@ -20883,25 +21001,45 @@ function convertYearToSummary(y) {
      promising one would have the confirm describe a row that never appears. */
   const earns = Object.values(yr.balAdjust || {}).some(balAdjStatesFigure)
     ? ` What the accounts earned becomes one "Interest & Dividends" row.` : '';
-  /* The one thing a conversion genuinely drops, said before it happens rather
-     than discovered afterwards. A summary year has two kinds of row — flows
-     and balances — and growth is neither, so there is nowhere honest to put
-     it. No money goes missing: the balance rows are December's closing
-     figures and every dollar that grew is already inside them. What goes is
-     the line saying how much of the year's climb was appreciation. */
+  /* Growth used to be the one thing a fold destroyed, and this clause warned
+     about it. It gets a row of its own now, so the clause says what the reader
+     will SEE — a figure stated where there was none, and kept out of income,
+     which is the part somebody reading a summary needs to know. */
   const grew = accountsOf(state).some(a => a.earns === 'growth'
     && Object.keys(yr.balAdjust || {}).some(k => k.startsWith(a.id + '|')))
-    ? ` Growth is not carried across — a summary has no line for money that isn't `
-      + `income. The balances still hold it; only the figure saying how much grew `
-      + `is lost.` : '';
-  if (!confirm(`Convert ${y} to a yearly summary? Its ${yearMonths(yr).length} months of `
-    + `figures are replaced by one total per row (each account keeps its end-of-year `
-    + `balance), and the months are gone for good — only restoring a backup brings them `
-    + `back.${earns}${grew} The Progress tab's charts carry on unchanged.${warn}`))
+    ? ` What grew on paper gets a line of its own, stated but never counted as `
+      + `income.` : '';
+  if (!confirm(`Fold ${y} into a yearly summary? Its ${yearMonths(yr).length} months of `
+    + `figures read as one total per row (each account showing its end-of-year `
+    + `balance), and ${y} joins Previous Years.${earns}${grew} `
+    + `The months are KEPT — re-open ${y} and every figure, note and split comes `
+    + `back exactly as it is now. While it is folded its rows can be read but not `
+    + `edited, and the Progress tab's charts carry on unchanged.\n\n`
+    + `History folds oldest first, so ${y} is the only year this is offered on.${warn}`))
     return;
   state.years[y] = gridToSummary(state, y);
   save(); render();
-  toast(`${y} is a summary now`);
+  toast(`${y} is folded into Previous Years`);
+}
+
+/* The way back out of the fold. Offered on the NEWEST summary alone, and only
+   one it holds a stash for — see the block rule by `foldableYear`. */
+function reopenYearFromSummary(y) {
+  if (y !== unfoldableYear(state)) return;
+  const back = summaryToGrid(state, y);
+  if (!back) return;
+  if (!confirm(`Re-open ${y} as a budget year? Its months come back exactly as they `
+    + `were when it was folded — every figure, note and stated balance. The yearly `
+    + `totals on this card go; they were worked out from those months and are worked `
+    + `out again the next time ${y} is folded.`))
+    return;
+  state.years[y] = back;
+  /* The reader is moved onto the year they just got back — the chip is there
+     now, and leaving them on Previous Years would show a page one card shorter
+     with nothing saying where the year went. */
+  state.ui.activeYear = y;
+  save(); render();
+  toast(`${y} is a budget year again`);
 }
 
 /* The year-lifecycle step the app was missing: a live year, entered right
@@ -26022,6 +26160,16 @@ const EDITORS = {
       const list = state.years[ds.year].categoryTotals;
       const row = { name: v.name || '', total: v.total ?? 0 };
       if (v.isBalance) row.isBalance = true;
+      /* Carried by hand off the STORED row, because this rebuilds the row from
+         the form and the form never asks: a growth row saved here would come
+         back a flow, and a paper gain counted as income is the whole fault
+         `isGrowth` exists to stop — the `retAcct` trap, in the one editor that
+         can reach such a row. A folded year refuses this editor outright, so
+         the only way here is a summary whose stash was dropped; ticking "this
+         is a balance" still moves the row out of growth, since the two flags
+         are never both. */
+      else if (ds.idx !== undefined && list[+ds.idx] && list[+ds.idx].isGrowth)
+        row.isGrowth = true;
       if (v.note) row.note = v.note;
       if (ds.idx !== undefined) list[+ds.idx] = row;
       else list.push(row);
@@ -29801,9 +29949,16 @@ function gridToCsv(st, computed, y) {
   const yr = st.years[y];
   if (!yr) return '';
   if (yr.kind === 'summary') {
-    return [['Row', 'Total'].join(','),
+    /* The block each row is in, in the first column, exactly as the grid
+       branch below names its section. A bare `Brokerage,1840` in a flat list
+       of flows reads as income in the one file nobody re-checks, which is the
+       fault the growth row exists to close — so the export has to say which
+       kind of row it is or it quietly undoes the distinction. */
+    const block = (item) => item.isBalance ? 'Balances' : item.isGrowth ? 'Growth' : 'Flows';
+    return [['Section', 'Row', 'Total'].join(','),
       ...(yr.categoryTotals || []).map(item =>
-        [csvCell(item.name, true), csvCell(item.total)].join(','))].join('\n');
+        [csvCell(block(item), true), csvCell(item.name, true),
+          csvCell(item.total)].join(','))].join('\n');
   }
   const months = computed.months;
   const own = months.filter(m => m.startsWith(y));
@@ -32965,7 +33120,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   mergeAccountsByName, nominateHub, hubAccount, dividendAccounts, statedAfter,
   closeBlockedNote,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
-  normRole, gridToSummary, gridToPinned, pinnedToLive,
+  normRole, gridToSummary, summaryToGrid, gridToPinned, pinnedToLive,
   rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
