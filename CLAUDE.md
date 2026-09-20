@@ -2039,13 +2039,14 @@ suite passed while the card was wrong.
   `gridToSummary()` folds a pinned grid into totals — every category is a flow
   now that the old balance rows are accounts, and each account with a stated
   balance keeps its LAST stated month as a balance row (December wherever
-  December was recorded), so a converted year shows the same end-of-year
-  balances the imported summaries always had. It is permanent,
-  and it refuses quietly to be useful: `rulesNeedingYear()` warns when the
-  next year has `samemonth`/`avglastyear` rows that read the year being
-  converted. `migrate_local_data.py` only ever does the one-off strip of
-  hand-typed next-year months from the live grid — converting a year is a
+  December was recorded), so a folded year shows the same end-of-year
+  balances the imported summaries always had. `rulesNeedingYear()` warns when
+  the next year has `samemonth`/`avglastyear` rows that read the year being
+  folded. `migrate_local_data.py` only ever does the one-off strip of
+  hand-typed next-year months from the live grid — folding a year is a
   deliberate, per-year click, never something a script does behind your back.
+  **IT IS LOSSLESS AND REVERSIBLE SINCE 2026-09-20 — see "Folding a year keeps
+  its months" below.**
 - **`gridToPinned()` is the step that was MISSING, and its absence was found by
   auditing Charlie's own backup for state the app couldn't produce** (2026-08-16):
   every pinned grid in it came from the import, because nothing anywhere
@@ -2078,6 +2079,107 @@ suite passed while the card was wrong.
     that follows, and a pinned December is all `rolloverYear` seeds from.
   - Freezing DOES change one thing and the confirm says so: `yearFlows` counts
     no interest for a pinned year, because stated balances already hold it.
+
+## Folding a year keeps its months (2026-09-20)
+
+Charles: *"what if nothing was lost and you could convert back and forth without
+any data loss? also, what if there was a 'previous years' tab that showed the
+summary for all converted years stacked, instead of a tab for each summary
+year."* Both, decided with him the same day, along with four rules: a folded
+year is READ-ONLY, growth gets a row, newest at the top, and the fold order is
+strict.
+
+- **`foldedFrom` is the whole grid year, written last in the summary object** —
+  `pinnedFrom`'s shape one level up. `gridToSummary` deep-clones through JSON
+  (which keeps key order, so the round-trip test can make the strongest claim
+  there is: the same string out as in), and `summaryToGrid` is its mirror.
+  **NULL, never an approximation**, for a summary with none — an imported year,
+  or one folded by a build that predates this — and the absence of the Re-open
+  button is how that is said, exactly as an imported pinned year is offered no
+  "Re-open as live". The stash carries its own `pinnedFrom`, so fold → re-open →
+  "Re-open as live" still chains.
+- **The stash is read at the boundary exactly like a real year**, because on
+  re-open it BECOMES one: `coerceGridYear` was lifted out of `coerceShape`'s
+  year loop for that, and `normalizeIds`' per-year body into `oneYear`, so both
+  run over `yr.foldedFrom` too. Miss the second and an account id repaired on
+  the way in leaves every stated balance in the stash keyed to a name no account
+  answers to — invisible until the re-open, months later. **`coerceGridYear` is
+  a LOCAL ARROW inside `coerceShape`, deliberately**: it closes over `obj`,
+  `arr`, `num`, `rateOrNone`, `acctIds` and `peopleIds`, so not one of its ~30
+  call sites changed when it moved. A module-level function plus a context
+  object would have meant rewriting every one of them, and a missed `obj(`
+  throws inside `load()`, whose catch swallows it and returns a blank state.
+  A stash that cannot say it is a grid year is DROPPED (the year is then simply
+  one-way), and a stash never nests.
+- **A folded year is READ-ONLY, and that is what makes it lossless.** It is a
+  view of the grid behind it, so a total typed on the card would be thrown away
+  by the next re-open — and a summary that disagrees with its own months is the
+  thing the stash exists to make impossible. `summaryCard` draws no `data-edit`,
+  no Add Row and no End-of-year Figure; `openRowEditor` refuses `sumrow` and
+  `sumyear` on a folded year **for the owner too, not only in a shared view** —
+  `stripEditAffordances`' division of labour, applied to one card. An IMPORTED
+  summary is the only copy of its year and stays exactly as editable as it was.
+  The end-of-year figure is refused for the same reason the rows are: it came
+  out of the grid.
+- **Summaries are an unbroken BLOCK at the front of the plan.** `foldableYear`
+  names the oldest grid year that is not live; `unfoldableYear` names the newest
+  summary **and only if it holds a stash** — never "the newest summary that
+  holds one", which would re-open a year out of the middle and split the block.
+  `convertYearToSummary` and `reopenYearFromSummary` both RE-CHECK rather than
+  trusting the button (`freezeYear`'s discipline). A plan whose summaries are
+  not a block — an import can leave one after a grid — degrades: both answer,
+  neither throws, the page lists every summary wherever it sits. Nothing
+  asserts the block at read time; it is a rule about what the buttons OFFER.
+- **The Previous Years page is `state.ui.activeYear` holding a summary year's
+  real key — there is no sentinel, and that is the best decision in it.** Every
+  reader of `activeYearKey()` goes on getting a real year (a `'~prev'` sentinel
+  falls through to `latestGridYear()`, a silent wrong answer at some fifteen
+  call sites); **`wireYearStrip` needed no change at all**, because the Previous
+  chip's `data-year` is the newest summary's key and that function has always
+  read `chip.dataset.year`; and `goToSearchHit`, the close checklist and a share
+  link's `ui.activeYear` all land on the page for free. An older build sees a
+  normal year key and draws that one card, as it always did.
+- **The chip is FIRST, italic, and reads "Previous"** (`Prev` under 430px — the
+  `.now-short` answer applied to the one chip whose label is a word rather than
+  four digits). Its `aria-label` names the span it stands for. `chip-now` and
+  the "This year" button now ask whether this year is a **grid** year in the
+  strip: a folded current year has no chip of its own, and a button pointing at
+  one would have nowhere to go.
+- **`data-box` per year is mandatory on that page.** `boxKey` strips the DIGITS
+  out of a heading, so "2025 — Yearly Summary" and "2024 — Yearly Summary" are
+  ONE key — right while one showed at a time, and nine cards folding as one now.
+  The year moves out of both card headings and into a `.yearhead` above the
+  pair, which is `renderVacations`' shape; the grid page keeps the shared key,
+  so folding 2026's notes still finds 2025's folded.
+- **Ids stay on the GRID card; the stacked cards go `data-yearact`.** Exactly
+  one grid card is ever on screen, and the month-close checklist reaches
+  `#csvYearBtn` by name — so those two keep their ids AND gain the attribute,
+  and one delegated handler serves both pages. `exportYearCsv(y)` is the
+  handler's body, lifted out of `wireBudget`. The checklist's `{kind:'grid'}`
+  branch now refuses a year that has been folded since, rather than focusing
+  whichever `#csvYearBtn` happens to be on screen.
+- **A share link never carries the stash.** A recipient is read-only for ever
+  and can never re-open a year — and `fitShareWindow` bisects the YEAR WINDOW to
+  fit `SHARE_WARN_AT`, so carrying it would not merely lengthen the link, it
+  would silently ship them FEWER YEARS of history to make room for months they
+  cannot use. `stripFoldedGrids` is a sibling of `stripStamps`, called beside
+  it, walked for the same reason, with a test. **`SHARE_PAYLOAD_V` 4**: a v3
+  build would read an `isGrowth` row as an ordinary flow.
+- **SCHEMA 10, rewriting nothing** — the schema 8/9 shape. It is earned three
+  times: an older build's `sumrow.save` rebuilds a row as `{name, total,
+  isBalance?, note?}` and **drops `isGrowth`**, so a paper gain silently becomes
+  income; it lets you edit a folded year, whose edits the next re-open here
+  throws away; and it offers the fold on any finished year, interleaving
+  summaries and grids behind the block rule's back.
+- **The sample's PREV is BUILT as a pinned grid and folded by `gridToSummary`
+  itself** (`foldSampleYear`), not written out as totals like PREV2 — a
+  hand-typed stash would be the one thing in the demo that could drift from what
+  the app produces. Its figures come out to the cent where they were typed
+  before (each row's total spread over twelve months, the remainder in
+  December), the row names still match the live grid's, and `Holiday club` still
+  carries its note. What it buys: a two-card Previous page, a read-only folded
+  card beside an editable imported one, a live Re-open button, a Growth block,
+  and a summary CSV with a Growth row in it.
 
 ## Editing
 
@@ -4045,14 +4147,19 @@ disagreed; this is which one was wrong.
   that exclusion is mandatory rather than tidy — `adj.interest` is the stored
   field for whatever the rate produced, so summing it blind folds a paper gain
   into an income row at the one moment nobody would look again.
-  **It is not carried across as a row of its own either**, and that is a real
-  loss stated out loud: a summary has two kinds of row, flows and balances, and
-  growth is neither. The MONEY is not lost — the balance rows are December's
-  closing figures and hold every dollar of it — only the note saying how much of
-  the climb was appreciation. `convertYearToSummary`'s confirm says so first.
-  Do NOT "fix" this by giving the row `isBalance: true`: that flag's name says
-  balance and its job is exclusion, and the row would then be listed among the
-  account balances as though growth were one.
+  **IT IS CARRIED ACROSS AS A ROW OF ITS OWN SINCE 2026-09-20** (`isGrowth`,
+  one per account that made any), which is the third kind of row a summary has:
+  flows, growth, balances. It was the one thing a fold genuinely destroyed —
+  the money was never lost, the balance rows being December's closing figures,
+  but the figure saying how much of the climb was appreciation went. Two things
+  about it that must not be "tidied": it may NEVER wear `isBalance` instead
+  (that flag's name says balance and the row would be listed among the account
+  balances as though growth were one), and every reader that counts a summary's
+  rows has to skip it — `yearFlows`, `yearIncome`, `yearSpending` and
+  `categorySpend` are the load-bearing four, and `yearSpending` on a NEGATIVE
+  growth row is the one that inverts. The CSV names each row's block for the
+  same reason: a bare `Brokerage,9200` in a flat list of flows reads as income
+  in the one file nobody re-checks.
 - **NEITHER LENS GIVES GROWTH A ROW, and that is the decision.** Both had one
   for a few hours on 2026-08-31 and both came straight back out, on Charles's
   reading, which was right twice:
@@ -5965,6 +6072,31 @@ suite — it turns "untested" into "verified". **If a test passes when you expec
 it to fail, check `document.getElementById('app').contentWindow` has the function
 you just wrote before believing anything.** `api.github.com` is deliberately left
 un-busted: somebody else's endpoint, not a file we serve.
+**A TEST FRAME IS ASKED FOR BY ITS VIEWPORT, NOT BY ITS BOX** (2026-09-20).
+`auditFrame(375, 812)` means a SCREEN 375px wide — what the media queries answer
+to and what every `100%` inside resolves against — and it was written as a 375px
+ELEMENT, which is the same thing only where a scrollbar takes no room. macOS and
+CI's headless Chromium draw OVERLAY scrollbars (0px); a Chromium drawing CLASSIC
+ones takes 15px out of the inside of every frame, and **five tests went red at
+once while the app was right in all five** — a docked calculator "failing" to
+reach 1280 by landing at 1265, a sheet "failing" to be 900 wide by being 885.
+`scrollbarW()` measures it once off a probe in the suite's own document and
+`frameBox(w)` widens the box by it, so the viewport is the width that was asked
+for; both are 0 in CI, where every frame stays byte for byte what it was. **Size
+it BEFORE the frame loads**: a first cut corrected the width afterwards, and
+resizing a loaded frame fires the app's own resize path (`syncCalcSheet`,
+`syncDockAttr`, the tab row's nudge) in the middle of a test that was not
+expecting one — it broke two unrelated tests. The four places a test narrows a
+frame live to watch a media query fire take the same arithmetic.
+**A `:focus-visible` assertion is modality-dependent and cannot be forced.**
+`wireScrollRow`'s reveal is guarded by `:focus-visible` on purpose — a mouse
+click must not yank a half-visible tab out from under the pointer — and a
+script's `.focus()` matches that guard only where the browser is in KEYBOARD
+modality. CI is; a Chromium whose page has been clicked in is not, and there the
+handler is right not to fire. `focus({ focusVisible: true })` is not honoured.
+The test asks `matches(':focus-visible')` and asserts the half of the rule it is
+in, which is one more guarantee than the unconditional version had.
+
 **A test must never depend on the app's AMBIENT state.** The harness frames the
 real `index.html`, so the app inside it loads whatever is in that browser's
 `fin-state` — and while testing a feature by hand that is routinely Charlie's

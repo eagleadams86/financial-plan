@@ -2193,7 +2193,14 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
    else, so the way back steps aside: the underscore still marks now, and the
    arrows still walk there. */
 .now-short { display: none; }
+/* The Previous chip is the one chip whose label is a WORD rather than four
+   digits, so it is the one that runs out of rail first — the `.now-short`
+   answer, applied to the same problem one control along. The accessible name
+   is unchanged either way: it already names the years the chip stands for. */
+.prev-short { display: none; }
 @media (max-width: 430px) {
+  .prev-long { display: none; }
+  .prev-short { display: inline; }
   .viewswitch { margin-right: 6px; }
   .viewswitch .vswitch { padding: 4px 6px; }
   .yearchip { padding: 6px 8px; }
@@ -4014,7 +4021,7 @@ const STORAGE_KEY = 'fin-state';
    here is what lets `load` spot the opposite case — a plan from the FUTURE,
    saved by a newer build — which migrate cannot help with and must not guess
    at. Bump it in the same commit as the migration step that earns it. */
-const SCHEMA = 9;
+const SCHEMA = 10;
 
 /* The strapline beside the app's name in the header, and after it in the browser
    tab. Every other app in the family carries one — "· Charlie's Epic Sprint
@@ -5441,10 +5448,14 @@ function normalizeIds(d) {
      mangled `securedOn` still finds the row it names. */
   for (const l of list(side.liabilities)) ref(l, 'securedOn', '');
 
-  const years = (d.years && typeof d.years === 'object') ? d.years : {};
-  for (const y of Object.keys(years)) {
-    const yr = years[y];
-    if (!yr || typeof yr !== 'object') continue;
+  /* One year's own ids and the maps keyed on them. Lifted out of the loop
+     (2026-09-20) so the SAME pass reaches the grid a folded summary is still
+     holding — an account id that moved on the way in would otherwise leave
+     every stated balance in the stash keyed to a name no account answers to
+     any more, and nothing would notice until the year was re-opened months
+     later. `movedCat` is per year and cleared here, where it always was. */
+  const oneYear = (yr) => {
+    if (!yr || typeof yr !== 'object') return;
     movedCat.clear();
     for (const c of list(yr.categories)) {
       own(c, c.name || 'row', movedCat);
@@ -5456,6 +5467,14 @@ function normalizeIds(d) {
     remapPrefixed(yr.overrides, movedAcct);
     remapPrefixed(yr.balAdjust, movedAcct);
     remapKeys(yr.seeds, movedAcct);
+  };
+
+  const years = (d.years && typeof d.years === 'object') ? d.years : {};
+  for (const y of Object.keys(years)) {
+    const yr = years[y];
+    if (!yr || typeof yr !== 'object') continue;
+    oneYear(yr);
+    oneYear(yr.foldedFrom);
   }
 }
 
@@ -5614,6 +5633,308 @@ function coerceShape(data) {
      nothing consults has no business riding along in every backup. Same
      treatment `side.retirement` and `side.rothLimit` got. */
   delete d.settings.longTermRateAnnual;
+  /* ── One grid year's boundary ────────────────────────────────────────────
+     Lifted out of the loop below on 2026-09-20, when a folded summary year
+     started carrying the grid it was made from. That stash BECOMES a real year
+     the moment it is re-opened, so it has to be read exactly as strictly as one
+     — a hand-edited backup that slipped an unsanitised grid in there would
+     otherwise be promoted straight into the engine, which is the whole class of
+     fault the `num()` and `rateOrNone()` passes in here exist to close.
+     A local arrow rather than a function of its own, deliberately: it closes
+     over `obj`, `arr`, `num`, `rateOrNone`, `acctIds` and `peopleIds`, so not a
+     single call site inside it had to change when it moved. */
+  const coerceGridYear = (yr, y) => {
+    yr.categories = arr(yr.categories);
+    yr.cells = obj(yr.cells);
+    yr.paychecks = obj(yr.paychecks);
+    yr.seeds = obj(yr.seeds);
+    yr.overrides = obj(yr.overrides);
+    yr.balAdjust = obj(yr.balAdjust);
+    yr.extraNotes = Array.isArray(yr.extraNotes) ? yr.extraNotes : [];
+    yr.monthCount = Math.max(1, Math.min(36, +yr.monthCount || 12));
+    if (!/^\d{4}-\d{2}$/.test(yr.startMonth || '')) yr.startMonth = `${y}-01`;
+    /* A live year MUST carry enteredThrough: gridCard does
+       monthAdd(yr.enteredThrough, 1) unguarded, and a truncated backup
+       without it would throw inside render() — the empty-workbook failure
+       this function exists to prevent. The month before the year starts
+       means "nothing entered yet", which is what a blank year says. */
+    if (yr.model === 'live' && !/^\d{4}-\d{2}$/.test(yr.enteredThrough || ''))
+      yr.enteredThrough = monthAdd(yr.startMonth, -1);
+    /* The grid's own figures get the same treatment as every other money
+       map. Shapes were forced above; this forces the VALUES: cells, seeds,
+       overrides and paychecks reach the engine verbatim, and one string of
+       markup in a hand-edited backup would otherwise ride into the page raw
+       and turn every balance downstream into NaN. (`balAdjust`'s figures are
+       type-checked at their sink as well, but it carries prose now, so it
+       gets a pass of its own below.) */
+    for (const [k, cell] of Object.entries(yr.cells)) {
+      if (!cell || typeof cell !== 'object') { delete yr.cells[k]; continue; }
+      const cv = num(cell.v);
+      cell.v = typeof cv === 'number' ? cv : 0;
+      /* `missing` joined the list 2026-08-26 — a NOTE WITH NO FIGURE. It is
+         the engine's own word for "nothing recorded", and that is exactly
+         what such a cell records: the month is still blank, still unpaid,
+         still counted as outstanding; there is simply something written on
+         it. Without it here the boundary turned every one of them into a
+         STATED $0.00, which is the opposite claim — the bill came and it was
+         nothing — and the fix would have survived until the next reload. */
+      if (!['actual', 'manual', 'mixed', 'missing'].includes(cell.kind)) cell.kind = 'actual';
+      /* One spelling of nothing. A `missing` cell exists only to carry its
+         note, so with nothing written on it there is nothing to keep, and no
+         figure and no parts can ride along under a kind that claims neither. */
+      if (cell.kind === 'missing') {
+        cell.v = 0;
+        delete cell.parts;
+        const note = typeof cell.note === 'string' ? cell.note.trim() : '';
+        if (!note) { delete yr.cells[k]; continue; }
+      }
+      if (Array.isArray(cell.parts)) {
+        cell.parts = cell.parts.filter(p => p && typeof p === 'object');
+        for (const p of cell.parts) {
+          const pv = num(p.v);
+          p.v = typeof pv === 'number' ? pv : 0;
+        }
+      } else delete cell.parts;
+    }
+    for (const [k, v] of Object.entries(yr.seeds)) {
+      const n = num(v);
+      if (typeof n === 'number') yr.seeds[k] = n; else delete yr.seeds[k];
+    }
+    for (const [k, ov] of Object.entries(yr.overrides)) {
+      /* A BALANCE MONTH'S NOTE LIVES ON `balAdjust`, NOT ON THE PIN (schema
+         9). It used to ride along on the override, which meant a note could
+         only exist where a balance had been stated: clear the amount, save,
+         and the words went with it — so "the statement came late" could only
+         be written down by first pinning a figure, which is a claim about the
+         account made to keep a sentence. The move happens here so that a plan
+         written before it comes forward on load, whichever door it came in
+         through. An existing note on the new side wins: that is the one the
+         editor has been writing since. */
+      if (ov && typeof ov === 'object') {
+        const carried = typeof ov.note === 'string' ? ov.note.trim() : '';
+        if (carried) {
+          const adj = yr.balAdjust[k] = obj(yr.balAdjust[k]);
+          if (!(typeof adj.note === 'string' && adj.note.trim())) adj.note = carried;
+        }
+        delete ov.note;
+      }
+      /* Read STRICTLY (rateOrNone), not through num(): an override PINS a
+         balance, and num would turn a corrupt field into a deliberate-
+         looking $0 statement. One that states no figure states nothing —
+         dropped, the same way the balance editor deletes a cleared one. */
+      const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
+      if (typeof n === 'number') ov.v = n; else delete yr.overrides[k];
+    }
+    /* THREE FIELDS AND NO MORE: what the month earned, what it paid out, and
+       the note. The two figures read STRICTLY for the override's reason — a
+       corrupt field must not become a stated $0, which the engine would read
+       as "the rate produced nothing this month" — and the note is trimmed,
+       absent rather than blank, like every other optional string in here.
+       An entry left holding none of the three is dropped: an empty one still
+       keeps its account's row on screen, which is a row with nothing in it.
+       (A no-notes share link makes exactly those: `stripNotes` walks the
+       whole payload, and a note-only month comes out of it as `{}`.) */
+    for (const [k, raw] of Object.entries(yr.balAdjust)) {
+      const was = obj(raw);
+      const adj = {};
+      const int = rateOrNone(was.interest), div = rateOrNone(was.dividend);
+      if (typeof int === 'number') adj.interest = int;
+      if (typeof div === 'number') adj.dividend = div;
+      const note = typeof was.note === 'string' ? was.note.trim() : '';
+      if (note) adj.note = note;
+      if (Object.keys(adj).length) yr.balAdjust[k] = adj;
+      else delete yr.balAdjust[k];
+    }
+    /* AND ONLY FOR THE MONTHS THIS YEAR SHOWS. A count is keyed by month,
+       and until 2026-09-11 nothing asked whether that month belonged to the
+       year holding it. An import whose Paychecks row ran wider than the year
+       it built — Charlie's sheet carried 24 columns into a 12-month 2026 —
+       left twelve counts for 2027 sitting inside 2026, where no grid renders
+       them and no cell editor can reach them.
+       They were not inert. `rolloverYear` seeds a new year by reading the
+       OLD year's map at the NEW year's months, so every rebuild of 2027
+       copied the whole hidden block straight back in, a 3.5 in February
+       included. Deleting the year and recreating it — which he did many
+       times — fixed the copy and never touched the original, so the figure
+       came back every time and there was nowhere to go and look at it.
+       The carry-forward itself stays: a year whose grid genuinely reaches
+       into the next one holds those months in its OWN span, which is the
+       shape the feature was written for and the one its test pins. What goes
+       is the block no reader can see. With it gone a rebuilt year falls back
+       through `resolvePaychecks` to the same month last year, which is the
+       answer the hidden block was standing in the way of. */
+    const shownMonths = new Set(yearMonths(yr));
+    for (const [m, v] of Object.entries(yr.paychecks)) {
+      const n = num(v);
+      if (typeof n === 'number' && shownMonths.has(m)) yr.paychecks[m] = n;
+      else delete yr.paychecks[m];
+    }
+    /* What a FROZEN year was before it was frozen — the balances it stated
+       by hand (the freeze wrote all the others) and whether the end-of-year
+       figure was stamped at the same time. It exists so "Re-open as live"
+       can put the year back exactly, which is why only a year the app froze
+       carries one: an IMPORTED history year states its balances outright and
+       has no chain to go back to, so it is never offered the button.
+       A marker that can't say what the year was entered through can't
+       restore anything, so it goes rather than half-works — the year stays
+       frozen, which is what the reader sees anyway. */
+    const pf = obj(yr.pinnedFrom);
+    if (yr.model === 'live' || !/^\d{4}-\d{2}$/.test(pf.enteredThrough || ''))
+      delete yr.pinnedFrom;
+    else {
+      pf.overrides = obj(pf.overrides);
+      for (const [k, ov] of Object.entries(pf.overrides)) {
+        const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
+        if (typeof n === 'number') ov.v = n; else delete pf.overrides[k];
+      }
+      pf.eoyStamped = !!pf.eoyStamped;
+      /* The typed counts Re-open restores: a number per month, nothing else.
+         Absent on a year frozen before 2026-09-17, which `pinnedToLive`
+         reads as "the stamped map is the typed one". */
+      if (pf.paychecks !== undefined) {
+        pf.paychecks = obj(pf.paychecks);
+        for (const [m, v] of Object.entries(pf.paychecks)) {
+          const n = rateOrNone(v);
+          if (typeof n === 'number' && /^\d{4}-\d{2}$/.test(m)) pf.paychecks[m] = n;
+          else delete pf.paychecks[m];
+        }
+      }
+      yr.pinnedFrom = pf;
+    }
+    /* Rows classify into Income / Expenses / Transfers sections. Data from
+       before sections existed gets a one-time guess here — transfer roles
+       by role, everything else by the sign of what's stored — which sticks
+       on the next save, so a hand-picked section is never re-guessed. */
+    for (const cat of yr.categories) {
+      /* Pass-throughs on a bank account (the old "zelle" role) grouped as
+         transfers too; money paid straight out of investments (the old
+         "charitable" role) never did. */
+      const looksLikeTransfer = ['bankTransfer', 'midTransfer', 'longTransfer',
+        'zelle', 'transfer'].includes(cat.role);
+      Object.assign(cat, normRole(cat));   // one-time role → role + target
+      /* A dividends row written before the accounts were nameable earns on
+         the two the engine used to assume — but only the ones that still
+         exist, and only where the row says nothing yet. Absent means "never
+         asked"; an empty list is a decision, and re-filling it would argue
+         with the reader every time the app loaded. */
+      if (cat.rule === 'dividends' && !Array.isArray(cat.accounts))
+        cat.accounts = ['cash', 'mid'].filter(id => acctIds.has(id));
+      if (Array.isArray(cat.accounts))
+        cat.accounts = cat.accounts.filter(id => acctIds.has(id));
+      /* An overflow row names a source, a destination and a threshold. A
+         dangling account id is deleted — the row degrades to blank rather
+         than breaking, the goal-accounts rule — and the threshold is read
+         STRICTLY: num() would turn junk into 0, and a $0 threshold is a
+         real-looking claim ("sweep everything") the reader never made.
+         goalId is checked after the goals themselves are settled, below. */
+      /* How fast a growing row rises, read STRICTLY — the account.rate
+         discipline. num() would turn a corrupt field into 0%, which reads on
+         screen as a row somebody deliberately said does not rise, and the
+         whole point of the rule is that it does. Kept only while the row IS
+         a growing one, the way `every` and `perCheck` are. */
+      if (cat.rule === 'grow') {
+        const g = rateOrNone(cat.growth);
+        if (g !== undefined) cat.growth = g; else delete cat.growth;
+      } else delete cat.growth;
+      /* Whether the same-month rule keeps the cents instead of rounding to
+         the nearest dollar. Stored only when TRUE and only while the row is
+         a same-month one — `duePayAhead`'s discipline, and never `undefined`
+         (the Firestore rule). `false` and absent are one claim, so a plan
+         written before this field existed is byte for byte what it was: no
+         schema bump, no migration, the `dueMonths` precedent. */
+      if (cat.rule === 'samemonth' && cat.keepCents === true) cat.keepCents = true;
+      else delete cat.keepCents;
+      if (cat.rule === 'overflow') {
+        /* A sweep is a move between the reader's own accounts, whatever a
+           hand-edited file says: the editor already forces Transfers, and
+           filed under Expense the row would count its sweeps as spending
+           (review fix 3). */
+        cat.section = 'transfer';
+        if (!acctIds.has(cat.overflowFrom)) delete cat.overflowFrom;
+        if (!acctIds.has(cat.transferTo)) delete cat.transferTo;
+        const th = rateOrNone(cat.threshold);
+        if (th !== undefined) cat.threshold = th; else delete cat.threshold;
+        const cap = rateOrNone(cat.capAmount);
+        if (cap !== undefined) cat.capAmount = cap; else delete cat.capAmount;
+        /* The frozen measure lists a share link writes — a goal's account
+           set carried as plain ids so the recipient measures the same pot.
+           Dangling ids drop, and an emptied list is deleted outright:
+           absent falls back to the row's own end, which is the honest
+           degrade. */
+        for (const k of ['thresholdAccounts', 'capAccounts']) {
+          if (!Array.isArray(cat[k])) { delete cat[k]; continue; }
+          cat[k] = cat[k].filter(id => acctIds.has(id));
+          if (!cat[k].length) delete cat[k];
+        }
+      } else {
+        delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
+        delete cat.capGoalId; delete cat.capAmount;
+        delete cat.thresholdAccounts; delete cat.capAccounts;
+      }
+      /* Whose row it is — a second earner's paycheck, tagged so take-home
+         can be read per person. Only ever a label; the engine sums the
+         household's rows regardless. */
+      if (cat.person && !peopleIds.has(cat.person)) delete cat.person;
+      /* ── When the bill is due ──────────────────────────────────────
+         Display and reminders only: the engine never reads any of this, so a
+         corrupt schedule can make the page quieter but can never move a
+         figure. `duePay` is the MARKER — a row either carries one of the two
+         words or carries no schedule at all — which is why a bad one deletes
+         the other three rather than leaving a half-schedule behind. The same
+         delete-when-inapplicable discipline the overflow block above uses,
+         and never `undefined` (the Firestore rule).
+
+         Every part is read STRICTLY. `dueDay` through a plain num() would
+         turn junk into 0 and 0 has no honest reading — the 1st? the last? —
+         and an EMPTY `dueMonths` would say "never due", which is a different
+         claim from the absent list's "due every month". Junk deletes, and
+         the field falls back to its absent meaning. */
+      if (!DUE_PAY.includes(cat.duePay)) {
+        delete cat.duePay; delete cat.dueMonths;
+        delete cat.dueDay; delete cat.dueHold; delete cat.duePayAhead;
+      } else {
+        if (Array.isArray(cat.dueMonths)) {
+          const ms = [...new Set(cat.dueMonths
+            .map(n => Math.round(num(n)))
+            .filter(n => Number.isFinite(n) && n >= 1 && n <= 12))].sort((x, y) => x - y);
+          /* All twelve IS "every month", which is what an absent list already
+             says — storing both spellings would give the same schedule two
+             shapes for a test and a share link to disagree over. */
+          if (ms.length && ms.length < 12) cat.dueMonths = ms;
+          else delete cat.dueMonths;
+        } else delete cat.dueMonths;
+        const day = Math.round(num(cat.dueDay));
+        if (Number.isFinite(day) && day >= 1 && day <= 31) cat.dueDay = day;
+        else delete cat.dueDay;
+        /* A month, guarded exactly like an account's since/until. */
+        if (typeof cat.dueHold !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.dueHold))
+          delete cat.dueHold;
+        /* Whether the money leaves the month BEFORE the bill is due. Stored
+           only when true — `false` and absent are the same claim here, and an
+           absent key keeps a row that has never been asked the question
+           exactly as it was. */
+        if (cat.duePayAhead === true) cat.duePayAhead = true;
+        else delete cat.duePayAhead;
+      }
+      /* ── The month the row stopped ─────────────────────────────────
+         `until` is the last month this row had money in it, and it is
+         deliberately the SAME key, the same shape and the same words an
+         ACCOUNT uses to say it was closed — two objects saying one thing,
+         and one vocabulary to learn. A month string or nothing: absent is
+         "still in use", and there is no second spelling of that (never
+         `false`, never `''` — the Firestore rule). Guarded exactly like
+         `dueHold` and `a.until` above it. */
+      if (typeof cat.until !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.until))
+        delete cat.until;
+      if (cat.section) continue;
+      if (looksLikeTransfer) { cat.section = 'transfer'; continue; }
+      let sum = 0;
+      for (const [key, cell] of Object.entries(yr.cells))
+        if (key.startsWith(cat.id + '|')) sum += (cell && cell.v) || 0;
+      cat.section = sum >= 0 ? 'income' : 'expense';
+    }
+  };
+
   d.years = obj(d.years);
   for (const y of Object.keys(d.years)) {
     const yr = obj(d.years[y]);
@@ -5627,299 +5948,39 @@ function coerceShape(data) {
       const n = rateOrNone(yr.eoyCash);
       if (typeof n === 'number') yr.eoyCash = n; else delete yr.eoyCash;
     }
-    if (yr.kind === 'grid') {
-      yr.categories = arr(yr.categories);
-      yr.cells = obj(yr.cells);
-      yr.paychecks = obj(yr.paychecks);
-      yr.seeds = obj(yr.seeds);
-      yr.overrides = obj(yr.overrides);
-      yr.balAdjust = obj(yr.balAdjust);
-      yr.extraNotes = Array.isArray(yr.extraNotes) ? yr.extraNotes : [];
-      yr.monthCount = Math.max(1, Math.min(36, +yr.monthCount || 12));
-      if (!/^\d{4}-\d{2}$/.test(yr.startMonth || '')) yr.startMonth = `${y}-01`;
-      /* A live year MUST carry enteredThrough: gridCard does
-         monthAdd(yr.enteredThrough, 1) unguarded, and a truncated backup
-         without it would throw inside render() — the empty-workbook failure
-         this function exists to prevent. The month before the year starts
-         means "nothing entered yet", which is what a blank year says. */
-      if (yr.model === 'live' && !/^\d{4}-\d{2}$/.test(yr.enteredThrough || ''))
-        yr.enteredThrough = monthAdd(yr.startMonth, -1);
-      /* The grid's own figures get the same treatment as every other money
-         map. Shapes were forced above; this forces the VALUES: cells, seeds,
-         overrides and paychecks reach the engine verbatim, and one string of
-         markup in a hand-edited backup would otherwise ride into the page raw
-         and turn every balance downstream into NaN. (`balAdjust`'s figures are
-         type-checked at their sink as well, but it carries prose now, so it
-         gets a pass of its own below.) */
-      for (const [k, cell] of Object.entries(yr.cells)) {
-        if (!cell || typeof cell !== 'object') { delete yr.cells[k]; continue; }
-        const cv = num(cell.v);
-        cell.v = typeof cv === 'number' ? cv : 0;
-        /* `missing` joined the list 2026-08-26 — a NOTE WITH NO FIGURE. It is
-           the engine's own word for "nothing recorded", and that is exactly
-           what such a cell records: the month is still blank, still unpaid,
-           still counted as outstanding; there is simply something written on
-           it. Without it here the boundary turned every one of them into a
-           STATED $0.00, which is the opposite claim — the bill came and it was
-           nothing — and the fix would have survived until the next reload. */
-        if (!['actual', 'manual', 'mixed', 'missing'].includes(cell.kind)) cell.kind = 'actual';
-        /* One spelling of nothing. A `missing` cell exists only to carry its
-           note, so with nothing written on it there is nothing to keep, and no
-           figure and no parts can ride along under a kind that claims neither. */
-        if (cell.kind === 'missing') {
-          cell.v = 0;
-          delete cell.parts;
-          const note = typeof cell.note === 'string' ? cell.note.trim() : '';
-          if (!note) { delete yr.cells[k]; continue; }
-        }
-        if (Array.isArray(cell.parts)) {
-          cell.parts = cell.parts.filter(p => p && typeof p === 'object');
-          for (const p of cell.parts) {
-            const pv = num(p.v);
-            p.v = typeof pv === 'number' ? pv : 0;
-          }
-        } else delete cell.parts;
-      }
-      for (const [k, v] of Object.entries(yr.seeds)) {
-        const n = num(v);
-        if (typeof n === 'number') yr.seeds[k] = n; else delete yr.seeds[k];
-      }
-      for (const [k, ov] of Object.entries(yr.overrides)) {
-        /* A BALANCE MONTH'S NOTE LIVES ON `balAdjust`, NOT ON THE PIN (schema
-           9). It used to ride along on the override, which meant a note could
-           only exist where a balance had been stated: clear the amount, save,
-           and the words went with it — so "the statement came late" could only
-           be written down by first pinning a figure, which is a claim about the
-           account made to keep a sentence. The move happens here so that a plan
-           written before it comes forward on load, whichever door it came in
-           through. An existing note on the new side wins: that is the one the
-           editor has been writing since. */
-        if (ov && typeof ov === 'object') {
-          const carried = typeof ov.note === 'string' ? ov.note.trim() : '';
-          if (carried) {
-            const adj = yr.balAdjust[k] = obj(yr.balAdjust[k]);
-            if (!(typeof adj.note === 'string' && adj.note.trim())) adj.note = carried;
-          }
-          delete ov.note;
-        }
-        /* Read STRICTLY (rateOrNone), not through num(): an override PINS a
-           balance, and num would turn a corrupt field into a deliberate-
-           looking $0 statement. One that states no figure states nothing —
-           dropped, the same way the balance editor deletes a cleared one. */
-        const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
-        if (typeof n === 'number') ov.v = n; else delete yr.overrides[k];
-      }
-      /* THREE FIELDS AND NO MORE: what the month earned, what it paid out, and
-         the note. The two figures read STRICTLY for the override's reason — a
-         corrupt field must not become a stated $0, which the engine would read
-         as "the rate produced nothing this month" — and the note is trimmed,
-         absent rather than blank, like every other optional string in here.
-         An entry left holding none of the three is dropped: an empty one still
-         keeps its account's row on screen, which is a row with nothing in it.
-         (A no-notes share link makes exactly those: `stripNotes` walks the
-         whole payload, and a note-only month comes out of it as `{}`.) */
-      for (const [k, raw] of Object.entries(yr.balAdjust)) {
-        const was = obj(raw);
-        const adj = {};
-        const int = rateOrNone(was.interest), div = rateOrNone(was.dividend);
-        if (typeof int === 'number') adj.interest = int;
-        if (typeof div === 'number') adj.dividend = div;
-        const note = typeof was.note === 'string' ? was.note.trim() : '';
-        if (note) adj.note = note;
-        if (Object.keys(adj).length) yr.balAdjust[k] = adj;
-        else delete yr.balAdjust[k];
-      }
-      /* AND ONLY FOR THE MONTHS THIS YEAR SHOWS. A count is keyed by month,
-         and until 2026-09-11 nothing asked whether that month belonged to the
-         year holding it. An import whose Paychecks row ran wider than the year
-         it built — Charlie's sheet carried 24 columns into a 12-month 2026 —
-         left twelve counts for 2027 sitting inside 2026, where no grid renders
-         them and no cell editor can reach them.
-         They were not inert. `rolloverYear` seeds a new year by reading the
-         OLD year's map at the NEW year's months, so every rebuild of 2027
-         copied the whole hidden block straight back in, a 3.5 in February
-         included. Deleting the year and recreating it — which he did many
-         times — fixed the copy and never touched the original, so the figure
-         came back every time and there was nowhere to go and look at it.
-         The carry-forward itself stays: a year whose grid genuinely reaches
-         into the next one holds those months in its OWN span, which is the
-         shape the feature was written for and the one its test pins. What goes
-         is the block no reader can see. With it gone a rebuilt year falls back
-         through `resolvePaychecks` to the same month last year, which is the
-         answer the hidden block was standing in the way of. */
-      const shownMonths = new Set(yearMonths(yr));
-      for (const [m, v] of Object.entries(yr.paychecks)) {
-        const n = num(v);
-        if (typeof n === 'number' && shownMonths.has(m)) yr.paychecks[m] = n;
-        else delete yr.paychecks[m];
-      }
-      /* What a FROZEN year was before it was frozen — the balances it stated
-         by hand (the freeze wrote all the others) and whether the end-of-year
-         figure was stamped at the same time. It exists so "Re-open as live"
-         can put the year back exactly, which is why only a year the app froze
-         carries one: an IMPORTED history year states its balances outright and
-         has no chain to go back to, so it is never offered the button.
-         A marker that can't say what the year was entered through can't
-         restore anything, so it goes rather than half-works — the year stays
-         frozen, which is what the reader sees anyway. */
-      const pf = obj(yr.pinnedFrom);
-      if (yr.model === 'live' || !/^\d{4}-\d{2}$/.test(pf.enteredThrough || ''))
-        delete yr.pinnedFrom;
-      else {
-        pf.overrides = obj(pf.overrides);
-        for (const [k, ov] of Object.entries(pf.overrides)) {
-          const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
-          if (typeof n === 'number') ov.v = n; else delete pf.overrides[k];
-        }
-        pf.eoyStamped = !!pf.eoyStamped;
-        /* The typed counts Re-open restores: a number per month, nothing else.
-           Absent on a year frozen before 2026-09-17, which `pinnedToLive`
-           reads as "the stamped map is the typed one". */
-        if (pf.paychecks !== undefined) {
-          pf.paychecks = obj(pf.paychecks);
-          for (const [m, v] of Object.entries(pf.paychecks)) {
-            const n = rateOrNone(v);
-            if (typeof n === 'number' && /^\d{4}-\d{2}$/.test(m)) pf.paychecks[m] = n;
-            else delete pf.paychecks[m];
-          }
-        }
-        yr.pinnedFrom = pf;
-      }
-      /* Rows classify into Income / Expenses / Transfers sections. Data from
-         before sections existed gets a one-time guess here — transfer roles
-         by role, everything else by the sign of what's stored — which sticks
-         on the next save, so a hand-picked section is never re-guessed. */
-      for (const cat of yr.categories) {
-        /* Pass-throughs on a bank account (the old "zelle" role) grouped as
-           transfers too; money paid straight out of investments (the old
-           "charitable" role) never did. */
-        const looksLikeTransfer = ['bankTransfer', 'midTransfer', 'longTransfer',
-          'zelle', 'transfer'].includes(cat.role);
-        Object.assign(cat, normRole(cat));   // one-time role → role + target
-        /* A dividends row written before the accounts were nameable earns on
-           the two the engine used to assume — but only the ones that still
-           exist, and only where the row says nothing yet. Absent means "never
-           asked"; an empty list is a decision, and re-filling it would argue
-           with the reader every time the app loaded. */
-        if (cat.rule === 'dividends' && !Array.isArray(cat.accounts))
-          cat.accounts = ['cash', 'mid'].filter(id => acctIds.has(id));
-        if (Array.isArray(cat.accounts))
-          cat.accounts = cat.accounts.filter(id => acctIds.has(id));
-        /* An overflow row names a source, a destination and a threshold. A
-           dangling account id is deleted — the row degrades to blank rather
-           than breaking, the goal-accounts rule — and the threshold is read
-           STRICTLY: num() would turn junk into 0, and a $0 threshold is a
-           real-looking claim ("sweep everything") the reader never made.
-           goalId is checked after the goals themselves are settled, below. */
-        /* How fast a growing row rises, read STRICTLY — the account.rate
-           discipline. num() would turn a corrupt field into 0%, which reads on
-           screen as a row somebody deliberately said does not rise, and the
-           whole point of the rule is that it does. Kept only while the row IS
-           a growing one, the way `every` and `perCheck` are. */
-        if (cat.rule === 'grow') {
-          const g = rateOrNone(cat.growth);
-          if (g !== undefined) cat.growth = g; else delete cat.growth;
-        } else delete cat.growth;
-        /* Whether the same-month rule keeps the cents instead of rounding to
-           the nearest dollar. Stored only when TRUE and only while the row is
-           a same-month one — `duePayAhead`'s discipline, and never `undefined`
-           (the Firestore rule). `false` and absent are one claim, so a plan
-           written before this field existed is byte for byte what it was: no
-           schema bump, no migration, the `dueMonths` precedent. */
-        if (cat.rule === 'samemonth' && cat.keepCents === true) cat.keepCents = true;
-        else delete cat.keepCents;
-        if (cat.rule === 'overflow') {
-          /* A sweep is a move between the reader's own accounts, whatever a
-             hand-edited file says: the editor already forces Transfers, and
-             filed under Expense the row would count its sweeps as spending
-             (review fix 3). */
-          cat.section = 'transfer';
-          if (!acctIds.has(cat.overflowFrom)) delete cat.overflowFrom;
-          if (!acctIds.has(cat.transferTo)) delete cat.transferTo;
-          const th = rateOrNone(cat.threshold);
-          if (th !== undefined) cat.threshold = th; else delete cat.threshold;
-          const cap = rateOrNone(cat.capAmount);
-          if (cap !== undefined) cat.capAmount = cap; else delete cat.capAmount;
-          /* The frozen measure lists a share link writes — a goal's account
-             set carried as plain ids so the recipient measures the same pot.
-             Dangling ids drop, and an emptied list is deleted outright:
-             absent falls back to the row's own end, which is the honest
-             degrade. */
-          for (const k of ['thresholdAccounts', 'capAccounts']) {
-            if (!Array.isArray(cat[k])) { delete cat[k]; continue; }
-            cat[k] = cat[k].filter(id => acctIds.has(id));
-            if (!cat[k].length) delete cat[k];
-          }
-        } else {
-          delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
-          delete cat.capGoalId; delete cat.capAmount;
-          delete cat.thresholdAccounts; delete cat.capAccounts;
-        }
-        /* Whose row it is — a second earner's paycheck, tagged so take-home
-           can be read per person. Only ever a label; the engine sums the
-           household's rows regardless. */
-        if (cat.person && !peopleIds.has(cat.person)) delete cat.person;
-        /* ── When the bill is due ──────────────────────────────────────
-           Display and reminders only: the engine never reads any of this, so a
-           corrupt schedule can make the page quieter but can never move a
-           figure. `duePay` is the MARKER — a row either carries one of the two
-           words or carries no schedule at all — which is why a bad one deletes
-           the other three rather than leaving a half-schedule behind. The same
-           delete-when-inapplicable discipline the overflow block above uses,
-           and never `undefined` (the Firestore rule).
-
-           Every part is read STRICTLY. `dueDay` through a plain num() would
-           turn junk into 0 and 0 has no honest reading — the 1st? the last? —
-           and an EMPTY `dueMonths` would say "never due", which is a different
-           claim from the absent list's "due every month". Junk deletes, and
-           the field falls back to its absent meaning. */
-        if (!DUE_PAY.includes(cat.duePay)) {
-          delete cat.duePay; delete cat.dueMonths;
-          delete cat.dueDay; delete cat.dueHold; delete cat.duePayAhead;
-        } else {
-          if (Array.isArray(cat.dueMonths)) {
-            const ms = [...new Set(cat.dueMonths
-              .map(n => Math.round(num(n)))
-              .filter(n => Number.isFinite(n) && n >= 1 && n <= 12))].sort((x, y) => x - y);
-            /* All twelve IS "every month", which is what an absent list already
-               says — storing both spellings would give the same schedule two
-               shapes for a test and a share link to disagree over. */
-            if (ms.length && ms.length < 12) cat.dueMonths = ms;
-            else delete cat.dueMonths;
-          } else delete cat.dueMonths;
-          const day = Math.round(num(cat.dueDay));
-          if (Number.isFinite(day) && day >= 1 && day <= 31) cat.dueDay = day;
-          else delete cat.dueDay;
-          /* A month, guarded exactly like an account's since/until. */
-          if (typeof cat.dueHold !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.dueHold))
-            delete cat.dueHold;
-          /* Whether the money leaves the month BEFORE the bill is due. Stored
-             only when true — `false` and absent are the same claim here, and an
-             absent key keeps a row that has never been asked the question
-             exactly as it was. */
-          if (cat.duePayAhead === true) cat.duePayAhead = true;
-          else delete cat.duePayAhead;
-        }
-        /* ── The month the row stopped ─────────────────────────────────
-           `until` is the last month this row had money in it, and it is
-           deliberately the SAME key, the same shape and the same words an
-           ACCOUNT uses to say it was closed — two objects saying one thing,
-           and one vocabulary to learn. A month string or nothing: absent is
-           "still in use", and there is no second spelling of that (never
-           `false`, never `''` — the Firestore rule). Guarded exactly like
-           `dueHold` and `a.until` above it. */
-        if (typeof cat.until !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.until))
-          delete cat.until;
-        if (cat.section) continue;
-        if (looksLikeTransfer) { cat.section = 'transfer'; continue; }
-        let sum = 0;
-        for (const [key, cell] of Object.entries(yr.cells))
-          if (key.startsWith(cat.id + '|')) sum += (cell && cell.v) || 0;
-        cat.section = sum >= 0 ? 'income' : 'expense';
-      }
-    } else {
+    if (yr.kind === 'grid') coerceGridYear(yr, y);
+    else {
       yr.kind = 'summary';
       yr.categoryTotals = arr(yr.categoryTotals);
+      /* A summary row was only ever filtered to "is it an object", so a total
+         of "1200" out of a hand-edited backup reached `fmtMoney` and printed
+         NaN across the card. Read like every other figure here, and the two
+         flags held to one answer: a row is a balance, or growth, or a flow —
+         never two of them, whatever a file says. */
+      for (const it of yr.categoryTotals) {
+        it.name = String(it.name || '');
+        const n = num(it.total);
+        it.total = typeof n === 'number' ? n : 0;
+        if (it.isBalance) { it.isBalance = true; delete it.isGrowth; }
+        else if (it.isGrowth) { it.isGrowth = true; delete it.isBalance; }
+        else { delete it.isBalance; delete it.isGrowth; }
+        if (typeof it.note === 'string' && it.note.trim()) it.note = it.note.trim();
+        else delete it.note;
+      }
+      /* THE STASHED GRID IS READ EXACTLY LIKE A REAL ONE, because on Re-open it
+         BECOMES one — a hand-edited backup that slipped an unsanitised grid in
+         here would otherwise be promoted straight into the engine. A stash that
+         cannot say it is a grid year restores nothing, so the marker goes and
+         the year is simply one-way, the discipline `pinnedFrom` already keeps.
+         A stash never nests: it is the year BEFORE the fold, and that year was
+         a grid. */
+      if (yr.foldedFrom !== undefined) {
+        const st = obj(yr.foldedFrom);
+        delete st.foldedFrom;
+        if (st.kind !== 'grid' || !/^\d{4}-\d{2}$/.test(st.startMonth || ''))
+          delete yr.foldedFrom;
+        else { coerceGridYear(st, y); yr.foldedFrom = st; }
+      }
     }
   }
   d.goals = arr(d.goals);
@@ -7168,6 +7229,21 @@ function migrate(parsed) {
      alone, so the first save on that month DELETES the note — silently, with
      the words gone for good. A plan written before this has nothing to gate. */
   if ((parsed.schema || 1) < 9) parsed.schema = 9;
+  /* Schema 10 is the lossless fold: a summary year keeps the grid it was made
+     from (`foldedFrom`), and the growth its accounts made becomes a row of its
+     own (`isGrowth`). It rewrites nothing either — a plan with no folded year
+     is exactly what it was — and the gate is earned at the other end three
+     times over.
+
+     An older build's summary-row editor REBUILDS a row as {name, total,
+     isBalance?, note?}, so it drops `isGrowth` on the first save: a paper gain
+     silently becomes a flow, counted as income in money in, in the savings
+     rate and in Where the Money Goes. That is schema 8's fault class exactly,
+     and it is the one that earns this on its own. It also lets you edit a
+     folded year's totals — edits the next re-open here would throw away — and
+     offers "Convert to a Summary" on any finished year, so it can interleave
+     summaries and grids behind the block rule's back. */
+  if ((parsed.schema || 1) < 10) parsed.schema = 10;
   return parsed;
 }
 
@@ -7832,6 +7908,44 @@ function latestGridYear() {
 function newestGridYear() {
   const ks = yearKeys().filter(y => state.years[y].kind === 'grid');
   return ks.length ? ks[ks.length - 1] : null;
+}
+/* Every summary year, oldest first — the Previous Years page, in the order the
+   year strip runs. */
+function summaryYears(st) {
+  return Object.keys(st.years).sort().filter(y => st.years[y].kind === 'summary');
+}
+/* A summary year still holding the grid it was made from — so it can be
+   re-opened, and so it must not be edited. Pure, and exported, so the door's
+   rule can be pinned without a page. */
+function folded(yr) { return !!(yr && yr.kind === 'summary' && yr.foldedFrom); }
+
+/* ── The block rule ────────────────────────────────────────────────────────
+   Summaries are an unbroken block at the FRONT of the plan, with the years
+   that still have months after them — which is what makes one stacked page of
+   history make sense, and what stops a re-opened 2021 sitting between two
+   folded years in the strip.
+
+   Each answers WHICH YEAR rather than yes-or-no, because the renderer asks
+   once: two booleans over a list of years would be two chances to disagree
+   about the same rule. Only the OLDEST grid year folds, and only the NEWEST
+   summary re-opens — "the newest summary AND it kept its grid", never "the
+   newest summary that kept one", which would re-open a year out of the middle
+   and split the block in two.
+
+   A plan whose summaries are NOT a block (an import can leave one sitting
+   after a grid) degrades rather than throwing: both answer, folding the oldest
+   grid only ever improves matters, an imported summary at the end has no stash
+   and so gets no button, and the page lists every summary wherever it sits.
+   Nothing anywhere asserts the block at read time — it is a rule about what
+   the buttons OFFER. Pure, pinned by tests. */
+function foldableYear(st) {
+  const y = Object.keys(st.years).sort().find(k => st.years[k].kind === 'grid');
+  return y && st.years[y].model !== 'live' ? y : null;
+}
+function unfoldableYear(st) {
+  const sums = summaryYears(st);
+  const y = sums[sums.length - 1];
+  return y && st.years[y].foldedFrom ? y : null;
 }
 /* Years built beyond the current one, oldest first. They exist to be read, so
    every projection the app draws runs through them. */
@@ -9604,8 +9718,9 @@ const HELP = {
       + 'stopping at the last one you entered — otherwise August would always look like a '
       + 'cheap year — and the figures say so by being set in the estimate style.'],
     ['Rows are matched to last year ', b('by the row itself'), ', so renaming one keeps its '
-      + 'history in one line rather than splitting it in two; against an old imported yearly '
-      + 'summary, which has no rows to point at, they are matched by name instead.'],
+      + 'history in one line rather than splitting it in two; against a year read as a '
+      + 'yearly summary, which has no rows to point at, they are matched by name instead '
+      + '— so a folded year still lines up, its rows having kept their names.'],
     ['Anything that spent nothing in either year is left out, and ', b('a row that has '
       + 'vanished since last year still gets a line'), ' — money that stopped being spent is '
       + 'as much a finding as money that started.'],
@@ -9896,11 +10011,29 @@ const HELP = {
      at all. So the reader who clicked wondering what one was got a title saying
      the window was not for them and a paragraph proving it. Same fault the due
      block had (2026-08-27), found by sweeping every window in the family. */
+  summaryGrowth: { title: 'Growth in a Summary Year', body: [
+    ['These rows are what the year\'s investment accounts gained ', b('on paper'), ' — '
+      + 'the figure each account\'s own growth rate produced, added up across the year. '
+      + 'It is neither of the two kinds of row above and below it, which is exactly why '
+      + 'it has a block of its own.'],
+    [b('It is not income'), ', and nothing counts it as any: it stays out of money in, '
+      + 'out of money out, out of what the year spent and out of the savings rate. A gain '
+      + 'you have not sold is not money you can spend, and folding it in beside a paycheck '
+      + 'would flatter every one of those figures.'],
+    ['It is not a balance either — the balances below are what each account HELD at the '
+      + 'end of the year, and they already contain every dollar of this. The row is here '
+      + 'to say ', b('how much of the year\'s climb was the market'), ' rather than money '
+      + 'you put in, which is the one thing a closing figure cannot tell you.'],
+    ['The figure is written down ', b('at the moment the year is folded'), ', out of the '
+      + 'months the year itself recorded — never worked out again afterwards from today\'s '
+      + 'rates, which would rewrite a past year every time an assumption changed.'],
+  ] },
   summaryBalances: { title: 'Balances & Derived Rows, Explained', body: [
-    ['Everything above this heading is a ', b('flow'), ' — money that came in or went '
+    ['Everything at the top of the card is a ', b('flow'), ' — money that came in or went '
       + 'out during the year, and the figure beside it is the year\'s total. The two kinds '
       + 'of row down here are the ones that would be counted twice if they were left up '
-      + 'there with the rest.'],
+      + 'there with the rest. (A Growth block in between, where there is one, is a third '
+      + 'kind again — it has a dot of its own.)'],
     [b('A balance row holds December\'s figure'), ', not a total: adding up twelve monthly '
       + 'balances would be meaningless, so what it states is what the account held at the '
       + 'end of the year.'],
@@ -9912,6 +10045,11 @@ const HELP = {
     ['The split was worked out once, from the shape those old sheets have, and it is '
       + 'yours to correct: open any row and ', b('This is a balance, not a flow'), ' moves '
       + 'it between the two groups. Nothing re-guesses it afterwards.'],
+    ['That is true of an ', b('imported'), ' year, which is the only copy of itself. A '
+      + 'year you FOLDED still has its months, so its card reads but does not edit — the '
+      + 'rows here were worked out from those months, and a figure typed over one would '
+      + 'be thrown away the next time the year is opened. Re-open it and change the '
+      + 'month itself.'],
   ] },
   bonusVsSalary: { title: 'The Bonus as a Share of Salary', body: [
     ['The bonus measured against ', b('the salary the year opened on'), ' — the pay it was '
@@ -10322,6 +10460,7 @@ function render() {
    affordance, that closes the door. */
 function stripEditAffordances(root) {
   root.querySelectorAll('.addbar, [data-add], .h-edit, #deleteYearBtn, #toSummaryBtn,'
+    + '[data-yearact="delete"], [data-yearact="unfold"],'
     /* the whole grid-actions wrap goes, toggle included — every button in it
        is an edit affordance, and a toggle opening an emptied box is worse */
     + '#rolloverBtn, #closeMonthBtn, #reopenMonthBtn, .gridactions-wrap').forEach(el => el.remove());
@@ -10737,28 +10876,37 @@ function sampleState() {
           { name: 'Brokerage', total: 41900, isBalance: true },
           { name: "Mia's 529", total: 8600, isBalance: true },
         ] },
-        [PREV]: { kind: 'summary', categoryTotals: [
-          { name: 'Rosa — paycheck', total: 62400 },
-          { name: 'Ben — paycheck', total: 33600 },
-          { name: 'Interest & Dividends', total: 1480 },
-          { name: 'Mortgage', total: -25320 },
-          { name: 'Childcare', total: -12600 },
-          { name: 'Groceries', total: -11520 },
-          { name: 'Everything else', total: -6940 },
-          { name: 'Transport', total: -4320 },
-          { name: 'Insurance', total: -3180 },
-          { name: 'Dining out', total: -3180 },
-          { name: 'Utilities', total: -2940 },
-          /* And a note on a SUMMARY row, the other table where a note hangs off
-             a row — on the row that stops, where the obvious question is why. */
-          { name: 'Holiday club', total: -1150,
-            note: 'The last year we needed it — Mia was old enough after that.' },
-          { name: 'Everyday', total: 4800, isBalance: true },
-          { name: 'Savings', total: 15600, isBalance: true },
-          { name: 'Emergency fund', total: 7300, isBalance: true },
-          { name: 'Brokerage', total: 52400, isBalance: true },
-          { name: "Mia's 529", total: 11400, isBalance: true },
-        ] },
+        /* PREV IS BUILT AS A YEAR AND THEN FOLDED, by the app's own
+           `gridToSummary` at the foot of this function — not written out as
+           totals like PREV2 above. That is what puts the whole of the fold in
+           the demo: a Previous Years page with two cards rather than one, a
+           read-only folded card beside an editable imported one, a live
+           "Re-open 2025 as a Year" button, a Growth block (the Brokerage
+           account already earns its rate as growth), and a summary CSV that
+           names each row's block. A hand-typed stash would be the one thing
+           in the sample that could drift from what the app actually produces.
+
+           The figures come out EXACTLY where they were typed before: each
+           row's total is spread across its twelve months with the remainder in
+           December, and the closing balances are stated on December. The row
+           NAMES still match the live grid's, which is how a summary year lines
+           up beside one (a summary has no row ids, so the match is by name),
+           and `Holiday club` is still the row that existed then and does not
+           now — carrying the note that says why. */
+        [PREV]: foldSampleYear(PREV, [
+          ['Rosa — paycheck', 'income', 62400],
+          ['Ben — paycheck', 'income', 33600],
+          ['Mortgage', 'expense', -25320],
+          ['Childcare', 'expense', -12600],
+          ['Groceries', 'expense', -11520],
+          ['Everything else', 'expense', -6940],
+          ['Transport', 'expense', -4320],
+          ['Insurance', 'expense', -3180],
+          ['Dining out', 'expense', -3180],
+          ['Utilities', 'expense', -2940],
+          ['Holiday club', 'expense', -1150,
+            'The last year we needed it — Mia was old enough after that.'],
+        ]),
         [y]: {
           kind: 'grid', model: 'live',
           startMonth: `${Y}-01`, monthCount: 12,
@@ -11023,7 +11171,60 @@ function sampleState() {
       },
       ui: { activeYear: y, activeTab: 'budget', collapsed: [] },
     };
+  /* The fold itself, once `state` exists — `gridToSummary` reads the plan's
+     accounts to write the balance and growth rows, so it cannot run inside the
+     literal above. `foldSampleYear` left a grid year there; this makes it the
+     summary the demo shows, through the same function the button calls. */
+  state.years[String(PREV)] = gridToSummary(state, String(PREV));
   return state;
+}
+
+/* One history year as a GRID, ready to be folded — see the note by PREV above.
+   Each row's total is spread evenly across the twelve months with the
+   remainder landing in December, so the year's totals are to the cent what
+   they were when they were typed out by hand. The earnings are stated rather
+   than computed, which is what a pinned year does: interest on the three
+   accounts that pay it, and the Brokerage's rate as GROWTH, which is the row
+   this demo exists to show. */
+function foldSampleYear(yy, rows) {
+  const Yq = String(yy);
+  const months = Array.from({ length: 12 }, (_, i) => `${Yq}-${String(i + 1).padStart(2, '0')}`);
+  const categories = [], cells = {};
+  for (const [name, section, total, note] of rows) {
+    const id = slugJs(name);
+    const cat = { id, name, section, rule: 'none', role: 'normal' };
+    if (note) cat.note = note;
+    categories.push(cat);
+    const each = round2(total / 12);
+    let run = 0;
+    months.forEach((mm, i) => {
+      const v = i === 11 ? round2(total - run) : each;
+      run = round2(run + v);
+      cells[`${id}|${mm}`] = { v, kind: 'actual' };
+    });
+  }
+  const dec = `${Yq}-12`;
+  return {
+    kind: 'grid', model: 'pinned',
+    startMonth: `${Yq}-01`, monthCount: 12, enteredThrough: dec,
+    categories, cells, paychecks: {},
+    /* Where the year opened — the year before it closed here. */
+    seeds: { cash: 4100, mid: 12800, emergency: 5400, long: 41900, college: 8600 },
+    overrides: {
+      [`cash|${dec}`]: { v: 4800 }, [`mid|${dec}`]: { v: 15600 },
+      [`emergency|${dec}`]: { v: 7300 }, [`long|${dec}`]: { v: 52400 },
+      [`college|${dec}`]: { v: 11400 },
+    },
+    balAdjust: {
+      [`mid|${dec}`]: { interest: 620 },
+      [`emergency|${dec}`]: { interest: 300 },
+      [`college|${dec}`]: { interest: 560 },
+      /* The Brokerage earns `growth`, so this figure is NOT income and folds
+         into a Growth row of its own rather than into Interest & Dividends. */
+      [`long|${dec}`]: { interest: 9200 },
+    },
+    extraNotes: [],
+  };
 }
 
 /* Offered on the welcome card only, which is the one place there is nothing to
@@ -11116,20 +11317,35 @@ function yearPickerHtml(active) {
      It ran newest first until 2026-09-11, carried over from the tabs along the
      top of the spreadsheet this plan came from. Charles: "flip years so it
      aligns with the rest of the app." */
-  const order = yearKeys().slice();
+  /* EVERY SUMMARY YEAR IS ONE CHIP (2026-09-20), first, because the block they
+     stand for is the front of the plan and this strip runs oldest first. A
+     plan of sixteen years spent most of its rail on years holding one short
+     card each; they are one page now, and the chip carries the NEWEST of them
+     as its `data-year`, which is a real year key — so `wireYearStrip` needed
+     nothing at all: click, the arrow keys, Home/End, the focus hand-back and
+     `settleRail` all go on reading `chip.dataset.year`. It keeps `y-summary`'s
+     italics, which said "this year is a summary" and now says it of several. */
+  const sums = summaryYears(state);
+  const order = sums.length
+    ? [sums[sums.length - 1], ...yearKeys().filter(y => state.years[y].kind !== 'summary')]
+    : yearKeys().slice();
   const chips = order.map(y => {
     const yr = state.years[y];
     const summary = yr.kind === 'summary';
     const future = !summary && !yearStarted(state, y);
-    const isNow = y === nowY;
-    const label = y + (summary ? ' (summary)' : future ? ' (not started yet)' : '')
-      + (isNow ? ' — this year' : '');
-    const on = y === active;
+    const isNow = !summary && y === nowY;
+    const span = sums.length === 1 ? sums[0] : `${sums[0]} to ${sums[sums.length - 1]}`;
+    const label = summary
+      ? `Previous years — ${span}, ${sums.length} yearly ${sums.length === 1 ? 'summary' : 'summaries'}`
+      : y + (future ? ' (not started yet)' : '') + (isNow ? ' — this year' : '');
+    const on = summary ? state.years[active] && state.years[active].kind === 'summary' : y === active;
     return `<button type="button" role="radio" data-year="${esc(y)}"
       class="yearchip${summary ? ' y-summary' : ''}${future ? ' y-future' : ''}${
       isNow ? ' chip-now' : ''}"
       aria-checked="${on ? 'true' : 'false'}" tabindex="${on ? 0 : -1}"
-      aria-label="${esc(label)}" title="${esc(label)}">${esc(y)}</button>`;
+      aria-label="${esc(label)}" title="${esc(label)}">${summary
+        ? '<span class="prev-long">Previous</span><span class="prev-short">Prev</span>'
+        : esc(y)}</button>`;
   }).join('');
   /* "This year", the month strip's button in the other lens, and it appears on
      the same condition: only when this year is IN the strip and you are not
@@ -11173,8 +11389,15 @@ function yearPickerHtml(active) {
      from a rail scrolled to its far end, picking this year pulled every chip
      sideways by the button's width — the shift Charles reported. The arrows
      beside it already follow this rule for exactly this reason. */
-  const showNow = yearKeys().includes(nowY);
-  const at = order.indexOf(active);
+  /* "This year" needs a chip to take you to, and a folded year has none of its
+     own — so the question is now whether this year is a GRID year in the
+     strip. A plan whose current year has been folded marks nothing and offers
+     nothing, exactly as one that is all history always did. */
+  const showNow = !!state.years[nowY] && state.years[nowY].kind !== 'summary';
+  /* The chip the arrows step from: the Previous chip stands for every summary,
+     so reading a year further down the stack still points at it. */
+  const at = order.indexOf(state.years[active] && state.years[active].kind === 'summary'
+    ? order[0] : active);
   return `<div class="yearstrip">
     ${budgetSwitchHtml('year')}
     <div class="yearrail" id="yearRail" role="radiogroup"
@@ -11307,43 +11530,92 @@ function renderBudget() {
   const picker = yearPickerHtml(y);
   /* The notes are their own box UNDER the budget, not a panel inside it — see
      yearNotes(). They return '' for a year with none, so nothing empty is drawn. */
-  if (yr.kind === 'summary') return picker + summaryCard(y, yr) + yearNotes(y);
+  /* A summary year IS the Previous Years page: every folded and imported year
+     stacked behind one chip, rather than a chip each for years holding one
+     short card. Which year `activeYearKey()` names still decides the chip, so
+     nothing else in the app had to learn a new word for this page. */
+  if (yr.kind === 'summary') return picker + previousYearsPage();
   return picker + gridCard(y, yr) + yearNotes(y);
 }
 
-function summaryCard(y, yr) {
+function summaryCard(y, yr, stacked) {
+  /* A FOLDED year is a view of the grid it is still holding, so it cannot be
+     edited: a total typed here would be thrown away by the next re-open, and a
+     summary that disagrees with the months behind it is the one thing the
+     stash exists to make impossible. The rows read, the notes still show their
+     dots, and the way to change a figure is to open the year. An IMPORTED
+     summary has no grid behind it — it is the only copy of that year — so it
+     stays exactly as editable as it has always been. */
+  const folded = !!yr.foldedFrom;
+  const readOnly = folded || viewOnly;
   const line = (i) => {
     const idx = yr.categoryTotals.indexOf(i);
-    if (!i.name && !i.total) return `<div class="rowline" data-edit="sumrow"
+    if (!i.name && !i.total) return readOnly ? '' : `<div class="rowline" data-edit="sumrow"
       data-year="${esc(y)}" data-idx="${idx}" role="button"
       aria-label="Empty line — press Enter to fill it in"
       style="cursor:pointer;height:14px;border-bottom:none"></div>`;
-    return `<div class="rowline" data-edit="sumrow" data-year="${esc(y)}"
-      data-idx="${idx}" style="cursor:pointer"${rowTip('Click to edit', i.note)
+    return `<div class="rowline"${readOnly ? '' : ` data-edit="sumrow" data-year="${esc(y)}"
+      data-idx="${idx}" style="cursor:pointer"`}${rowTip(readOnly ? '' : 'Click to edit', i.note)
       }><span>${esc(i.name)}${noteDot(i.note)}</span><span>${fmtMoney(i.total)}</span></div>`;
   };
-  const flows = yr.categoryTotals.filter(i => !i.isBalance);
+  const flows = yr.categoryTotals.filter(i => !i.isBalance && !i.isGrowth);
+  const grew = yr.categoryTotals.filter(i => i.isGrowth);
   const bals = yr.categoryTotals.filter(i => i.isBalance);
-  return `<div class="card">
-    <h2>${esc(y)} — Yearly Summary</h2>
-    <p class="sub">${yr.convertedFrom
-      ? 'The months of this year were folded into totals.'
-      : 'This year predates the monthly layout, so it\'s imported as totals only.'}
+  const newest = unfoldableYear(state) === y;
+  /* Four sentences for four states, because "what can I do with this card"
+     differs in each: an imported year is the only copy of itself, a year
+     folded by an older build has no way back, the newest folded year opens
+     with one press, and one further down the stack waits its turn. */
+  const sub = !yr.convertedFrom
+    ? 'This year predates the monthly layout, so it\'s imported as totals only.'
+    : !folded
+    ? 'The months of this year were folded into totals.'
+    : newest
+    ? `The months of ${esc(y)} are folded into these totals — and kept. Re-open the year to change any figure here.`
+    : `The months of ${esc(y)} are folded into these totals — and kept. Years re-open newest first, so ${esc(unfoldableYear(state) || '')} goes back before this one.`;
+  return `<div class="card"${stacked ? ` data-box="summary-${esc(y)}"` : ''}>
+    <h2>${stacked ? 'Yearly Summary' : `${esc(y)} — Yearly Summary`}</h2>
+    <p class="sub">${sub}
       ${yr.eoyCash !== undefined ? `End of year: <strong>${fmtMoney(yr.eoyCash)}</strong>.` : ''}
-      ${viewOnly ? '' : 'Click any row to edit it.'}</p>
+      ${readOnly ? '' : 'Click any row to edit it.'}</p>
     <div class="sumlist">${flows.map(line).join('')}</div>
+    ${grew.length ? `<h2 style="margin-top:18px">Growth${
+        helpBtn('summaryGrowth', 'growth in a summary year')}</h2>
+      <p class="sub">What these accounts gained on paper in ${esc(y)}. It moved the
+        balances below; it is not income, and it is not in the flows above.</p>
+      <div class="sumlist">${grew.map(line).join('')}</div>` : ''}
     ${bals.length ? `<h2 style="margin-top:18px">Balances &amp; Derived Rows${
         helpBtn('summaryBalances', 'balances and derived rows')}</h2>
       <div class="sumlist">${bals.map(line).join('')}</div>` : ''}
     <div class="addbar">
-      <button class="btn small" data-add="sumrow" data-year="${esc(y)}">＋ Add Row</button>
-      <button class="btn small" data-edit="sumyear" data-year="${esc(y)}"><span aria-hidden="true">✎</span> End-of-year Figure</button>
-      <button class="btn small" id="csvYearBtn"
+      ${folded && newest ? `<button class="btn small" data-yearact="unfold" data-year="${esc(y)}"
+        title="Put ${esc(y)}'s months back exactly as they were"><span aria-hidden="true">↩</span> Re-open ${esc(y)} as a Year</button>` : ''}
+      ${folded ? '' : `<button class="btn small" data-add="sumrow" data-year="${esc(y)}">＋ Add Row</button>
+      <button class="btn small" data-edit="sumyear" data-year="${esc(y)}"><span aria-hidden="true">✎</span> End-of-year Figure</button>`}
+      <button class="btn small" data-yearact="csv" data-year="${esc(y)}"
         title="Download ${esc(y)}'s totals as a spreadsheet"><span aria-hidden="true">⇩</span> CSV</button>
-      <button class="btn small" id="deleteYearBtn"
+      <button class="btn small" data-yearact="delete" data-year="${esc(y)}"
         title="Remove ${esc(y)} from the app entirely"><span aria-hidden="true">🗑️</span> Delete ${esc(y)}</button>
     </div>
   </div>`;
+}
+
+/* Every summary year on one page, newest at the top — the order the Trips tab
+   already reads in, and the one that puts the year you are most likely to want
+   (the only one carrying a Re-open button) at the top rather than nine cards
+   down. The YEAR moves out of the two card headings and into a `.yearhead`
+   above the pair, which is `renderVacations`' shape: three things on screen
+   saying "2019" within a few pixels is what that heading exists to avoid.
+
+   `data-box` per year is mandatory here. `boxKey` strips the DIGITS out of a
+   heading, so "2019 — Yearly Summary" and "2018 — Yearly Summary" are ONE
+   folded-box key — which was right while one showed at a time and would fold
+   all nine as one now. The grid page keeps the shared key, so folding 2026's
+   notes still finds 2025's folded. */
+function previousYearsPage() {
+  return summaryYears(state).reverse().map(y =>
+    `<h2 class="yearhead" id="year-${esc(y)}">${esc(y)}</h2>`
+    + summaryCard(y, state.years[y], true) + yearNotes(y, true)).join('');
 }
 
 /* Whether an account earns a row in a LIVE year's grid — pure and pinned, and
@@ -11823,12 +12095,16 @@ function gridCard(y, yr) {
       ${!live ? `<button class="btn small" data-edit="sumyear" data-year="${esc(y)}"
           title="The end-of-year total this year is drawn at on the year-by-year chart">
           ✎ End-of-year Figure</button>` : ''}
-      ${!live ? `<button class="btn small" id="toSummaryBtn"
-          title="Replace this year's months with its yearly totals — permanent">
-          ⇩ Convert to a Summary</button>` : ''}
-      <button class="btn small" id="csvYearBtn"
+      ${y === foldableYear(state) ? `<button class="btn small" id="toSummaryBtn"
+          title="Read this year as yearly totals — its months are kept, and it opens back up">
+          ⇩ Fold Into Previous Years</button>` : ''}
+      ${/* The ids stay on the GRID card, where exactly one is ever on screen —
+           the month-close checklist reaches two of them by id. The summary
+           cards stack, so theirs are `data-yearact` and go through the
+           delegated handler these two now share with them. */''}
+      <button class="btn small" id="csvYearBtn" data-yearact="csv" data-year="${esc(y)}"
         title="Download ${esc(y)} as a spreadsheet — raw numbers, one row per line of the grid"><span aria-hidden="true">⇩</span> CSV</button>
-      <button class="btn small" id="deleteYearBtn"
+      <button class="btn small" id="deleteYearBtn" data-yearact="delete" data-year="${esc(y)}"
         title="Remove ${esc(y)} from the app entirely"><span aria-hidden="true">🗑️</span> Delete ${esc(y)}</button>
       </div>
     </div>`;
@@ -11960,7 +12236,7 @@ function noteLine(n, y) {
     }<span class="note-text">${esc(n.note)}</span></li>`;
 }
 
-function yearNotes(y) {
+function yearNotes(y, stacked) {
   const items = notesOfYear(state, y);
   if (!items.length) return '';
   const line = (n) => noteLine(n, y);
@@ -11984,8 +12260,8 @@ function yearNotes(y) {
      the year, or you come to read what you wrote about it — and a box nested
      inside a box gives you two headers to fold and no way to guess which one
      you shut. Both fold the same way now, through wireBoxes(). */
-  return `<div class="card">
-    <h2>Notes for ${esc(y)} (${items.length})</h2>
+  return `<div class="card"${stacked ? ` data-box="notes-${esc(y)}"` : ''}>
+    <h2>${stacked ? `Notes (${items.length})` : `Notes for ${esc(y)} (${items.length})`}</h2>
     <p class="sub">Every note in this year, gathered from the rows, the months
       and the stated balances they were written on${
       viewOnly ? '' : ' — click one to open the cell it came from'}.</p>
@@ -13506,9 +13782,11 @@ function renderMonthView() {
     return `<div class="yearstrip">${budgetSwitchHtml('month')}</div>
       <div class="card"><div class="empty">
         <h2>No Months to Look At</h2>
-        <p>Every year in this plan is stored as yearly totals, and a total has no
-          months inside it. Switch back to Year to read them — this view needs a
-          grid year, which is the kind the budget keeps its months in.</p>
+        <p>Every year in this plan reads as yearly totals, and a total has no months
+          inside it. Switch back to Year to read them — this view needs a year the
+          budget is keeping its months in.${unfoldableYear(state)
+            ? ` Re-open ${esc(unfoldableYear(state))} from Previous Years and its
+              months come back.` : ''}</p>
       </div></div>`;
   const m = activeMonthKey();
   const y = yearOfMonth(state, m);
@@ -14460,6 +14738,11 @@ function wireMonthRows() {
       const b = F('closeMonthBtn');
       if (b) { b.scrollIntoView({ block: 'center' }); b.focus({ preventScroll: true }); }
     } else if (kind === 'grid') {
+      /* The three targets all live on the GRID card, so a year folded since
+         this line was written has no button to press — and hunting for one by
+         id would focus whichever `#csvYearBtn` happened to be on screen, on
+         some other year's card. */
+      if (year && (!state.years[year] || state.years[year].kind !== 'grid')) return;
       delete state.ui.budgetView;
       if (year && state.years[year]) state.ui.activeYear = year;
       save(); render();
@@ -15364,8 +15647,10 @@ function spendingMixCard() {
       moved between your own accounts is not spending and is not here${
       projected ? `, and ${esc(y)} is still running — the figures include the months the
       plan has worked out, so they read as the estimates they are` : ''}.${
-      prevY && !mix.prevDetailed ? ` ${esc(prevY)} is kept as a yearly summary with no rows
-      in it, so there is nothing to compare against line by line.` : ''}</p>
+      prevY && !mix.prevDetailed ? ` ${esc(prevY)} is read as a yearly summary with no
+      rows in it, so there is nothing to compare against line by line${
+        state.years[prevY] && state.years[prevY].foldedFrom
+          ? ` — re-open it and this table fills in` : ''}.` : ''}</p>
     <div class="chartbox" style="height:${Math.max(180, Math.min(560, mix.rows.length * 26 + 60))}px"><canvas id="mixChart"></canvas></div>
     <div class="tablewrap" style="margin-top:12px"><table>
       <thead><tr><th style="text-align:left">Category</th><th>${esc(y)}</th>
@@ -19733,7 +20018,7 @@ function takeHomePay(st, computed, y, personId) {
   if (yr.kind === 'summary') {
     if (personId) return null;
     const rows = (yr.categoryTotals || [])
-      .filter(it => !it.isBalance && isPayRow(it.name));
+      .filter(it => !it.isBalance && !it.isGrowth && isPayRow(it.name));
     return rows.length
       ? round2(rows.reduce((t, it) => t + (it.total || 0), 0)) : null;
   }
@@ -19772,7 +20057,7 @@ function payRowsOf(st, y, personId) {
   if (yr.kind === 'summary') {
     if (personId) return [];
     return (yr.categoryTotals || [])
-      .filter(it => !it.isBalance && isPayRow(it.name))
+      .filter(it => !it.isBalance && !it.isGrowth && isPayRow(it.name))
       /* A summary year has no rules and no ticks — its rows are names and
          totals — so every one of them qualified by the list. */
       .map(it => ({ name: it.name, guessed: true }));
@@ -20231,7 +20516,7 @@ function yearFlows(yr, computed, y, noTransfers) {
   const add = (v) => { if (v > 0) inn += v; else out += v; };
   if (yr.kind === 'summary') {
     for (const item of yr.categoryTotals) {
-      if (item.isBalance) continue;
+      if (item.isBalance || item.isGrowth) continue;
       add(item.total);
     }
   } else {
@@ -20301,7 +20586,7 @@ function yearSpending(yr, computed, y) {
   let out = 0;
   if (yr.kind === 'summary') {
     for (const item of yr.categoryTotals || [])
-      if (!item.isBalance && item.total < 0) out += item.total;
+      if (!item.isBalance && !item.isGrowth && item.total < 0) out += item.total;
     return round2(-out);
   }
   /* The COMPUTED cells, for the reason yearFlows takes them: a year still
@@ -20344,7 +20629,7 @@ function categorySpend(yr, computed, y) {
   if (!yr) return [];
   if (yr.kind === 'summary')
     return (yr.categoryTotals || [])
-      .filter(it => !it.isBalance && (it.total || 0) < 0)
+      .filter(it => !it.isBalance && !it.isGrowth && (it.total || 0) < 0)
       .map(it => ({ id: null, name: String(it.name || 'Unnamed'), total: round2(-it.total) }));
   const cells = (computed && computed.cells) || yr.cells || {};
   const rows = (yr.categories || []).filter(c => (c.section || 'expense') === 'expense');
@@ -20423,7 +20708,7 @@ function yearIncome(yr, computed, y) {
   if (yr.kind === 'summary') {
     let inn = 0;
     for (const item of yr.categoryTotals || [])
-      if (!item.isBalance && item.total > 0) inn += item.total;
+      if (!item.isBalance && !item.isGrowth && item.total > 0) inn += item.total;
     return round2(inn);
   }
   const cells = (computed && computed.cells) || yr.cells || {};
@@ -20853,14 +21138,7 @@ function gridToSummary(st, y) {
      stored field for whatever an account's rate produced, so adding it blind
      would fold an investment account's paper gains into an income row and undo
      the whole distinction at the moment a year is frozen — the one place it
-     would never be noticed again.
-     It is not carried across as a row of its own either, and that is a real
-     loss stated out loud rather than hidden: a summary has two kinds of row,
-     flows and balances, and growth is neither. The MONEY is not lost — the
-     balance rows below are December's closing figures and already hold every
-     dollar of it — only the note saying how much of the year's climb was
-     appreciation. `convertYearToSummary`'s confirm says so before it happens,
-     which is the promise this trades on. */
+     would never be noticed again. */
   const own = new Set(months);
   const growthAcct = (k) => accountById(st, k.slice(0, k.indexOf('|')))?.earns === 'growth';
   const earned = round2(Object.entries(yr.balAdjust || {}).reduce((t, [k, adj]) =>
@@ -20869,6 +21147,29 @@ function gridToSummary(st, y) {
           + (typeof adj.dividend === 'number' ? adj.dividend : 0)
       : t, 0));
   if (earned) categoryTotals.push({ name: 'Interest & Dividends', total: earned });
+  /* GROWTH GETS A ROW OF ITS OWN (2026-09-20), one per account that made any.
+     It used to be the one thing a fold genuinely destroyed: a summary had two
+     kinds of row, flows and balances, and appreciation is neither, so the
+     figure saying how much of the year's climb was paper went and only the
+     balances below — December's closing figures, which hold every dollar of it
+     — were left. `isGrowth` is the third kind, a sibling of `isBalance` and
+     never both: the row is STATED and is kept out of income, out of spending
+     and out of money in vs money out, which is the whole reason it could not
+     wear `isBalance` instead.
+     Written down HERE rather than read later, for the reason `gridToPinned`
+     stamps its earnings: `computeAll` skips a summary year entirely, so there
+     is no `C[y]` for anything downstream to ask. The fold is only offered on a
+     pinned year, whose growth `gridToPinned` has already stamped into
+     `adj.interest` (or the reader typed), so that map is the whole source.
+     A zero earns no row — the silence the Interest & Dividends row keeps — and
+     a NEGATIVE total is kept, because a fall is half of what the row is for. */
+  for (const a of accountsOf(st)) {
+    if (a.earns !== 'growth') continue;
+    const t = round2(Object.entries(yr.balAdjust || {}).reduce((s, [k, adj]) =>
+      k.startsWith(a.id + '|') && own.has(k.slice(k.indexOf('|') + 1))
+        && typeof adj.interest === 'number' ? s + adj.interest : s, 0));
+    if (t) categoryTotals.push({ name: a.name, total: t, isGrowth: true });
+  }
   for (const a of accountsOf(st)) {
     let last = null;
     for (const m of months)
@@ -20880,9 +21181,29 @@ function gridToSummary(st, y) {
     if (note) row.note = note;
     categoryTotals.push(row);
   }
+  /* THE YEAR ITSELF GOES WITH IT (2026-09-20), whole and last in the object, so
+     a fold is a way of READING a year rather than the end of one:
+     `summaryToGrid` puts back exactly what was folded — every cell, every split
+     amount, every note, and the `pinnedFrom` marker, so fold → re-open →
+     "Re-open as live" still chains. A deep clone through JSON, which also
+     keeps the key order, is what lets the tests make the strongest claim there
+     is about a round trip: the same string out as in. */
   return { kind: 'summary', convertedFrom: 'grid', categoryTotals,
     extraNotes: (yr.extraNotes || []).slice(),
-    ...(yr.eoyCash !== undefined ? { eoyCash: yr.eoyCash } : {}) };
+    ...(yr.eoyCash !== undefined ? { eoyCash: yr.eoyCash } : {}),
+    foldedFrom: JSON.parse(JSON.stringify(yr)) };
+}
+
+/* The way back, and only for a year this app folded — `foldedFrom` is what it
+   was before, put back whole. NULL rather than an approximation for a summary
+   that has none: an imported year, or one folded by a build that predates the
+   stash, has no months to go back to, and the absence of a Re-open button is
+   how that is said — exactly as an imported pinned year is offered no "Re-open
+   as live". Pure, pinned by tests. */
+function summaryToGrid(st, y) {
+  const yr = st.years[y];
+  if (!yr || yr.kind !== 'summary' || !yr.foldedFrom) return null;
+  return JSON.parse(JSON.stringify(yr.foldedFrom));
 }
 
 /* Freezing a finished year: the balances the chain COMPUTED become balances
@@ -21002,11 +21323,16 @@ function rulesNeedingYear(st, y) {
 function convertYearToSummary(y) {
   const yr = state.years[y];
   if (!yr || yr.kind !== 'grid') return;
+  /* Re-checked here and not only in the button — `freezeYear`'s discipline.
+     The block rule is what makes the Previous Years page one unbroken run of
+     history, and a second way in (a stale page, a keyboard press on a button
+     the last render drew) must not be able to fold a year out of the middle. */
+  if (y !== foldableYear(state)) return;
   const needed = rulesNeedingYear(state, y);
   const warn = needed.length
     ? `\n\n${String(+y + 1)} has ${needed.length} row(s) that look back into ${y} — `
       + `${needed.slice(0, 4).join(', ')}${needed.length > 4 ? '…' : ''}. `
-      + `Their estimates will go blank.`
+      + `Their estimates will go blank until ${y} is opened up again.`
     : '';
   /* Said out loud because it is the one row the reader didn't type: stated
      earnings survive the conversion as a single flow total, and a confirm that
@@ -21016,25 +21342,45 @@ function convertYearToSummary(y) {
      promising one would have the confirm describe a row that never appears. */
   const earns = Object.values(yr.balAdjust || {}).some(balAdjStatesFigure)
     ? ` What the accounts earned becomes one "Interest & Dividends" row.` : '';
-  /* The one thing a conversion genuinely drops, said before it happens rather
-     than discovered afterwards. A summary year has two kinds of row — flows
-     and balances — and growth is neither, so there is nowhere honest to put
-     it. No money goes missing: the balance rows are December's closing
-     figures and every dollar that grew is already inside them. What goes is
-     the line saying how much of the year's climb was appreciation. */
+  /* Growth used to be the one thing a fold destroyed, and this clause warned
+     about it. It gets a row of its own now, so the clause says what the reader
+     will SEE — a figure stated where there was none, and kept out of income,
+     which is the part somebody reading a summary needs to know. */
   const grew = accountsOf(state).some(a => a.earns === 'growth'
     && Object.keys(yr.balAdjust || {}).some(k => k.startsWith(a.id + '|')))
-    ? ` Growth is not carried across — a summary has no line for money that isn't `
-      + `income. The balances still hold it; only the figure saying how much grew `
-      + `is lost.` : '';
-  if (!confirm(`Convert ${y} to a yearly summary? Its ${yearMonths(yr).length} months of `
-    + `figures are replaced by one total per row (each account keeps its end-of-year `
-    + `balance), and the months are gone for good — only restoring a backup brings them `
-    + `back.${earns}${grew} The Progress tab's charts carry on unchanged.${warn}`))
+    ? ` What grew on paper gets a line of its own, stated but never counted as `
+      + `income.` : '';
+  if (!confirm(`Fold ${y} into a yearly summary? Its ${yearMonths(yr).length} months of `
+    + `figures read as one total per row (each account showing its end-of-year `
+    + `balance), and ${y} joins Previous Years.${earns}${grew} `
+    + `The months are KEPT — re-open ${y} and every figure, note and split comes `
+    + `back exactly as it is now. While it is folded its rows can be read but not `
+    + `edited, and the Progress tab's charts carry on unchanged.\n\n`
+    + `History folds oldest first, so ${y} is the only year this is offered on.${warn}`))
     return;
   state.years[y] = gridToSummary(state, y);
   save(); render();
-  toast(`${y} is a summary now`);
+  toast(`${y} is folded into Previous Years`);
+}
+
+/* The way back out of the fold. Offered on the NEWEST summary alone, and only
+   one it holds a stash for — see the block rule by `foldableYear`. */
+function reopenYearFromSummary(y) {
+  if (y !== unfoldableYear(state)) return;
+  const back = summaryToGrid(state, y);
+  if (!back) return;
+  if (!confirm(`Re-open ${y} as a budget year? Its months come back exactly as they `
+    + `were when it was folded — every figure, note and stated balance. The yearly `
+    + `totals on this card go; they were worked out from those months and are worked `
+    + `out again the next time ${y} is folded.`))
+    return;
+  state.years[y] = back;
+  /* The reader is moved onto the year they just got back — the chip is there
+     now, and leaving them on Previous Years would show a page one card shorter
+     with nothing saying where the year went. */
+  state.ui.activeYear = y;
+  save(); render();
+  toast(`${y} is a budget year again`);
 }
 
 /* The year-lifecycle step the app was missing: a live year, entered right
@@ -21073,6 +21419,18 @@ function reopenYearAsLive(y) {
   state.years[y] = pinnedToLive(state, y);
   save(); render();
   toast(`${y} is live again — its balances are computed from here`);
+}
+
+/* One year's spreadsheet, and the stamp December's Close card reads — lifted
+   out of `wireBudget`'s `#csvYearBtn` handler when the summary cards started
+   stacking and an id could no longer say which year was meant. */
+function exportYearCsv(y) {
+  downloadCsv(`financial-plan-${y}.csv`, gridToCsv(state, C[y], y));
+  if (viewOnly) return;
+  const ex = Object.assign({}, state.exported);
+  ex.csv = Object.assign({}, ex.csv, { [y]: todayISO() });
+  state.exported = ex;
+  save(); render();
 }
 
 function deleteYear(y) {
@@ -21208,8 +21566,6 @@ function stretchLonePairs(root) {
 }
 
 function wireView(view) {
-  const delBtn = F('deleteYearBtn');
-  if (delBtn) delBtn.onclick = () => deleteYear(activeYearKey());
   const sumBtn = F('toSummaryBtn');
   if (sumBtn) sumBtn.onclick = () => convertYearToSummary(activeYearKey());
   const btn = F('welcomeRestoreBtn');
@@ -24077,6 +24433,15 @@ function unreadableFields(fields) {
 
 function openRowEditor(section, ds, isNew) {
   if (viewOnly) return;   // someone else's figures — nothing here is yours to change
+  /* A FOLDED year's figures belong to the months it is still holding, so both
+     of its editors refuse — for the owner too, not only in a shared view.
+     `summaryCard` draws no affordance; this closes the door behind it, the way
+     `stripEditAffordances` and these two lines already divide the work. The
+     end-of-year figure is refused for the same reason the rows are: it came
+     out of the grid, so a correction typed here would be thrown away by the
+     next re-open — refusing is honest, accepting and discarding is not. */
+  if ((section === 'sumrow' || section === 'sumyear')
+      && ds && folded(state.years[ds.year])) return;
   const ed = EDITORS[section];
   if (!ed) return;
   const spec = typeof ed.fields === 'function' ? ed.fields(ds, isNew) : ed.fields;
@@ -26167,6 +26532,16 @@ const EDITORS = {
       const list = state.years[ds.year].categoryTotals;
       const row = { name: v.name || '', total: v.total ?? 0 };
       if (v.isBalance) row.isBalance = true;
+      /* Carried by hand off the STORED row, because this rebuilds the row from
+         the form and the form never asks: a growth row saved here would come
+         back a flow, and a paper gain counted as income is the whole fault
+         `isGrowth` exists to stop — the `retAcct` trap, in the one editor that
+         can reach such a row. A folded year refuses this editor outright, so
+         the only way here is a summary whose stash was dropped; ticking "this
+         is a balance" still moves the row out of growth, since the two flags
+         are never both. */
+      else if (ds.idx !== undefined && list[+ds.idx] && list[+ds.idx].isGrowth)
+        row.isGrowth = true;
       if (v.note) row.note = v.note;
       if (ds.idx !== undefined) list[+ds.idx] = row;
       else list.push(row);
@@ -27942,6 +28317,20 @@ F('views').addEventListener('click', (e) => {
     }
     return;
   }
+  /* The three year actions that appear on a card the page may draw SEVERAL of
+     — Previous Years stacks one summary card per year — so each names its own
+     year rather than asking `activeYearKey()`, and the grid card's CSV and
+     Delete come through here too. They keep their ids for the month-close
+     checklist, which reaches `#csvYearBtn` by name. */
+  const act = e.target.closest('[data-yearact]');
+  if (act) {
+    const y = act.dataset.year;
+    if (!y || !state.years[y]) return;
+    if (act.dataset.yearact === 'csv') exportYearCsv(y);
+    else if (act.dataset.yearact === 'delete') deleteYear(y);
+    else if (act.dataset.yearact === 'unfold') reopenYearFromSummary(y);
+    return;
+  }
   const add = e.target.closest('[data-add]');
   if (add) { openRowEditor(add.dataset.add, add.dataset, true); return; }
   const row = e.target.closest('[data-edit]');
@@ -28295,18 +28684,6 @@ function wireBudget() {
     if (mv) buildMonthNetChart(yearOfMonth(state, mv), mv);
   }
   /* The phone-sized "Actions" toggle over the grid's admin buttons. */
-  const csvBtn = F('csvYearBtn');
-  if (csvBtn) csvBtn.onclick = () => {
-    const y = activeYearKey();
-    downloadCsv(`financial-plan-${y}.csv`, gridToCsv(state, C[y], y));
-    /* Remembered for December's Close card — see "Closing a month". */
-    if (!viewOnly) {
-      const ex = Object.assign({}, state.exported);
-      ex.csv = Object.assign({}, ex.csv, { [y]: todayISO() });
-      state.exported = ex;
-      save(); render();
-    }
-  };
   const actBtn = F('gridActionsBtn');
   if (actBtn) actBtn.onclick = () => {
     const box = F('gridActions');
@@ -29954,9 +30331,16 @@ function gridToCsv(st, computed, y) {
   const yr = st.years[y];
   if (!yr) return '';
   if (yr.kind === 'summary') {
-    return [['Row', 'Total'].join(','),
+    /* The block each row is in, in the first column, exactly as the grid
+       branch below names its section. A bare `Brokerage,1840` in a flat list
+       of flows reads as income in the one file nobody re-checks, which is the
+       fault the growth row exists to close — so the export has to say which
+       kind of row it is or it quietly undoes the distinction. */
+    const block = (item) => item.isBalance ? 'Balances' : item.isGrowth ? 'Growth' : 'Flows';
+    return [['Section', 'Row', 'Total'].join(','),
       ...(yr.categoryTotals || []).map(item =>
-        [csvCell(item.name, true), csvCell(item.total)].join(','))].join('\n');
+        [csvCell(block(item), true), csvCell(item.name, true),
+          csvCell(item.total)].join(','))].join('\n');
   }
   const months = computed.months;
   const own = months.filter(m => m.startsWith(y));
@@ -30514,7 +30898,14 @@ function goToSearchHit(h) {
      editor is over it, and moving the page to the top would strand them there
      when the editor closes — at the top of a long grid rather than at the row
      they searched for. */
-  if (!opensRecord) window.scrollTo(0, 0);
+  /* A SUMMARY YEAR'S HIT SCROLLS TO ITS OWN CARD (2026-09-20). Every folded
+     and imported year is on one page now, newest first, so a 2013 row found by
+     name would leave the reader at the top of nine cards reading 2019 — the
+     landing that "go to the top" exists to avoid, one page deeper. */
+  const stacked = h.year && state.years[h.year] && state.years[h.year].kind === 'summary'
+    && document.getElementById(`year-${h.year}`);
+  if (!opensRecord && stacked) stacked.scrollIntoView({ block: 'start' });
+  else if (!opensRecord) window.scrollTo(0, 0);
   if (opensRecord) openCellEditor(h.year, h.cell.type, h.cell.id, h.cell.m);
 }
 F('findBtn').onclick = () => {
@@ -31984,7 +32375,8 @@ const SHARE_FORMAT = 1;
    missing whatever their build added. Unlike SCHEMA there is no stored copy at
    stake, so nothing is written and nothing halts — the family pattern from
    Sprint Velocity. */
-const SHARE_PAYLOAD_V = 3;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05)
+const SHARE_PAYLOAD_V = 4;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05);
+                             // 4: a summary year's isGrowth rows (2026-09-20)
 
 const b64urlEncode = (bytes) => {
   let s = '';
@@ -32374,6 +32766,26 @@ function stripStamps(v) {
   return v;
 }
 
+/* A folded year's stashed months NEVER travel, and this is not only about
+   weight. A recipient is read-only for ever and can never re-open a year, so
+   the stash is data they cannot use — and `fitShareWindow` bisects the YEAR
+   WINDOW to fit the link inside `SHARE_WARN_AT`, so carrying it would not
+   merely lengthen the link, it would silently ship them FEWER YEARS OF HISTORY
+   to make room. Shortening the numbers to carry a backup is the one trade that
+   window exists not to make. `state.quotes` is kept out by construction for
+   the same kind of reason, and has a test; so does this. Walked, for the
+   reason stripNotes is walked. */
+function stripFoldedGrids(v) {
+  if (Array.isArray(v)) { v.forEach(stripFoldedGrids); return v; }
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) {
+      if (k === 'foldedFrom') delete v[k];
+      else stripFoldedGrids(v[k]);
+    }
+  }
+  return v;
+}
+
 /* ── Keeping a trimmed link's balances honest ───────────────────────────────
    Every account's balance CHAINS: a month opens on the month before, a January
    opens on the previous grid year's December, and only the very first year
@@ -32564,6 +32976,7 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
       accountsOf(state).map(a => a.id));
   }
   stripStamps(data);
+  stripFoldedGrids(data);
   if (!includeNotes) stripNotes(data);
   if (!includeNames) anonymisePeople(data);
 
@@ -32868,8 +33281,9 @@ function shareFutureNote(years) {
 
 /* Trimming the years changes the FIGURES the recipient sees, not just the size
    of the link: the same-month and average-of-last-year rules read the year
-   before, and the oldest year in a trimmed link no longer has one. Same rule as
-   converting a year to a summary, which warns about exactly this. */
+   before, and the oldest year in a trimmed link no longer has one. Folding a
+   year warns about exactly this too — though there the estimates come back when
+   the year is re-opened, and here the recipient's link simply has no year. */
 function shareYearNote(data) {
   const kept = Object.keys(data.years || {}).sort();
   if (!kept.length) return '';
@@ -33118,7 +33532,8 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   mergeAccountsByName, nominateHub, hubAccount, dividendAccounts, statedAfter,
   closeBlockedNote,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
-  normRole, gridToSummary, gridToPinned, pinnedToLive,
+  normRole, gridToSummary, summaryToGrid, gridToPinned, pinnedToLive,
+  foldableYear, unfoldableYear, summaryYears, folded, stripFoldedGrids,
   rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,

@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1203;
+const EXPECTED = 1225;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -6567,10 +6567,20 @@ t('a grid year exports the shape the screen shows', () => {
   eq(tot[tot.length - 1], tot[tot.length - 2],
     'the year column is the closing balance, not a sum of the months');
 });
-t('a summary year is two columns', () => {
-  const st = H.coerceShape({ years: { '2015': { kind: 'summary',
-    categoryTotals: [{ name: 'Income', total: 40000 }] } } });
-  eq(H.gridToCsv(st, null, '2015').split('\n')[1], 'Income,40000');
+t('a summary year names the block each row is in', () => {
+  /* The Section column arrived with the Growth row (2026-09-20): a bare
+     `Brokerage,9200` in a flat list of flows reads as income in the one file
+     nobody re-checks, which is the whole distinction the row exists to make. */
+  const st = H.coerceShape({ years: { '2015': { kind: 'summary', categoryTotals: [
+    { name: 'Income', total: 40000 },
+    { name: 'Brokerage', total: 9200, isGrowth: true },
+    { name: 'Savings', total: 15600, isBalance: true },
+  ] } } });
+  const lines = H.gridToCsv(st, null, '2015').split('\n');
+  eq(lines[0], 'Section,Row,Total');
+  eq(lines[1], 'Flows,Income,40000');
+  eq(lines[2], 'Growth,Brokerage,9200');
+  eq(lines[3], 'Balances,Savings,15600');
 });
 /* The Deductible column is the row's own TICK, not a guess from its shape.
    This used to read `d.funding` — "money into the fund is deductible", which is
@@ -9865,6 +9875,259 @@ t('an end-of-year figure is a number or it is nothing', () => {
   eq(eoy(0).eoyCash, 0, 'a stated zero is a statement');
 });
 
+/* ── Folding a year is lossless, and reversible (2026-09-20) ────────────────
+   The fold used to be a one-way door: twelve months of cells, their notes and
+   splits and the year's growth figure all went, and the confirm said so. The
+   summary keeps the whole grid now (`foldedFrom`), the way a frozen year keeps
+   `pinnedFrom` — so these are the claims the feature rests on. */
+
+/* A pinned year with earnings on both kinds of account, which is what makes a
+   fold worth testing: interest that IS income, and growth that is not. */
+function foldFixture() {
+  const s = H.coerceShape({
+    settings: { accounts: [
+      { id: 'cash', name: 'Checking', hub: true },
+      { id: 'mid', name: 'Savings', rate: 0.04 },
+      { id: 'long', name: 'Brokerage', rate: 0.06, earns: 'growth' },
+    ] },
+    years: { '2030': {
+      kind: 'grid', model: 'pinned', startMonth: '2030-01', monthCount: 12,
+      enteredThrough: '2030-12',
+      categories: [
+        { id: 'pay', name: 'Paycheck', section: 'income', rule: 'none' },
+        { id: 'rent', name: 'Rent', section: 'expense', rule: 'none',
+          note: 'Went up in June.' },
+      ],
+      cells: {
+        'pay|2030-01': { v: 4000, kind: 'actual' },
+        'pay|2030-02': { v: 4000, kind: 'actual', parts: [
+          { v: 2000, kind: 'actual', note: 'first half' },
+          { v: 2000, kind: 'actual' }] },
+        'rent|2030-01': { v: -1000, kind: 'actual', note: 'paid late' },
+        'rent|2030-02': { v: -1200, kind: 'actual' },
+      },
+      paychecks: { '2030-01': 2 }, seeds: { cash: 100 },
+      overrides: { 'cash|2030-12': { v: 5000 }, 'mid|2030-12': { v: 20000 },
+                   'long|2030-12': { v: 80000 } },
+      balAdjust: { 'mid|2030-06': { interest: 400 }, 'mid|2030-12': { interest: 420 },
+                   'long|2030-12': { interest: 6000 } },
+      extraNotes: [],
+    } },
+  });
+  return s;
+}
+
+t('folding a year keeps the grid it was made from', () => {
+  const s = foldFixture();
+  const fold = H.gridToSummary(s, '2030');
+  eq(fold.kind, 'summary');
+  eq(!!fold.foldedFrom, true, 'the year itself goes with the totals');
+  eq(fold.foldedFrom.cells['rent|2030-01'].note, 'paid late', 'a cell note and all');
+  eq(fold.foldedFrom.cells['pay|2030-02'].parts.length, 2, 'and a split month');
+  eq(Object.keys(fold.foldedFrom).includes('foldedFrom'), false, 'a stash never nests');
+});
+
+t('re-opening a folded year puts back exactly the year that was folded', () => {
+  const s = foldFixture();
+  const before = JSON.stringify(s.years['2030']);
+  s.years['2030'] = H.gridToSummary(s, '2030');
+  eq(JSON.stringify(H.summaryToGrid(s, '2030')), before,
+     'the same string out as in — key order included, which is what makes this '
+     + 'the strongest claim a round trip can make');
+  /* AND THROUGH THE BOUNDARY, which is the one that actually pins it: a fold is
+     saved to localStorage and read back by `coerceShape` before anything can
+     re-open it, so a stash the boundary silently changed would come back as a
+     year that is nearly right. */
+  const rebooted = H.migrate(H.coerceShape(JSON.parse(JSON.stringify(s))));
+  const back = H.summaryToGrid(rebooted, '2030');
+  const canon = (o) => JSON.stringify(o, Object.keys(o).sort());
+  eq(canon(back), canon(H.coerceShape(JSON.parse(before) && { years: { '2030':
+     JSON.parse(before) } }).years['2030']), 'and the same year after a reload');
+});
+
+t('a year folded by an older build has nothing to go back to', () => {
+  const s = H.coerceShape({ years: { '2030': { kind: 'summary',
+    convertedFrom: 'grid', categoryTotals: [{ name: 'Pay', total: 1000 }] } } });
+  eq(H.summaryToGrid(s, '2030'), null,
+     'null, never an approximation — and the absence of the button is how that is said');
+  eq(H.unfoldableYear(s), null, 'so it is offered no Re-open');
+  eq(H.folded(s.years['2030']), false, 'and it is still editable, being the only copy');
+});
+
+t('folding writes each growth account a row of its own', () => {
+  const s = foldFixture();
+  const fold = H.gridToSummary(s, '2030');
+  const growth = fold.categoryTotals.filter(r => r.isGrowth);
+  eq(growth.length, 1, 'one row, for the one account that grows');
+  eq(growth[0].name, 'Brokerage');
+  eq(growth[0].total, 6000, 'measured from the year\'s own months');
+  eq(growth[0].isBalance, undefined, 'never both flags — a row is one kind');
+  const earned = fold.categoryTotals.find(r => r.name === 'Interest & Dividends');
+  eq(earned.total, 820, 'and the growth stays OUT of what the accounts earned');
+});
+
+t('an account that grew nothing earns no row, and a fall keeps its own', () => {
+  const s = foldFixture();
+  delete s.years['2030'].balAdjust['long|2030-12'];
+  eq(H.gridToSummary(s, '2030').categoryTotals.some(r => r.isGrowth), false,
+     'zero earns no row — the silence every other figure here keeps');
+  s.years['2030'].balAdjust['long|2030-12'] = { interest: -2500 };
+  const fell = H.gridToSummary(s, '2030').categoryTotals.find(r => r.isGrowth);
+  eq(fell.total, -2500, 'a fall is half of what the row is for');
+});
+
+t('nothing counts a growth row as income, spending or a balance', () => {
+  const s = foldFixture();
+  const fold = H.gridToSummary(s, '2030');
+  const without = { ...fold, categoryTotals: fold.categoryTotals.filter(r => !r.isGrowth) };
+  eq(H.yearFlows(fold, undefined, '2030'), H.yearFlows(without, undefined, '2030'),
+     'money in vs money out is the same figure with the row and without it');
+  eq(H.yearIncome(fold, undefined, '2030'), H.yearIncome(without, undefined, '2030'),
+     'and so is income, which is the savings rate\'s denominator');
+  eq(H.yearSpending(fold, undefined, '2030'), H.yearSpending(without, undefined, '2030'));
+  eq(H.categorySpend(fold, undefined, '2030').some(r => r.name === 'Brokerage'), false,
+     'and Where the Money Goes never lists it');
+  /* A FALL is the case that inverts: a negative row would read as spending. */
+  const down = fold.categoryTotals.map(r => r.isGrowth ? { ...r, total: -9000 } : r);
+  eq(H.yearSpending({ ...fold, categoryTotals: down }, undefined, '2030'),
+     H.yearSpending(without, undefined, '2030'), 'a year that FELL spent no more for it');
+  eq(H.payRowsOf({ years: { '2030': { kind: 'summary', categoryTotals:
+      [{ name: 'Paycheck', total: 9000, isGrowth: true }] } } }, '2030').length, 0,
+     'and a growth row named like pay is still not pay');
+});
+
+t('only the oldest grid year may be folded', () => {
+  const st = (years) => H.coerceShape({ years });
+  const pinned = (y) => ({ kind: 'grid', model: 'pinned', startMonth: `${y}-01`,
+    monthCount: 12, enteredThrough: `${y}-12`, categories: [], cells: {} });
+  const sum = () => ({ kind: 'summary', categoryTotals: [] });
+  eq(H.foldableYear(st({ '2028': sum(), '2029': pinned('2029'), '2030': pinned('2030') })),
+     '2029', 'the oldest year that still has months');
+  eq(H.foldableYear(st({ '2029': { ...pinned('2029'), model: 'live' } })), null,
+     'a live year is never offered — freezing it comes first');
+  eq(H.foldableYear(st({ '2028': sum() })), null, 'and a plan of history has nothing to fold');
+});
+
+t('only the newest summary re-opens, and only if it kept its grid', () => {
+  const s = foldFixture();
+  s.years['2029'] = { kind: 'summary', categoryTotals: [] };
+  s.years['2030'] = H.gridToSummary(s, '2030');
+  eq(H.unfoldableYear(s), '2030', 'the newest, holding a stash');
+  s.years['2031'] = { kind: 'summary', categoryTotals: [] };
+  eq(H.unfoldableYear(s), null,
+     'an imported year AFTER it blocks the queue rather than letting 2030 out of the '
+     + 'middle — the block is what makes one page of history make sense');
+});
+
+t('a plan whose summaries are not a block degrades rather than throwing', () => {
+  /* An import can leave a summary sitting after a grid. Neither helper may
+     throw, neither may refuse to answer, and the page lists every summary
+     wherever it sits — the block is a rule about what the buttons OFFER. */
+  const s = H.coerceShape({ years: {
+    '2028': { kind: 'grid', model: 'pinned', startMonth: '2028-01', monthCount: 12,
+              enteredThrough: '2028-12', categories: [], cells: {} },
+    '2029': { kind: 'summary', categoryTotals: [] },
+    '2030': { kind: 'grid', model: 'pinned', startMonth: '2030-01', monthCount: 12,
+              enteredThrough: '2030-12', categories: [], cells: {} },
+  } });
+  eq(H.foldableYear(s), '2028', 'folding the oldest grid only ever improves matters');
+  eq(H.unfoldableYear(s), null, 'the newest summary has no stash, so no button');
+  eq(H.summaryYears(s), ['2029'], 'and the page still lists it');
+});
+
+t('the stashed grid is read as strictly as a real one', () => {
+  const s = H.coerceShape({ years: { '2030': {
+    kind: 'summary', categoryTotals: [],
+    foldedFrom: { kind: 'grid', model: 'pinned', startMonth: '2030-01', monthCount: 12,
+      enteredThrough: '2030-12',
+      categories: [{ id: 'pay', name: 'Pay' }],
+      cells: { 'pay|2030-01': { v: '1200', kind: 'nonsense' } },
+      overrides: { 'cash|2030-12': { v: 'junk' } },
+      seeds: {}, paychecks: {} },
+  } } });
+  const st = s.years['2030'].foldedFrom;
+  eq(typeof st.cells['pay|2030-01'].v, 'number', 'a string figure is read as one');
+  eq(st.cells['pay|2030-01'].kind, 'actual', 'and a kind outside the list is settled');
+  eq('cash|2030-12' in st.overrides, false,
+     'while a corrupt override is DROPPED rather than becoming a deliberate-looking $0');
+});
+
+t('a stash that is not a grid year is dropped', () => {
+  const bad = (ff) => H.coerceShape({ years: { '2030': { kind: 'summary',
+    categoryTotals: [], foldedFrom: ff } } }).years['2030'];
+  eq('foldedFrom' in bad({ kind: 'summary', categoryTotals: [] }), false,
+     'it must say it is a grid — the pinnedFrom discipline');
+  eq('foldedFrom' in bad({ kind: 'grid' }), false, 'and say which months it holds');
+  eq('foldedFrom' in bad('a string'), false);
+  eq('foldedFrom' in bad({ kind: 'grid', startMonth: '2030-01',
+     foldedFrom: { kind: 'grid', startMonth: '2030-01' } }), true, 'a real one stays');
+  eq('foldedFrom' in bad({ kind: 'grid', startMonth: '2030-01',
+     foldedFrom: { kind: 'grid', startMonth: '2030-01' } }).foldedFrom, false,
+     'with the nested one taken off it');
+});
+
+t('an id that moved on load follows into the stashed grid', () => {
+  /* `normalizeIds` repairs an account id and rewrites the maps keyed on it. A
+     stash it did not reach would re-open with every stated balance stranded —
+     invisible until the re-open, months later. */
+  const s = H.coerceShape({
+    settings: { accounts: [{ id: 'my|acct', name: 'Savings', hub: true }] },
+    years: { '2030': { kind: 'summary', categoryTotals: [], foldedFrom: {
+      kind: 'grid', model: 'pinned', startMonth: '2030-01', monthCount: 12,
+      enteredThrough: '2030-12', categories: [], cells: {},
+      overrides: { 'my|acct|2030-12': { v: 900 } }, seeds: { 'my|acct': 5 },
+      paychecks: {} } } },
+  });
+  const id = s.settings.accounts[0].id;
+  eq(/^[A-Za-z0-9_-]+$/.test(id), true, 'the id is repaired');
+  eq(s.years['2030'].foldedFrom.overrides[`${id}|2030-12`].v, 900,
+     'and the stash\'s balance followed it');
+  eq(s.years['2030'].foldedFrom.seeds[id], 5, 'seeds too');
+});
+
+t('a summary row\'s total is a number, and its kind is one kind', () => {
+  const rows = H.coerceShape({ years: { '2030': { kind: 'summary', categoryTotals: [
+    { name: 'Pay', total: '1200' },
+    { name: 'Junk', total: 'nothing' },
+    { name: 'Both', total: 5, isBalance: true, isGrowth: true },
+    { name: 'Blank note', total: 5, note: '   ' },
+  ] } } }).years['2030'].categoryTotals;
+  eq(rows[0].total, 1200, 'a string figure is read, not printed as NaN');
+  eq(rows[1].total, 0, 'and junk is nothing');
+  eq([rows[2].isBalance, rows[2].isGrowth], [true, undefined],
+     'a balance is never also growth — the balance wins, being the older claim');
+  eq('note' in rows[3], false, 'an empty note is no note');
+});
+
+t('a folded year is the one summary that cannot be edited', () => {
+  eq(H.folded({ kind: 'summary', foldedFrom: { kind: 'grid' } }), true);
+  eq(H.folded({ kind: 'summary' }), false, 'an imported year is the only copy of itself');
+  eq(H.folded({ kind: 'grid' }), false);
+  eq(H.folded(undefined), false);
+});
+
+t('a share link never carries a folded year\'s stashed grid', () => {
+  const v = H.stripFoldedGrids({ years: { '2030': { kind: 'summary',
+    categoryTotals: [{ name: 'Pay', total: 10 }],
+    foldedFrom: { kind: 'grid', cells: { 'pay|2030-01': { v: 10 } } } } } });
+  eq('foldedFrom' in v.years['2030'], false, 'the months go');
+  eq(v.years['2030'].categoryTotals.length, 1, 'and the totals stay');
+  eq(JSON.stringify(v).includes('pay|2030-01'), false, 'nothing of the grid is left');
+});
+
+t('a folded year costs a link no more than it did before it kept its months', () => {
+  /* fitShareWindow bisects the YEAR WINDOW to fit SHARE_WARN_AT, so a stash
+     riding along would not merely lengthen the link — it would ship the
+     recipient FEWER YEARS to make room for months they can never re-open. */
+  const s = foldFixture();
+  const fold = H.gridToSummary(s, '2030');
+  const sent = H.stripFoldedGrids(JSON.parse(JSON.stringify({ years: { '2030': fold } })));
+  const flat = { years: { '2030': { ...fold, foldedFrom: undefined } } };
+  delete flat.years['2030'].foldedFrom;
+  eq(JSON.stringify(sent).length, JSON.stringify(flat).length,
+     'the payload is the summary, to the byte');
+});
+
 group('Tax — the shape of a table you typed');
 
 /* EVERY figure in this group is invented, on round thousands, at rates nobody
@@ -10603,11 +10866,13 @@ t('a link from a newer build is refused, and marked as such', async () => {
   eq(back.sections, ['budget'], 'the current version still opens');
 });
 
-t('the payload version is 3: goals carry claimed-first-by and a months-of-expenses target', () => {
+t('the payload version is 4: a summary year can carry growth rows', () => {
   /* v1 would read `capped` + `overflowOf` as a plain capped goal and draw the
-     claim away; v2 would read a months goal at $0 — each the silent misread
-     the version exists to refuse. */
-  eq(H.SHARE_PAYLOAD_V, 3);
+     claim away; v2 would read a months goal at $0; v3 would read a summary
+     year's `isGrowth` row as an ordinary flow and count a paper gain as income
+     in money in and in the savings rate — each the silent misread the version
+     exists to refuse. */
+  eq(H.SHARE_PAYLOAD_V, 4);
 });
 
 t('an unknown tab in a link is dropped, not drawn', async () => {
@@ -11625,9 +11890,12 @@ t('the year strip offers "This year" on the same terms the month strip does', ()
   const nav = fn[0].slice(fn[0].indexOf('class="yearstrip"'));
   const at = (id) => nav.indexOf('id="' + id + '"');
   ok(at('yearNow') > -1, 'the strip has a "This year" button');
-  ok(/showNow\s*=\s*yearKeys\(\)\.includes\(nowY\);/.test(fn[0]),
-     'it is rendered whenever this year is IN the strip (2026-09-17) — coming and going '
-     + 'changed the rail\'s width and slid every year sideways');
+  ok(/showNow = !!state\.years\[nowY\] && state\.years\[nowY\]\.kind !== 'summary';/.test(fn[0]),
+     'it is rendered whenever this year is a GRID year in the strip — it was "in the '
+     + 'strip" until 2026-09-20, when a folded year stopped having a chip of its own '
+     + 'and a button pointing at one would have had nowhere to go. Coming and going '
+     + 'changes the rail\'s width and slides every year sideways, so it is still only '
+     + 'ever disabled');
   ok(/id="yearNow"\$\{active === nowY \? ' disabled' : ''\}/.test(fn[0]),
      'and on this year it is disabled rather than gone, like the arrows beside it');
   const mfn = src.match(/function monthPickerHtml\([\s\S]*?\n\}/);
@@ -11663,7 +11931,11 @@ t('the year arrows step one year a press, like the month strip\'s', async () => 
     const on = () => D.querySelector('#yearRail .yearchip[aria-checked="true"]').dataset.year;
     const order = rail();
     const last = order.length - 1;
-    ok(order.length > 2, 'the sample plan has years to walk', order.join(','));
+    /* Two chips is the sample's own strip since 2026-09-20: every summary year
+       stands as one "Previous" chip, so the rail is that plus one per grid
+       year. The chip still carries a real year key, which is why nothing in
+       `wireYearStrip` — or in this walk — had to learn a new word for it. */
+    ok(order.length >= 2, 'the sample plan has chips to walk between', order.join(','));
     /* OLDEST FIRST, which is what makes the direction worth pinning: the chip to
        the LEFT is the year BEFORE, the same way round as the month rail and as
        every year chart further down the page. */
@@ -11725,8 +11997,12 @@ t('‹ means earlier in BOTH strips, and the rail is the plan\'s own order', () 
   ok(yfn && mfn, 'both strips are still built in one function each');
   ok(!/yearKeys\(\)\.slice\(\)\.reverse\(\)/.test(yfn[0]),
      'the rail is no longer reversed — it is yearKeys() as the rest of the app reads it');
-  ok(/const order = yearKeys\(\)\.slice\(\);/.test(yfn[0]),
+  ok(/yearKeys\(\)\.slice\(\)/.test(yfn[0]),
      'and it is still copied before the arrows step it');
+  ok(/const sums = summaryYears\(state\);/.test(yfn[0])
+     && /sums\[sums\.length - 1\], \.\.\.yearKeys\(\)\.filter/.test(yfn[0]),
+     'with every summary year standing as ONE chip at the front (2026-09-20) — the '
+     + 'block they make is the oldest end of the plan, and this strip runs oldest first');
   ok(/id="yearPrev"[\s\S]{0,120}aria-label="The year before"/.test(yfn[0]),
      '‹ steps to the year BEFORE');
   ok(/id="yearNext"[\s\S]{0,120}aria-label="The year after"/.test(yfn[0]),
@@ -13231,6 +13507,128 @@ t('the sample shows a note off the budget: a trip line and a summary row', () =>
     .flatMap(y => y.categoryTotals || []).filter(r => r.note);
   ok(sumRows.length >= 1, 'and a summary year’s row does too', sumRows.length);
 });
+group('Previous years, all on one page');
+/* Driven through the real page, because every claim here is about what the
+   reader sees: which chips the strip carries, which cards the page stacks, and
+   whether an id is drawn twice — none of which a pure function can answer. */
+
+t('every summary year is on one page, newest first, behind one chip', async () => {
+  const { f, D } = await auditFrame(1280, 900, 'prevyears');
+  try {
+    /* innerText, not textContent: the chip carries BOTH labels and the CSS
+       shows one — the `.now-short` arrangement, for the one chip whose label
+       is a word rather than four digits. */
+    const chips = () => [...D.querySelectorAll('#yearRail .yearchip')]
+      .map(c => c.innerText.trim());
+    eq(chips()[0], 'Previous', 'the summaries stand as one chip, at the oldest end');
+    eq(chips().length, 2, 'beside the one grid year the sample has');
+    const prev = D.querySelector('#yearRail .yearchip');
+    ok(/Previous years — \d{4} to \d{4}, 2 yearly summaries/.test(prev.getAttribute('aria-label')),
+       'and it names the years it stands for', prev.getAttribute('aria-label'));
+    D.querySelector('#yearRail .yearchip').click();
+    await new Promise(r => setTimeout(r, 300));
+    const heads = [...D.querySelectorAll('#views .yearhead')].map(h => h.textContent.trim());
+    eq(heads.length, 2, 'both of the sample\'s history years are on the page');
+    ok(+heads[0] > +heads[1], 'newest at the top — the Trips tab\'s order', heads.join(','));
+    ok(D.querySelector('[data-yearact="unfold"]'),
+       'and the newest carries the Re-open button');
+    eq(D.querySelectorAll('[data-yearact="unfold"]').length, 1,
+       'only the newest — history re-opens in order');
+  } finally { f.remove(); }
+});
+
+t('no id is drawn twice, however many summary years there are', async () => {
+  const { f, D } = await auditFrame(1280, 900, 'previds');
+  try {
+    const dupes = () => ['csvYearBtn', 'deleteYearBtn', 'toSummaryBtn']
+      .filter(id => D.querySelectorAll('#' + id).length > 1);
+    eq(dupes(), [], 'the grid page draws one of each');
+    D.querySelector('#yearRail .yearchip').click();
+    await new Promise(r => setTimeout(r, 300));
+    eq(dupes(), [], 'and a page of stacked cards draws none of them at all');
+    ok(D.querySelectorAll('[data-yearact="csv"]').length >= 2,
+       'each card names its own year instead', D.querySelectorAll('[data-yearact="csv"]').length);
+  } finally { f.remove(); }
+});
+
+t('each year\'s card folds on its own', async () => {
+  /* `boxKey` strips the DIGITS out of a heading, so "2025 — Yearly Summary" and
+     "2024 — Yearly Summary" were ONE key — right while one showed at a time,
+     and nine cards folding as one now. */
+  const { f, D } = await auditFrame(1280, 900, 'prevfold');
+  try {
+    D.querySelector('#yearRail .yearchip').click();
+    await new Promise(r => setTimeout(r, 300));
+    const keys = [...D.querySelectorAll('#views .card')].map(c => c.dataset.boxkey);
+    eq(new Set(keys).size, keys.length, 'every card on the page has a key of its own', keys.join(','));
+    ok(keys.every(k => /\d/.test(k)), 'and the year is IN it', keys.join(','));
+  } finally { f.remove(); }
+});
+
+t('folding a year and re-opening it leaves the plan exactly as it was', async () => {
+  /* The whole feature, through the buttons: freeze this year, fold it, and put
+     it back — then compare the year byte for byte with what was there before. */
+  const { f, W, D } = await auditFrame(1280, 900, 'foldtrip');
+  try {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const st = W.finGet();
+    const y = String(new Date().getFullYear());
+    st.years[y].enteredThrough = `${y}-12`;
+    W.render(); await wait(200);
+    D.getElementById('freezeYearBtn').click(); await wait(200);
+    const before = JSON.stringify(W.finGet().years[y]);
+    D.getElementById('toSummaryBtn').click(); await wait(300);
+    eq(W.finGet().years[y].kind, 'summary', 'the year folds');
+    eq(D.querySelectorAll('#yearRail .yearchip').length, 1,
+       'and the strip is one Previous chip, the plan being all history now');
+    D.querySelector('[data-yearact="unfold"]').click(); await wait(300);
+    eq(JSON.stringify(W.finGet().years[y]), before,
+       'and it comes back exactly — every cell, note and stated balance');
+    eq(W.finGet().ui.activeYear, y, 'with the reader moved onto the chip they just got back');
+  } finally { f.remove(); }
+});
+
+t('a folded year\'s rows and end-of-year figure refuse the editor', () => {
+  /* `summaryCard` draws no affordance on a folded year; this is the other half
+     — the door — and it has to refuse for the OWNER too, not only in a shared
+     view. The end-of-year figure is refused for the reason the rows are: it
+     came out of the grid, so a correction typed here would be thrown away by
+     the next re-open. */
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const src = stripComments(APP_SRC);
+  const fn = src.slice(src.indexOf('function openRowEditor('),
+                       src.indexOf('function openRowEditor(') + 2000);
+  ok(/\(section === 'sumrow' \|\| section === 'sumyear'\)[\s\S]{0,120}folded\(state\.years\[ds\.year\]\)\) return;/
+     .test(fn), 'the door closes on both, before anything is built');
+  const card = src.slice(src.indexOf('function summaryCard('),
+                         src.indexOf('function previousYearsPage('));
+  ok(/const folded = !!yr\.foldedFrom;/.test(card)
+     && /const readOnly = folded \|\| viewOnly;/.test(card),
+     'and the card draws nothing to press in the first place');
+});
+
+t('the sample carries a folded year that opens back up', () => {
+  /* Sample data must reach every feature: without a folded year in it the
+     Previous Years page has one card, no Growth block and no Re-open button —
+     a feature the demo cannot reach is one nobody finds. */
+  const d = H.migrate(H.coerceShape(H.sampleState()));
+  const prev = String(new Date().getFullYear() - 1);
+  eq(d.years[prev].kind, 'summary');
+  eq(H.unfoldableYear(d), prev, 'the demo\'s Re-open button is live');
+  eq(d.years[prev].categoryTotals.some(r => r.isGrowth), true,
+     'and its Growth block has a row in it');
+  const back = H.summaryToGrid(d, prev);
+  ok(back && Object.keys(back.cells).length >= 120,
+     'the year behind it is a real twelve months', Object.keys(back.cells || {}).length);
+  const older = String(new Date().getFullYear() - 2);
+  eq(H.folded(d.years[older]), false,
+     'while the year before it is imported-style and stays editable — the other '
+     + 'half of the story, and the reason both are in the demo');
+  const holiday = d.years[prev].categoryTotals.find(r => r.name === 'Holiday club');
+  eq(holiday.total, -1150, 'the figures are where they were typed');
+  ok(holiday.note, 'and the row note survived the fold');
+});
+
 group('The sync button holds the header still');
 /* ── The render smoke walk ──────────────────────────────────────────────────
    Everything else in this file calls a pure function or reads index.html as
@@ -15126,7 +15524,7 @@ t('a chart fills the window under a header that stays live', async () => {
        case — six lines of sub AND a switch under it — and without this rule
        pressing the button on a 375px screen gives back a chart barely taller
        than the one already on the page. */
-    f.style.width = '380px';
+    f.style.width = frameBox(380);
     f.style.height = '760px';
     await new Promise((r) => setTimeout(r, 250));
     D.getElementById('tab-goals').click();
@@ -15514,7 +15912,7 @@ t('nothing runs off the side of a phone', async () => {
 
     /* Wide again: the desktop shape is untouched. The frame is resized rather
        than a second one booted, so this is the real rule firing at a real width. */
-    f.style.width = '1280px';
+    f.style.width = frameBox(1280);
     await new Promise((r) => setTimeout(r, 400));
     const wideBox = D.querySelector('.asofswitch').getBoundingClientRect();
     ok(wideBox.height < 44, 'with room, the pair is one line again',
@@ -16802,11 +17200,52 @@ group('Fixes from the 2026-09-03 audit');
    to fail against the unfixed page — the commit that fixed it quotes the red row.
    They need a REAL frame for the same reason the full-screen group does: they
    are geometry and focus, and neither exists in the suite's 1x1 frame. */
+/* ── A FRAME IS ASKED FOR BY ITS VIEWPORT, NOT BY ITS BOX (2026-09-20) ──────
+   Every layout test here says "at 375px" and means A SCREEN 375px WIDE — the
+   width the app's media queries answer to and every `100%` inside it resolves
+   against. It was written as a 375px ELEMENT, and those are the same thing
+   only where a scrollbar takes no room.
+
+   They are not the same everywhere. macOS draws OVERLAY scrollbars (0px) and
+   so does CI's headless Chromium, so the suite was green in both; a Chromium
+   drawing CLASSIC scrollbars takes 15px out of the inside of every frame, and
+   five tests went red at once — a docked calculator "failing" to reach 1280 by
+   landing at 1265, a sheet "failing" to be 900 wide by being 885. The app was
+   right every time and the frame was 15px smaller inside than the test
+   believed. A suite that is red in the browser you develop in is one you stop
+   reading, which is how a real regression hides.
+
+   So the BOX is widened by the scrollbar and the VIEWPORT comes out the width
+   that was asked for. Measured once, off a probe in this document — same
+   engine, same setting as the frames — and it is 0 on macOS and 0 in CI, where
+   every frame is then byte for byte the element it always was.
+
+   It is done BEFORE the frame loads, deliberately, and an earlier cut that
+   corrected the width afterwards is why: resizing a loaded frame fires the
+   app's own resize path (`syncCalcSheet`, `syncDockAttr`, the tab row's nudge)
+   in the middle of a test that was not expecting one, and it broke two tests
+   that had nothing to do with any of this. Size it right and nothing moves. */
+let SCROLLBAR_W = null;
+function scrollbarW() {
+  if (SCROLLBAR_W === null) {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:absolute;left:-9999px;top:-9999px;'
+      + 'width:100px;height:100px;overflow-y:scroll';
+    document.body.appendChild(d);
+    SCROLLBAR_W = d.offsetWidth - d.clientWidth;
+    d.remove();
+  }
+  return SCROLLBAR_W;
+}
+/* A frame's box, for the viewport a test is asking for. Used at creation and
+   wherever a test narrows a frame live to watch a media query fire. */
+const frameBox = (width) => (width + scrollbarW()) + 'px';
+
 async function auditFrame(width, height, tag) {
   const f = document.createElement('iframe');
   f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
   f.setAttribute('aria-hidden', 'true');
-  f.style.cssText = `position:absolute;left:-9999px;width:${width}px;height:${height}px;border:0`;
+  f.style.cssText = `position:absolute;left:-9999px;width:${frameBox(width)};height:${height}px;border:0`;
   await new Promise((resolve) => {
     f.onload = resolve;
     f.src = 'index.html?' + tag + '=' + Date.now();
@@ -19005,7 +19444,7 @@ t('docking pads the page and survives a reload; a phone gets a sheet', async () 
     localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: true, pick: true, x: null, y: null, tape: [] }));
     f = document.createElement('iframe');
     f.setAttribute('data-fin-tests', '');
-    f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+    f.style.cssText = `position:absolute;left:-9999px;width:${frameBox(1280)};height:900px;border:0`;
     await new Promise((resolve) => { f.onload = resolve; f.src = 'index.html?calcreload=' + Date.now(); document.body.appendChild(f); });
     const D2 = f.contentWindow.document;
     eq(D2.documentElement.dataset.calc, 'dock', 'the attribute is on at load');
@@ -19357,10 +19796,31 @@ t('the header and the tab bar are one scrolling line at every width, with arrows
       box = row.getBoundingClientRect();
       const r1 = half.getBoundingClientRect();
       ok(r1.left < box.right && r1.right > box.right, 'set up: it straddles the edge', `${r1.left} ${r1.right} vs ${box.right}`);
+      const before = row.scrollLeft;
       half.focus();
       const r = half.getBoundingClientRect(), b2 = row.getBoundingClientRect();
-      ok(b2.right - r.right >= 3 && r.left - b2.left >= 3,
-         'focused, it is scrolled fully inside the row with its ring room', `${(r.left - b2.left).toFixed(1)} / ${(b2.right - r.right).toFixed(1)}`);
+      /* WHICH HALF OF THE RULE IS BEING TESTED DEPENDS ON THE BROWSER'S FOCUS
+         MODALITY, and asking it is the only honest way to pick (2026-09-20).
+         `wireScrollRow`'s handler is guarded by `:focus-visible` on purpose —
+         a MOUSE click on a half-visible tab must not yank the row out from
+         under the pointer — and a script's `.focus()` matches that guard only
+         where the browser is in keyboard modality. It is in CI, which is why
+         this read as one unconditional assertion for so long; it is not in a
+         Chromium whose page has been clicked in, and there the handler is
+         RIGHT not to fire. So each modality asserts its own half, and neither
+         is the weaker claim: one says the row reveals a keyboard target, the
+         other says it holds still for a pointer. `focus({focusVisible: true})`
+         was tried first and is not honoured here. */
+      if (half.matches(':focus-visible')) {
+        ok(b2.right - r.right >= 3 && r.left - b2.left >= 3,
+           'focused from the keyboard, it is scrolled fully inside the row with its ring room',
+           `${(r.left - b2.left).toFixed(1)} / ${(b2.right - r.right).toFixed(1)}`);
+      } else {
+        ok(row.scrollLeft === before,
+           'focused without the keyboard, the row holds still — the guard that stops a '
+           + 'click yanking a half-visible tab out from under the pointer',
+           `${before} → ${row.scrollLeft}`);
+      }
     };
     reveal(ctl, [...ctl.children].filter((c) => c.getClientRects().length && !c.classList.contains('sr-only')));
     reveal(tabs, [...tabs.querySelectorAll('[role="tab"]')].filter((t) => !t.hidden));
@@ -19483,11 +19943,11 @@ t('a docked calculator in a window under 930px is a sheet with three rows of tap
     eq(D.documentElement.dataset.calc, 'dock', '1000px: the docked column, as before');
     eq(D.documentElement.dataset.calcSheet, undefined, 'and no sheet');
     /* Narrowed live, the way a reader drags a window edge. */
-    f.style.width = '900px';
+    f.style.width = frameBox(900);
     await new Promise((res) => setTimeout(res, 150));
     eq(D.documentElement.dataset.calc, undefined, 'narrowed to 900px, the column gives way');
     eq(D.documentElement.dataset.calcSheet, 'on', 'to a sheet');
-    f.style.width = '1000px';
+    f.style.width = frameBox(1000);
     await new Promise((res) => setTimeout(res, 150));
     eq(D.documentElement.dataset.calc, 'dock', 'and widened again it docks — the reader’s choice was kept');
     eq(D.documentElement.dataset.calcSheet, undefined, 'with the sheet gone');
@@ -21672,7 +22132,7 @@ t('share links carry no stamps, on every link', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const src = stripComments(APP_SRC);
   const fn = src.slice(src.indexOf('function buildSharePayload('), src.indexOf('async function encodeShare('));
-  ok(/\n\s*stripStamps\(data\);\n\s*if \(!includeNotes\) stripNotes\(data\);/.test(fn),
+  ok(/\n\s*stripStamps\(data\);\n\s*stripFoldedGrids\(data\);\n\s*if \(!includeNotes\) stripNotes\(data\);/.test(fn),
      'stripped unconditionally, not only when notes are left out');
 });
 
@@ -21881,7 +22341,7 @@ t('the checklist sits under the month’s four cards, in two columns where there
     eq(lefts.size, 2, 'and the lines really do sit in two');
     eq(W.getComputedStyle(rows[rows.length - 1]).borderBottomStyle, 'solid',
        'the last line keeps its rule, so both columns end the same way');
-    f.style.width = '420px';
+    f.style.width = frameBox(420);
     await wait(150);
     const narrow = new Set(rows.map(r => Math.round(r.getBoundingClientRect().left)));
     eq(narrow.size, 1, 'one column on a phone');
