@@ -2086,6 +2086,19 @@ choice actually uses.
   the figure it held — it used to delete the figure, and on a sweep row that
   blanked the row without a word. An emptied box still clears: that is a
   statement, and it is kept.
+- **On a phone a money box carries its own ± key** (2026-09-20). A phone's
+  number pad is ten digits, a point and delete — there is no minus on it, and no
+  brackets either, so until now there was no way to type a negative figure at
+  all. Since an expense is stored as a negative, that meant the phone lens — the
+  one that exists for fixing a row while you are standing in a shop — could not
+  record a spend. Every money box now has a small ± beside it (or under it,
+  where the box has no room beside it) that flips the sign of whatever is in the
+  box, mid-typing included: tap it on an empty box and the digits you type next
+  are negative. It is **touch only** — a desktop keyboard has a minus, so nothing
+  about the app changes on one — and it stays out of the way where a flip would
+  mean nothing: the Amount box while a month is split into amounts (the amounts
+  have their own), a target that is tied to months of expenses, and the paycheck
+  count, which is a count rather than money.
 - **Landing on a box selects what's in it**, so typing replaces the figure
   instead of running on to the end of it. Click a second time to place the
   cursor and edit normally. The up/down arrows a browser draws on a number box

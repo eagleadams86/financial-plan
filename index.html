@@ -1148,6 +1148,67 @@ legend { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04
   display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .grid-fields > div > .field-row > .opensbox > .btn {
   display: inline-flex; align-items: center; text-decoration: none; flex: none; }
+/* ── THE SIGN KEY: a minus the phone's keyboard hasn't got (2026-09-20) ─────
+   Reported by Charles from an iPhone: "I can't add a negative number." Every
+   money box is `type=text` + `inputmode="decimal"` (see `asMoneyInput`), and
+   that raises iOS's DECIMAL PAD — ten digits, a point and delete, and no minus
+   key at all. `numeric` and `tel` have none either, and `parseMoney` reads the
+   accounting form `(40)` as -40 but the pad has no brackets to type it with.
+   So on a phone there was no way to record an expense, whose cells are stored
+   NEGATIVE — in the lens that exists for fixing one row while standing in a
+   shop.
+   The alternative was dropping `inputmode` and taking the full keyboard, as
+   `#calcExpr` did for its operators. It was weighed and turned down: that
+   costs an extra tap and much smaller keys on EVERY figure ever typed on a
+   phone, where a key costs one tap only on the negative ones.
+   TOUCH ONLY, and by CSS rather than by `matchMedia`: a desktop keyboard has a
+   minus, so there is nothing for the key to do there — and `display: none`
+   takes it out of the tab order and the accessibility tree with it, so a
+   mouse's dialog is exactly what it was.
+   The key FOLLOWS ITS BOX and lets the container decide where that is: beside
+   it wherever there is a row to sit in, and under it in a flex COLUMN — which
+   is the `.field-row` bargain above, for the same reason. A bare button in
+   `.grid-fields > div` would STRETCH to the cell without the `align-self`. */
+.moneykey { display: none; }
+@media (pointer: coarse) {
+  /* `.btn.moneykey` rather than `.moneykey`, or `.btn.small`'s own
+     `min-height: var(--chrome-h)` out-specifies this and the key comes up
+     34px beside a 40px box. */
+  .btn.moneykey { display: inline-flex; align-items: center; justify-content: center;
+    flex: none; min-width: 44px; min-height: 40px; }
+  .grid-fields > div > .moneykey,
+  .grid-fields > div > .field-row > .moneykey,
+  .partgrid > label > .moneykey { align-self: flex-start; margin-top: 6px; }
+  /* The cell editor's three boxes sit in plain block divs, which have no row
+     for the key to join. `keyfield` gives them one — only on touch, so the
+     desktop dialog is untouched — with the label held to a line of its own so
+     the box and its key read as one control.
+     `gap: 0 8px` is a COLUMN gap and nothing else: a row gap would add itself
+     between the label's own bottom margin and the box, which moved every box in
+     this dialog down the screen. Measured against the build before it, the
+     three boxes and the note now sit at exactly the pixel they did. */
+  #cellDialog .keyfield { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; }
+  #cellDialog .keyfield > .field { flex: 1 0 100%; }
+}
+/* A box with the pen taken off it offers no flip, and the rule follows the box
+   LIVE rather than being synced from JS — which is what keeps the key right on
+   the Amount box while a month is split, on a goal's target while it is tied
+   to months of expenses, and on the paycheck COUNT (`data-money="off"`), which
+   is not money and cannot go negative.
+   `:disabled` IS NAMED SEPARATELY, and that is not belt and braces: `:read-only`
+   matches a disabled input, so one selector reads as though it covered both —
+   and it does on a first paint. But Chromium does not invalidate a SIBLING's
+   style for `:read-only` when `disabled` moves, only for `:disabled` itself, so
+   splitting a month left a live-looking key over a box that had just been
+   disabled. Measured in Chromium before and after: with `:read-only` alone the
+   key computed `inline-flex` after `input.disabled = true` and `none` after
+   `input.readOnly = true`; naming both gives `none` either way, and the box
+   coming back gives `inline-flex` again.
+   All three out-specify the rule above them, so order is not load-bearing and
+   no `!important` is needed. */
+input:disabled + .moneykey,
+input:read-only + .moneykey,
+input[data-money="off"] + .moneykey { display: none; }
 /* ── A field that holds a LIST of sub-rows (`type: 'parts'`) ────────────────
    One line of a trip is often several purchases — three excursions booked
    separately, a flight and its seat fee — and the Budget already had the
@@ -3635,7 +3696,7 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
     <h3 id="cellDialogTitle">Edit</h3>
     <p class="sub" id="cellContext"></p>
     <div class="row">
-      <div>
+      <div class="keyfield">
         <label class="field" for="cellValue">Amount</label>
         <input type="text" id="cellValue" inputmode="decimal" autocomplete="off"
           style="width:160px">
@@ -3677,7 +3738,7 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
          out on top. Both are computed until a number is typed here. -->
     <div id="cellBalWrap" hidden style="margin-top:12px">
       <div class="row">
-        <div>
+        <div class="keyfield">
           <!-- The word changes with the account: an investment account's rate
                produces GROWTH, and one box labelled "Interest" over a figure
                that is not income is the whole confusion this pair of words
@@ -3686,7 +3747,7 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
           <input type="text" id="cellInterest" inputmode="decimal" autocomplete="off"
             style="width:160px">
         </div>
-        <div>
+        <div class="keyfield">
           <!-- "Dividend this month", not "Dividend paid in": these two boxes
                correct what THIS account earned, and the context line above them
                now says what other accounts paid IN — two different directions
@@ -4299,6 +4360,103 @@ function asMoneyInput(input) {
   return input;
 }
 const showMoney = (v) => (v === null || v === undefined || v === '') ? '' : fmtMoney(v);
+
+/* ── The sign key ────────────────────────────────────────────────────────────
+   A phone's decimal pad has no minus (see the CSS block of the same name), so
+   a money box carries a ± of its own on a coarse pointer.
+
+   `flipMoney` is the whole arithmetic, pure and pinned, and it works on the
+   BOX'S TEXT rather than on the number in it. That is the load-bearing choice:
+   a box is flipped MID-ENTRY, and re-formatting what is there would rewrite a
+   half-typed figure under the reader — press ± after typing "4" and a
+   number-first version hands back "-$4.00", where the next keystroke makes
+   "-$4.000". Toggling the sign in front of whatever has been typed leaves
+   every other character alone and lets the blur formatter dress it as usual.
+
+   An EMPTY box takes a bare "-", so the digits that follow are negative; a box
+   holding only "-" gives it back. Neither is a figure — `parseMoney` reads both
+   as null — which is what keeps a flip on an empty box from claiming anything.
+   The accounting form is unwrapped rather than prefixed, or `(40)` and `-(40)`
+   would both read as -40 and the key would look dead. */
+const LEADING_MINUS = /^([\s\p{Sc}]*)-\s*/u;
+function flipMoney(raw) {
+  const s = String(raw ?? '').trim();
+  /* The minus may sit AFTER the currency symbol — `fmtMoney` writes it first in
+     every currency (en-US, checked), but a reader typing over a figure writes
+     `$-40` as readily as `-$40`, and taking only a leading one back would hand
+     that box `-$-40`, which `parseMoney` reads as nothing and the blur
+     formatter then empties. Coerce the class, not the one sink. */
+  if (LEADING_MINUS.test(s)) return s.replace(LEADING_MINUS, '$1');
+  if (BRACKETED.test(s)) return s.replace('(', '').replace(/\)\s*$/, '').trim();
+  return s === '' ? '-' : '-' + s;
+}
+/* What to call the box, for the reader who cannot see which one the key
+   belongs to — six buttons all named "Flip the sign" name nothing. Text nodes
+   only out of a label, because a label may carry a help dot and "Amount ⓘ" is
+   not the name of a field. */
+function moneyBoxName(el) {
+  const aria = el.getAttribute('aria-label');
+  if (aria && aria.trim()) return aria.trim();
+  const lab = el.labels && el.labels[0];
+  if (lab) {
+    const words = [...lab.childNodes].filter(n => n.nodeType === 3)
+      .map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim();
+    if (words) return words;
+  }
+  return 'this amount';
+}
+/* Gives every money box under `root` a key it hasn't got yet. A money box is
+   `type=text` + `inputmode=decimal` — the same test `cellAddPartBtn` already
+   uses to pick the amounts out of the boxes beside them — so nothing has to be
+   marked and a box added later is covered by whichever call site draws it.
+   Idempotent, because three of the four callers redraw a list that may already
+   be half keyed. Whether a key SHOWS is the stylesheet's business, not this
+   function's: it reads the box's own state live, so nothing here has to be
+   kept in step with a box being disabled, made read-only, or handed the
+   paycheck count. */
+function signKeysIn(root) {
+  if (!root) return;
+  for (const box of root.querySelectorAll('input[type="text"][inputmode="decimal"]')) {
+    if (box.nextElementSibling && box.nextElementSibling.classList.contains('moneykey')) continue;
+    const key = document.createElement('button');
+    key.type = 'button';                      // never submits the dialog
+    key.className = 'btn small moneykey';
+    /* The glyph is decorative — every one in this app is `aria-hidden`, and
+       the words are in the accessible name. No `title`: it is a touch-only
+       control, and a title never appears on a phone. */
+    const glyph = document.createElement('span');
+    glyph.setAttribute('aria-hidden', 'true');
+    glyph.textContent = '±';
+    key.appendChild(glyph);
+    key.setAttribute('aria-label', `Flip the sign — ${moneyBoxName(box)}`);
+    /* The press must not take the focus out of the box: it would raise the
+       keyboard again, and the delegated SELECT_ON_FOCUS listener would select
+       the whole figure on the way back in, so the next digit typed would
+       REPLACE the sign just added. The calculator's → Field button guards
+       itself the same way. */
+    key.addEventListener('pointerdown', (e) => e.preventDefault());
+    key.onclick = () => {
+      box.value = flipMoney(box.value);
+      /* A real `input` event, so every handler already listening on this box
+         runs as it does for a keystroke — the split month's running total, the
+         reconciliation note, a dialog's `link`. */
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      box.focus({ preventScroll: true });
+      /* And the caret at the END, undoing the select-all the focus above may
+         have caused if the guard did not hold. */
+      if (box.setSelectionRange) { const n = box.value.length; box.setSelectionRange(n, n); }
+      /* A window that saves as you go commits like it would for a finished
+         field — the `action` button's rule, and for its reason: without it the
+         next field finished re-primes the form from state and puts the old
+         sign straight back. Only once the box holds a READABLE figure, so
+         seeding a bare "-" into an empty box commits nothing (and is not then
+         wiped by the re-prime of its own commit). */
+      if (parseMoney(box.value) !== null && rowDialog.contains(box)
+          && rowCtx && rowCtx.auto && rowMoved(rowCtx)) commitRow(rowCtx, false);
+    };
+    box.after(key);
+  }
+}
 
 /* ── The calculator's arithmetic ─────────────────────────────────────────────
    Four pure functions the calculator window is built on, kept beside
@@ -23430,6 +23588,10 @@ function renderPartsList(host, f) {
     line.appendChild(btns);
     list.appendChild(line);
   });
+  /* The list is rebuilt whole on every add, settle and delete, so its boxes
+     need their sign keys again — `buildFields`' call only ever saw the parts
+     the window opened on. */
+  signKeysIn(list);
   partsTally(host, f);
 }
 
@@ -24012,6 +24174,14 @@ function buildFields(fields, values, link) {
     wrap.appendChild(cell);
   }
   applyFieldVisibility(fields);
+  /* Every money box in this window gets its sign key, including the ones
+     inside a parts list built a moment ago. A list REDRAWN while the window is
+     open keys itself (see `renderPartsList`).
+     `host`, NEVER `wrap`: in a SECTIONED window `wrap` has walked on to the
+     last section's own grid, so keying that would key one block and leave the
+     rest of the window without a minus — which is every money box in the
+     Budget Row editor but the ones under its final heading. */
+  signKeysIn(host);
 }
 
 /* The bonus and its percentage, kept in step in whichever dialog is open —
@@ -29025,6 +29195,10 @@ function setParts(parts, canEstimate) {
     row.appendChild(del);
     list.appendChild(row);
   });
+  /* The amounts just drawn, and the Amount box above them — which this
+     function has just DISABLED, so its own key goes quiet with it (the
+     stylesheet reads the box, so there is nothing to switch here). */
+  signKeysIn(cellDialog);
   partsTotal();
 }
 
@@ -29770,6 +29944,10 @@ function openCellEditor(yearKey, type, id, m) {
     F('cellAcceptLabel').textContent = 'Accept the Estimate';
   }
   updateReconcile();   // a balance already typed over shows its gap on opening
+  /* After the branch, never before it: the paycheck branch marks the Amount
+     box `data-money="off"`, which is what takes its sign key off a figure that
+     is a COUNT and cannot go negative. */
+  signKeysIn(cellDialog);
   openModal(cellDialog);
 }
 F('cellValue').addEventListener('input', updateReconcile);
@@ -33298,7 +33476,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   /* Looking a property's value up: where each kind sends you, and the boundary
      for the one thing that store holds. */
   PROPERTY_LOOKUPS, coercePropLinks, safePropLink, setPropLink, propLinkLabel, propLinkAccount, PROP_LINK_MAX,
-  parseMoney, raiseFor, sinceLastYear,
+  parseMoney, flipMoney, raiseFor, sinceLastYear,
   /* The calculator's arithmetic: the parser, the selection reader, the tape's
      stats, the figure under a click, and the boundary for fin-calc. */
   calcEval, numbersIn, calcStats, figureAt, selectedFigures, coerceCalc, CALC_TAPE_MAX, fmtKind, calcToken,
