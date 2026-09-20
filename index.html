@@ -7749,6 +7749,11 @@ function newestGridYear() {
 function summaryYears(st) {
   return Object.keys(st.years).sort().filter(y => st.years[y].kind === 'summary');
 }
+/* A summary year still holding the grid it was made from — so it can be
+   re-opened, and so it must not be edited. Pure, and exported, so the door's
+   rule can be pinned without a page. */
+function folded(yr) { return !!(yr && yr.kind === 'summary' && yr.foldedFrom); }
+
 /* ── The block rule ────────────────────────────────────────────────────────
    Summaries are an unbroken block at the FRONT of the plan, with the years
    that still have months after them — which is what makes one stacked page of
@@ -9840,6 +9845,23 @@ const HELP = {
      at all. So the reader who clicked wondering what one was got a title saying
      the window was not for them and a paragraph proving it. Same fault the due
      block had (2026-08-27), found by sweeping every window in the family. */
+  summaryGrowth: { title: 'Growth in a Summary Year', body: [
+    ['These rows are what the year\'s investment accounts gained ', b('on paper'), ' — '
+      + 'the figure each account\'s own growth rate produced, added up across the year. '
+      + 'It is neither of the two kinds of row above and below it, which is exactly why '
+      + 'it has a block of its own.'],
+    [b('It is not income'), ', and nothing counts it as any: it stays out of money in, '
+      + 'out of money out, out of what the year spent and out of the savings rate. A gain '
+      + 'you have not sold is not money you can spend, and folding it in beside a paycheck '
+      + 'would flatter every one of those figures.'],
+    ['It is not a balance either — the balances below are what each account HELD at the '
+      + 'end of the year, and they already contain every dollar of this. The row is here '
+      + 'to say ', b('how much of the year\'s climb was the market'), ' rather than money '
+      + 'you put in, which is the one thing a closing figure cannot tell you.'],
+    ['The figure is written down ', b('at the moment the year is folded'), ', out of the '
+      + 'months the year itself recorded — never worked out again afterwards from today\'s '
+      + 'rates, which would rewrite a past year every time an assumption changed.'],
+  ] },
   summaryBalances: { title: 'Balances & Derived Rows, Explained', body: [
     ['Everything above this heading is a ', b('flow'), ' — money that came in or went '
       + 'out during the year, and the figure beside it is the year\'s total. The two kinds '
@@ -10266,6 +10288,7 @@ function render() {
    affordance, that closes the door. */
 function stripEditAffordances(root) {
   root.querySelectorAll('.addbar, [data-add], .h-edit, #deleteYearBtn, #toSummaryBtn,'
+    + '[data-yearact="delete"], [data-yearact="unfold"],'
     /* the whole grid-actions wrap goes, toggle included — every button in it
        is an edit affordance, and a toggle opening an emptied box is worse */
     + '#rolloverBtn, #closeMonthBtn, #reopenMonthBtn, .gridactions-wrap').forEach(el => el.remove());
@@ -11060,20 +11083,33 @@ function yearPickerHtml(active) {
      It ran newest first until 2026-09-11, carried over from the tabs along the
      top of the spreadsheet this plan came from. Charles: "flip years so it
      aligns with the rest of the app." */
-  const order = yearKeys().slice();
+  /* EVERY SUMMARY YEAR IS ONE CHIP (2026-09-20), first, because the block they
+     stand for is the front of the plan and this strip runs oldest first. A
+     plan of sixteen years spent most of its rail on years holding one short
+     card each; they are one page now, and the chip carries the NEWEST of them
+     as its `data-year`, which is a real year key — so `wireYearStrip` needed
+     nothing at all: click, the arrow keys, Home/End, the focus hand-back and
+     `settleRail` all go on reading `chip.dataset.year`. It keeps `y-summary`'s
+     italics, which said "this year is a summary" and now says it of several. */
+  const sums = summaryYears(state);
+  const order = sums.length
+    ? [sums[sums.length - 1], ...yearKeys().filter(y => state.years[y].kind !== 'summary')]
+    : yearKeys().slice();
   const chips = order.map(y => {
     const yr = state.years[y];
     const summary = yr.kind === 'summary';
     const future = !summary && !yearStarted(state, y);
-    const isNow = y === nowY;
-    const label = y + (summary ? ' (summary)' : future ? ' (not started yet)' : '')
-      + (isNow ? ' — this year' : '');
-    const on = y === active;
+    const isNow = !summary && y === nowY;
+    const span = sums.length === 1 ? sums[0] : `${sums[0]} to ${sums[sums.length - 1]}`;
+    const label = summary
+      ? `Previous years — ${span}, ${sums.length} yearly ${sums.length === 1 ? 'summary' : 'summaries'}`
+      : y + (future ? ' (not started yet)' : '') + (isNow ? ' — this year' : '');
+    const on = summary ? state.years[active] && state.years[active].kind === 'summary' : y === active;
     return `<button type="button" role="radio" data-year="${esc(y)}"
       class="yearchip${summary ? ' y-summary' : ''}${future ? ' y-future' : ''}${
       isNow ? ' chip-now' : ''}"
       aria-checked="${on ? 'true' : 'false'}" tabindex="${on ? 0 : -1}"
-      aria-label="${esc(label)}" title="${esc(label)}">${esc(y)}</button>`;
+      aria-label="${esc(label)}" title="${esc(label)}">${summary ? 'Previous' : esc(y)}</button>`;
   }).join('');
   /* "This year", the month strip's button in the other lens, and it appears on
      the same condition: only when this year is IN the strip and you are not
@@ -11117,8 +11153,15 @@ function yearPickerHtml(active) {
      from a rail scrolled to its far end, picking this year pulled every chip
      sideways by the button's width — the shift Charles reported. The arrows
      beside it already follow this rule for exactly this reason. */
-  const showNow = yearKeys().includes(nowY);
-  const at = order.indexOf(active);
+  /* "This year" needs a chip to take you to, and a folded year has none of its
+     own — so the question is now whether this year is a GRID year in the
+     strip. A plan whose current year has been folded marks nothing and offers
+     nothing, exactly as one that is all history always did. */
+  const showNow = !!state.years[nowY] && state.years[nowY].kind !== 'summary';
+  /* The chip the arrows step from: the Previous chip stands for every summary,
+     so reading a year further down the stack still points at it. */
+  const at = order.indexOf(state.years[active] && state.years[active].kind === 'summary'
+    ? order[0] : active);
   return `<div class="yearstrip">
     ${budgetSwitchHtml('year')}
     <div class="yearrail" id="yearRail" role="radiogroup"
@@ -11251,43 +11294,92 @@ function renderBudget() {
   const picker = yearPickerHtml(y);
   /* The notes are their own box UNDER the budget, not a panel inside it — see
      yearNotes(). They return '' for a year with none, so nothing empty is drawn. */
-  if (yr.kind === 'summary') return picker + summaryCard(y, yr) + yearNotes(y);
+  /* A summary year IS the Previous Years page: every folded and imported year
+     stacked behind one chip, rather than a chip each for years holding one
+     short card. Which year `activeYearKey()` names still decides the chip, so
+     nothing else in the app had to learn a new word for this page. */
+  if (yr.kind === 'summary') return picker + previousYearsPage();
   return picker + gridCard(y, yr) + yearNotes(y);
 }
 
-function summaryCard(y, yr) {
+function summaryCard(y, yr, stacked) {
+  /* A FOLDED year is a view of the grid it is still holding, so it cannot be
+     edited: a total typed here would be thrown away by the next re-open, and a
+     summary that disagrees with the months behind it is the one thing the
+     stash exists to make impossible. The rows read, the notes still show their
+     dots, and the way to change a figure is to open the year. An IMPORTED
+     summary has no grid behind it — it is the only copy of that year — so it
+     stays exactly as editable as it has always been. */
+  const folded = !!yr.foldedFrom;
+  const readOnly = folded || viewOnly;
   const line = (i) => {
     const idx = yr.categoryTotals.indexOf(i);
-    if (!i.name && !i.total) return `<div class="rowline" data-edit="sumrow"
+    if (!i.name && !i.total) return readOnly ? '' : `<div class="rowline" data-edit="sumrow"
       data-year="${esc(y)}" data-idx="${idx}" role="button"
       aria-label="Empty line — press Enter to fill it in"
       style="cursor:pointer;height:14px;border-bottom:none"></div>`;
-    return `<div class="rowline" data-edit="sumrow" data-year="${esc(y)}"
-      data-idx="${idx}" style="cursor:pointer"${rowTip('Click to edit', i.note)
+    return `<div class="rowline"${readOnly ? '' : ` data-edit="sumrow" data-year="${esc(y)}"
+      data-idx="${idx}" style="cursor:pointer"`}${rowTip(readOnly ? '' : 'Click to edit', i.note)
       }><span>${esc(i.name)}${noteDot(i.note)}</span><span>${fmtMoney(i.total)}</span></div>`;
   };
-  const flows = yr.categoryTotals.filter(i => !i.isBalance);
+  const flows = yr.categoryTotals.filter(i => !i.isBalance && !i.isGrowth);
+  const grew = yr.categoryTotals.filter(i => i.isGrowth);
   const bals = yr.categoryTotals.filter(i => i.isBalance);
-  return `<div class="card">
-    <h2>${esc(y)} — Yearly Summary</h2>
-    <p class="sub">${yr.convertedFrom
-      ? 'The months of this year were folded into totals.'
-      : 'This year predates the monthly layout, so it\'s imported as totals only.'}
+  const newest = unfoldableYear(state) === y;
+  /* Four sentences for four states, because "what can I do with this card"
+     differs in each: an imported year is the only copy of itself, a year
+     folded by an older build has no way back, the newest folded year opens
+     with one press, and one further down the stack waits its turn. */
+  const sub = !yr.convertedFrom
+    ? 'This year predates the monthly layout, so it\'s imported as totals only.'
+    : !folded
+    ? 'The months of this year were folded into totals.'
+    : newest
+    ? `The months of ${esc(y)} are folded into these totals — and kept. Re-open the year to change any figure here.`
+    : `The months of ${esc(y)} are folded into these totals — and kept. Years re-open newest first, so ${esc(unfoldableYear(state) || '')} goes back before this one.`;
+  return `<div class="card"${stacked ? ` data-box="summary-${esc(y)}"` : ''}>
+    <h2>${stacked ? 'Yearly Summary' : `${esc(y)} — Yearly Summary`}</h2>
+    <p class="sub">${sub}
       ${yr.eoyCash !== undefined ? `End of year: <strong>${fmtMoney(yr.eoyCash)}</strong>.` : ''}
-      ${viewOnly ? '' : 'Click any row to edit it.'}</p>
+      ${readOnly ? '' : 'Click any row to edit it.'}</p>
     <div class="sumlist">${flows.map(line).join('')}</div>
+    ${grew.length ? `<h2 style="margin-top:18px">Growth${
+        helpBtn('summaryGrowth', 'growth in a summary year')}</h2>
+      <p class="sub">What these accounts gained on paper in ${esc(y)}. It moved the
+        balances below; it is not income, and it is not in the flows above.</p>
+      <div class="sumlist">${grew.map(line).join('')}</div>` : ''}
     ${bals.length ? `<h2 style="margin-top:18px">Balances &amp; Derived Rows${
         helpBtn('summaryBalances', 'balances and derived rows')}</h2>
       <div class="sumlist">${bals.map(line).join('')}</div>` : ''}
     <div class="addbar">
-      <button class="btn small" data-add="sumrow" data-year="${esc(y)}">＋ Add Row</button>
-      <button class="btn small" data-edit="sumyear" data-year="${esc(y)}"><span aria-hidden="true">✎</span> End-of-year Figure</button>
-      <button class="btn small" id="csvYearBtn"
+      ${folded && newest ? `<button class="btn small" data-yearact="unfold" data-year="${esc(y)}"
+        title="Put ${esc(y)}'s months back exactly as they were"><span aria-hidden="true">↩</span> Re-open ${esc(y)} as a Year</button>` : ''}
+      ${folded ? '' : `<button class="btn small" data-add="sumrow" data-year="${esc(y)}">＋ Add Row</button>
+      <button class="btn small" data-edit="sumyear" data-year="${esc(y)}"><span aria-hidden="true">✎</span> End-of-year Figure</button>`}
+      <button class="btn small" data-yearact="csv" data-year="${esc(y)}"
         title="Download ${esc(y)}'s totals as a spreadsheet"><span aria-hidden="true">⇩</span> CSV</button>
-      <button class="btn small" id="deleteYearBtn"
+      <button class="btn small" data-yearact="delete" data-year="${esc(y)}"
         title="Remove ${esc(y)} from the app entirely"><span aria-hidden="true">🗑️</span> Delete ${esc(y)}</button>
     </div>
   </div>`;
+}
+
+/* Every summary year on one page, newest at the top — the order the Trips tab
+   already reads in, and the one that puts the year you are most likely to want
+   (the only one carrying a Re-open button) at the top rather than nine cards
+   down. The YEAR moves out of the two card headings and into a `.yearhead`
+   above the pair, which is `renderVacations`' shape: three things on screen
+   saying "2019" within a few pixels is what that heading exists to avoid.
+
+   `data-box` per year is mandatory here. `boxKey` strips the DIGITS out of a
+   heading, so "2019 — Yearly Summary" and "2018 — Yearly Summary" are ONE
+   folded-box key — which was right while one showed at a time and would fold
+   all nine as one now. The grid page keeps the shared key, so folding 2026's
+   notes still finds 2025's folded. */
+function previousYearsPage() {
+  return summaryYears(state).reverse().map(y =>
+    `<h2 class="yearhead" id="year-${esc(y)}">${esc(y)}</h2>`
+    + summaryCard(y, state.years[y], true) + yearNotes(y, true)).join('');
 }
 
 /* Whether an account earns a row in a LIVE year's grid — pure and pinned, and
@@ -11767,12 +11859,16 @@ function gridCard(y, yr) {
       ${!live ? `<button class="btn small" data-edit="sumyear" data-year="${esc(y)}"
           title="The end-of-year total this year is drawn at on the year-by-year chart">
           ✎ End-of-year Figure</button>` : ''}
-      ${!live ? `<button class="btn small" id="toSummaryBtn"
-          title="Replace this year's months with its yearly totals — permanent">
-          ⇩ Convert to a Summary</button>` : ''}
-      <button class="btn small" id="csvYearBtn"
+      ${y === foldableYear(state) ? `<button class="btn small" id="toSummaryBtn"
+          title="Read this year as yearly totals — its months are kept, and it opens back up">
+          ⇩ Fold Into Previous Years</button>` : ''}
+      ${/* The ids stay on the GRID card, where exactly one is ever on screen —
+           the month-close checklist reaches two of them by id. The summary
+           cards stack, so theirs are `data-yearact` and go through the
+           delegated handler these two now share with them. */''}
+      <button class="btn small" id="csvYearBtn" data-yearact="csv" data-year="${esc(y)}"
         title="Download ${esc(y)} as a spreadsheet — raw numbers, one row per line of the grid"><span aria-hidden="true">⇩</span> CSV</button>
-      <button class="btn small" id="deleteYearBtn"
+      <button class="btn small" id="deleteYearBtn" data-yearact="delete" data-year="${esc(y)}"
         title="Remove ${esc(y)} from the app entirely"><span aria-hidden="true">🗑️</span> Delete ${esc(y)}</button>
       </div>
     </div>`;
@@ -11904,7 +12000,7 @@ function noteLine(n, y) {
     }<span class="note-text">${esc(n.note)}</span></li>`;
 }
 
-function yearNotes(y) {
+function yearNotes(y, stacked) {
   const items = notesOfYear(state, y);
   if (!items.length) return '';
   const line = (n) => noteLine(n, y);
@@ -11928,8 +12024,8 @@ function yearNotes(y) {
      the year, or you come to read what you wrote about it — and a box nested
      inside a box gives you two headers to fold and no way to guess which one
      you shut. Both fold the same way now, through wireBoxes(). */
-  return `<div class="card">
-    <h2>Notes for ${esc(y)} (${items.length})</h2>
+  return `<div class="card"${stacked ? ` data-box="notes-${esc(y)}"` : ''}>
+    <h2>${stacked ? `Notes (${items.length})` : `Notes for ${esc(y)} (${items.length})`}</h2>
     <p class="sub">Every note in this year, gathered from the rows, the months
       and the stated balances they were written on${
       viewOnly ? '' : ' — click one to open the cell it came from'}.</p>
@@ -14404,6 +14500,11 @@ function wireMonthRows() {
       const b = F('closeMonthBtn');
       if (b) { b.scrollIntoView({ block: 'center' }); b.focus({ preventScroll: true }); }
     } else if (kind === 'grid') {
+      /* The three targets all live on the GRID card, so a year folded since
+         this line was written has no button to press — and hunting for one by
+         id would focus whichever `#csvYearBtn` happened to be on screen, on
+         some other year's card. */
+      if (year && (!state.years[year] || state.years[year].kind !== 'grid')) return;
       delete state.ui.budgetView;
       if (year && state.years[year]) state.ui.activeYear = year;
       save(); render();
@@ -21080,6 +21181,18 @@ function reopenYearAsLive(y) {
   toast(`${y} is live again — its balances are computed from here`);
 }
 
+/* One year's spreadsheet, and the stamp December's Close card reads — lifted
+   out of `wireBudget`'s `#csvYearBtn` handler when the summary cards started
+   stacking and an id could no longer say which year was meant. */
+function exportYearCsv(y) {
+  downloadCsv(`financial-plan-${y}.csv`, gridToCsv(state, C[y], y));
+  if (viewOnly) return;
+  const ex = Object.assign({}, state.exported);
+  ex.csv = Object.assign({}, ex.csv, { [y]: todayISO() });
+  state.exported = ex;
+  save(); render();
+}
+
 function deleteYear(y) {
   if (!confirm(`Delete ${y} completely? Every figure in it goes, and there's no undo `
     + `beyond a backup file.`)) return;
@@ -21213,8 +21326,6 @@ function stretchLonePairs(root) {
 }
 
 function wireView(view) {
-  const delBtn = F('deleteYearBtn');
-  if (delBtn) delBtn.onclick = () => deleteYear(activeYearKey());
   const sumBtn = F('toSummaryBtn');
   if (sumBtn) sumBtn.onclick = () => convertYearToSummary(activeYearKey());
   const btn = F('welcomeRestoreBtn');
@@ -24070,6 +24181,15 @@ function unreadableFields(fields) {
 
 function openRowEditor(section, ds, isNew) {
   if (viewOnly) return;   // someone else's figures — nothing here is yours to change
+  /* A FOLDED year's figures belong to the months it is still holding, so both
+     of its editors refuse — for the owner too, not only in a shared view.
+     `summaryCard` draws no affordance; this closes the door behind it, the way
+     `stripEditAffordances` and these two lines already divide the work. The
+     end-of-year figure is refused for the same reason the rows are: it came
+     out of the grid, so a correction typed here would be thrown away by the
+     next re-open — refusing is honest, accepting and discarding is not. */
+  if ((section === 'sumrow' || section === 'sumyear')
+      && ds && folded(state.years[ds.year])) return;
   const ed = EDITORS[section];
   if (!ed) return;
   const spec = typeof ed.fields === 'function' ? ed.fields(ds, isNew) : ed.fields;
@@ -27945,6 +28065,20 @@ F('views').addEventListener('click', (e) => {
     }
     return;
   }
+  /* The three year actions that appear on a card the page may draw SEVERAL of
+     — Previous Years stacks one summary card per year — so each names its own
+     year rather than asking `activeYearKey()`, and the grid card's CSV and
+     Delete come through here too. They keep their ids for the month-close
+     checklist, which reaches `#csvYearBtn` by name. */
+  const act = e.target.closest('[data-yearact]');
+  if (act) {
+    const y = act.dataset.year;
+    if (!y || !state.years[y]) return;
+    if (act.dataset.yearact === 'csv') exportYearCsv(y);
+    else if (act.dataset.yearact === 'delete') deleteYear(y);
+    else if (act.dataset.yearact === 'unfold') reopenYearFromSummary(y);
+    return;
+  }
   const add = e.target.closest('[data-add]');
   if (add) { openRowEditor(add.dataset.add, add.dataset, true); return; }
   const row = e.target.closest('[data-edit]');
@@ -28298,18 +28432,6 @@ function wireBudget() {
     if (mv) buildMonthNetChart(yearOfMonth(state, mv), mv);
   }
   /* The phone-sized "Actions" toggle over the grid's admin buttons. */
-  const csvBtn = F('csvYearBtn');
-  if (csvBtn) csvBtn.onclick = () => {
-    const y = activeYearKey();
-    downloadCsv(`financial-plan-${y}.csv`, gridToCsv(state, C[y], y));
-    /* Remembered for December's Close card — see "Closing a month". */
-    if (!viewOnly) {
-      const ex = Object.assign({}, state.exported);
-      ex.csv = Object.assign({}, ex.csv, { [y]: todayISO() });
-      state.exported = ex;
-      save(); render();
-    }
-  };
   const actBtn = F('gridActionsBtn');
   if (actBtn) actBtn.onclick = () => {
     const box = F('gridActions');
@@ -30516,7 +30638,14 @@ function goToSearchHit(h) {
      editor is over it, and moving the page to the top would strand them there
      when the editor closes — at the top of a long grid rather than at the row
      they searched for. */
-  if (!opensRecord) window.scrollTo(0, 0);
+  /* A SUMMARY YEAR'S HIT SCROLLS TO ITS OWN CARD (2026-09-20). Every folded
+     and imported year is on one page now, newest first, so a 2013 row found by
+     name would leave the reader at the top of nine cards reading 2019 — the
+     landing that "go to the top" exists to avoid, one page deeper. */
+  const stacked = h.year && state.years[h.year] && state.years[h.year].kind === 'summary'
+    && document.getElementById(`year-${h.year}`);
+  if (!opensRecord && stacked) stacked.scrollIntoView({ block: 'start' });
+  else if (!opensRecord) window.scrollTo(0, 0);
   if (opensRecord) openCellEditor(h.year, h.cell.type, h.cell.id, h.cell.m);
 }
 F('findBtn').onclick = () => {
@@ -31986,7 +32115,8 @@ const SHARE_FORMAT = 1;
    missing whatever their build added. Unlike SCHEMA there is no stored copy at
    stake, so nothing is written and nothing halts — the family pattern from
    Sprint Velocity. */
-const SHARE_PAYLOAD_V = 3;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05)
+const SHARE_PAYLOAD_V = 4;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05);
+                             // 4: a summary year's isGrowth rows (2026-09-20)
 
 const b64urlEncode = (bytes) => {
   let s = '';
@@ -32376,6 +32506,26 @@ function stripStamps(v) {
   return v;
 }
 
+/* A folded year's stashed months NEVER travel, and this is not only about
+   weight. A recipient is read-only for ever and can never re-open a year, so
+   the stash is data they cannot use — and `fitShareWindow` bisects the YEAR
+   WINDOW to fit the link inside `SHARE_WARN_AT`, so carrying it would not
+   merely lengthen the link, it would silently ship them FEWER YEARS OF HISTORY
+   to make room. Shortening the numbers to carry a backup is the one trade that
+   window exists not to make. `state.quotes` is kept out by construction for
+   the same kind of reason, and has a test; so does this. Walked, for the
+   reason stripNotes is walked. */
+function stripFoldedGrids(v) {
+  if (Array.isArray(v)) { v.forEach(stripFoldedGrids); return v; }
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) {
+      if (k === 'foldedFrom') delete v[k];
+      else stripFoldedGrids(v[k]);
+    }
+  }
+  return v;
+}
+
 /* ── Keeping a trimmed link's balances honest ───────────────────────────────
    Every account's balance CHAINS: a month opens on the month before, a January
    opens on the previous grid year's December, and only the very first year
@@ -32566,6 +32716,7 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
       accountsOf(state).map(a => a.id));
   }
   stripStamps(data);
+  stripFoldedGrids(data);
   if (!includeNotes) stripNotes(data);
   if (!includeNames) anonymisePeople(data);
 
@@ -33121,6 +33272,7 @@ window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDolla
   closeBlockedNote,
   currentMonthOf, rolloverYear, yearMonthsOf: yearMonths,
   normRole, gridToSummary, summaryToGrid, gridToPinned, pinnedToLive,
+  foldableYear, unfoldableYear, summaryYears, folded, stripFoldedGrids,
   rulesNeedingYear, partsKind, sumKind, paycheckParts,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
