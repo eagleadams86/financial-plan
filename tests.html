@@ -15524,7 +15524,7 @@ t('a chart fills the window under a header that stays live', async () => {
        case — six lines of sub AND a switch under it — and without this rule
        pressing the button on a 375px screen gives back a chart barely taller
        than the one already on the page. */
-    f.style.width = '380px';
+    f.style.width = frameBox(380);
     f.style.height = '760px';
     await new Promise((r) => setTimeout(r, 250));
     D.getElementById('tab-goals').click();
@@ -15912,7 +15912,7 @@ t('nothing runs off the side of a phone', async () => {
 
     /* Wide again: the desktop shape is untouched. The frame is resized rather
        than a second one booted, so this is the real rule firing at a real width. */
-    f.style.width = '1280px';
+    f.style.width = frameBox(1280);
     await new Promise((r) => setTimeout(r, 400));
     const wideBox = D.querySelector('.asofswitch').getBoundingClientRect();
     ok(wideBox.height < 44, 'with room, the pair is one line again',
@@ -17200,11 +17200,52 @@ group('Fixes from the 2026-09-03 audit');
    to fail against the unfixed page — the commit that fixed it quotes the red row.
    They need a REAL frame for the same reason the full-screen group does: they
    are geometry and focus, and neither exists in the suite's 1x1 frame. */
+/* ── A FRAME IS ASKED FOR BY ITS VIEWPORT, NOT BY ITS BOX (2026-09-20) ──────
+   Every layout test here says "at 375px" and means A SCREEN 375px WIDE — the
+   width the app's media queries answer to and every `100%` inside it resolves
+   against. It was written as a 375px ELEMENT, and those are the same thing
+   only where a scrollbar takes no room.
+
+   They are not the same everywhere. macOS draws OVERLAY scrollbars (0px) and
+   so does CI's headless Chromium, so the suite was green in both; a Chromium
+   drawing CLASSIC scrollbars takes 15px out of the inside of every frame, and
+   five tests went red at once — a docked calculator "failing" to reach 1280 by
+   landing at 1265, a sheet "failing" to be 900 wide by being 885. The app was
+   right every time and the frame was 15px smaller inside than the test
+   believed. A suite that is red in the browser you develop in is one you stop
+   reading, which is how a real regression hides.
+
+   So the BOX is widened by the scrollbar and the VIEWPORT comes out the width
+   that was asked for. Measured once, off a probe in this document — same
+   engine, same setting as the frames — and it is 0 on macOS and 0 in CI, where
+   every frame is then byte for byte the element it always was.
+
+   It is done BEFORE the frame loads, deliberately, and an earlier cut that
+   corrected the width afterwards is why: resizing a loaded frame fires the
+   app's own resize path (`syncCalcSheet`, `syncDockAttr`, the tab row's nudge)
+   in the middle of a test that was not expecting one, and it broke two tests
+   that had nothing to do with any of this. Size it right and nothing moves. */
+let SCROLLBAR_W = null;
+function scrollbarW() {
+  if (SCROLLBAR_W === null) {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:absolute;left:-9999px;top:-9999px;'
+      + 'width:100px;height:100px;overflow-y:scroll';
+    document.body.appendChild(d);
+    SCROLLBAR_W = d.offsetWidth - d.clientWidth;
+    d.remove();
+  }
+  return SCROLLBAR_W;
+}
+/* A frame's box, for the viewport a test is asking for. Used at creation and
+   wherever a test narrows a frame live to watch a media query fire. */
+const frameBox = (width) => (width + scrollbarW()) + 'px';
+
 async function auditFrame(width, height, tag) {
   const f = document.createElement('iframe');
   f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
   f.setAttribute('aria-hidden', 'true');
-  f.style.cssText = `position:absolute;left:-9999px;width:${width}px;height:${height}px;border:0`;
+  f.style.cssText = `position:absolute;left:-9999px;width:${frameBox(width)};height:${height}px;border:0`;
   await new Promise((resolve) => {
     f.onload = resolve;
     f.src = 'index.html?' + tag + '=' + Date.now();
@@ -19403,7 +19444,7 @@ t('docking pads the page and survives a reload; a phone gets a sheet', async () 
     localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: true, dock: true, pick: true, x: null, y: null, tape: [] }));
     f = document.createElement('iframe');
     f.setAttribute('data-fin-tests', '');
-    f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+    f.style.cssText = `position:absolute;left:-9999px;width:${frameBox(1280)};height:900px;border:0`;
     await new Promise((resolve) => { f.onload = resolve; f.src = 'index.html?calcreload=' + Date.now(); document.body.appendChild(f); });
     const D2 = f.contentWindow.document;
     eq(D2.documentElement.dataset.calc, 'dock', 'the attribute is on at load');
@@ -19755,10 +19796,31 @@ t('the header and the tab bar are one scrolling line at every width, with arrows
       box = row.getBoundingClientRect();
       const r1 = half.getBoundingClientRect();
       ok(r1.left < box.right && r1.right > box.right, 'set up: it straddles the edge', `${r1.left} ${r1.right} vs ${box.right}`);
+      const before = row.scrollLeft;
       half.focus();
       const r = half.getBoundingClientRect(), b2 = row.getBoundingClientRect();
-      ok(b2.right - r.right >= 3 && r.left - b2.left >= 3,
-         'focused, it is scrolled fully inside the row with its ring room', `${(r.left - b2.left).toFixed(1)} / ${(b2.right - r.right).toFixed(1)}`);
+      /* WHICH HALF OF THE RULE IS BEING TESTED DEPENDS ON THE BROWSER'S FOCUS
+         MODALITY, and asking it is the only honest way to pick (2026-09-20).
+         `wireScrollRow`'s handler is guarded by `:focus-visible` on purpose —
+         a MOUSE click on a half-visible tab must not yank the row out from
+         under the pointer — and a script's `.focus()` matches that guard only
+         where the browser is in keyboard modality. It is in CI, which is why
+         this read as one unconditional assertion for so long; it is not in a
+         Chromium whose page has been clicked in, and there the handler is
+         RIGHT not to fire. So each modality asserts its own half, and neither
+         is the weaker claim: one says the row reveals a keyboard target, the
+         other says it holds still for a pointer. `focus({focusVisible: true})`
+         was tried first and is not honoured here. */
+      if (half.matches(':focus-visible')) {
+        ok(b2.right - r.right >= 3 && r.left - b2.left >= 3,
+           'focused from the keyboard, it is scrolled fully inside the row with its ring room',
+           `${(r.left - b2.left).toFixed(1)} / ${(b2.right - r.right).toFixed(1)}`);
+      } else {
+        ok(row.scrollLeft === before,
+           'focused without the keyboard, the row holds still — the guard that stops a '
+           + 'click yanking a half-visible tab out from under the pointer',
+           `${before} → ${row.scrollLeft}`);
+      }
     };
     reveal(ctl, [...ctl.children].filter((c) => c.getClientRects().length && !c.classList.contains('sr-only')));
     reveal(tabs, [...tabs.querySelectorAll('[role="tab"]')].filter((t) => !t.hidden));
@@ -19881,11 +19943,11 @@ t('a docked calculator in a window under 930px is a sheet with three rows of tap
     eq(D.documentElement.dataset.calc, 'dock', '1000px: the docked column, as before');
     eq(D.documentElement.dataset.calcSheet, undefined, 'and no sheet');
     /* Narrowed live, the way a reader drags a window edge. */
-    f.style.width = '900px';
+    f.style.width = frameBox(900);
     await new Promise((res) => setTimeout(res, 150));
     eq(D.documentElement.dataset.calc, undefined, 'narrowed to 900px, the column gives way');
     eq(D.documentElement.dataset.calcSheet, 'on', 'to a sheet');
-    f.style.width = '1000px';
+    f.style.width = frameBox(1000);
     await new Promise((res) => setTimeout(res, 150));
     eq(D.documentElement.dataset.calc, 'dock', 'and widened again it docks — the reader’s choice was kept');
     eq(D.documentElement.dataset.calcSheet, undefined, 'with the sheet gone');
@@ -22279,7 +22341,7 @@ t('the checklist sits under the month’s four cards, in two columns where there
     eq(lefts.size, 2, 'and the lines really do sit in two');
     eq(W.getComputedStyle(rows[rows.length - 1]).borderBottomStyle, 'solid',
        'the last line keeps its rule, so both columns end the same way');
-    f.style.width = '420px';
+    f.style.width = frameBox(420);
     await wait(150);
     const narrow = new Set(rows.map(r => Math.round(r.getBoundingClientRect().left)));
     eq(narrow.size, 1, 'one column on a phone');
