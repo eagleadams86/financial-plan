@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1196;
+const EXPECTED = 1203;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -21892,6 +21892,216 @@ t('the card and the pointer are never drawn in a shared view', () => {
   const fn = src.slice(src.indexOf('function renderMonthView('), src.indexOf('function monthNetPoints('));
   ok(/const close = viewOnly \? null : closeChecklist\(/.test(fn), 'no card for somebody else’s chores');
   ok(/m === today\.slice\(0, 7\) && !viewOnly \? yearOfMonth/.test(fn), 'and no pointer to one');
+});
+
+group('The sign key: a minus the pad hasn’t got (2026-09-20)');
+/* ── A money box carries its own ± on a phone ──────────────────────────
+   Reported by Charles from an iPhone: "I can't add a negative number." Every
+   money box is `inputmode="decimal"`, and iOS's Decimal Pad is ten digits, a
+   point and delete — no minus, no brackets. Expense cells are stored NEGATIVE,
+   so the phone lens could not record a spend at all. */
+
+t('flipMoney toggles the sign of whatever is in the box, formatted or half-typed', () => {
+  eq(H.flipMoney(''), '-', 'an empty box takes a bare minus, so the digits that follow are negative');
+  eq(H.flipMoney('-'), '', 'and gives it straight back');
+  eq(H.flipMoney('40'), '-40');
+  eq(H.flipMoney('-40'), '40');
+  eq(H.flipMoney('$1,234.56'), '-$1,234.56', 'a formatted figure keeps its dress');
+  eq(H.flipMoney('-$1,234.56'), '$1,234.56');
+  eq(H.flipMoney('  40  '), '-40', 'trimmed first');
+  /* And a minus that sits AFTER the symbol, which is how a reader typing over a
+     figure writes it. Taking only a LEADING one back would hand the box
+     `-$-40`, which parseMoney reads as nothing and the blur formatter empties. */
+  eq(H.flipMoney('$-40'), '$40');
+  eq(H.parseMoney(H.flipMoney('$-40')), 40, 'and it is still readable');
+  eq(H.flipMoney(H.flipMoney('$-40')), '-$40', 'the sign goes back in front, as fmtMoney writes it');
+  /* THE WHOLE REASON IT WORKS ON TEXT RATHER THAN ON THE NUMBER. A box is
+     flipped MID-ENTRY: re-formatting "4" as "-$4.00" would make the next
+     keystroke read "-$4.000", which parses as -4 and loses the digit. */
+  eq(H.flipMoney('4'), '-4', 'a half-typed figure is not re-formatted under the reader');
+  eq(H.parseMoney(H.flipMoney('4') + '0'), -40, 'so typing on after a flip means what it says');
+  /* Neither end of the empty case is a figure, which is what keeps a flip on an
+     empty box from claiming anything. */
+  eq(H.parseMoney('-'), null, 'a bare minus states nothing');
+});
+
+t('the accounting form is unwrapped rather than prefixed', () => {
+  /* parseMoney reads wrapping brackets as a minus, so prefixing one would leave
+     `(40)` and `-(40)` both reading -40 and the key looking dead. */
+  eq(H.flipMoney('(40)'), '40');
+  eq(H.parseMoney('(40)'), -40, 'the form it came in as');
+  eq(H.parseMoney(H.flipMoney('(40)')), 40, 'and the flip really flips it');
+  eq(H.flipMoney('$ (1,234.56)'), '$ 1,234.56', 'symbol outside the brackets, as Excel writes it');
+  eq(H.parseMoney(H.flipMoney('$ (1,234.56)')), 1234.56);
+  /* Every shape round-trips: flip twice and parseMoney says what it said. */
+  for (const s of ['40', '-40', '$1,234.56', '(40)', '$ (1,234.56)', '0', '$0.00', '4'])
+    eq(H.parseMoney(H.flipMoney(H.flipMoney(s))), H.parseMoney(s), 'round trip: ' + s);
+});
+
+t('the guard names :disabled as well as :read-only', () => {
+  /* Not belt and braces. `:read-only` matches a disabled input, so one selector
+     READS as though it covered both — and it does on a first paint. But Chromium
+     does not invalidate a SIBLING's style for `:read-only` when `disabled`
+     moves, only for `:disabled` itself, so splitting a month left a live-looking
+     key over a box that had just been disabled. Measured in the browser; the
+     live test below is the one that would go red, and this is what says why. */
+  const src = stripComments(APP_SRC);
+  ok(/input:disabled \+ \.moneykey,/.test(src), ':disabled is named in its own right');
+  ok(/input:read-only \+ \.moneykey,/.test(src), 'and :read-only for a readonly box');
+  ok(/input\[data-money="off"\] \+ \.moneykey \{ display: none; \}/.test(src),
+     'and the paycheck COUNT, which is not money');
+  /* Touch only, and by CSS rather than by matchMedia — `display: none` takes the
+     key out of the tab order and the accessibility tree with it. */
+  ok(/\.moneykey \{ display: none; \}/.test(src), 'nothing at all off a coarse pointer');
+  ok(/\.btn\.moneykey \{ display: inline-flex;/.test(src),
+     '`.btn.moneykey`, or `.btn.small`’s own min-height out-specifies it');
+});
+
+t('every money box in the cell editor and the row editor has a key', async () => {
+  /* THE CALL-SITE GUARD, and it is the one that has already caught a bug:
+     `buildFields` keyed `wrap`, which in a SECTIONED window has walked on to
+     the last section's grid — so the Budget Row editor got a minus under its
+     final heading and nowhere else. A money box is `type=text` +
+     `inputmode=decimal`; every one of them must have a key next to it. */
+  const { f, W, D } = await auditFrame(1280, 900, 'signkeys');
+  try {
+    const keyed = (root) => [...root.querySelectorAll('input[type="text"][inputmode="decimal"]')]
+      .map((b) => ({ id: b.id || b.getAttribute('aria-label'),
+                     ok: !!(b.nextElementSibling
+                            && b.nextElementSibling.classList.contains('moneykey')) }));
+    const st = W.finGet();
+    const yk = Object.keys(st.years)
+      .filter((k) => st.years[k].kind === 'grid' && st.years[k].model === 'live').sort().pop();
+    const cat = st.years[yk].categories[0];
+    const m = W.yearMonths(st.years[yk])[0];
+
+    W.openCellEditor(yk, 'cat', cat.id, m);
+    let miss = keyed(D.getElementById('cellDialog')).filter((b) => !b.ok);
+    eq(miss, [], 'the cell editor’s own boxes');
+    D.getElementById('cellSplitBtn').click();
+    D.getElementById('cellAddPartBtn').click();
+    miss = keyed(D.getElementById('cellPartsList')).filter((b) => !b.ok);
+    eq(miss.length, 0, 'and every amount of a split month, including one just added');
+    ok(D.querySelectorAll('#cellPartsList .moneykey').length >= 2, 'fixture: two amounts');
+    D.getElementById('cellDialog').close();
+
+    /* A balance month, for the Interest and Dividend boxes. */
+    const acct = st.settings.accounts[0];
+    W.openCellEditor(yk, 'bal', acct.id, m);
+    miss = keyed(D.getElementById('cellDialog')).filter((b) => !b.ok);
+    eq(miss, [], 'the balance branch’s three boxes');
+    D.getElementById('cellDialog').close();
+
+    /* And the row editor, which is SECTIONED — the case the first cut missed. */
+    W.openRowEditor('category', { year: yk, id: cat.id }, false);
+    const fields = D.getElementById('rowFields');
+    ok(fields.querySelector('.fieldsec'), 'fixture: the Budget Row window is sectioned');
+    const boxes = keyed(fields);
+    ok(boxes.length >= 2, 'fixture: it holds money boxes', boxes.length);
+    eq(boxes.filter((b) => !b.ok), [], 'every one of them, not just the last block’s');
+    D.getElementById('rowDialog').close();
+  } finally { f.remove(); }
+});
+
+t('the key flips the box, and everything reading it follows', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'signflip');
+  try {
+    const st = W.finGet();
+    const yk = Object.keys(st.years)
+      .filter((k) => st.years[k].kind === 'grid' && st.years[k].model === 'live').sort().pop();
+    const cat = st.years[yk].categories[0];
+    const m = W.yearMonths(st.years[yk])[0];
+    W.openCellEditor(yk, 'cat', cat.id, m);
+    const box = D.getElementById('cellValue'), key = box.nextElementSibling;
+    box.value = '$120.00';
+    key.click();
+    eq(box.value, '-$120.00', 'the box itself');
+    key.click();
+    eq(box.value, '$120.00', 'and back');
+    /* The running total of a split month is driven by the box’s own `input`
+       handler, so the key has to raise a real event rather than set `.value`
+       and walk away. */
+    D.getElementById('cellSplitBtn').click();
+    const amt = D.querySelector('#cellPartsList input[inputmode="decimal"]');
+    amt.value = '$60.00';
+    amt.dispatchEvent(new W.Event('input', { bubbles: true }));
+    const before = D.getElementById('cellPartsTotal').textContent;
+    amt.nextElementSibling.click();
+    eq(amt.value, '-$60.00', 'the amount');
+    ok(D.getElementById('cellPartsTotal').textContent !== before,
+       'and the total under it moved with it', before);
+    ok(/-\$60\.00|-\$/.test(D.getElementById('cellValue').value),
+       'as did the Amount box the parts drive', D.getElementById('cellValue').value);
+    /* The focus stays in the box, with the caret at the END — the delegated
+       select-on-focus listener would otherwise leave the whole figure selected
+       and the next digit would REPLACE the sign just added. */
+    eq(D.activeElement, amt, 'focus stays in the box it flipped');
+    eq(amt.selectionStart, amt.value.length, 'caret at the end, nothing selected');
+    eq(amt.selectionEnd, amt.value.length);
+    D.getElementById('cellDialog').close();
+  } finally { f.remove(); }
+});
+
+t('a box with the pen taken off it offers no flip', async () => {
+  /* THE CHROMIUM SIBLING-INVALIDATION TRAP, driven live. Pointer media cannot
+     be emulated from script, so the coarse declaration is forced on by hand —
+     `.btn.moneykey` at the same specificity the stylesheet uses, which leaves
+     the three guards (one class more specific) to do their own work. On the
+     `:read-only`-only version this reads `inline-flex` after the box is
+     disabled. */
+  const { f, W, D } = await auditFrame(1280, 900, 'signguard');
+  try {
+    const st = W.finGet();
+    const yk = Object.keys(st.years)
+      .filter((k) => st.years[k].kind === 'grid' && st.years[k].model === 'live').sort().pop();
+    const cat = st.years[yk].categories[0];
+    const m = W.yearMonths(st.years[yk])[0];
+    const forced = D.createElement('style');
+    forced.textContent = '.btn.moneykey { display: inline-flex; }';
+    D.head.appendChild(forced);
+
+    W.openCellEditor(yk, 'cat', cat.id, m);
+    const box = D.getElementById('cellValue'), key = box.nextElementSibling;
+    const shown = () => W.getComputedStyle(key).display;
+    ok(shown() !== 'none', 'a live box has its key', shown());
+    D.getElementById('cellSplitBtn').click();          // disables the Amount box
+    eq(box.disabled, true, 'fixture: a split month disables the Amount box');
+    eq(shown(), 'none', 'and its key goes with it');
+    D.getElementById('cellSplitBtn').click();          // back to one amount
+    eq(box.disabled, false, 'fixture: unsplitting gives the box back');
+    ok(shown() !== 'none', 'and the key comes back', shown());
+    box.readOnly = true;
+    eq(shown(), 'none', 'a read-only box offers no flip either');
+    box.readOnly = false;
+    D.getElementById('cellDialog').close();
+
+    /* The paycheck COUNT is not money and cannot go negative. */
+    W.openCellEditor(yk, 'pay', 'paychecks', m);
+    eq(box.dataset.money, 'off', 'fixture: the count marks itself');
+    eq(shown(), 'none', 'so it has no key');
+    D.getElementById('cellDialog').close();
+    forced.remove();
+  } finally { f.remove(); }
+});
+
+t('nothing of it shows on a fine pointer', async () => {
+  /* The promise the whole design rests on: a desktop keyboard has a minus, so
+     there is nothing for the key to do there, and `display: none` takes it out
+     of the tab order and the accessibility tree too. The suite’s frames are a
+     fine pointer, so this is simply what they measure. */
+  const { f, W, D } = await auditFrame(1280, 900, 'signfine');
+  try {
+    const st = W.finGet();
+    const yk = Object.keys(st.years)
+      .filter((k) => st.years[k].kind === 'grid' && st.years[k].model === 'live').sort().pop();
+    W.openCellEditor(yk, 'cat', st.years[yk].categories[0].id, W.yearMonths(st.years[yk])[0]);
+    const keys = [...D.querySelectorAll('#cellDialog .moneykey')];
+    ok(keys.length, 'fixture: the keys are in the DOM', keys.length);
+    eq(keys.filter((k) => W.getComputedStyle(k).display !== 'none').length, 0,
+       'and not one of them is painted');
+    eq(keys.filter((k) => k.getClientRects().length).length, 0, 'nor in the layout at all');
+    D.getElementById('cellDialog').close();
+  } finally { f.remove(); }
 });
 
 async function run() {

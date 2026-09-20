@@ -7384,7 +7384,9 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   nothing but a bare number could be typed. The full keyboard's 123 layer has
   them. `autocorrect="off"` rides with it (the price key's reason: iOS would
   rewrite `total`/`max` mid-expression). The money boxes keep their decimal
-  pad on purpose; the minus key it lacks is a separate, open question.
+  pad on purpose; the minus key it lacks was the open question this left, and
+  it was answered on 2026-09-20 by a ± on the box rather than by another
+  keyboard — see "The sign key" below.
 - **→ Field keeps the focus where it was.** A `pointerdown` on the button is
   `preventDefault`ed so the box the reader is IN is still the active element
   when the button acts — the belt to the `focusin` tracker, which turned out
@@ -7408,6 +7410,122 @@ after the backdrop registration list, `HELP.calculator`, `fin-calc`.
   a reload with the dock on read off the head script, and a 375px sheet). All
   twelve proven red against `main`. The existing HELP pin gained a third call
   site, `data-help="(\w+)"`, for a dot written literally in static markup.
+
+## The sign key: a minus the pad hasn't got (2026-09-20)
+
+Charles, from an iPhone, with a screenshot of the split-month editor: **"I can't
+add a negative number."** Every money box is `type=text` + `inputmode="decimal"`
+(`asMoneyInput`), and iOS's Decimal Pad is ten digits, a point and delete. No
+minus. `parseMoney` reads the accounting form `(40)` as −40, and the pad has no
+brackets either. **So on a phone there was no way to record an expense** — whose
+cells are stored NEGATIVE — in the lens that exists for fixing one row while
+standing in a shop.
+
+- **THE ALTERNATIVE WAS DROPPING `inputmode`, AND IT WAS WEIGHED AND TURNED
+  DOWN.** That is what `#calcExpr` did the day before for its operators, and it
+  is one line. But it costs an extra tap and much smaller keys on EVERY figure
+  ever typed on a phone, where a key costs one tap only on the negative ones —
+  so the key dominates. Charles picked it. (`numeric` and `tel` have no minus
+  either; nothing an `inputmode` can reach both keeps the pad and carries one.)
+- **`flipMoney(raw)` is the whole arithmetic, pure and pinned, and IT WORKS ON
+  THE BOX'S TEXT rather than on the number in it.** That is the load-bearing
+  choice: a box is flipped MID-ENTRY, so re-formatting would rewrite a half-typed
+  figure under the reader — press ± after typing `4` and a number-first version
+  hands back `-$4.00`, where the next keystroke makes `-$4.000`, which parses as
+  −4 and loses the digit. Toggling the sign in front of whatever has been typed
+  leaves every other character alone and lets the blur formatter dress it.
+  - An EMPTY box takes a bare `-`, so the digits that follow are negative; a box
+    holding only `-` gives it back. Neither is a figure (`parseMoney` reads both
+    as null), which is what keeps a flip on an empty box from claiming anything.
+  - **The accounting form is UNWRAPPED, not prefixed** — `(40)` → `40` — or
+    `(40)` and `-(40)` would both read as −40 and the key would look dead.
+  - **A minus may sit AFTER the currency symbol.** `fmtMoney` writes it first in
+    every currency the app can be set to (checked across seven, all `en-US`), but
+    a reader typing over a figure writes `$-40` as readily as `-$40` — and taking
+    only a LEADING minus back would hand that box `-$-40`, which `parseMoney`
+    reads as nothing and the blur formatter then empties. `LEADING_MINUS` allows
+    a run of currency symbols and spaces in front of it: the class fixed, not
+    the one sink.
+- **`signKeysIn(root)` is the inserter, and a money box is found by SHAPE, not by
+  a marker**: `input[type="text"][inputmode="decimal"]` is exactly the set
+  `asMoneyInput` makes (a percent or number field is `type=number`), which is the
+  same test `cellAddPartBtn` already uses to pick the amounts out of the boxes
+  beside them. So nothing has to be marked and a box added later is covered by
+  whichever call site draws it. Idempotent, because three of its four callers
+  redraw a list that may already be half keyed.
+  - **FOUR CALL SITES, each where money boxes are PUT ON SCREEN**: `buildFields`
+    (the row editor, parts lists included), `renderPartsList` (a trip line's
+    parts, rebuilt whole on every add, settle and delete), `setParts` (a split
+    month's amounts) and `openCellEditor` (the three static boxes, and AFTER the
+    branch has settled `data-money` on the Amount box).
+  - **`buildFields` keys `host`, NEVER `wrap`** — the first cut keyed `wrap`,
+    which in a SECTIONED window has walked on to the last section's own grid, so
+    the Budget Row editor got a minus under its final heading and nowhere else.
+    The call-site test is what caught it and is the guard against a fifth site
+    being forgotten: every money box in the cell editor and the row editor must
+    have a key beside it.
+- **WHETHER A KEY SHOWS IS THE STYLESHEET'S BUSINESS, and that is what keeps the
+  JS free of state to sync.** Touch only by CSS rather than by `matchMedia`, so
+  `display: none` takes it out of the tab order and the accessibility tree with
+  it — and the desktop dialog is what it always was. Measured against the build
+  before it: every box, note and dialog on the Budget's cell editors is at the
+  SAME PIXEL on a 1280x900 desktop, and on a phone too.
+  - **`gap: 0 8px` on `#cellDialog .keyfield` — COLUMN gap only.** A row gap
+    would add itself between the label's own bottom margin and the box, which
+    moved every box in that dialog down the screen.
+  - **`.btn.moneykey`, not `.moneykey`**, for the size: `.btn.small`'s own
+    `min-height: var(--chrome-h)` out-specifies a bare class, and the key came up
+    34px beside a 40px box.
+  - **The key FOLLOWS ITS BOX and lets the container decide where that is** —
+    beside it wherever there is a row to sit in, and under it in a flex COLUMN,
+    which is the `.field-row` bargain. The cell editor's three boxes sit in plain
+    block divs, which have no row to join; `keyfield` gives them one, on touch
+    only, with the label held to a line of its own.
+- **`:disabled` IS NAMED SEPARATELY FROM `:read-only`, AND THAT IS NOT BELT AND
+  BRACES.** `:read-only` matches a disabled input, so one selector READS as
+  though it covered both — and it does on a first paint. **But Chromium does not
+  invalidate a SIBLING's style for `:read-only` when `disabled` moves**, only for
+  `:disabled` itself, so splitting a month left a live-looking key over a box
+  that had just been disabled. Measured in the browser, both ways: with
+  `:read-only` alone the key computed `inline-flex` after `input.disabled = true`
+  and `none` after `input.readOnly = true`. The live test forces the coarse
+  declaration on by hand (pointer media cannot be emulated from script — the
+  `#syncBtn` trick) and drives the disable/re-enable round trip, so it goes red
+  on the version that reads correctly and behaves wrongly.
+  Three states are quiet: a DISABLED box (the Amount while a month is split — the
+  amounts have their own), a READ-ONLY one (a goal's target while it is tied to
+  months of expenses) and `data-money="off"` (the paycheck COUNT, which is not
+  money and cannot go negative).
+- **THE PRESS MUST NOT TAKE THE FOCUS OUT OF THE BOX**, and the reason is
+  specific: a `focus()` back into it would raise the keyboard again, and the
+  delegated `SELECT_ON_FOCUS` listener selects a text box's contents on focus —
+  so the next digit typed would REPLACE the sign just added. A `pointerdown`
+  `preventDefault` holds the focus (the calculator's → Field guard), and the
+  handler then focuses the box anyway and puts the caret at the END, which undoes
+  the select-all if the guard did not hold.
+- **It raises a real `input` event and NEVER a `change`.** `input` runs every
+  handler already listening on that box — the split month's running total, the
+  reconciliation note, a dialog's `link` — as a keystroke would. A `change` would
+  commit in an auto-saving window on every press, and on an empty box seeded with
+  a bare `-` that commit CLEARS the figure and the re-prime that follows wipes
+  the `-` off the screen. Instead the handler calls `commitRow` itself, the
+  `action` button's rule and for its reason (without it the next field finished
+  re-primes the form and puts the old sign straight back) — but **only once the
+  box holds a READABLE figure**, and only for a box inside `#rowDialog`.
+- **Glyph-only and named in words.** `±` is `aria-hidden` like every decorative
+  glyph here; the accessible name is `Flip the sign — <field>`, built by
+  `moneyBoxName` from the box's `aria-label` or its label's TEXT NODES (a label
+  may carry a help dot, and "Amount ⓘ" is not the name of a field). No `title`:
+  it is a touch-only control, and a title never appears on a phone.
+- **Seven tests** — two pure over `flipMoney`, one source pin on the guard
+  selector, and FOUR live: every money box in both editors carries a key, the
+  flip driven through the real dialog (value, running total, focus and caret),
+  the disabled/read-only/count guard with the coarse declaration forced on, and
+  the desktop promise that not one key is painted or in the layout on a fine
+  pointer.
+  All seven proven red against the build before them, and the guard one proven
+  red a second time against this build with `input:disabled + .moneykey` taken
+  back out. EXPECTED 1196 → 1203.
 
 ## Looking a property's value up (2026-09-17)
 
