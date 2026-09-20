@@ -5283,10 +5283,14 @@ function normalizeIds(d) {
      mangled `securedOn` still finds the row it names. */
   for (const l of list(side.liabilities)) ref(l, 'securedOn', '');
 
-  const years = (d.years && typeof d.years === 'object') ? d.years : {};
-  for (const y of Object.keys(years)) {
-    const yr = years[y];
-    if (!yr || typeof yr !== 'object') continue;
+  /* One year's own ids and the maps keyed on them. Lifted out of the loop
+     (2026-09-20) so the SAME pass reaches the grid a folded summary is still
+     holding — an account id that moved on the way in would otherwise leave
+     every stated balance in the stash keyed to a name no account answers to
+     any more, and nothing would notice until the year was re-opened months
+     later. `movedCat` is per year and cleared here, where it always was. */
+  const oneYear = (yr) => {
+    if (!yr || typeof yr !== 'object') return;
     movedCat.clear();
     for (const c of list(yr.categories)) {
       own(c, c.name || 'row', movedCat);
@@ -5298,6 +5302,14 @@ function normalizeIds(d) {
     remapPrefixed(yr.overrides, movedAcct);
     remapPrefixed(yr.balAdjust, movedAcct);
     remapKeys(yr.seeds, movedAcct);
+  };
+
+  const years = (d.years && typeof d.years === 'object') ? d.years : {};
+  for (const y of Object.keys(years)) {
+    const yr = years[y];
+    if (!yr || typeof yr !== 'object') continue;
+    oneYear(yr);
+    oneYear(yr.foldedFrom);
   }
 }
 
@@ -5456,6 +5468,308 @@ function coerceShape(data) {
      nothing consults has no business riding along in every backup. Same
      treatment `side.retirement` and `side.rothLimit` got. */
   delete d.settings.longTermRateAnnual;
+  /* ── One grid year's boundary ────────────────────────────────────────────
+     Lifted out of the loop below on 2026-09-20, when a folded summary year
+     started carrying the grid it was made from. That stash BECOMES a real year
+     the moment it is re-opened, so it has to be read exactly as strictly as one
+     — a hand-edited backup that slipped an unsanitised grid in there would
+     otherwise be promoted straight into the engine, which is the whole class of
+     fault the `num()` and `rateOrNone()` passes in here exist to close.
+     A local arrow rather than a function of its own, deliberately: it closes
+     over `obj`, `arr`, `num`, `rateOrNone`, `acctIds` and `peopleIds`, so not a
+     single call site inside it had to change when it moved. */
+  const coerceGridYear = (yr, y) => {
+    yr.categories = arr(yr.categories);
+    yr.cells = obj(yr.cells);
+    yr.paychecks = obj(yr.paychecks);
+    yr.seeds = obj(yr.seeds);
+    yr.overrides = obj(yr.overrides);
+    yr.balAdjust = obj(yr.balAdjust);
+    yr.extraNotes = Array.isArray(yr.extraNotes) ? yr.extraNotes : [];
+    yr.monthCount = Math.max(1, Math.min(36, +yr.monthCount || 12));
+    if (!/^\d{4}-\d{2}$/.test(yr.startMonth || '')) yr.startMonth = `${y}-01`;
+    /* A live year MUST carry enteredThrough: gridCard does
+       monthAdd(yr.enteredThrough, 1) unguarded, and a truncated backup
+       without it would throw inside render() — the empty-workbook failure
+       this function exists to prevent. The month before the year starts
+       means "nothing entered yet", which is what a blank year says. */
+    if (yr.model === 'live' && !/^\d{4}-\d{2}$/.test(yr.enteredThrough || ''))
+      yr.enteredThrough = monthAdd(yr.startMonth, -1);
+    /* The grid's own figures get the same treatment as every other money
+       map. Shapes were forced above; this forces the VALUES: cells, seeds,
+       overrides and paychecks reach the engine verbatim, and one string of
+       markup in a hand-edited backup would otherwise ride into the page raw
+       and turn every balance downstream into NaN. (`balAdjust`'s figures are
+       type-checked at their sink as well, but it carries prose now, so it
+       gets a pass of its own below.) */
+    for (const [k, cell] of Object.entries(yr.cells)) {
+      if (!cell || typeof cell !== 'object') { delete yr.cells[k]; continue; }
+      const cv = num(cell.v);
+      cell.v = typeof cv === 'number' ? cv : 0;
+      /* `missing` joined the list 2026-08-26 — a NOTE WITH NO FIGURE. It is
+         the engine's own word for "nothing recorded", and that is exactly
+         what such a cell records: the month is still blank, still unpaid,
+         still counted as outstanding; there is simply something written on
+         it. Without it here the boundary turned every one of them into a
+         STATED $0.00, which is the opposite claim — the bill came and it was
+         nothing — and the fix would have survived until the next reload. */
+      if (!['actual', 'manual', 'mixed', 'missing'].includes(cell.kind)) cell.kind = 'actual';
+      /* One spelling of nothing. A `missing` cell exists only to carry its
+         note, so with nothing written on it there is nothing to keep, and no
+         figure and no parts can ride along under a kind that claims neither. */
+      if (cell.kind === 'missing') {
+        cell.v = 0;
+        delete cell.parts;
+        const note = typeof cell.note === 'string' ? cell.note.trim() : '';
+        if (!note) { delete yr.cells[k]; continue; }
+      }
+      if (Array.isArray(cell.parts)) {
+        cell.parts = cell.parts.filter(p => p && typeof p === 'object');
+        for (const p of cell.parts) {
+          const pv = num(p.v);
+          p.v = typeof pv === 'number' ? pv : 0;
+        }
+      } else delete cell.parts;
+    }
+    for (const [k, v] of Object.entries(yr.seeds)) {
+      const n = num(v);
+      if (typeof n === 'number') yr.seeds[k] = n; else delete yr.seeds[k];
+    }
+    for (const [k, ov] of Object.entries(yr.overrides)) {
+      /* A BALANCE MONTH'S NOTE LIVES ON `balAdjust`, NOT ON THE PIN (schema
+         9). It used to ride along on the override, which meant a note could
+         only exist where a balance had been stated: clear the amount, save,
+         and the words went with it — so "the statement came late" could only
+         be written down by first pinning a figure, which is a claim about the
+         account made to keep a sentence. The move happens here so that a plan
+         written before it comes forward on load, whichever door it came in
+         through. An existing note on the new side wins: that is the one the
+         editor has been writing since. */
+      if (ov && typeof ov === 'object') {
+        const carried = typeof ov.note === 'string' ? ov.note.trim() : '';
+        if (carried) {
+          const adj = yr.balAdjust[k] = obj(yr.balAdjust[k]);
+          if (!(typeof adj.note === 'string' && adj.note.trim())) adj.note = carried;
+        }
+        delete ov.note;
+      }
+      /* Read STRICTLY (rateOrNone), not through num(): an override PINS a
+         balance, and num would turn a corrupt field into a deliberate-
+         looking $0 statement. One that states no figure states nothing —
+         dropped, the same way the balance editor deletes a cleared one. */
+      const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
+      if (typeof n === 'number') ov.v = n; else delete yr.overrides[k];
+    }
+    /* THREE FIELDS AND NO MORE: what the month earned, what it paid out, and
+       the note. The two figures read STRICTLY for the override's reason — a
+       corrupt field must not become a stated $0, which the engine would read
+       as "the rate produced nothing this month" — and the note is trimmed,
+       absent rather than blank, like every other optional string in here.
+       An entry left holding none of the three is dropped: an empty one still
+       keeps its account's row on screen, which is a row with nothing in it.
+       (A no-notes share link makes exactly those: `stripNotes` walks the
+       whole payload, and a note-only month comes out of it as `{}`.) */
+    for (const [k, raw] of Object.entries(yr.balAdjust)) {
+      const was = obj(raw);
+      const adj = {};
+      const int = rateOrNone(was.interest), div = rateOrNone(was.dividend);
+      if (typeof int === 'number') adj.interest = int;
+      if (typeof div === 'number') adj.dividend = div;
+      const note = typeof was.note === 'string' ? was.note.trim() : '';
+      if (note) adj.note = note;
+      if (Object.keys(adj).length) yr.balAdjust[k] = adj;
+      else delete yr.balAdjust[k];
+    }
+    /* AND ONLY FOR THE MONTHS THIS YEAR SHOWS. A count is keyed by month,
+       and until 2026-09-11 nothing asked whether that month belonged to the
+       year holding it. An import whose Paychecks row ran wider than the year
+       it built — Charlie's sheet carried 24 columns into a 12-month 2026 —
+       left twelve counts for 2027 sitting inside 2026, where no grid renders
+       them and no cell editor can reach them.
+       They were not inert. `rolloverYear` seeds a new year by reading the
+       OLD year's map at the NEW year's months, so every rebuild of 2027
+       copied the whole hidden block straight back in, a 3.5 in February
+       included. Deleting the year and recreating it — which he did many
+       times — fixed the copy and never touched the original, so the figure
+       came back every time and there was nowhere to go and look at it.
+       The carry-forward itself stays: a year whose grid genuinely reaches
+       into the next one holds those months in its OWN span, which is the
+       shape the feature was written for and the one its test pins. What goes
+       is the block no reader can see. With it gone a rebuilt year falls back
+       through `resolvePaychecks` to the same month last year, which is the
+       answer the hidden block was standing in the way of. */
+    const shownMonths = new Set(yearMonths(yr));
+    for (const [m, v] of Object.entries(yr.paychecks)) {
+      const n = num(v);
+      if (typeof n === 'number' && shownMonths.has(m)) yr.paychecks[m] = n;
+      else delete yr.paychecks[m];
+    }
+    /* What a FROZEN year was before it was frozen — the balances it stated
+       by hand (the freeze wrote all the others) and whether the end-of-year
+       figure was stamped at the same time. It exists so "Re-open as live"
+       can put the year back exactly, which is why only a year the app froze
+       carries one: an IMPORTED history year states its balances outright and
+       has no chain to go back to, so it is never offered the button.
+       A marker that can't say what the year was entered through can't
+       restore anything, so it goes rather than half-works — the year stays
+       frozen, which is what the reader sees anyway. */
+    const pf = obj(yr.pinnedFrom);
+    if (yr.model === 'live' || !/^\d{4}-\d{2}$/.test(pf.enteredThrough || ''))
+      delete yr.pinnedFrom;
+    else {
+      pf.overrides = obj(pf.overrides);
+      for (const [k, ov] of Object.entries(pf.overrides)) {
+        const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
+        if (typeof n === 'number') ov.v = n; else delete pf.overrides[k];
+      }
+      pf.eoyStamped = !!pf.eoyStamped;
+      /* The typed counts Re-open restores: a number per month, nothing else.
+         Absent on a year frozen before 2026-09-17, which `pinnedToLive`
+         reads as "the stamped map is the typed one". */
+      if (pf.paychecks !== undefined) {
+        pf.paychecks = obj(pf.paychecks);
+        for (const [m, v] of Object.entries(pf.paychecks)) {
+          const n = rateOrNone(v);
+          if (typeof n === 'number' && /^\d{4}-\d{2}$/.test(m)) pf.paychecks[m] = n;
+          else delete pf.paychecks[m];
+        }
+      }
+      yr.pinnedFrom = pf;
+    }
+    /* Rows classify into Income / Expenses / Transfers sections. Data from
+       before sections existed gets a one-time guess here — transfer roles
+       by role, everything else by the sign of what's stored — which sticks
+       on the next save, so a hand-picked section is never re-guessed. */
+    for (const cat of yr.categories) {
+      /* Pass-throughs on a bank account (the old "zelle" role) grouped as
+         transfers too; money paid straight out of investments (the old
+         "charitable" role) never did. */
+      const looksLikeTransfer = ['bankTransfer', 'midTransfer', 'longTransfer',
+        'zelle', 'transfer'].includes(cat.role);
+      Object.assign(cat, normRole(cat));   // one-time role → role + target
+      /* A dividends row written before the accounts were nameable earns on
+         the two the engine used to assume — but only the ones that still
+         exist, and only where the row says nothing yet. Absent means "never
+         asked"; an empty list is a decision, and re-filling it would argue
+         with the reader every time the app loaded. */
+      if (cat.rule === 'dividends' && !Array.isArray(cat.accounts))
+        cat.accounts = ['cash', 'mid'].filter(id => acctIds.has(id));
+      if (Array.isArray(cat.accounts))
+        cat.accounts = cat.accounts.filter(id => acctIds.has(id));
+      /* An overflow row names a source, a destination and a threshold. A
+         dangling account id is deleted — the row degrades to blank rather
+         than breaking, the goal-accounts rule — and the threshold is read
+         STRICTLY: num() would turn junk into 0, and a $0 threshold is a
+         real-looking claim ("sweep everything") the reader never made.
+         goalId is checked after the goals themselves are settled, below. */
+      /* How fast a growing row rises, read STRICTLY — the account.rate
+         discipline. num() would turn a corrupt field into 0%, which reads on
+         screen as a row somebody deliberately said does not rise, and the
+         whole point of the rule is that it does. Kept only while the row IS
+         a growing one, the way `every` and `perCheck` are. */
+      if (cat.rule === 'grow') {
+        const g = rateOrNone(cat.growth);
+        if (g !== undefined) cat.growth = g; else delete cat.growth;
+      } else delete cat.growth;
+      /* Whether the same-month rule keeps the cents instead of rounding to
+         the nearest dollar. Stored only when TRUE and only while the row is
+         a same-month one — `duePayAhead`'s discipline, and never `undefined`
+         (the Firestore rule). `false` and absent are one claim, so a plan
+         written before this field existed is byte for byte what it was: no
+         schema bump, no migration, the `dueMonths` precedent. */
+      if (cat.rule === 'samemonth' && cat.keepCents === true) cat.keepCents = true;
+      else delete cat.keepCents;
+      if (cat.rule === 'overflow') {
+        /* A sweep is a move between the reader's own accounts, whatever a
+           hand-edited file says: the editor already forces Transfers, and
+           filed under Expense the row would count its sweeps as spending
+           (review fix 3). */
+        cat.section = 'transfer';
+        if (!acctIds.has(cat.overflowFrom)) delete cat.overflowFrom;
+        if (!acctIds.has(cat.transferTo)) delete cat.transferTo;
+        const th = rateOrNone(cat.threshold);
+        if (th !== undefined) cat.threshold = th; else delete cat.threshold;
+        const cap = rateOrNone(cat.capAmount);
+        if (cap !== undefined) cat.capAmount = cap; else delete cat.capAmount;
+        /* The frozen measure lists a share link writes — a goal's account
+           set carried as plain ids so the recipient measures the same pot.
+           Dangling ids drop, and an emptied list is deleted outright:
+           absent falls back to the row's own end, which is the honest
+           degrade. */
+        for (const k of ['thresholdAccounts', 'capAccounts']) {
+          if (!Array.isArray(cat[k])) { delete cat[k]; continue; }
+          cat[k] = cat[k].filter(id => acctIds.has(id));
+          if (!cat[k].length) delete cat[k];
+        }
+      } else {
+        delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
+        delete cat.capGoalId; delete cat.capAmount;
+        delete cat.thresholdAccounts; delete cat.capAccounts;
+      }
+      /* Whose row it is — a second earner's paycheck, tagged so take-home
+         can be read per person. Only ever a label; the engine sums the
+         household's rows regardless. */
+      if (cat.person && !peopleIds.has(cat.person)) delete cat.person;
+      /* ── When the bill is due ──────────────────────────────────────
+         Display and reminders only: the engine never reads any of this, so a
+         corrupt schedule can make the page quieter but can never move a
+         figure. `duePay` is the MARKER — a row either carries one of the two
+         words or carries no schedule at all — which is why a bad one deletes
+         the other three rather than leaving a half-schedule behind. The same
+         delete-when-inapplicable discipline the overflow block above uses,
+         and never `undefined` (the Firestore rule).
+
+         Every part is read STRICTLY. `dueDay` through a plain num() would
+         turn junk into 0 and 0 has no honest reading — the 1st? the last? —
+         and an EMPTY `dueMonths` would say "never due", which is a different
+         claim from the absent list's "due every month". Junk deletes, and
+         the field falls back to its absent meaning. */
+      if (!DUE_PAY.includes(cat.duePay)) {
+        delete cat.duePay; delete cat.dueMonths;
+        delete cat.dueDay; delete cat.dueHold; delete cat.duePayAhead;
+      } else {
+        if (Array.isArray(cat.dueMonths)) {
+          const ms = [...new Set(cat.dueMonths
+            .map(n => Math.round(num(n)))
+            .filter(n => Number.isFinite(n) && n >= 1 && n <= 12))].sort((x, y) => x - y);
+          /* All twelve IS "every month", which is what an absent list already
+             says — storing both spellings would give the same schedule two
+             shapes for a test and a share link to disagree over. */
+          if (ms.length && ms.length < 12) cat.dueMonths = ms;
+          else delete cat.dueMonths;
+        } else delete cat.dueMonths;
+        const day = Math.round(num(cat.dueDay));
+        if (Number.isFinite(day) && day >= 1 && day <= 31) cat.dueDay = day;
+        else delete cat.dueDay;
+        /* A month, guarded exactly like an account's since/until. */
+        if (typeof cat.dueHold !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.dueHold))
+          delete cat.dueHold;
+        /* Whether the money leaves the month BEFORE the bill is due. Stored
+           only when true — `false` and absent are the same claim here, and an
+           absent key keeps a row that has never been asked the question
+           exactly as it was. */
+        if (cat.duePayAhead === true) cat.duePayAhead = true;
+        else delete cat.duePayAhead;
+      }
+      /* ── The month the row stopped ─────────────────────────────────
+         `until` is the last month this row had money in it, and it is
+         deliberately the SAME key, the same shape and the same words an
+         ACCOUNT uses to say it was closed — two objects saying one thing,
+         and one vocabulary to learn. A month string or nothing: absent is
+         "still in use", and there is no second spelling of that (never
+         `false`, never `''` — the Firestore rule). Guarded exactly like
+         `dueHold` and `a.until` above it. */
+      if (typeof cat.until !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.until))
+        delete cat.until;
+      if (cat.section) continue;
+      if (looksLikeTransfer) { cat.section = 'transfer'; continue; }
+      let sum = 0;
+      for (const [key, cell] of Object.entries(yr.cells))
+        if (key.startsWith(cat.id + '|')) sum += (cell && cell.v) || 0;
+      cat.section = sum >= 0 ? 'income' : 'expense';
+    }
+  };
+
   d.years = obj(d.years);
   for (const y of Object.keys(d.years)) {
     const yr = obj(d.years[y]);
@@ -5469,297 +5783,8 @@ function coerceShape(data) {
       const n = rateOrNone(yr.eoyCash);
       if (typeof n === 'number') yr.eoyCash = n; else delete yr.eoyCash;
     }
-    if (yr.kind === 'grid') {
-      yr.categories = arr(yr.categories);
-      yr.cells = obj(yr.cells);
-      yr.paychecks = obj(yr.paychecks);
-      yr.seeds = obj(yr.seeds);
-      yr.overrides = obj(yr.overrides);
-      yr.balAdjust = obj(yr.balAdjust);
-      yr.extraNotes = Array.isArray(yr.extraNotes) ? yr.extraNotes : [];
-      yr.monthCount = Math.max(1, Math.min(36, +yr.monthCount || 12));
-      if (!/^\d{4}-\d{2}$/.test(yr.startMonth || '')) yr.startMonth = `${y}-01`;
-      /* A live year MUST carry enteredThrough: gridCard does
-         monthAdd(yr.enteredThrough, 1) unguarded, and a truncated backup
-         without it would throw inside render() — the empty-workbook failure
-         this function exists to prevent. The month before the year starts
-         means "nothing entered yet", which is what a blank year says. */
-      if (yr.model === 'live' && !/^\d{4}-\d{2}$/.test(yr.enteredThrough || ''))
-        yr.enteredThrough = monthAdd(yr.startMonth, -1);
-      /* The grid's own figures get the same treatment as every other money
-         map. Shapes were forced above; this forces the VALUES: cells, seeds,
-         overrides and paychecks reach the engine verbatim, and one string of
-         markup in a hand-edited backup would otherwise ride into the page raw
-         and turn every balance downstream into NaN. (`balAdjust`'s figures are
-         type-checked at their sink as well, but it carries prose now, so it
-         gets a pass of its own below.) */
-      for (const [k, cell] of Object.entries(yr.cells)) {
-        if (!cell || typeof cell !== 'object') { delete yr.cells[k]; continue; }
-        const cv = num(cell.v);
-        cell.v = typeof cv === 'number' ? cv : 0;
-        /* `missing` joined the list 2026-08-26 — a NOTE WITH NO FIGURE. It is
-           the engine's own word for "nothing recorded", and that is exactly
-           what such a cell records: the month is still blank, still unpaid,
-           still counted as outstanding; there is simply something written on
-           it. Without it here the boundary turned every one of them into a
-           STATED $0.00, which is the opposite claim — the bill came and it was
-           nothing — and the fix would have survived until the next reload. */
-        if (!['actual', 'manual', 'mixed', 'missing'].includes(cell.kind)) cell.kind = 'actual';
-        /* One spelling of nothing. A `missing` cell exists only to carry its
-           note, so with nothing written on it there is nothing to keep, and no
-           figure and no parts can ride along under a kind that claims neither. */
-        if (cell.kind === 'missing') {
-          cell.v = 0;
-          delete cell.parts;
-          const note = typeof cell.note === 'string' ? cell.note.trim() : '';
-          if (!note) { delete yr.cells[k]; continue; }
-        }
-        if (Array.isArray(cell.parts)) {
-          cell.parts = cell.parts.filter(p => p && typeof p === 'object');
-          for (const p of cell.parts) {
-            const pv = num(p.v);
-            p.v = typeof pv === 'number' ? pv : 0;
-          }
-        } else delete cell.parts;
-      }
-      for (const [k, v] of Object.entries(yr.seeds)) {
-        const n = num(v);
-        if (typeof n === 'number') yr.seeds[k] = n; else delete yr.seeds[k];
-      }
-      for (const [k, ov] of Object.entries(yr.overrides)) {
-        /* A BALANCE MONTH'S NOTE LIVES ON `balAdjust`, NOT ON THE PIN (schema
-           9). It used to ride along on the override, which meant a note could
-           only exist where a balance had been stated: clear the amount, save,
-           and the words went with it — so "the statement came late" could only
-           be written down by first pinning a figure, which is a claim about the
-           account made to keep a sentence. The move happens here so that a plan
-           written before it comes forward on load, whichever door it came in
-           through. An existing note on the new side wins: that is the one the
-           editor has been writing since. */
-        if (ov && typeof ov === 'object') {
-          const carried = typeof ov.note === 'string' ? ov.note.trim() : '';
-          if (carried) {
-            const adj = yr.balAdjust[k] = obj(yr.balAdjust[k]);
-            if (!(typeof adj.note === 'string' && adj.note.trim())) adj.note = carried;
-          }
-          delete ov.note;
-        }
-        /* Read STRICTLY (rateOrNone), not through num(): an override PINS a
-           balance, and num would turn a corrupt field into a deliberate-
-           looking $0 statement. One that states no figure states nothing —
-           dropped, the same way the balance editor deletes a cleared one. */
-        const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
-        if (typeof n === 'number') ov.v = n; else delete yr.overrides[k];
-      }
-      /* THREE FIELDS AND NO MORE: what the month earned, what it paid out, and
-         the note. The two figures read STRICTLY for the override's reason — a
-         corrupt field must not become a stated $0, which the engine would read
-         as "the rate produced nothing this month" — and the note is trimmed,
-         absent rather than blank, like every other optional string in here.
-         An entry left holding none of the three is dropped: an empty one still
-         keeps its account's row on screen, which is a row with nothing in it.
-         (A no-notes share link makes exactly those: `stripNotes` walks the
-         whole payload, and a note-only month comes out of it as `{}`.) */
-      for (const [k, raw] of Object.entries(yr.balAdjust)) {
-        const was = obj(raw);
-        const adj = {};
-        const int = rateOrNone(was.interest), div = rateOrNone(was.dividend);
-        if (typeof int === 'number') adj.interest = int;
-        if (typeof div === 'number') adj.dividend = div;
-        const note = typeof was.note === 'string' ? was.note.trim() : '';
-        if (note) adj.note = note;
-        if (Object.keys(adj).length) yr.balAdjust[k] = adj;
-        else delete yr.balAdjust[k];
-      }
-      /* AND ONLY FOR THE MONTHS THIS YEAR SHOWS. A count is keyed by month,
-         and until 2026-09-11 nothing asked whether that month belonged to the
-         year holding it. An import whose Paychecks row ran wider than the year
-         it built — Charlie's sheet carried 24 columns into a 12-month 2026 —
-         left twelve counts for 2027 sitting inside 2026, where no grid renders
-         them and no cell editor can reach them.
-         They were not inert. `rolloverYear` seeds a new year by reading the
-         OLD year's map at the NEW year's months, so every rebuild of 2027
-         copied the whole hidden block straight back in, a 3.5 in February
-         included. Deleting the year and recreating it — which he did many
-         times — fixed the copy and never touched the original, so the figure
-         came back every time and there was nowhere to go and look at it.
-         The carry-forward itself stays: a year whose grid genuinely reaches
-         into the next one holds those months in its OWN span, which is the
-         shape the feature was written for and the one its test pins. What goes
-         is the block no reader can see. With it gone a rebuilt year falls back
-         through `resolvePaychecks` to the same month last year, which is the
-         answer the hidden block was standing in the way of. */
-      const shownMonths = new Set(yearMonths(yr));
-      for (const [m, v] of Object.entries(yr.paychecks)) {
-        const n = num(v);
-        if (typeof n === 'number' && shownMonths.has(m)) yr.paychecks[m] = n;
-        else delete yr.paychecks[m];
-      }
-      /* What a FROZEN year was before it was frozen — the balances it stated
-         by hand (the freeze wrote all the others) and whether the end-of-year
-         figure was stamped at the same time. It exists so "Re-open as live"
-         can put the year back exactly, which is why only a year the app froze
-         carries one: an IMPORTED history year states its balances outright and
-         has no chain to go back to, so it is never offered the button.
-         A marker that can't say what the year was entered through can't
-         restore anything, so it goes rather than half-works — the year stays
-         frozen, which is what the reader sees anyway. */
-      const pf = obj(yr.pinnedFrom);
-      if (yr.model === 'live' || !/^\d{4}-\d{2}$/.test(pf.enteredThrough || ''))
-        delete yr.pinnedFrom;
-      else {
-        pf.overrides = obj(pf.overrides);
-        for (const [k, ov] of Object.entries(pf.overrides)) {
-          const n = ov && typeof ov === 'object' ? rateOrNone(ov.v) : undefined;
-          if (typeof n === 'number') ov.v = n; else delete pf.overrides[k];
-        }
-        pf.eoyStamped = !!pf.eoyStamped;
-        /* The typed counts Re-open restores: a number per month, nothing else.
-           Absent on a year frozen before 2026-09-17, which `pinnedToLive`
-           reads as "the stamped map is the typed one". */
-        if (pf.paychecks !== undefined) {
-          pf.paychecks = obj(pf.paychecks);
-          for (const [m, v] of Object.entries(pf.paychecks)) {
-            const n = rateOrNone(v);
-            if (typeof n === 'number' && /^\d{4}-\d{2}$/.test(m)) pf.paychecks[m] = n;
-            else delete pf.paychecks[m];
-          }
-        }
-        yr.pinnedFrom = pf;
-      }
-      /* Rows classify into Income / Expenses / Transfers sections. Data from
-         before sections existed gets a one-time guess here — transfer roles
-         by role, everything else by the sign of what's stored — which sticks
-         on the next save, so a hand-picked section is never re-guessed. */
-      for (const cat of yr.categories) {
-        /* Pass-throughs on a bank account (the old "zelle" role) grouped as
-           transfers too; money paid straight out of investments (the old
-           "charitable" role) never did. */
-        const looksLikeTransfer = ['bankTransfer', 'midTransfer', 'longTransfer',
-          'zelle', 'transfer'].includes(cat.role);
-        Object.assign(cat, normRole(cat));   // one-time role → role + target
-        /* A dividends row written before the accounts were nameable earns on
-           the two the engine used to assume — but only the ones that still
-           exist, and only where the row says nothing yet. Absent means "never
-           asked"; an empty list is a decision, and re-filling it would argue
-           with the reader every time the app loaded. */
-        if (cat.rule === 'dividends' && !Array.isArray(cat.accounts))
-          cat.accounts = ['cash', 'mid'].filter(id => acctIds.has(id));
-        if (Array.isArray(cat.accounts))
-          cat.accounts = cat.accounts.filter(id => acctIds.has(id));
-        /* An overflow row names a source, a destination and a threshold. A
-           dangling account id is deleted — the row degrades to blank rather
-           than breaking, the goal-accounts rule — and the threshold is read
-           STRICTLY: num() would turn junk into 0, and a $0 threshold is a
-           real-looking claim ("sweep everything") the reader never made.
-           goalId is checked after the goals themselves are settled, below. */
-        /* How fast a growing row rises, read STRICTLY — the account.rate
-           discipline. num() would turn a corrupt field into 0%, which reads on
-           screen as a row somebody deliberately said does not rise, and the
-           whole point of the rule is that it does. Kept only while the row IS
-           a growing one, the way `every` and `perCheck` are. */
-        if (cat.rule === 'grow') {
-          const g = rateOrNone(cat.growth);
-          if (g !== undefined) cat.growth = g; else delete cat.growth;
-        } else delete cat.growth;
-        /* Whether the same-month rule keeps the cents instead of rounding to
-           the nearest dollar. Stored only when TRUE and only while the row is
-           a same-month one — `duePayAhead`'s discipline, and never `undefined`
-           (the Firestore rule). `false` and absent are one claim, so a plan
-           written before this field existed is byte for byte what it was: no
-           schema bump, no migration, the `dueMonths` precedent. */
-        if (cat.rule === 'samemonth' && cat.keepCents === true) cat.keepCents = true;
-        else delete cat.keepCents;
-        if (cat.rule === 'overflow') {
-          /* A sweep is a move between the reader's own accounts, whatever a
-             hand-edited file says: the editor already forces Transfers, and
-             filed under Expense the row would count its sweeps as spending
-             (review fix 3). */
-          cat.section = 'transfer';
-          if (!acctIds.has(cat.overflowFrom)) delete cat.overflowFrom;
-          if (!acctIds.has(cat.transferTo)) delete cat.transferTo;
-          const th = rateOrNone(cat.threshold);
-          if (th !== undefined) cat.threshold = th; else delete cat.threshold;
-          const cap = rateOrNone(cat.capAmount);
-          if (cap !== undefined) cat.capAmount = cap; else delete cat.capAmount;
-          /* The frozen measure lists a share link writes — a goal's account
-             set carried as plain ids so the recipient measures the same pot.
-             Dangling ids drop, and an emptied list is deleted outright:
-             absent falls back to the row's own end, which is the honest
-             degrade. */
-          for (const k of ['thresholdAccounts', 'capAccounts']) {
-            if (!Array.isArray(cat[k])) { delete cat[k]; continue; }
-            cat[k] = cat[k].filter(id => acctIds.has(id));
-            if (!cat[k].length) delete cat[k];
-          }
-        } else {
-          delete cat.overflowFrom; delete cat.goalId; delete cat.threshold;
-          delete cat.capGoalId; delete cat.capAmount;
-          delete cat.thresholdAccounts; delete cat.capAccounts;
-        }
-        /* Whose row it is — a second earner's paycheck, tagged so take-home
-           can be read per person. Only ever a label; the engine sums the
-           household's rows regardless. */
-        if (cat.person && !peopleIds.has(cat.person)) delete cat.person;
-        /* ── When the bill is due ──────────────────────────────────────
-           Display and reminders only: the engine never reads any of this, so a
-           corrupt schedule can make the page quieter but can never move a
-           figure. `duePay` is the MARKER — a row either carries one of the two
-           words or carries no schedule at all — which is why a bad one deletes
-           the other three rather than leaving a half-schedule behind. The same
-           delete-when-inapplicable discipline the overflow block above uses,
-           and never `undefined` (the Firestore rule).
-
-           Every part is read STRICTLY. `dueDay` through a plain num() would
-           turn junk into 0 and 0 has no honest reading — the 1st? the last? —
-           and an EMPTY `dueMonths` would say "never due", which is a different
-           claim from the absent list's "due every month". Junk deletes, and
-           the field falls back to its absent meaning. */
-        if (!DUE_PAY.includes(cat.duePay)) {
-          delete cat.duePay; delete cat.dueMonths;
-          delete cat.dueDay; delete cat.dueHold; delete cat.duePayAhead;
-        } else {
-          if (Array.isArray(cat.dueMonths)) {
-            const ms = [...new Set(cat.dueMonths
-              .map(n => Math.round(num(n)))
-              .filter(n => Number.isFinite(n) && n >= 1 && n <= 12))].sort((x, y) => x - y);
-            /* All twelve IS "every month", which is what an absent list already
-               says — storing both spellings would give the same schedule two
-               shapes for a test and a share link to disagree over. */
-            if (ms.length && ms.length < 12) cat.dueMonths = ms;
-            else delete cat.dueMonths;
-          } else delete cat.dueMonths;
-          const day = Math.round(num(cat.dueDay));
-          if (Number.isFinite(day) && day >= 1 && day <= 31) cat.dueDay = day;
-          else delete cat.dueDay;
-          /* A month, guarded exactly like an account's since/until. */
-          if (typeof cat.dueHold !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.dueHold))
-            delete cat.dueHold;
-          /* Whether the money leaves the month BEFORE the bill is due. Stored
-             only when true — `false` and absent are the same claim here, and an
-             absent key keeps a row that has never been asked the question
-             exactly as it was. */
-          if (cat.duePayAhead === true) cat.duePayAhead = true;
-          else delete cat.duePayAhead;
-        }
-        /* ── The month the row stopped ─────────────────────────────────
-           `until` is the last month this row had money in it, and it is
-           deliberately the SAME key, the same shape and the same words an
-           ACCOUNT uses to say it was closed — two objects saying one thing,
-           and one vocabulary to learn. A month string or nothing: absent is
-           "still in use", and there is no second spelling of that (never
-           `false`, never `''` — the Firestore rule). Guarded exactly like
-           `dueHold` and `a.until` above it. */
-        if (typeof cat.until !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cat.until))
-          delete cat.until;
-        if (cat.section) continue;
-        if (looksLikeTransfer) { cat.section = 'transfer'; continue; }
-        let sum = 0;
-        for (const [key, cell] of Object.entries(yr.cells))
-          if (key.startsWith(cat.id + '|')) sum += (cell && cell.v) || 0;
-        cat.section = sum >= 0 ? 'income' : 'expense';
-      }
-    } else {
+    if (yr.kind === 'grid') coerceGridYear(yr, y);
+    else {
       yr.kind = 'summary';
       yr.categoryTotals = arr(yr.categoryTotals);
     }
