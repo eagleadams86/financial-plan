@@ -6072,6 +6072,31 @@ suite — it turns "untested" into "verified". **If a test passes when you expec
 it to fail, check `document.getElementById('app').contentWindow` has the function
 you just wrote before believing anything.** `api.github.com` is deliberately left
 un-busted: somebody else's endpoint, not a file we serve.
+**A TEST FRAME IS ASKED FOR BY ITS VIEWPORT, NOT BY ITS BOX** (2026-09-20).
+`auditFrame(375, 812)` means a SCREEN 375px wide — what the media queries answer
+to and what every `100%` inside resolves against — and it was written as a 375px
+ELEMENT, which is the same thing only where a scrollbar takes no room. macOS and
+CI's headless Chromium draw OVERLAY scrollbars (0px); a Chromium drawing CLASSIC
+ones takes 15px out of the inside of every frame, and **five tests went red at
+once while the app was right in all five** — a docked calculator "failing" to
+reach 1280 by landing at 1265, a sheet "failing" to be 900 wide by being 885.
+`scrollbarW()` measures it once off a probe in the suite's own document and
+`frameBox(w)` widens the box by it, so the viewport is the width that was asked
+for; both are 0 in CI, where every frame stays byte for byte what it was. **Size
+it BEFORE the frame loads**: a first cut corrected the width afterwards, and
+resizing a loaded frame fires the app's own resize path (`syncCalcSheet`,
+`syncDockAttr`, the tab row's nudge) in the middle of a test that was not
+expecting one — it broke two unrelated tests. The four places a test narrows a
+frame live to watch a media query fire take the same arithmetic.
+**A `:focus-visible` assertion is modality-dependent and cannot be forced.**
+`wireScrollRow`'s reveal is guarded by `:focus-visible` on purpose — a mouse
+click must not yank a half-visible tab out from under the pointer — and a
+script's `.focus()` matches that guard only where the browser is in KEYBOARD
+modality. CI is; a Chromium whose page has been clicked in is not, and there the
+handler is right not to fire. `focus({ focusVisible: true })` is not honoured.
+The test asks `matches(':focus-visible')` and asserts the half of the rule it is
+in, which is one more guarantee than the unconditional version had.
+
 **A test must never depend on the app's AMBIENT state.** The harness frames the
 real `index.html`, so the app inside it loads whatever is in that browser's
 `fin-state` — and while testing a feature by hand that is routinely Charlie's
