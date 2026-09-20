@@ -2132,7 +2132,14 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
    else, so the way back steps aside: the underscore still marks now, and the
    arrows still walk there. */
 .now-short { display: none; }
+/* The Previous chip is the one chip whose label is a WORD rather than four
+   digits, so it is the one that runs out of rail first — the `.now-short`
+   answer, applied to the same problem one control along. The accessible name
+   is unchanged either way: it already names the years the chip stands for. */
+.prev-short { display: none; }
 @media (max-width: 430px) {
+  .prev-long { display: none; }
+  .prev-short { display: inline; }
   .viewswitch { margin-right: 6px; }
   .viewswitch .vswitch { padding: 4px 6px; }
   .yearchip { padding: 6px 8px; }
@@ -10704,28 +10711,37 @@ function sampleState() {
           { name: 'Brokerage', total: 41900, isBalance: true },
           { name: "Mia's 529", total: 8600, isBalance: true },
         ] },
-        [PREV]: { kind: 'summary', categoryTotals: [
-          { name: 'Rosa — paycheck', total: 62400 },
-          { name: 'Ben — paycheck', total: 33600 },
-          { name: 'Interest & Dividends', total: 1480 },
-          { name: 'Mortgage', total: -25320 },
-          { name: 'Childcare', total: -12600 },
-          { name: 'Groceries', total: -11520 },
-          { name: 'Everything else', total: -6940 },
-          { name: 'Transport', total: -4320 },
-          { name: 'Insurance', total: -3180 },
-          { name: 'Dining out', total: -3180 },
-          { name: 'Utilities', total: -2940 },
-          /* And a note on a SUMMARY row, the other table where a note hangs off
-             a row — on the row that stops, where the obvious question is why. */
-          { name: 'Holiday club', total: -1150,
-            note: 'The last year we needed it — Mia was old enough after that.' },
-          { name: 'Everyday', total: 4800, isBalance: true },
-          { name: 'Savings', total: 15600, isBalance: true },
-          { name: 'Emergency fund', total: 7300, isBalance: true },
-          { name: 'Brokerage', total: 52400, isBalance: true },
-          { name: "Mia's 529", total: 11400, isBalance: true },
-        ] },
+        /* PREV IS BUILT AS A YEAR AND THEN FOLDED, by the app's own
+           `gridToSummary` at the foot of this function — not written out as
+           totals like PREV2 above. That is what puts the whole of the fold in
+           the demo: a Previous Years page with two cards rather than one, a
+           read-only folded card beside an editable imported one, a live
+           "Re-open 2025 as a Year" button, a Growth block (the Brokerage
+           account already earns its rate as growth), and a summary CSV that
+           names each row's block. A hand-typed stash would be the one thing
+           in the sample that could drift from what the app actually produces.
+
+           The figures come out EXACTLY where they were typed before: each
+           row's total is spread across its twelve months with the remainder in
+           December, and the closing balances are stated on December. The row
+           NAMES still match the live grid's, which is how a summary year lines
+           up beside one (a summary has no row ids, so the match is by name),
+           and `Holiday club` is still the row that existed then and does not
+           now — carrying the note that says why. */
+        [PREV]: foldSampleYear(PREV, [
+          ['Rosa — paycheck', 'income', 62400],
+          ['Ben — paycheck', 'income', 33600],
+          ['Mortgage', 'expense', -25320],
+          ['Childcare', 'expense', -12600],
+          ['Groceries', 'expense', -11520],
+          ['Everything else', 'expense', -6940],
+          ['Transport', 'expense', -4320],
+          ['Insurance', 'expense', -3180],
+          ['Dining out', 'expense', -3180],
+          ['Utilities', 'expense', -2940],
+          ['Holiday club', 'expense', -1150,
+            'The last year we needed it — Mia was old enough after that.'],
+        ]),
         [y]: {
           kind: 'grid', model: 'live',
           startMonth: `${Y}-01`, monthCount: 12,
@@ -10990,7 +11006,60 @@ function sampleState() {
       },
       ui: { activeYear: y, activeTab: 'budget', collapsed: [] },
     };
+  /* The fold itself, once `state` exists — `gridToSummary` reads the plan's
+     accounts to write the balance and growth rows, so it cannot run inside the
+     literal above. `foldSampleYear` left a grid year there; this makes it the
+     summary the demo shows, through the same function the button calls. */
+  state.years[String(PREV)] = gridToSummary(state, String(PREV));
   return state;
+}
+
+/* One history year as a GRID, ready to be folded — see the note by PREV above.
+   Each row's total is spread evenly across the twelve months with the
+   remainder landing in December, so the year's totals are to the cent what
+   they were when they were typed out by hand. The earnings are stated rather
+   than computed, which is what a pinned year does: interest on the three
+   accounts that pay it, and the Brokerage's rate as GROWTH, which is the row
+   this demo exists to show. */
+function foldSampleYear(yy, rows) {
+  const Yq = String(yy);
+  const months = Array.from({ length: 12 }, (_, i) => `${Yq}-${String(i + 1).padStart(2, '0')}`);
+  const categories = [], cells = {};
+  for (const [name, section, total, note] of rows) {
+    const id = slugJs(name);
+    const cat = { id, name, section, rule: 'none', role: 'normal' };
+    if (note) cat.note = note;
+    categories.push(cat);
+    const each = round2(total / 12);
+    let run = 0;
+    months.forEach((mm, i) => {
+      const v = i === 11 ? round2(total - run) : each;
+      run = round2(run + v);
+      cells[`${id}|${mm}`] = { v, kind: 'actual' };
+    });
+  }
+  const dec = `${Yq}-12`;
+  return {
+    kind: 'grid', model: 'pinned',
+    startMonth: `${Yq}-01`, monthCount: 12, enteredThrough: dec,
+    categories, cells, paychecks: {},
+    /* Where the year opened — the year before it closed here. */
+    seeds: { cash: 4100, mid: 12800, emergency: 5400, long: 41900, college: 8600 },
+    overrides: {
+      [`cash|${dec}`]: { v: 4800 }, [`mid|${dec}`]: { v: 15600 },
+      [`emergency|${dec}`]: { v: 7300 }, [`long|${dec}`]: { v: 52400 },
+      [`college|${dec}`]: { v: 11400 },
+    },
+    balAdjust: {
+      [`mid|${dec}`]: { interest: 620 },
+      [`emergency|${dec}`]: { interest: 300 },
+      [`college|${dec}`]: { interest: 560 },
+      /* The Brokerage earns `growth`, so this figure is NOT income and folds
+         into a Growth row of its own rather than into Interest & Dividends. */
+      [`long|${dec}`]: { interest: 9200 },
+    },
+    extraNotes: [],
+  };
 }
 
 /* Offered on the welcome card only, which is the one place there is nothing to
@@ -11109,7 +11178,9 @@ function yearPickerHtml(active) {
       class="yearchip${summary ? ' y-summary' : ''}${future ? ' y-future' : ''}${
       isNow ? ' chip-now' : ''}"
       aria-checked="${on ? 'true' : 'false'}" tabindex="${on ? 0 : -1}"
-      aria-label="${esc(label)}" title="${esc(label)}">${summary ? 'Previous' : esc(y)}</button>`;
+      aria-label="${esc(label)}" title="${esc(label)}">${summary
+        ? '<span class="prev-long">Previous</span><span class="prev-short">Prev</span>'
+        : esc(y)}</button>`;
   }).join('');
   /* "This year", the month strip's button in the other lens, and it appears on
      the same condition: only when this year is IN the strip and you are not

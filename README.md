@@ -272,8 +272,10 @@ Picking a month moves the Year lens to that month's year, and opening the Month
 lens over a year you are not already inside lands you in it — so switching
 lenses shows you the same place differently rather than losing it.
 
-A year kept as a **yearly summary** has no months in it, so the Month lens sends
-you back to Year for those.
+A year kept as a **yearly summary** shows no months, so the Month lens sends you
+back to Year for those. A year you folded yourself still HAS its months — they
+are kept, and re-opening the year brings them back — but while it is folded the
+Month lens has nothing to draw.
 
 ### How a Row Projects Itself
 
@@ -805,10 +807,17 @@ End-of-year figure**.
 Nothing is lost either way. **↩ Re-open as live** puts the year back to a
 computed one, including any balance you'd stated by hand.
 
-A finished year can also be **converted to a yearly summary** — permanent; the
-Progress charts carry on unchanged, each account keeps its end-of-year balance
-as a balance row, and whatever the year stated it earned folds into one
-"Interest & Dividends" row among the flows — or deleted outright. It holds its account balances
+A finished year can also be **folded into Previous Years** — one total per row,
+each account showing its end-of-year balance, whatever the year stated it earned
+as one "Interest & Dividends" row, and whatever grew on paper as a **Growth**
+row of its own, stated but never counted as income. The Progress charts carry on
+unchanged. **Nothing is lost: the months are kept.** While the year is folded
+its rows read but do not edit — it is a view of the year behind it, so a total
+typed there would be thrown away — and **↩ Re-open ⟨year⟩ as a Year** puts every
+figure, note, split and stated balance back exactly as it was. History folds
+oldest first and re-opens newest first, so the folded years stay one unbroken
+block at the front of the plan and Previous Years is one page rather than a
+chip each. A year can be deleted outright too. A folded or imported year holds its account balances
 as figures you stated at the time rather than a chain to recompute, and an
 account you've since closed stops at its last month instead of following you
 into later years.
@@ -1923,8 +1932,9 @@ the top and at both ends). And whether or not anything is pinned, a control
 you reach with Tab or Shift+Tab is scrolled to just below the header and any
 pinned bars, never behind them.
 
-A year kept as a yearly summary is set in italics, one built before it has
-started is underlined with dots, **this year carries an underscore** wherever it
+Every folded and imported year stands as one **Previous** chip at the oldest end
+of the strip, set in italics, and opens one page with a card per year, newest at
+the top. A year built before it has started is underlined with dots, **this year carries an underscore** wherever it
 has got to in the strip, and hovering any of them says which in words. A **This
 Year** button sits at the right-hand end — greyed out while you're on this year,
 live once you have wandered off it, the Month lens's button on the same terms —
@@ -1966,9 +1976,10 @@ itself.)
 The **year rail, the month rail and the Year / Month switch are the exception,
 on purpose**: press 2025, then 2024, then Mar 26 and the page stays exactly
 where it is, because that is a comparison — you are reading the same rows while
-the figures change under them. (A year kept as a yearly summary is a single
-short card, so there is simply less page to hold; that is the window, not the
-app moving you.) Every other control that changes what a view is showing rather
+the figures change under them. (Previous Years is a stack of short cards rather
+than a grid, so there is simply less page to hold; that is the window, not the
+app moving you. A Find result in one of those years scrolls to that year's own
+card rather than the top of the stack.) Every other control that changes what a view is showing rather
 than which view you are on — the **This Year** button, the ‹ › arrows, the
 switches inside a card — holds the page in the same way.
 
