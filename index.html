@@ -5345,6 +5345,13 @@ function coerceTaxBands(list) {
    is deciding about ids that are already in shape. */
 const ID_OK = /^[A-Za-z0-9_-]{1,64}$/;
 
+/* The one summary row that is DERIVED rather than folded from something — what
+   the year's accounts earned, which no category and no account owns. It needs an
+   id like every other row (see `gridToSummary`), and the underscore is what
+   makes it unownable: `slugJs` emits only `[a-z0-9-]`, so no id this app ever
+   mints from a name can collide with it, while ID_OK still admits it. */
+const EARNED_ROW_ID = '_earned';
+
 function cleanId(raw, fallback) {
   const s = (raw === null || raw === undefined) ? '' : String(raw);
   if (ID_OK.test(s)) return s;
@@ -5469,12 +5476,32 @@ function normalizeIds(d) {
     remapKeys(yr.seeds, movedAcct);
   };
 
+  /* A FOLDED year's rows hold the id of the category or account each was folded
+     from, so an id repaired on the way in has to move them too — the very trap
+     `oneYear(yr.foldedFrom)` exists to close, one level up: miss it and the card
+     names an id nothing answers to, invisibly, because the card draws the NAME.
+     Read after the stash, which is where a folded year's `movedCat` comes from:
+     the summary has no categories of its own, and `oneYear` clears the map at
+     its start, so what is in hand here is the stash's.
+     Gated on the STASH, not on `categoryTotals`: an imported summary's ids — if
+     a reader ever added a row to one — came out of `uniqueId` over that list
+     and belong to no namespace this pass moves. */
+  const summaryRowIds = (yr) => {
+    if (!yr.foldedFrom || !Array.isArray(yr.categoryTotals)) return;
+    for (const it of yr.categoryTotals) {
+      if (!it || typeof it !== 'object' || it.id === undefined || it.id === null) continue;
+      const moved = (it.isBalance || it.isGrowth) ? movedAcct : movedCat;
+      if (moved.has(String(it.id))) it.id = moved.get(String(it.id));
+    }
+  };
+
   const years = (d.years && typeof d.years === 'object') ? d.years : {};
   for (const y of Object.keys(years)) {
     const yr = years[y];
     if (!yr || typeof yr !== 'object') continue;
     oneYear(yr);
     oneYear(yr.foldedFrom);
+    summaryRowIds(yr);
   }
 }
 
@@ -5957,6 +5984,18 @@ function coerceShape(data) {
          NaN across the card. Read like every other figure here, and the two
          flags held to one answer: a row is a balance, or growth, or a flow —
          never two of them, whatever a file says. */
+      /* A ROW'S ID is read like every other one — ID_OK or nothing at all — and
+         is DROPPED rather than repaired when a second row of the same KIND
+         claims it. Two rows answering to one id is worse than two rows with no
+         id: the second is what the id exists to tell apart, and a renumbered
+         `other-2` would be a claim this file never made. Kind-by-kind because a
+         flow's id comes from a category and a balance's from an account, and
+         those two namespaces may legitimately agree.
+         NEVER MINTED HERE, unlike `side.property`'s: an imported summary's rows
+         have no identity to state, and minting from their names would hand a
+         year ids that look meaningful and are not. `gridToSummary` and the row
+         editor are the two places that know what a row actually is. */
+      const idSeen = new Set();
       for (const it of yr.categoryTotals) {
         it.name = String(it.name || '');
         const n = num(it.total);
@@ -5964,6 +6003,12 @@ function coerceShape(data) {
         if (it.isBalance) { it.isBalance = true; delete it.isGrowth; }
         else if (it.isGrowth) { it.isGrowth = true; delete it.isBalance; }
         else { delete it.isBalance; delete it.isGrowth; }
+        if (it.id !== undefined) {
+          const id = String(it.id);
+          const key = `${it.isBalance ? 'bal' : it.isGrowth ? 'grow' : 'flow'}|${id}`;
+          if (ID_OK.test(id) && !idSeen.has(key)) { it.id = id; idSeen.add(key); }
+          else delete it.id;
+        }
         if (typeof it.note === 'string' && it.note.trim()) it.note = it.note.trim();
         else delete it.note;
       }
@@ -20645,7 +20690,8 @@ function categorySpend(yr, computed, y) {
 /* Two years' worth of that, lined up by ROW rather than by position — matched
    on the row id where both years are grids (a rename then follows the row
    rather than splitting it in two) and on the NAME where either side is a
-   summary, which is the only handle those years have.
+   summary, which is the only handle those years have — a repeat of a name being
+   numbered, so two rows called the same thing stay two rows.
 
    Sorted by this year's figure, biggest first, with anything that spent nothing
    in EITHER year dropped: a row that has never been used is not a finding, and
@@ -20658,20 +20704,46 @@ function spendingMix(st, computed, y, prevY) {
   const now = categorySpend(yr, (computed || {})[y], y);
   const prevYr = prevY && (st.years || {})[prevY];
   const before = prevYr ? categorySpend(prevYr, (computed || {})[prevY], prevY) : [];
-  const key = (r) => (r.id === null ? `name:${r.name.trim().toLowerCase()}` : `id:${r.id}`);
-  /* A summary year has no ids, so a grid year beside one has to fall back to
-     names on BOTH sides or nothing would ever match. Decided once, up here,
-     rather than per row — a mixed answer would match half a table. */
+  /* A summary year has no ids a comparison can use — `gridToSummary` stamps the
+     row's own, but the history import minted them per SHEET, so the same real row
+     drifts (a utility row carries its supplier's name as an id for nine years
+     and a plain one after that) and matching on them would read a rename as one
+     row ending and another starting. So a grid year beside a summary falls back
+     to names on BOTH sides. Decided once, up here, rather than per row — a mixed
+     answer would match half a table. */
   const byName = now.some(r => r.id === null) || before.some(r => r.id === null);
-  const k = (r) => (byName ? `name:${r.name.trim().toLowerCase()}` : key(r));
-  const prevBy = new Map(before.map(r => [k(r), r.total]));
+  const base = (r) => (byName || r.id === null
+    ? `name:${r.name.trim().toLowerCase()}` : `id:${r.id}`);
+  /* ONE KEY PER ROW, worked out once per list and held by reference, because a
+     NAME does not have to be unique and an id does. A summary year can call two
+     rows the same thing — a transfer row and the account it pays into share the
+     savings row's name in every year Charlie folded — and a flat name key made
+     them one row: the second never reached the table while its money stayed in the
+     total above it, so the lines stopped adding up to the figure they were a
+     breakdown of. The repeat is NUMBERED instead, which gives it a line of its
+     own and still pairs the two years row for row, since both sides are
+     numbered the same way. An id branch numbers nothing — ids are already
+     unique within a year, kind by kind. */
+  const keysOf = (rows) => {
+    const at = new Map(), used = new Map();
+    for (const r of rows) {
+      const b = base(r);
+      const n = (used.get(b) || 0) + 1;
+      used.set(b, n);
+      at.set(r, n > 1 ? `${b}#${n}` : b);
+    }
+    return at;
+  };
+  const kNow = keysOf(now), kPrev = keysOf(before);
+  const prevBy = new Map(before.map(r => [kPrev.get(r), r.total]));
   const total = round2(now.reduce((t, r) => t + r.total, 0));
   const prevTotal = round2(before.reduce((t, r) => t + r.total, 0));
   const seen = new Set();
   const rows = [];
   for (const r of now) {
-    seen.add(k(r));
-    const was = prevBy.has(k(r)) ? prevBy.get(k(r)) : null;
+    const k = kNow.get(r);
+    seen.add(k);
+    const was = prevBy.has(k) ? prevBy.get(k) : null;
     if (!r.total && !was) continue;
     rows.push({ id: r.id, name: r.name, total: r.total, was,
       change: was === null ? null : round2(r.total - was),
@@ -20680,7 +20752,7 @@ function spendingMix(st, computed, y, prevY) {
   /* A row that existed last year and is gone from this one still spent money,
      and dropping it would make the two columns describe different tables. */
   for (const r of before) {
-    if (seen.has(k(r)) || !r.total) continue;
+    if (seen.has(kPrev.get(r)) || !r.total) continue;
     rows.push({ id: r.id, name: r.name, total: 0, was: r.total,
       change: round2(-r.total), share: total ? 0 : null });
   }
@@ -21118,12 +21190,38 @@ function rolloverYear(st, computed, fromKey) {
    contributes no row, the same rule the pinned grid draws by — so a converted
    year shows the same balances the grid did, just once instead of monthly
    (what the imported 2011–2019 summaries always had). Pure state-in,
-   value-out so tests can pin it. */
+   value-out so tests can pin it.
+
+   EVERY ROW CARRIES THE ID OF WHAT IT WAS FOLDED FROM (2026-09-20) — the
+   category for a flow, the account for a balance or a growth row, and
+   `EARNED_ROW_ID` for the one row that is derived from neither. Found by
+   comparing eight of Charlie's own exports: a flat list of names loses a
+   distinction the grid had, because a transfer row and the account it pays into
+   are called the same thing — the savings row is BOTH a flow and a balance in
+   every one of 2012–2015, with the same figure in both — and a reader with only
+   the name in hand sees one row where there are two. `foldedFrom` holds the
+   answer today, but it is the stash's job to restore the year, not to say what a
+   row on the card IS.
+
+   THE ID IS THE ROW'S IDENTITY WITHIN ITS OWN YEAR, and deliberately not a
+   handle for matching years to each other — see `spendingMix`, which goes on
+   matching summary rows by NAME. The history import minted an id per sheet from
+   whatever that sheet's wording was, so the same real row drifts: a utility row
+   carries its supplier's name as an id for nine years and a plain one from 2021,
+   another moves between three spellings of the same thing and back. Fourteen of
+   the fifteen year boundaries in the real plan carry at least one such move.
+   Keying a comparison on these would read those years as a row ending and
+   another beginning.
+
+   The id pairs with the row's KIND, never stands alone: a category and an
+   account are two namespaces, so a flow and a balance may hold the same string
+   and still be different rows. Every reader already asks `isBalance`/`isGrowth`
+   first, which is what makes one field enough. */
 function gridToSummary(st, y) {
   const yr = st.years[y];
   const months = yearMonths(yr).filter(m => m.startsWith(y));
   const categoryTotals = yr.categories.map(cat => {
-    const row = { name: cat.name,
+    const row = { id: cat.id, name: cat.name,
       total: round2(months.reduce((s, m) => s + (yr.cells[`${cat.id}|${m}`]?.v || 0), 0)) };
     if (cat.note) row.note = cat.note;
     return row;
@@ -21146,7 +21244,8 @@ function gridToSummary(st, y) {
       ? t + (typeof adj.interest === 'number' && !growthAcct(k) ? adj.interest : 0)
           + (typeof adj.dividend === 'number' ? adj.dividend : 0)
       : t, 0));
-  if (earned) categoryTotals.push({ name: 'Interest & Dividends', total: earned });
+  if (earned) categoryTotals.push({ id: EARNED_ROW_ID, name: 'Interest & Dividends',
+    total: earned });
   /* GROWTH GETS A ROW OF ITS OWN (2026-09-20), one per account that made any.
      It used to be the one thing a fold genuinely destroyed: a summary had two
      kinds of row, flows and balances, and appreciation is neither, so the
@@ -21168,7 +21267,7 @@ function gridToSummary(st, y) {
     const t = round2(Object.entries(yr.balAdjust || {}).reduce((s, [k, adj]) =>
       k.startsWith(a.id + '|') && own.has(k.slice(k.indexOf('|') + 1))
         && typeof adj.interest === 'number' ? s + adj.interest : s, 0));
-    if (t) categoryTotals.push({ name: a.name, total: t, isGrowth: true });
+    if (t) categoryTotals.push({ id: a.id, name: a.name, total: t, isGrowth: true });
   }
   for (const a of accountsOf(st)) {
     let last = null;
@@ -21176,7 +21275,7 @@ function gridToSummary(st, y) {
       if ((yr.overrides || {})[`${a.id}|${m}`] !== undefined) last = m;
     if (last === null) continue;
     const ov = yr.overrides[`${a.id}|${last}`];
-    const row = { name: a.name, total: round2(ov.v || 0), isBalance: true };
+    const row = { id: a.id, name: a.name, total: round2(ov.v || 0), isBalance: true };
     const note = balNoteOf(yr, a.id, last);
     if (note) row.note = note;
     categoryTotals.push(row);
@@ -26530,7 +26629,19 @@ const EDITORS = {
     get: (ds) => state.years[ds.year].categoryTotals[+ds.idx],
     save(ds, v) {
       const list = state.years[ds.year].categoryTotals;
-      const row = { name: v.name || '', total: v.total ?? 0 };
+      const prev = ds.idx !== undefined ? list[+ds.idx] : null;
+      /* THE ID IS CARRIED BY HAND for exactly the reason `isGrowth` is, and was
+         missed on the first pass for exactly the reason too: this rebuilds the
+         row from the form, and the form does not ask. A rename would otherwise
+         drop the row's identity at the one moment the name stops being a way to
+         find it. A NEW row MINTS one — two rows a reader calls the same thing
+         really are two rows, and on an imported summary the id is the only thing
+         that will say so. An EXISTING row that never had one keeps it that way:
+         it is the same row it always was, and a minted id would be the app
+         making up an identity for a year it only ever read. */
+      const id = prev ? prev.id : uniqueId(list, v.name, 'row');
+      const row = id === undefined ? { name: v.name || '', total: v.total ?? 0 }
+        : { id, name: v.name || '', total: v.total ?? 0 };
       if (v.isBalance) row.isBalance = true;
       /* Carried by hand off the STORED row, because this rebuilds the row from
          the form and the form never asks: a growth row saved here would come
@@ -26540,8 +26651,7 @@ const EDITORS = {
          the only way here is a summary whose stash was dropped; ticking "this
          is a balance" still moves the row out of growth, since the two flags
          are never both. */
-      else if (ds.idx !== undefined && list[+ds.idx] && list[+ds.idx].isGrowth)
-        row.isGrowth = true;
+      else if (prev && prev.isGrowth) row.isGrowth = true;
       if (v.note) row.note = v.note;
       if (ds.idx !== undefined) list[+ds.idx] = row;
       else list.push(row);
@@ -33467,7 +33577,7 @@ applyPin(savedPin());
 
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
-window.__finTestHooks = { SCHEMA, DEFAULT_TAGLINE, round2, roundTo, roundToDollar,
+window.__finTestHooks = { SCHEMA, EARNED_ROW_ID, DEFAULT_TAGLINE, round2, roundTo, roundToDollar,
   EDITORS,
   /* Closing a month (2026-09-19). */
   closeChecklist, stampDay, coerceExported, stripStamps, carryExported,
