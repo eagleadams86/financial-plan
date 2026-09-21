@@ -21900,7 +21900,34 @@ function wireView(view) {
    landing it just clear of the pinned label column. Instant, never smooth: an
    animated scroll is a silent no-op in some engines. A history year has no
    `th.now`, a grid that fits whole never scrolls, and a folded box measures
-   zero wide — all three fall out of the guards. */
+   zero wide — all three fall out of the guards.
+
+   ── THE SIXTH THING CSS ZOOM BREAKS (2026-09-21) ──────────────────────────
+   Charles, on a half-screen window at 95%: "at this width, when switching to
+   year view, the current month is scrolled off the page" — then, before anyone
+   had finished guessing: "it's the zoom".
+
+   The same two coordinate spaces pinGridHeader() and zoomedSize() were caught
+   mixing, in the third place they meet. getBoundingClientRect() reports SCREEN
+   pixels, with the page zoom already in them; `scrollLeft` is written in the
+   element's OWN layout pixels, which the zoom then multiplies. The distance
+   worked out from the two rectangles is therefore `zoom` times the distance
+   that should be written, and the line was writing it unchanged:
+
+     below 100%  it scrolls SHORT — at 95%, nineteen twentieths of the way —
+                 and a grid wide enough that the shortfall matters leaves the
+                 current month just off the right edge, which is exactly the
+                 report;
+     above 100%  it scrolls TOO FAR. Measured at 200% on the sample: the write
+                 overshot the end of the grid, clamped there, and left Sep 26
+                 487px to the LEFT of where it was aimed — underneath the
+                 pinned label column, off screen in the other direction.
+
+   Dividing by zoomScale puts the figure back into the pixels scrollLeft is
+   counting. It is exactly 1 on an unzoomed page, so this is a no-op there
+   rather than a second behaviour to keep in mind — the same shape as the
+   correction pinGridHeader() makes to its translateY. `|| 1` because a scale
+   of 0 would make this the one arithmetic that cannot be undone. */
 function scrollGridToNow() {
   const wrap = document.querySelector('.gridwrap');
   const nowTh = wrap && wrap.querySelector('thead th.now');
@@ -21910,7 +21937,7 @@ function scrollGridToNow() {
   const lblW = lbl ? lbl.getBoundingClientRect().width : 0;
   const r = nowTh.getBoundingClientRect();
   if (wrapRect.width > 0 && (r.right > wrapRect.right || r.left < wrapRect.left + lblW))
-    wrap.scrollLeft += r.left - (wrapRect.left + lblW);
+    wrap.scrollLeft += (r.left - (wrapRect.left + lblW)) / (zoomScale || 1);
 }
 
 /* ── Charts ─────────────────────────────────────────────────────────────────

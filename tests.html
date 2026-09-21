@@ -20069,6 +20069,67 @@ t('a zoom typed in Preferences joins the list in order, not on the end of it', a
     else localStorage.setItem('fin-zoom', keep);
   }
 });
+/* ── The sixth thing CSS zoom breaks (2026-09-21) ───────────────────────────
+   Charles, on a half-screen window: "at this width, when switching to year
+   view, the current month is scrolled off the page" — then "it's the zoom".
+
+   scrollGridToNow() worked its distance out of two getBoundingClientRects,
+   which report SCREEN pixels with the page zoom already in them, and wrote it
+   straight into scrollLeft, which counts the element's own layout pixels. So
+   the figure written was `zoom` times the figure meant. Above 100% that
+   overshoots: measured here before the fix, 150% left the column 81px past its
+   mark and 200% left it 487px past — scrolled clean under the pinned label
+   column, off screen in the opposite direction to the one reported.
+
+   The path is the one he took: Month lens, then back to Year. 100% is in the
+   list as the control — the arithmetic has to stay a no-op on an unzoomed
+   page, which is the half of this a divisor is easy to get wrong. */
+t('the current month is scrolled into view at any zoom, not zoom times too far', async () => {
+  const keepZoom = localStorage.getItem('fin-zoom');
+  const { f, W, D } = await auditFrame(1150, 900, 'gridzoom');
+  try {
+    const sw = (label) => [...D.querySelectorAll('.vswitch')]
+      .find((b) => b.textContent.trim() === label);
+    const thisYear = String(new Date().getFullYear());
+    const chip = [...D.querySelectorAll('.yearchip')]
+      .find((b) => b.textContent.trim().startsWith(thisYear));
+    ok(chip, `the sample carries ${thisYear}, the year with a current month in it`);
+    chip.click();
+    await new Promise((r) => setTimeout(r, 400));
+
+    for (const z of [100, 150, 200]) {
+      W.applyZoom(z);
+      await new Promise((r) => setTimeout(r, 350));
+      sw('Month').click();
+      await new Promise((r) => setTimeout(r, 350));
+      sw('Year').click();
+      await new Promise((r) => setTimeout(r, 500));
+
+      const wrap = D.querySelector('.gridwrap');
+      ok(wrap, `${z}%: the year lens draws the grid`);
+      const nowTh = wrap.querySelector('thead th.now');
+      ok(nowTh, `${z}%: the current month has a column of its own to scroll to`);
+      ok(wrap.scrollWidth > wrap.clientWidth,
+         `${z}%: the grid is wider than the window, so this is a scroll worth making`);
+
+      const wr = wrap.getBoundingClientRect();
+      const nr = nowTh.getBoundingClientRect();
+      const lblW = wrap.querySelector('thead th.lbl').getBoundingClientRect().width;
+      /* Fully inside the visible run, and clear of the label column pinned over
+         the left of it — being underneath that is the failure, not a near miss. */
+      ok(nr.left >= wr.left + lblW - 2,
+         `${z}%: the current month is clear of the pinned label column`,
+         Math.round(nr.left - (wr.left + lblW)) + 'px from it');
+      ok(nr.right <= wr.right + 1,
+         `${z}%: and its right edge is inside the window`,
+         Math.round(nr.right - wr.right) + 'px over');
+    }
+  } finally {
+    f.remove();
+    if (keepZoom === null) localStorage.removeItem('fin-zoom');
+    else localStorage.setItem('fin-zoom', keepZoom);
+  }
+});
 t('the phone header is the name above one scrolling line of controls (2026-09-14)', async () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const html = APP_SRC;
