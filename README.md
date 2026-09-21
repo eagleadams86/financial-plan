@@ -2009,10 +2009,13 @@ moment you closed it.
   devices. A box you fold in one year stays folded in the next, and anything
   new is open until you say otherwise. (The welcome card is the one exception:
   hiding the page that explains what the app is would be a poor greeting.)
-- **Zoom** — scale the whole app from the header in quarter steps, or type an
-  exact percentage in Preferences (50–200%). It belongs to the device you set
-  it on: never synced, never in a backup, so a laptop and a desk monitor can
-  each have the size that suits them.
+- **Zoom** — scale the whole app from the header in 5% steps, or type an exact
+  percentage in Preferences (50–200%). An exact figure joins the header list in
+  its own place on the ladder, so the picker never shows a size the page isn't
+  drawn at. It belongs to the device you set it on: never synced, never in a
+  backup, so a laptop and a desk monitor can each have the size that suits them
+  — and on a half-screen window a few per cent is often the difference between
+  a layout that fits side by side and one that folds.
 - **Chart text is the page's own text.** Axis labels, legends and the hover
   panel are set in the app's typeface at the same small size as the chrome
   around them, instead of the chart library's built-in Helvetica at a fixed
@@ -2261,7 +2264,7 @@ else: never synced, never in a backup, never in a share link.
 | Setting | What it changes |
 | --- | --- |
 | **Keep the tabs on screen while scrolling** | Pins the view tabs — and the Budget's year or month strip — to the top of the page. The pin button at the right-hand end of the tab row is the same switch |
-| **Zoom** | The exact percentage (50–200%), the quarter steps in the header being the everyday version |
+| **Zoom** | The exact percentage (50–200%), the 5% steps in the header being the everyday version |
 | **Twelve Data key** | The [price-lookup](#investments) key — typed here, handed to your password manager, and out of backups, share links and sync |
 
 ---

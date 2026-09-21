@@ -7608,8 +7608,13 @@ t('nonsense falls back to full size, never to zero', () => {
   eq(H.zoomPct(undefined), 100);
   eq(H.zoomPct(NaN), 100);
 });
-t('the quarter-step presets are all reachable', () => {
-  for (const p of [50, 75, 100, 125, 150, 175, 200]) eq(H.zoomPct(p), p);
+t('every step the picker offers survives the clamp', () => {
+  for (let p = H.ZOOM_MIN; p <= H.ZOOM_MAX; p += 5) eq(H.zoomPct(p), p);
+  /* 5% steps since 2026-09-21. The old quarter ladder is still legal — it is a
+     subset of this one — but an exact figure off a five is the case that has to
+     keep working, because Preferences takes one and applyZoom() then hangs it
+     on the picker as an option of its own. */
+  for (const p of [51, 96, 137, 199]) eq(H.zoomPct(p), p, 'a figure off a five is not rounded to one');
 });
 
 group('Which rows count as pay');
@@ -19990,6 +19995,79 @@ t('the header and the tab bar are one scrolling line at every width, with arrows
   }
   ok(/@media \(hover: none\), \(pointer: coarse\) \{ \.rownav \{ display: none !important; \} \}/.test(APP_SRC),
      'the arrows are for a mouse or trackpad — a finger swipes, and on touch their 40px floor grew the header');
+});
+/* The picker's LADDER is markup, so nothing in the Zoom group can see it:
+   zoomPct() passes 95 and 137 through just as happily as 100, and did for as
+   long as the select offered neither. This is the test that would have caught
+   the gap Charles hit on 2026-09-21 — four Month cards needing 96% on a
+   half-screen window, and a picker whose nearest offers were 100% and 75%. */
+t('the zoom picker offers 50–200 in 5% steps, with 100% the one pre-selected', () => {
+  ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
+  const at = APP_SRC.indexOf('<select id="zoomSel"');
+  ok(at > 0, 'the picker is still a <select> in the markup');
+  const sel = APP_SRC.slice(at, APP_SRC.indexOf('</select>', at));
+  const got = [...sel.matchAll(/<option value="(\d+)"([^>]*)>(\d+)%<\/option>/g)];
+  const want = [];
+  for (let p = 50; p <= 200; p += 5) want.push(p);
+  eq(got.map((m) => +m[1]).join(','), want.join(','),
+     'every five from the floor to the ceiling, in order and with no gaps');
+  ok(got.every((m) => +m[1] === +m[3]), 'and each is labelled with its own figure');
+  /* The ends are the constants' job, not the markup's. A ladder that walked
+     past them would offer a step applyZoom() then silently clamped, which is
+     the one way this picker can disagree with what is on screen. */
+  eq(+got[0][1], H.ZOOM_MIN, 'the ladder starts at the floor the clamp enforces');
+  eq(+got[got.length - 1][1], H.ZOOM_MAX, 'and ends at its ceiling');
+  const selected = got.filter((m) => /\bselected\b/.test(m[2]));
+  eq(selected.length, 1, 'exactly one option is pre-selected');
+  eq(+selected[0][1], 100, 'and it is 100%, the zoom the page is drawn at before applyZoom runs');
+});
+/* The custom option's PLACE, not merely its presence. It was appended, which
+   put a typed 96% below 200% — and a native <select> opens with the checked
+   entry under the pointer, so a picker living in a header at the top of the
+   page opened as a list scrolled to its own last line, every figure a reader
+   might switch to hidden above the fold. Driven through applyZoom() because
+   the ordering is its job, and read back off the DOM because the option list
+   IS what the popup draws. */
+t('a zoom typed in Preferences joins the list in order, not on the end of it', async () => {
+  const keep = localStorage.getItem('fin-zoom');
+  const { f, W, D } = await auditFrame(1280, 900, 'zoomorder');
+  try {
+    const sel = D.getElementById('zoomSel');
+    const vals = () => [...sel.options].map((o) => +o.value);
+    const sorted = (a) => a.slice().sort((x, y) => x - y).join(',') === a.join(',');
+
+    W.applyZoom(96);
+    eq(sel.value, '96', 'the picker shows the figure the page is drawn at');
+    const one = vals();
+    ok(sorted(one), 'every option is in ascending order, the custom one included');
+    eq(one[one.indexOf(96) - 1], 95, '96% sits after 95%');
+    eq(one[one.indexOf(96) + 1], 100,
+       'and before 100% — between the two steps a reader would otherwise pick');
+    eq(one[one.length - 1], 200, 'and the ceiling is still the last line, where it belongs');
+
+    /* A SECOND typed figure MOVES the one option. Appending never had to think
+       about this; inserting does, because the search for the step above must
+       skip the custom option or it can measure the node against itself. */
+    W.applyZoom(137);
+    const two = vals();
+    eq(two.filter((v) => v === 96).length, 0, 'the old custom figure is gone');
+    eq(two.filter((v) => v === 137).length, 1, 'and the new one is there exactly once');
+    ok(sorted(two), 'still in order after the move');
+    eq(two[two.indexOf(137) - 1], 135, 'between 135%');
+    eq(two[two.indexOf(137) + 1], 140, 'and 140%');
+
+    /* Landing back on a listed step takes the custom option away again — the
+       behaviour that kept the picker from ever showing a figure twice. */
+    W.applyZoom(125);
+    eq(vals().length, 31, 'back to the plain ladder');
+    eq(sel.value, '125', 'showing the listed step');
+    eq(D.querySelectorAll('#zoomSel option[data-custom]').length, 0,
+       'with no custom option left over');
+  } finally {
+    f.remove();
+    if (keep === null) localStorage.removeItem('fin-zoom');
+    else localStorage.setItem('fin-zoom', keep);
+  }
 });
 t('the phone header is the name above one scrolling line of controls (2026-09-14)', async () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
