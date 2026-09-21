@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1225;
+const EXPECTED = 1231;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -9964,6 +9964,140 @@ t('folding writes each growth account a row of its own', () => {
   eq(growth[0].isBalance, undefined, 'never both flags — a row is one kind');
   const earned = fold.categoryTotals.find(r => r.name === 'Interest & Dividends');
   eq(earned.total, 820, 'and the growth stays OUT of what the accounts earned');
+});
+
+/* ── A folded row says WHAT IT IS, not only what it is called (2026-09-20) ───
+   Found by comparing eight of Charlie's own exports: the folded form of a year
+   dropped a distinction the grid had, because a transfer row and the account it
+   pays into are called the same thing. "M&T Savings" is BOTH a flow and a
+   balance in every one of 2012–2015, and the flat list gave a reader no way to
+   tell the two apart. Every row carries the id of what it was folded from now. */
+
+t('every folded row states the category or account it came from', () => {
+  const s = foldFixture();
+  const fold = H.gridToSummary(s, '2030');
+  const at = (n) => fold.categoryTotals.find(r => r.name === n && !r.isBalance && !r.isGrowth);
+  eq(at('Paycheck').id, 'pay', 'a flow is its category');
+  eq(at('Rent').id, 'rent');
+  eq(fold.categoryTotals.find(r => r.isGrowth).id, 'long', 'growth is its account');
+  eq(fold.categoryTotals.filter(r => r.isBalance).map(r => r.id),
+     ['cash', 'mid', 'long'], 'and so is every balance');
+  eq(at('Interest & Dividends').id, H.EARNED_ROW_ID,
+     'the one derived row gets the reserved id, because no category owns it');
+  ok(!/^[a-z0-9-]+$/.test(H.EARNED_ROW_ID),
+     'whose underscore is what puts it out of reach of slugJs, so no name can claim it');
+});
+
+t('a transfer row and the account it pays into are told apart', () => {
+  /* The real case, spelled out: this is 2012–2015 in Charlie's own plan. */
+  const s = H.coerceShape({
+    settings: { accounts: [{ id: 'cash', name: 'Checking', hub: true },
+      { id: 'm-t-savings', name: 'M&T Savings' }] },
+    years: { '2020': { kind: 'grid', model: 'pinned', startMonth: '2020-01',
+      monthCount: 12, paychecks: {}, seeds: {}, balAdjust: {}, extraNotes: [],
+      categories: [{ id: 'to-savings', name: 'M&T Savings', section: 'transfer',
+        rule: 'none' }],
+      cells: { 'to-savings|2020-03': { v: 50, kind: 'actual' } },
+      overrides: { 'cash|2020-12': { v: 10 }, 'm-t-savings|2020-12': { v: 50 } } } } });
+  const rows = H.gridToSummary(s, '2020').categoryTotals
+    .filter(r => r.name === 'M&T Savings');
+  eq(rows.length, 2, 'fixture: one name, two rows — the flow and the balance');
+  eq(rows.map(r => r.id), ['to-savings', 'm-t-savings'],
+     'and each says which of the two it is');
+  eq(rows[0].total, rows[1].total, 'the figures agree, which is why the NAME could not tell them apart');
+});
+
+t('a summary row id is read at the boundary, and a duplicate is dropped', () => {
+  const rows = (list) => H.coerceShape({ years: { '2030': { kind: 'summary',
+    categoryTotals: list } } }).years['2030'].categoryTotals;
+  eq(rows([{ id: 'rent|x', name: 'Rent', total: -9 }])[0].id, undefined,
+     'an id that is not an id at all goes, rather than being re-slugged into one');
+  eq(rows([{ id: 12, name: 'Rent', total: -9 }])[0].id, '12', 'a number is read as its string');
+  const twice = rows([{ id: 'rent', name: 'Rent', total: -9 },
+                      { id: 'rent', name: 'Also rent', total: -1 }]);
+  eq(twice.map(r => r.id), ['rent', undefined],
+     'two rows answering to one id is worse than one with none, so the second loses it');
+  const kinds = rows([{ id: 'save', name: 'Savings', total: 50 },
+                      { id: 'save', name: 'Savings', total: 900, isBalance: true }]);
+  eq(kinds.map(r => r.id), ['save', 'save'],
+     'but a flow and a balance are different namespaces and may agree');
+  eq(rows([{ name: 'Rent', total: -9 }])[0].id, undefined,
+     'and nothing is MINTED here — an imported year has no identity to state');
+});
+
+t('an id repaired on the way in moves the folded rows with it', () => {
+  /* The `foldedFrom` trap one level out: the card draws the NAME, so a row left
+     pointing at an id nothing answers to would look perfectly fine. */
+  const s = H.coerceShape({
+    settings: { accounts: [{ id: 'cash', name: 'Checking', hub: true },
+      { id: 'mid|bad', name: 'Savings' }] },
+    years: { '2030': { kind: 'summary', convertedFrom: 'grid',
+      categoryTotals: [
+        { id: 'rent|bad', name: 'Rent', total: -900 },
+        { id: 'mid|bad', name: 'Savings', total: 2000, isBalance: true }],
+      foldedFrom: { kind: 'grid', model: 'pinned', startMonth: '2030-01',
+        monthCount: 12, paychecks: {}, seeds: {}, balAdjust: {}, extraNotes: [],
+        categories: [{ id: 'rent|bad', name: 'Rent', rule: 'none' }],
+        cells: { 'rent|bad|2030-03': { v: -900, kind: 'actual' } },
+        overrides: {} } } } });
+  const yr = s.years['2030'];
+  eq(yr.foldedFrom.categories[0].id, 'rent-bad',
+     'fixture: the stash\'s row was repaired — `cleanId` keeps the stem, bar and all');
+  eq(s.settings.accounts[1].id, 'mid-bad', 'and so was the account');
+  eq(yr.categoryTotals[0].id, 'rent-bad', 'the flow row followed its category');
+  eq(yr.categoryTotals[1].id, 'mid-bad', 'and the balance row followed its account');
+});
+
+t('two rows a summary calls the same thing both reach Where the Money Goes', () => {
+  /* The collapse this cost: a flat name key made them one row, so the second
+     never reached the table while its money stayed in the total above it — a
+     breakdown that did not add up to the figure it was a breakdown of. */
+  const year = (a, b) => ({ kind: 'summary', categoryTotals: [
+    { name: 'Other', total: a }, { name: 'Other', total: b }] });
+  const st = { years: { '2029': year(-100, -400), '2030': year(-200, -500) } };
+  const mix = H.spendingMix(st, {}, '2030', '2029');
+  eq(mix.rows.length, 2, 'two rows in, two rows out');
+  eq(H.round2(mix.rows.reduce((t, r) => t + r.total, 0)), mix.total,
+     'and the lines add up to the total above them');
+  eq(mix.rows.map(r => [r.total, r.was]), [[500, 400], [200, 100]],
+     'each paired with the row in its own position last year');
+});
+
+t('the row editor keeps an id through a rename, and mints one for a new row', async () => {
+  /* The `isGrowth` trap, in the same editor: `sumrow.save` REBUILDS the row from
+     a form that never asks for an id, so a rename would drop it at the one
+     moment the name stops being a way to find the row. The sample's oldest year
+     is an IMPORTED summary, which is the only kind this editor can reach. */
+  const { f, W } = await auditFrame(900, 700, 'sumrowid');
+  try {
+    const y = String(new Date().getFullYear() - 2);
+    const s = W.finGet();
+    const list = s.years[y].categoryTotals;
+    ok(s.years[y].kind === 'summary' && !s.years[y].foldedFrom,
+       'fixture: the sample\'s oldest year is an imported summary', y);
+    eq(list.every(r => r.id === undefined), true,
+       'and its rows carry no id, because nothing folded them');
+
+    W.__finTestHooks.EDITORS.sumrow.save({ year: y, idx: '0' },
+      { name: 'Rosa — salary', total: list[0].total });
+    eq(list[0].id, undefined,
+       'an imported row that never had an id keeps it that way — the app read '
+       + 'that year, it did not write it');
+
+    W.__finTestHooks.EDITORS.sumrow.save({ year: y }, { name: 'Window cleaning', total: -240 });
+    const first = list[list.length - 1];
+    ok(first.id, 'a NEW row mints one', first.id);
+    W.__finTestHooks.EDITORS.sumrow.save({ year: y }, { name: 'Window cleaning', total: -60 });
+    const second = list[list.length - 1];
+    ok(second.id && second.id !== first.id,
+       'and a second row the reader calls the same thing gets a different one',
+       [first.id, second.id].join(' / '));
+
+    W.__finTestHooks.EDITORS.sumrow.save({ year: y, idx: String(list.length - 1) },
+      { name: 'Gutters', total: -60 });
+    eq(list[list.length - 1].id, second.id, 'a rename carries the id it had');
+    eq(list[list.length - 1].name, 'Gutters', 'fixture: the rename landed');
+  } finally { f.remove(); }
 });
 
 t('an account that grew nothing earns no row, and a fall keeps its own', () => {

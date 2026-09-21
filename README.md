@@ -1147,7 +1147,10 @@ you which row is biggest, and you already know which row is biggest.
 
 - Rows are matched to last year **by the row**, so renaming one keeps its
   history in a single line instead of splitting it in two. Against an old
-  yearly summary, which has no rows to point at, they are matched by name.
+  yearly summary, which has no rows to point at, they are matched by name — and
+  where a summary year calls two rows the same thing (a transfer and the account
+  it pays into often share a name), each still gets its own line, so the lines
+  add up to the total above them.
 - **A row that has vanished since last year still gets a line.** Money that
   stopped being spent is as much a finding as money that started.
 - **A row that hands back more than it takes is negative** — cash back, a

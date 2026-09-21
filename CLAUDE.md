@@ -2040,7 +2040,9 @@ suite passed while the card was wrong.
   now that the old balance rows are accounts, and each account with a stated
   balance keeps its LAST stated month as a balance row (December wherever
   December was recorded), so a folded year shows the same end-of-year
-  balances the imported summaries always had. `rulesNeedingYear()` warns when
+  balances the imported summaries always had. **Every row it writes states the
+  id of what it was folded from** — see "A folded row says which row it IS"
+  below. `rulesNeedingYear()` warns when
   the next year has `samemonth`/`avglastyear` rows that read the year being
   folded. `migrate_local_data.py` only ever does the one-off strip of
   hand-typed next-year months from the live grid — folding a year is a
@@ -2121,6 +2123,74 @@ strict.
   summary is the only copy of its year and stays exactly as editable as it was.
   The end-of-year figure is refused for the same reason the rows are: it came
   out of the grid.
+## A folded row says which row it IS (2026-09-20)
+
+Found by comparing eight of Charlie's own exports of the same plan, taken while
+folding and re-opening 2012–2015: outside `years` the eight differ only in the
+schema and the open tab, and every folded total reconciles to the cent — but the
+folded form dropped a distinction the grid had. `categoryTotals` was a flat list
+of NAMES, and **a transfer row and the account it pays into are called the same
+thing**: the savings row is both a flow and a balance in every one of 2012–2015,
+with the same figure in both. A reader with only the name in hand saw one row
+where there were two.
+
+- **Every row `gridToSummary` writes carries `id`** — the category for a flow,
+  the account for a balance or a growth row, and `EARNED_ROW_ID` for the derived
+  Interest & Dividends row. The underscore in `_earned` is load-bearing: `slugJs`
+  emits only `[a-z0-9-]`, so no id this app mints from a name can ever claim it,
+  while `ID_OK` still admits it.
+- **The id pairs with the row's KIND and never stands alone.** A category and an
+  account are two namespaces, so a flow and a balance may hold the same string
+  and still be different rows. Every reader already asks `isBalance`/`isGrowth`
+  first, which is what makes one field enough — and it is why the boundary
+  de-duplicates **kind by kind**.
+- **THE ID IS NOT A HANDLE FOR MATCHING YEARS TO EACH OTHER**, and `spendingMix`
+  deliberately goes on matching summary rows by NAME. Checked against the real
+  plan before writing a line of it: the history import minted an id per SHEET
+  from whatever that sheet's wording was, so the same real row drifts — a utility
+  row carries its supplier's name as an id for nine years and a plain one from
+  2021; another moves between three spellings of the same thing; an insurance row
+  swaps its insurer's name for a generic one and back. Fourteen of the fifteen
+  year boundaries carry at least one such move (check it against the real plan
+  before doubting it — the repo cannot hold the data that proves it). Keying
+  Where the Money Goes on these would read a rename as one row ending and another
+  beginning — strictly worse than the names it replaced.
+  **Don't "improve" this later.**
+- **What the name key DID cost, and this is the one wrong figure the audit
+  found:** `spendingMix` keyed rows on the lowercased name, so two rows a summary
+  calls the same thing became one — the second never reached the table while its
+  money stayed in the total above it, and a breakdown did not add up to the
+  figure it was a breakdown of. A repeat is NUMBERED now (`name:other#2`), which
+  gives it a line of its own and still pairs the two years row for row because
+  both sides are numbered the same way. The keys are worked out **once per list
+  and held by row reference**: `k(r)` used to be called three times for the same
+  row and has to answer the same thing each time.
+- **The boundary reads an id and DROPS a duplicate rather than repairing it.**
+  ID_OK or nothing; a second row of the same kind claiming one loses it, because
+  two rows answering to one id is worse than one with none — the second row is
+  exactly what the id exists to tell apart, and a renumbered `other-2` would be a
+  claim the file never made. **Nothing is MINTED there**, unlike
+  `side.property`'s `mintIds`: an imported summary's rows have no identity to
+  state, and minting from their names would hand a year ids that look meaningful
+  and are not.
+- **`normalizeIds` moves the rows with the id** — the `foldedFrom` trap one level
+  out, and the same miss would be just as invisible, because the card draws the
+  NAME. Read AFTER `oneYear(yr.foldedFrom)`, which is where a folded year's
+  `movedCat` comes from (the summary has no categories of its own, and `oneYear`
+  clears the map at its start). Gated on the STASH, so an imported summary's ids
+  — which belong to no namespace this pass moves — are left alone.
+- **`sumrow.save` carries the id by hand**, for exactly the reason it carries
+  `isGrowth`: it rebuilds the row from a form that never asks. A rename would
+  otherwise drop the identity at the one moment the name stops being a way to
+  find the row. A NEW row mints one (`uniqueId` over the list); an EXISTING row
+  that never had one keeps it that way.
+- **No schema bump and no migration** — the `parts`/`keepCents`/`dueMonths`
+  precedent. `id` is additive, a build that predates it reads a folded year and
+  name-matches as it always did, and the field round-trips through its
+  `coerceShape` untouched. The one thing an older build loses is the id of a row
+  saved through ITS `sumrow` editor, which falls back to the name: a
+  data-quality regression on a stale build, not a corrupt plan.
+
 - **Summaries are an unbroken BLOCK at the front of the plan.** `foldableYear`
   names the oldest grid year that is not live; `unfoldableYear` names the newest
   summary **and only if it holds a stash** — never "the newest summary that
