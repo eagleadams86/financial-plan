@@ -19463,6 +19463,18 @@ t('a drag on the grid selects a BLOCK of cells — a column as readily as a row'
     D.getElementById('tab-budget').click();
     await new Promise((r) => setTimeout(r, 300));
     const grid = D.querySelector('#views table.grid');
+    /* BACK TO JANUARY FIRST (2026-09-21). This test is about the BLOCK, and it
+       picks its corners by column number — so it needs those columns to be the
+       ones on screen. The budget grid opens scrolled to the current month, and
+       once scrollGridToNow() learned to allow for the year-total column pinned
+       over the right of the box it also began scrolling at widths where it used
+       to sit still, this frame's 1280 among them. The corners then lay under a
+       pinned column, where a synthetic pointermove resolves to whatever is
+       painted on top and the block came out a column wider. Nothing about the
+       selection changed; the test was resting on where the grid happened to
+       open. Cell drags that START under a pinned column are the neighbouring
+       test's subject, and it scrolls deliberately for them. */
+    grid.closest('.gridwrap').scrollLeft = 0;
     const rows = [...grid.tBodies[0].rows].filter((tr) => tr.querySelector('td.cell[data-cat]'));
     ok(rows.length >= 3, 'the sample grid has three category rows to select down');
     const a = rows[0].querySelectorAll('td.cell')[1], b = rows[2].querySelectorAll('td.cell')[3];
@@ -20128,6 +20140,85 @@ t('the current month is scrolled into view at any zoom, not zoom times too far',
     f.remove();
     if (keepZoom === null) localStorage.removeItem('fin-zoom');
     else localStorage.setItem('fin-zoom', keepZoom);
+  }
+});
+/* ── Two columns are pinned over that scroller, not one (2026-09-21) ────────
+   The zoom fault above was real and was NOT what Charles was looking at:
+   "nothing changed for me. my year only goes to december." Reproduced only
+   once his own plan was loaded at his own width.
+
+   The label column is stuck to the left of the grid and the year-total column
+   to the right, and the visible run is the box minus BOTH. The guard allowed
+   for the first and not the second, so a month sitting UNDERNEATH the total
+   column still satisfied `right <= wrap.right` — inside the box, simply
+   covered — and scrollGridToNow() decided it was already in view. At scrollLeft
+   0 that shows January through August with the total painted over September,
+   which is the screenshot he sent.
+
+   It is a BAND of widths, so the test has to find one: narrower and the scroll
+   happens anyway (aiming the ninth of twelve columns at the left edge
+   overshoots the end and clamps, leaving it on screen), wider and the grid
+   fits whole. The box is sized directly rather than by hunting for a frame
+   width, because the box IS the input to the function. Finding no width in the
+   band FAILS — a run that never set the trap would pass on the old code too. */
+t('the current month is brought out from under the pinned year-total column', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'gridpinned');
+  try {
+    const thisYear = String(new Date().getFullYear());
+    const chip = [...D.querySelectorAll('.yearchip')]
+      .find((b) => b.textContent.trim().startsWith(thisYear));
+    ok(chip, `the sample carries ${thisYear}`);
+    chip.click();
+    await new Promise((r) => setTimeout(r, 400));
+    const vsw = (label) => [...D.querySelectorAll('.vswitch')]
+      .find((b) => b.textContent.trim() === label);
+    if (vsw('Year').getAttribute('aria-checked') !== 'true') {
+      vsw('Year').click();
+      await new Promise((r) => setTimeout(r, 400));
+    }
+
+    const wrap = D.querySelector('.gridwrap');
+    ok(wrap, 'the year lens draws the grid');
+    const nowTh = wrap.querySelector('thead th.now');
+    const tot = wrap.querySelector('thead th.rowtot');
+    ok(nowTh && tot, 'with a column for the current month and a pinned year total');
+
+    /* The trap: a box wide enough that the current month falls inside its edges
+       at rest, but not so wide that it clears the total column pinned over the
+       right of them. */
+    let trapped = 0;
+    try {
+      for (let boxW = 820; boxW <= 1400; boxW += 4) {
+        wrap.style.width = boxW + 'px';
+        wrap.scrollLeft = 0;
+        const wr = wrap.getBoundingClientRect();
+        const nr = nowTh.getBoundingClientRect();
+        const tr = tot.getBoundingClientRect();
+        if (wrap.scrollWidth > wrap.clientWidth
+            && nr.right <= wr.right + 1 && nr.left >= wr.left - 1
+            && nr.right > tr.left + 1 && nr.left < tr.right - 1) { trapped = boxW; break; }
+      }
+      ok(trapped, 'a width exists where the current month rests under the pinned total — '
+        + 'without one this test proves nothing');
+
+      wrap.style.width = trapped + 'px';
+      wrap.scrollLeft = 0;
+      W.scrollGridToNow();
+      const wr = wrap.getBoundingClientRect();
+      const nr = nowTh.getBoundingClientRect();
+      const tr = tot.getBoundingClientRect();
+      const lblW = wrap.querySelector('thead th.lbl').getBoundingClientRect().width;
+      ok(wrap.scrollLeft > 0, 'the grid is scrolled rather than left where it was',
+         'scrollLeft ' + Math.round(wrap.scrollLeft));
+      ok(nr.right <= tr.left + 1,
+         'and the current month comes out from under the year-total column',
+         Math.round(nr.right - tr.left) + 'px still covered');
+      ok(nr.left >= wr.left + lblW - 2,
+         'without going under the label column pinned at the other end',
+         Math.round(nr.left - (wr.left + lblW)) + 'px past it');
+    } finally { wrap.style.width = ''; }
+  } finally {
+    f.remove();
   }
 });
 t('the phone header is the name above one scrolling line of controls (2026-09-14)', async () => {
