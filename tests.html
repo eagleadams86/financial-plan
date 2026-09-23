@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1231;
+const EXPECTED = 1238;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -21803,6 +21803,105 @@ t('a copy of the plan that is out of date adopts the other window’s plan inste
     const quiet = D.getElementById('toast').textContent;
     ok(/another tab or window/.test(quiet) && !/not saved/.test(quiet),
        'and the toast is only news — there was no change here to lose', quiet);
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+/* ── What happens AROUND a refused save (2026-09-23, from Flow Metrics 5312018 and
+   Sprint Velocity 4de8169) ─────────────────────────────────────────────────────
+   Three checks, each red against the build before. The grid CSV import is the one
+   path that saves inside its own try and then reports success. Every toast the
+   page shows is RECORDED, not just the last: the old fix re-said the warning a task
+   later, so the final text was right while "imported" had already been announced. */
+async function tcCsvImport(W, D) {
+  /* The page's own export of one grid year — its CSP refuses eval, so through
+     the functions, not the `C` it keeps in a script-level let. */
+  const st = W.finGet(), C = W.computeAll(st, W.todayISO());
+  const y = Object.keys(st.years).find((k) => st.years[k].kind !== 'summary' && C[k]);
+  const csv = W.gridToCsv(st, C[y], y);
+  const input = D.getElementById('csvInFile');
+  const dt = new W.DataTransfer();
+  dt.items.add(new W.File([csv], 'plan.csv', { type: 'text/csv' }));
+  input.files = dt.files;
+  input.dispatchEvent(new W.Event('change'));
+  await tcWait(200);
+}
+function tcToastLog(W, D) {
+  const seen = [];
+  new W.MutationObserver(() => seen.push(D.getElementById('toast').textContent))
+    .observe(D.getElementById('toast'), { childList: true, characterData: true, subtree: true });
+  return seen;
+}
+t('two copies: a plan from a newer build halts a CSV import, and is not called a broken file', async () => {
+  /* adoptOtherCopy → load() → haltForNewerData stops by THROWING. The CSV import
+     saves inside its reader's try, whose catch took that throw for an unreadable
+     file — a toast in the top layer, over the halt card. */
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'csvhalt');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    const errs = [];
+    W.addEventListener('error', (e) => { errs.push(String(e.message)); e.preventDefault(); });
+    D.getElementById('dataDialog').showModal();
+    const seen = tcToastLog(W, D);
+    const newer = JSON.parse(JSON.stringify(plan));
+    newer.schema = 9999;
+    localStorage.setItem('fin-state', JSON.stringify(newer));
+    await tcCsvImport(W, D);
+    ok(/This Plan Was Saved by a Newer Version/.test(D.body.textContent), 'the halt card is up');
+    ok(!seen.some((s) => /could not be read/.test(s)), 'and nothing calls the file unreadable', seen.join(' | '));
+    ok(errs.some((s) => /newer/i.test(s)), 'the halt stopped the handler by throwing, as it stops boot', errs.join(' | '));
+    eq(JSON.parse(localStorage.getItem('fin-state')).schema, 9999, 'the newer plan is untouched');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+t('two copies: a success line after a refused save is never shown, not even for a moment', async () => {
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'held');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    localStorage.setItem('fin-state', tcOtherCopy(plan));
+    W.finGet().goals[0].name = 'Renamed in the stale window';
+    W.save();
+    W.toast('Deleted');
+    const now = D.getElementById('toast').textContent;
+    ok(/not saved/.test(now) && !/Deleted/.test(now),
+       'the warning is what the toast says in the same task — "Deleted" is never announced', now);
+    await Promise.resolve();   // a press is a task of its own; this ends it
+    W.toast('A later message');
+    eq(D.getElementById('toast').textContent, 'A later message', 'the next task’s toasts are shown as usual');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+t('two copies: a refused CSV import says nothing was imported, and leaves Back Up open to try again', async () => {
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'csvrefused');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    D.getElementById('dataDialog').showModal();
+    const seen = tcToastLog(W, D);
+    const otherRaw = tcOtherCopy(plan);
+    localStorage.setItem('fin-state', otherRaw);
+    await tcCsvImport(W, D);
+    eq(localStorage.getItem('fin-state'), otherRaw, 'the refused import wrote nothing over the other plan');
+    ok(!seen.some((s) => /imported/.test(s)), 'nothing ever said it was imported', seen.join(' | '));
+    ok(seen.some((s) => /not saved/.test(s)), 'the warning was said', seen.join(' | '));
+    ok(D.getElementById('dataDialog').open, 'Back Up is still open, with the CSV button, to import again');
   } finally {
     if (f) f.remove();
     tcPutBack(kept);

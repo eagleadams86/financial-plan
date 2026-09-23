@@ -7366,6 +7366,10 @@ window.finViewOnly = viewOnly;
    green (the boot-time dead zone that has bitten this file before). For the same
    reason everything load() reaches on the way is a function DECLARATION. */
 let storedRaw = null;
+/* True for the rest of the task in which save() adopted another window's plan
+   instead of writing this one's — see adoptOtherCopy. Up here with storedRaw,
+   above anything that could toast while the script is still being evaluated. */
+let writeRefused = false;
 
 let state = load();
 
@@ -7906,12 +7910,22 @@ function adoptOtherCopy(lostChange) {
     ? 'This plan was changed in another tab or window, so that copy is loaded here now. '
       + 'Your last change here was not saved — make it again.'
     : ('Updated — this plan was changed in another tab or window. ' + ended.said).trim();
+  writeRefused = false;   // this sentence is never the one held back
   toast(msg);
   /* There is ONE toast, and most callers raise their own right after save() —
-     "Deleted", "Put back the way it was", a section's own sentence — which
-     would replace this one, in the same breath, with a claim that is no longer
-     true. Said again at the end of the task, so it is the one left standing. */
-  if (lostChange) setTimeout(() => toast(msg), 0);
+     "Deleted", "Put back the way it was", "2026 imported" — which would replace
+     this one, in the same breath, with a claim that is no longer true. Until
+     2026-09-23 this said the warning AGAIN on a timer, so it was the one left
+     standing — but the false line had been written into the live region first,
+     and a screen reader announced it. Now the toast is HELD for the rest of this
+     task (the Flow Metrics / Sprint Velocity flag): whatever a handler says after
+     its save was refused is about the change that did not land. Lifted in a
+     MICROTASK, not a timer — the handler's own synchronous tail is what has to be
+     silenced, and a timer is throttled in a background tab. */
+  if (lostChange) {
+    writeRefused = true;
+    queueMicrotask(() => { writeRefused = false; });
+  }
 }
 
 /* The other half: an IDLE copy takes the other window's plan as it lands, so
@@ -10335,6 +10349,8 @@ function dropToast(el) {
 }
 
 function toast(msg) {
+  /* A success line from a handler whose save was just refused — see adoptOtherCopy. */
+  if (writeRefused) return;
   const el = F('toast');
   clearTimeout(toastTimer);
   clearTimeout(toastHideTimer);
@@ -31385,7 +31401,16 @@ F('csvInFile').onchange = (e) => {
         + 'they are left alone. A month left empty in the file empties that month here.'))
         return;
       const done = applyGridCsv(state, parsed, todayISO());
-      save(); render();
+      /* save() may ADOPT another window's plan instead of writing (2026-09-23):
+         `state` is then a different object, the page shows that plan, and the
+         toast says this change did not land — commitRow's test, for commitRow's
+         reason (save() returning false also means "banked no undo step"). Back Up
+         is left OPEN, so the same file can be imported again onto the plan now
+         showing; nothing below may call it imported or close the window. */
+      const planWas = state;
+      save();
+      if (state !== planWas) return;
+      render();
       /* The toast counts the REAL run, not the rehearsal. They agree, and the
          day they stop agreeing is the day the reader should be told what
          actually happened rather than what was promised. */
@@ -31395,6 +31420,11 @@ F('csvInFile').onchange = (e) => {
       toast(`${parsed.year} imported — ${said.join(', ')}`);
       dataDialog.close();
     } catch (err) {
+      /* The newer-build halt, reached through save() → adoptOtherCopy → load()
+         (2026-09-23, from Flow Metrics). It stops by THROWING, and this catch
+         took that throw for a broken file: a toast in the top layer, over the
+         halt card. Passed on, it stops this handler as it stops boot. */
+      if (viewOnly) throw err;
       toast('That file could not be read as a CSV');
       console.warn('csv import failed', err);
     } finally {

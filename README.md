@@ -107,7 +107,10 @@ in the app lives in your browser's localStorage.
     "Your last change here was not saved — make it again." One press lost, out
     loud, instead of the other window's work lost in silence. A press that
     changes no figure, a tab click for instance, loses nothing and just gets
-    the "Updated" line.
+    the "Updated" line. The warning is never replaced, not even for a moment,
+    by the "Deleted" or "imported" that the press would otherwise have said —
+    and a CSV import that was turned away leaves Back Up open so you can import
+    the same file again (2026-09-23).
   - **The other window only changing tab is not a change to the plan**, so
     nothing re-draws and nothing is refused. The plan is compared by what it
     says, not by its bytes.

@@ -8189,10 +8189,18 @@ protect nothing:
   the "Updated — …" line. "Your last change here was not saved — make it again"
   is kept for a press that changed a figure. (A quiet price refresh whose save is
   refused is also "nothing lost": the cache it learned goes, and is re-fetched.)
-- **The lost-change toast is raised twice**, now and at the end of the task.
-  There is one toast, and most callers raise their own right after `save()`
-  ("Deleted", "Put back the way it was", a section's sentence) — which would
-  replace it in the same breath with a claim that is no longer true.
+- **The lost-change toast HOLDS every other toast for the rest of the task**
+  (`writeRefused`, 2026-09-23 — the Flow Metrics / Sprint Velocity flag). There
+  is one toast, and most callers raise their own right after `save()`
+  ("Deleted", "Put back the way it was", "2026 imported") — which would replace
+  it in the same breath with a claim that is no longer true. Until 2026-09-23 it
+  was raised TWICE instead, now and on a `setTimeout(0)`: the final text was
+  right, but the false line had already been written into the `aria-live`
+  toast and announced. The flag is set by `adoptOtherCopy(true)` only, lifted in
+  a MICROTASK (a timer is throttled in a background tab), and cleared first by
+  the adoption's own toast so the warning is never the one held back. Declared
+  beside `storedRaw`, above `let state = load()`. A test that drives two
+  refusals must `await` between them — in the app every press is its own task.
 - **The undo ring starts over on adoption**, `finAdopt`'s rule for `finAdopt`'s
   reason: every snapshot predates the other copy's work, so one ⌘Z would write
   the old plan over it under a newer timestamp — this same bug, by hand.
@@ -8222,6 +8230,24 @@ protect nothing:
   back through `save()`, found the newer plan again and drew a second card.
   Dialogs are closed BEFORE `load()` for a second reason: a modal is in the top
   layer, above the halt card.
+  **A caller that wraps `save()` in its own try must hand the halt back**
+  (2026-09-23, from Flow Metrics `5312018`). Here `save()` has no try of its own
+  — but the grid CSV import saves inside its FileReader's try, and that catch took
+  the halt's throw for a broken file: "That file could not be read as a CSV", in
+  the top-layer toast OVER the halt card. It now rethrows when `viewOnly` is set.
+  Found by walking the AST for every call to `save()` or to a function that
+  (transitively) calls it, inside a `try` block: three hits — the CSV import;
+  Restore, which `claimStorage()`s first so never adopts; and `openSharedView`'s
+  `render()`, under `viewOnly`, where `save()` is a no-op. Re-run that walk
+  (acorn + acorn-walk, not grep) before adding a `save()` inside a try.
+- **A caller that goes on to CLAIM success checks the adoption itself** — the
+  `state !== planWas` test `commitRow` already made, because `save()` returning
+  `false` also means "banked no undo step". The CSV import does it too
+  (2026-09-23): a refused import returns before `render()`, its toast and closing
+  Back Up, so the same file can be imported again onto the plan now showing.
+  Nothing in this app empties a paste box after a save (there are none; the file
+  pickers' `value = ''` loses nothing). EXPECTED 1231 → 1238 (the floor had been
+  left 4 under the real count; exact again).
 
 ### The idle half
 
