@@ -136,7 +136,8 @@ a spreadsheet longest.
 
 Rows are grouped into **Income, Expenses, Transfers and Accounts**, with
 per-month subtotals (a section holding a single row skips its subtotal) and a
-year-total column pinned to the right.
+year-total column pinned to the right (on a phone it unpins and waits at the end
+of the row, leaving room for the months).
 
 ### Which Way a Transfer Went
 
