@@ -8571,3 +8571,9 @@ accessibility audit" at the foot of `tests.html`.
   themes. Real keys: Tab from the tab reaches the region, ArrowRight scrolls it 40px; axe's rule
   clean at 390/320/1440. Test: Retirement and Tax at 320 (≥5 marked) and 1280 (none), every
   unmarked box either fits or has its own stops, plus the ring read off the cascade.
+- **The month chips' names did not start with their words (WCAG 2.5.3, noted by the audit
+  though not counted).** "Jan 26" was `aria-label="January 2026"`, so "click Jan 26" reached
+  nothing. `monthPickerHtml` now names a chip `Jan 26 (January 2026)`, `…, still to come)` for
+  a month ahead and `— this month` for now; the `title` keeps the long form. The year chips
+  already passed ("2026 — this year"; "Previous years — …" starts with "Prev" at ≤430px too).
+  Test: every chip in both strips at 1280 and 375, name starts with `innerText`.
