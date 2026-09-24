@@ -2846,7 +2846,7 @@ unchanged.
 
 Every page in this repo passes axe-core at WCAG 2.1 A and AA, the 2.2 AA additions and its
 best-practice rules, in all four themes, with data loaded, on every tab and in every window
-(last run 2026-09-05). The things axe cannot see are checked by hand the same day: a Tab
+(last run 2026-09-24). The things axe cannot see are checked by hand the same day: a Tab
 through every view reading the focus ring, every window opened from the keyboard and closed
 with Esc, hover colours, a 320px-wide window, widened text spacing and reduced motion.
 

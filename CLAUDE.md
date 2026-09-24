@@ -8577,3 +8577,15 @@ accessibility audit" at the foot of `tests.html`.
   a month ahead and `— this month` for now; the `title` keeps the long form. The year chips
   already passed ("2026 — this year"; "Previous years — …" starts with "Prev" at ≤430px too).
   Test: every chip in both strips at 1280 and 375, name starts with `innerText`.
+
+Checked and needing nothing: **every selected state that is drawn only as a fill already says
+so in ARIA**, which is what the theme pack's forced-colours rule (arriving separately) hooks on —
+the view tabs (`aria-selected`), the Year/Month switch, the year and month chips, the Net Worth
+"settled / this month" pair and the calculator's four readouts (`role=radio` +
+`aria-checked`), and the calculator's Pick (`aria-pressed`); each was driven in forced-colours
+mode and read back flipping with the press. No app-level forced-colours CSS was added. Left
+alone, outside what the audit counted: the grid's block selection (`td.selrange`) is a fill
+plus an inset box-shadow, both of which forced colours removes — it is a range of cells, not a
+control, and there is no ARIA attribute for "inside a drag-selection" on a `td`; and axe's
+EXPERIMENTAL `label-content-name-mismatch` rule (not in the WCAG tag set the audit runs) flags
+the Month page's rows, whose names are the row's own words re-ordered into a sentence.
