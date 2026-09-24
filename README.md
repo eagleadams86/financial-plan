@@ -2586,7 +2586,10 @@ drawn UNDERNEATH it: the app had stopped, and you were left looking at an
 editor whose every press did nothing, with the explanation and its Reload
 button hidden behind it. Since 2026-09-18 the stop closes whatever is open
 first, so the message and Reload are always what you see and what the keyboard
-is on.
+is on. Since 2026-09-24 the message also takes over the page completely: a
+screen reader announces it, the keyboard lands on Reload however the stop
+came about, nothing behind it can be reached with Tab, and no later message
+can pop up over it.
 
 A stopped window also stops syncing, completely. A change you had made a moment
 before is normally sent to the cloud about a second later, and that send used to

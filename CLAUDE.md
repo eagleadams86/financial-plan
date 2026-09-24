@@ -8589,3 +8589,13 @@ plus an inset box-shadow, both of which forced colours removes — it is a range
 control, and there is no ARIA attribute for "inside a drag-selection" on a `td`; and axe's
 EXPERIMENTAL `label-content-name-mismatch` rule (not in the WCAG tag set the audit runs) flags
 the Month page's rows, whose names are the row's own words re-ordered into a sentence.
+- **The newer-build halt card is modal** (2.1.1/2.4.3/4.1.3 — found when Sprint Predictability's
+  identical card was fixed; Money Map already closed open dialogs since 2026-09-18, so this is the
+  rest). `haltForNewerData()` marks the card `role=alertdialog aria-modal`, labelled by its heading
+  and described by the format sentence; `attach()` makes every other body child `inert` and focuses
+  Reload on EVERY road (it was focused only when a dialog had been open); and `window.finHalted`
+  makes `toast()` refuse, since a popover is top layer over the card. A WINDOW flag, not a `let` —
+  the `rowCtx` TDZ trap below. Test: "the newer-build halt card is modal…" (finAdopt road, no window
+  open; `<script>` children are skipped in the inert check). SV and FM carry the same fix.
+- **Theme pack rule 19 (forced colours) is taken** — `theme.css` copied from the pack. No app-level
+  `forced-colors` block; the pack's `check_consumers.py` flags one that restyles selected states.

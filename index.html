@@ -7480,10 +7480,27 @@ function haltForNewerData(found) {
   const card = document.createElement('div');
   card.setAttribute('style', 'max-width:34em;border:1px solid var(--border,#262f4a);'
     + 'border-radius:12px;padding:24px 26px;background:var(--surface,#121829)');
+  /* A MODAL CARD, NOT A PICTURE OF ONE (2026-09-24 accessibility audit). Closing
+     the windows below put the card on top, but the dead app behind it stayed in
+     the Tab order, a screen reader was never told the card had arrived, and a
+     late toast could still rise over it (a popover is top layer too). So the card
+     is an alertdialog named by its heading, everything else on the page is made
+     inert once it is attached, focus goes to Reload whatever road got here, and
+     `window.finHalted` turns toast() away. A WINDOW flag, not a `let`: at boot this
+     runs inside `let state = load()`, before any later declaration exists — the
+     same trap as `rowCtx` below. Sprint Predictability and Flow Metrics carry the
+     same card and the same fix. */
+  window.finHalted = true;
+  card.setAttribute('role', 'alertdialog');
+  card.setAttribute('aria-modal', 'true');
+  card.setAttribute('aria-labelledby', 'haltTitle');
+  card.setAttribute('aria-describedby', 'haltWhy');
   const h = document.createElement('h1');
+  h.id = 'haltTitle';
   h.setAttribute('style', 'margin:0 0 12px;font-size:var(--fs-lg)');
   h.textContent = 'This Plan Was Saved by a Newer Version';
   const p1 = document.createElement('p');
+  p1.id = 'haltWhy';
   p1.setAttribute('style', 'margin:0 0 12px');
   p1.textContent = 'Your saved plan uses data format ' + String(found)
     + ', and the copy of the app running here only understands ' + String(SCHEMA)
@@ -7529,7 +7546,11 @@ function haltForNewerData(found) {
   });
   card.append(h, p1, p2, p3, btn);
   wrap.appendChild(card);
-  const attach = () => document.body.appendChild(wrap);
+  const attach = () => {
+    document.body.appendChild(wrap);
+    for (const el of document.body.children) if (el !== wrap) el.inert = true;
+    btn.focus({ preventScroll: true });
+  };
   if (document.body) attach();
   else document.addEventListener('DOMContentLoaded', attach, { once: true });
   /* ── Nothing may sit ABOVE this card (2026-09-18) ──────────────────────────
@@ -10363,6 +10384,9 @@ function dropToast(el) {
 function toast(msg) {
   /* A success line from a handler whose save was just refused — see adoptOtherCopy. */
   if (writeRefused) return;
+  /* Nor anything once the app has stopped: a popover is top layer, over the
+     halt card — see haltForNewerData. */
+  if (window.finHalted) return;
   const el = F('toast');
   clearTimeout(toastTimer);
   clearTimeout(toastHideTimer);

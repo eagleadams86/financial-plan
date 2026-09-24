@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1242;
+const EXPECTED = 1243;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -22051,6 +22051,41 @@ t('a plan from a newer build in the other window halts this one once, and it nev
     eq(localStorage.getItem('fin-state'), newerRaw, 'and still nothing is written');
     eq([...D.querySelectorAll('h1')].filter(h => /Saved by a Newer Version/.test(h.textContent)).length, 1,
        'one card, not one per press');
+  } finally {
+    if (f) f.remove();
+    tcPutBack(kept);
+  }
+});
+
+t('the newer-build halt card is modal: announced, focused, nothing live behind it, no toast over it', async () => {
+  /* 2026-09-24 accessibility audit. Closing the windows put the card on top, but
+     the dead app stayed in the Tab order, the card was never announced, and a late
+     toast could rise over it. Reached here with NO window open — the road where
+     Reload used to get no focus at all. */
+  const kept = tcSnapshot();
+  let f = null;
+  try {
+    const plan = tcPlan();
+    const booted = await tcBoot(plan, 'haltmodal');
+    f = booted.f;
+    const W = booted.W, D = booted.D;
+    const newer = Object.assign(JSON.parse(JSON.stringify(plan)), { schema: H.SCHEMA + 1 });
+    let threw = false;
+    try { W.finAdopt(newer, Date.now() + 1000); } catch (e) { threw = /newer than this build/.test(String(e.message)); }
+    ok(threw, 'fixture: finAdopt halts');
+    const card = D.querySelector('[role="alertdialog"]');
+    ok(card && card.getAttribute('aria-modal') === 'true', 'the card is a modal alertdialog');
+    const named = card && D.getElementById(card.getAttribute('aria-labelledby'));
+    ok(named && /Saved by a Newer Version/.test(named.textContent), 'named by its heading');
+    const btn = card && [...card.querySelectorAll('button')].find(b => b.textContent === 'Reload');
+    ok(btn && D.activeElement === btn, 'focus is on Reload');
+    const wrap = card && card.parentElement;
+    ok(wrap && [...D.body.children].every(el => el === wrap || el.inert || el.tagName === 'SCRIPT'),
+       'everything else on the page is inert');
+    const toastEl = D.getElementById('toast');
+    toastEl.textContent = '';
+    W.toast('A late line');
+    ok(!/A late line/.test(toastEl.textContent), 'and no later toast is raised over the card');
   } finally {
     if (f) f.remove();
     tcPutBack(kept);
