@@ -8553,3 +8553,21 @@ accessibility audit" at the foot of `tests.html`.
   own return aims at the dead row) with `bidx`, else `idx`, stepped by `dir` — id-keyed rows
   keep their id. Row DELETE was left as it was: the row is gone and "the next row" is a
   judgement per section, not a fix. Test: one walk pressing all of them in a 1280×900 frame.
+- **An overflowing `.tablewrap` with nothing focusable in it could not be scrolled from the
+  keyboard (WCAG 2.1.1, axe `scrollable-region-focusable`).** Retirement's first Traditional vs
+  Roth table, "…at Retirement", "Where the IRAs Land", "Year by Year in Retirement"; Tax's
+  "What 2026 Owes", "What the Pot Has to Pay" and "Years You've Stored" — at 390 and 320 (none
+  overflow at 1440 with the sample). `wireScrollBoxes()` runs at the end of `render()`, after
+  `wireBoxes` (the name is read off the folded heading's `.box-title`), and gives each such box
+  `tabindex=0`, `role=region` and an `aria-label` from the nearest heading above it in its card
+  (`scrollBoxName` drops ✎ Edit and the info dot). **Only while it overflows and only if it has no
+  focusable descendant** — a stop on a table that fits does nothing, and one on a box whose rows
+  take Tab is a second way to the same place. Overflow moves with the width, so one module-level
+  `ResizeObserver` watches every wrap (disconnected and re-armed per render): a resized window,
+  a folded card opened (0 → real width) and the docked calculator all re-mark. `data-scrollbox`
+  marks what it added, so it only ever removes its own attributes. The ring is
+  `.tablewrap[data-scrollbox]:focus-visible`, `outline-offset: -2px` — inside the edge, since the
+  box is as wide as its card; measured 5.18–14.45:1 against the card and the table in all four
+  themes. Real keys: Tab from the tab reaches the region, ArrowRight scrolls it 40px; axe's rule
+  clean at 390/320/1440. Test: Retirement and Tax at 320 (≥5 marked) and 1280 (none), every
+  unmarked box either fits or has its own stops, plus the ring read off the cascade.

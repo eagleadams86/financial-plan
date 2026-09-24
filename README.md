@@ -2170,6 +2170,12 @@ choice actually uses.
   clickable row on the other tabs — a donation, a trip line, a comp year, a
   goal card, a gathered note — takes a tab stop of its own, so Enter or Space
   opens it without a mouse.
+- **A table too wide for its card scrolls from the keyboard too.** On a phone
+  the Retirement projections and the Tax tables run past the edge of their
+  cards, and there is nothing in them to click — so while one is wider than
+  its card it takes a tab stop of its own, named after its card, and the left
+  and right arrow keys scroll it. A table that fits, or one whose rows already
+  take the Tab, gets no extra stop. (Fixed 2026-09-24.)
 
 ### CSV, Out and Back
 

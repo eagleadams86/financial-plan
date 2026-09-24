@@ -898,6 +898,11 @@ label.field { display: block; font-size: var(--fs-xs); color: var(--text-seconda
    it is only ever visible on the phone. Mirrored in Sprint Predictability, Flow Metrics
    and Golf Handicap. */
 .tablewrap { overflow-x: auto; position: relative; }
+/* A table box that scrolls with nothing focusable inside it is made a tab stop
+   by `markScrollBox` (2026-09-24). Its ring sits INSIDE the edge: the box is as
+   wide as its card, and a ring outside it would be drawn in — or cut off by —
+   whatever it sits in. */
+.tablewrap[data-scrollbox]:focus-visible { outline: 2px solid var(--focus-border); outline-offset: -2px; }
 table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums; }
 th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border); }
@@ -21690,6 +21695,60 @@ function wireBoxes(view) {
   }
 }
 
+/* ── A TABLE THAT SCROLLS SIDEWAYS, REACHABLE FROM THE KEYBOARD (2026-09-24) ──
+   A `.tablewrap` scrolls its table sideways once the card is narrower than the
+   table — most of them on a phone, some in a narrow window. Where the table
+   holds a button or an editable row, Tab reaches that and the browser scrolls
+   it into view. Where it holds NOTHING focusable (the Retirement projections,
+   the Tax tables), the columns past the edge could only be reached with a
+   pointer (WCAG 2.1.1; axe's scrollable-region-focusable). Such a box becomes a
+   tab stop — arrow keys scroll a focused scroll box — and a region named by
+   the card heading above it, so the stop says what it is.
+
+   ONLY those boxes, and only WHILE they overflow: a stop on a table that fits
+   is a Tab press that does nothing, and one on a box that already has its own
+   stops is a second way to the same place. Overflow is a fact about the width,
+   so each box is watched rather than measured once — a ResizeObserver sees a
+   window resized, a folded card opened (0 wide to its real width) and the
+   calculator docking beside the page. `data-scrollbox` marks what this added,
+   so it only ever takes away its own. */
+const scrollBoxWatch = typeof ResizeObserver === 'function'
+  ? new ResizeObserver((seen) => seen.forEach((e) => markScrollBox(e.target))) : null;
+const SCROLLBOX_STOPS = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+function scrollBoxName(wrap) {
+  const card = wrap.closest('.card');
+  const heads = card ? [...card.querySelectorAll('h2, h3, h4')]
+    .filter((h) => h.compareDocumentPosition(wrap) & Node.DOCUMENT_POSITION_FOLLOWING) : [];
+  const h = heads[heads.length - 1];
+  if (!h) return 'Table';
+  /* A folded card's title is its `.box-title`; any other heading loses its
+     buttons (✎ Edit, the info dot) so the name is only the words. */
+  const title = h.querySelector('.box-title');
+  const text = title ? title.textContent : [...h.childNodes]
+    .filter((n) => !(n.nodeType === 1 && n.matches('button, a, .tile-help')))
+    .map((n) => n.textContent).join('');
+  return text.replace(/\s+/g, ' ').trim() || 'Table';
+}
+function markScrollBox(wrap) {
+  if (!wrap.isConnected) return;
+  const need = wrap.scrollWidth > wrap.clientWidth && !wrap.querySelector(SCROLLBOX_STOPS);
+  if (need) {
+    wrap.dataset.scrollbox = '';
+    wrap.tabIndex = 0;
+    wrap.setAttribute('role', 'region');
+    wrap.setAttribute('aria-label', scrollBoxName(wrap));
+  } else if (wrap.hasAttribute('data-scrollbox')) {
+    for (const a of ['data-scrollbox', 'tabindex', 'role', 'aria-label']) wrap.removeAttribute(a);
+  }
+}
+function wireScrollBoxes() {
+  if (scrollBoxWatch) scrollBoxWatch.disconnect();
+  for (const wrap of document.querySelectorAll('#views .tablewrap')) {
+    markScrollBox(wrap);
+    if (scrollBoxWatch) scrollBoxWatch.observe(wrap);
+  }
+}
+
 /* An id built from a box key, which holds a slash and may hold a tilde. */
 const cssId = (key) => key.replace(/[^a-z0-9]+/gi, '-');
 
@@ -21921,6 +21980,8 @@ function wireView(view) {
      itself to nothing; drawing them first and folding the box afterwards means
      each one is already the right size when its box is opened again. */
   wireBoxes(view);
+  /* After wireBoxes too: the name is read off the folded heading's title. */
+  wireScrollBoxes();
   /* AFTER wireBoxes, which is not a preference: folding the card reparents its
      contents into `.card-body`, and reinserting the gridwrap resets its scroll
      to 0 — a scroll set any earlier is silently thrown away. */

@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1240;
+const EXPECTED = 1241;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -23216,6 +23216,64 @@ t('a keyboard press that redraws its own control leaves the focus on its replace
     at = await press('.calc-del[data-i="0"]', 'the last ✕ on the tape');
     ok(at.id === 'calcExpr', 'the last ✕: the tape is empty and the focus is in the box', at.id || at.className);
   } finally { f.remove(); }
+});
+
+/* ── A table that scrolls sideways can be scrolled from the keyboard (2.1.1) ──
+   A `.tablewrap` scrolls its table sideways when the card is narrower than
+   it. Where the table has a button or an editable row in it, Tab reaches that
+   and the browser scrolls it into view; where it has NOTHING focusable — the
+   Retirement projections, the Tax tables — the columns past the edge could
+   only be reached with a pointer. Such a box becomes a tab stop, a region
+   named by its card's heading, and stops being one when it no longer
+   overflows. Measured at 320px, where the most of them overflow, and at
+   1280px, where none of these do. */
+t('a sideways-scrolling table with nothing focusable in it is a named tab stop, and only then', async () => {
+  const focusable = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  const heading = (wrap) => {
+    const card = wrap.closest('.card');
+    const hs = [...card.querySelectorAll('h2, h3, h4')]
+      .filter((h) => h.compareDocumentPosition(wrap) & 4);   // DOCUMENT_POSITION_FOLLOWING
+    const h = hs[hs.length - 1];
+    const t = h && (h.querySelector('.box-title') || h);
+    return t ? t.textContent.replace(/\s+/g, ' ').trim() : '';
+  };
+  let marked = 0, narrowChecked = 0, wideChecked = 0;
+  for (const width of [320, 1280]) {
+    const { f, W, D } = await auditFrame(width, 800, 'scrollbox');
+    try {
+      for (const tab of ['tab-retirement', 'tab-tax']) {
+        D.getElementById(tab).click();
+        await new Promise((r) => setTimeout(r, 350));
+        for (const wrap of D.querySelectorAll('#views .tablewrap')) {
+          if (!wrap.getClientRects().length) continue;
+          const over = wrap.scrollWidth > wrap.clientWidth;
+          const inner = wrap.querySelector(focusable);
+          const where = width + 'px ' + tab + ' “' + heading(wrap) + '”';
+          if (width === 320) narrowChecked++; else wideChecked++;
+          if (over && !inner) {
+            marked++;
+            ok(wrap.getAttribute('tabindex') === '0', where + ': overflows with nothing focusable, so it is a tab stop', wrap.getAttribute('tabindex'));
+            eq(wrap.getAttribute('role'), 'region', where + ': and a region');
+            ok(heading(wrap) && wrap.getAttribute('aria-label') === heading(wrap), where + ': named by its heading', wrap.getAttribute('aria-label'));
+          } else {
+            ok(!wrap.hasAttribute('tabindex') && !wrap.hasAttribute('role'),
+              where + ': ' + (over ? 'has its own focusable rows' : 'does not overflow') + ', so it is left alone',
+              wrap.getAttribute('tabindex'));
+          }
+        }
+      }
+    } finally { f.remove(); }
+  }
+  ok(narrowChecked >= 6 && wideChecked >= 6, 'fixture: the two tabs drew their tables', narrowChecked + '/' + wideChecked);
+  ok(marked >= 5, 'fixture: at 320px several tables overflow with nothing focusable', marked);
+  /* The ring: inset, so no card edge can clip it, in the family token. Read
+     off the cascade rather than by focusing — see the note on :focus-visible
+     in CI. */
+  const rule = [...w.document.styleSheets].flatMap((sh) => { try { return [...sh.cssRules]; } catch (e) { return []; } })
+    .find((r) => r.selectorText && /\.tablewrap/.test(r.selectorText) && /:focus-visible/.test(r.selectorText));
+  ok(rule, 'a focus ring is declared for the scrolling table');
+  ok(/var\(--focus-border\)/.test(rule.style.cssText) && /outline-offset:\s*-2px/.test(rule.style.cssText),
+    'the ring is the family’s, drawn inside the box', rule && rule.style.cssText);
 });
 
 async function run() {
