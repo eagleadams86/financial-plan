@@ -11585,7 +11585,7 @@ function wireYearStrip() {
     if (!chip || chip.getAttribute('aria-checked') === 'true') return;
     yearKeyMove = byKey;
     state.ui.activeYear = chip.dataset.year;
-    save(); render();
+    keepFocus(() => { save(); render(); }, CHOSEN_YEAR);
   };
   rail.onclick = (e) => pick(e.target.closest('.yearchip'), false);
   rail.onkeydown = (e) => {
@@ -11601,9 +11601,12 @@ function wireYearStrip() {
   /* ONE CHIP ALONG, and `pick` is the same door a click on that chip uses — so
      the year lands, the rail follows it and the strip is redrawn by exactly the
      one path, rather than by an arrow that knows how to choose a year on its
-     own. `false` for `byKey`: the pointer is on the arrow and the arrow is still
-     there after the redraw, so there is no focus to hand back. A disabled button
-     never fires, which is what makes the ends safe without a guard here. */
+     own. `false` for `byKey`: the chip is not where the reader is. The arrow is
+     NOT still there after the redraw — the whole strip is drawn again — which a
+     comment here once claimed; `pick`'s `keepFocus` hands the focus to the new
+     arrow, or to the chosen year when the new one is grey at the end. A
+     disabled button never fires, which is what makes the ends safe without a
+     guard here. */
   const step = (dir) => {
     const i = chips.findIndex(c => c.getAttribute('aria-checked') === 'true');
     if (i < 0) return;
@@ -11617,7 +11620,7 @@ function wireYearStrip() {
   const nowBtn = F('yearNow');
   if (nowBtn) nowBtn.onclick = () => {
     state.ui.activeYear = nowBtn.dataset.year;
-    save(); render();
+    keepFocus(() => { save(); render(); }, CHOSEN_YEAR);   // grey now: the year it chose
   };
   const on = chips.find(c => c.getAttribute('aria-checked') === 'true');
   settleRail(rail, on);
@@ -14783,7 +14786,11 @@ function wireMonthStrip() {
   const chips = [...rail.querySelectorAll('.yearchip')];
   const all = chips.map(ch => ch.dataset.month);
   const at = all.indexOf(activeMonthKey());
-  const go = (m, byKey) => { if (!m) return; monthKeyMove = byKey; pickMonth(m); };
+  const go = (m, byKey) => {
+    if (!m) return;
+    monthKeyMove = byKey;
+    keepFocus(() => pickMonth(m), CHOSEN_MONTH);
+  };
   rail.onclick = (e) => go(e.target.closest('.yearchip')?.dataset.month, false);
   rail.onkeydown = (e) => {
     const step = { ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last' }[e.key];
@@ -14823,7 +14830,11 @@ function wireMonthRows() {
     if (!rev) return;
     if (rev.dataset.reveal === 'on') state.ui.showNotDue = true;
     else delete state.ui.showNotDue;
-    save(); render();
+    /* Its own key flips on/off with the press, so the same line is found by
+       where it stood: every card's line flips together. */
+    const lines = () => [...document.querySelectorAll('#views [data-reveal]')];
+    const at = lines().indexOf(rev);
+    keepFocus(() => { save(); render(); }, () => lines()[at]);
   }, true);
   zone.addEventListener('click', (e) => open(e.target.closest('.mrow[data-cat], .mrow[data-bal]')));
   /* The Close card's lines, and the pointer to last month's card. Each goes to
@@ -14840,7 +14851,7 @@ function wireMonthRows() {
       if (el.dataset.settled) state.ui.worthAsOf = 'settled';
       goToView(view);
     } else if (kind === 'month') {
-      if (pickMonth(m)) window.scrollTo(0, 0);
+      if (moveFocus(() => pickMonth(m), CHOSEN_MONTH)) window.scrollTo(0, 0);
     } else if (kind === 'backup') {
       openModal(dataDialog);
     } else if (kind === 'enter') {
@@ -21775,7 +21786,7 @@ function wireView(view) {
       if (nw.hasProperty) snap.property = nw.property;
       if (nw.hasDebts) snap.debts = nw.debts;
       const replaced = upsertSnapshot(state.side.snapshots, snap);
-      save(); render();
+      keepFocus(() => { save(); render(); });
       const when = asOf === cur ? 'today' : `the end of ${monthLabelFull(asOf)}`;
       toast(replaced ? `Restated the snapshot for ${when} — ${fmtMoney(total)}`
         : `Recorded ${fmtMoney(total)} as of ${when}`);
@@ -23787,8 +23798,9 @@ function renderPartsList(host, f) {
       settle.setAttribute('aria-label', `${f.settle.label} — part ${i + 1}`);
       settle.onclick = () => {
         f.settle.run((k) => part[k] || 0, (k, n) => { part[k] = round2(n); });
-        renderPartsList(host, f);
-        partsCommitted(host, f);
+        /* The list is rebuilt whole; the focus goes back to this part's button
+           (it is found by its name, "… — part N"). */
+        keepFocus(() => { renderPartsList(host, f); partsCommitted(host, f); });
       };
       btns.appendChild(settle);
     }
@@ -23803,8 +23815,12 @@ function renderPartsList(host, f) {
          at a plain row whose own boxes are live again. Leaving an empty list
          standing would be a split that claims the line is nothing. */
       if (!parts.length) host._parts = null;
-      renderPartsList(host, f);
-      partsCommitted(host, f);
+      /* "Remove part N" is the NEXT part's button once this one has gone; the
+         last part's hands on to the one above it, and an emptied list to the
+         button that splits the line again. */
+      keepFocus(() => { renderPartsList(host, f); partsCommitted(host, f); },
+        () => host.querySelector(`.partbtns .btn[aria-label="Remove part ${i}"]`),
+        () => host.querySelector('.parts-add'), () => host.querySelector('.parts-toggle'));
     };
     btns.appendChild(del);
     line.appendChild(btns);
@@ -24942,11 +24958,22 @@ F('rowDeleteBtn').onclick = () => {
 };
 F('rowUpBtn').onclick = () => moveRow(-1);
 F('rowDownBtn').onclick = () => moveRow(1);
+/* A move redraws the page UNDER the open window, so the dialog's own focus
+   return aims at the row as it was drawn before — a dead node — and drops to
+   <body>. The row is handed the focus in its new place instead: the same keys,
+   with the index that moved stepped along (a bucket's `bidx`, else `idx`; a row
+   keyed by id keeps its id and is simply found again). */
 function moveRow(dir) {
   const { section, ds } = rowCtx;
   rowCtx = null;
-  if (EDITORS[section].move(ds, dir)) { save(); render(); }
+  const moved = EDITORS[section].move(ds, dir);
+  if (moved) { save(); render(); }
   rowDialog.close();
+  if (!moved) return;
+  const to = { ...ds };
+  const k = to.bidx !== undefined ? 'bidx' : to.idx !== undefined ? 'idx' : null;
+  if (k) to[k] = String(+to[k] + dir);
+  refocusEditRow({ section, ds: to });
 }
 
 /* Shared list helpers — most sections are "array of objects somewhere". */
@@ -28561,7 +28588,7 @@ F('views').addEventListener('click', (e) => {
     if (!y || !state.years[y]) return;
     if (act.dataset.yearact === 'csv') exportYearCsv(y);
     else if (act.dataset.yearact === 'delete') deleteYear(y);
-    else if (act.dataset.yearact === 'unfold') reopenYearFromSummary(y);
+    else if (act.dataset.yearact === 'unfold') moveFocus(() => reopenYearFromSummary(y), CHOSEN_YEAR);
     return;
   }
   const add = e.target.closest('[data-add]');
@@ -28953,9 +28980,13 @@ function wireBudget() {
     };
   });
   const closeBtn = F('closeMonthBtn');
-  if (closeBtn) closeBtn.onclick = markMonthEntered;
+  /* Each hands on to the other when it goes: marking the last open month
+     brings out Re-open, and re-opening brings Mark back. */
+  if (closeBtn) closeBtn.onclick = () =>
+    keepFocus(markMonthEntered, '#reopenMonthBtn', CHOSEN_MONTH, CHOSEN_YEAR);
   const reopenBtn = F('reopenMonthBtn');
-  if (reopenBtn) reopenBtn.onclick = reopenMonth;
+  if (reopenBtn) reopenBtn.onclick = () =>
+    keepFocus(reopenMonth, '#closeMonthBtn', CHOSEN_MONTH, CHOSEN_YEAR);
   const freezeBtn = F('freezeYearBtn');
   if (freezeBtn) freezeBtn.onclick = () => freezeYear(activeYearKey());
   const liveBtn = F('reopenLiveBtn');
@@ -28974,7 +29005,7 @@ function wireBudget() {
     const created = rolloverYear(state, C, from);
     if (created) {
       state.ui.activeYear = created;
-      save(); render();
+      moveFocus(() => { save(); render(); }, CHOSEN_YEAR);   // on the year it built
       toast(early ? `${created} is built — every month is a projection for now`
                   : `${created} is ready — check the seeded balances`);
     }
@@ -29372,6 +29403,78 @@ function refocusEditRow(ctx) {
   try { el = document.querySelector(sel); } catch (e) { /* odd key — no focus */ }
   if (el) el.focus({ preventScroll: true });
 }
+
+/* ── A PRESS THAT REDRAWS ITS OWN BUTTON (2026-09-24 accessibility audit) ────
+   Most presses here end in `save(); render()`, and the render throws away the
+   very button that was pressed. The browser leaves the focus on a node that is
+   no longer in the page, so it falls to <body> — the top of the document — and
+   a keyboard reader is sent back through the header and the tabs with nothing
+   said. The audit found a dozen of them: the strips' arrows, chips and "This
+   year"/"This month", the month buttons on the grid card and the month page,
+   the empty-rows line, the close checklist's pointer, "Re-open as a Year",
+   "Record Today's Figures", a split line's "✓ Paid", the tape's ✕.
+
+   So one pair of helpers rather than a dozen hand-backs. `keepFocus` runs the
+   press and, if the focus has gone, puts it on the SAME control drawn again —
+   found by its id, else its first class and its data keys, else its name —
+   and failing that on the fallbacks it is handed, in order: the neighbour its
+   job hands on to, or the chip that says where you now are. `moveFocus` is the
+   one for a press that TAKES you somewhere ("Build 2027", "Open it"): it skips
+   the same-control step, because the button standing in the old one's place
+   ("Build 2028") is not where the reader went.
+
+   It only ever acts on a focus that is LOST. If the press left it anywhere real
+   — the control survived, or the handler placed it itself — it is not touched,
+   and a press that did not start from a focused control asks for nothing, so a
+   pointer that never focused anything is left alone. A control that is still
+   in the page but went `disabled` or hidden by its own success (the arrow at
+   the end of the strip, "This year" once you are there) counts as lost: it can
+   hold no focus a keyboard can use. The ring follows the browser's own rule —
+   a focus moved by script after a mouse press does not ring. */
+function focusKey(el) {
+  if (!el || el === document.body || !el.isConnected) return null;
+  if (el.id) return '#' + CSS.escape(el.id);
+  const tag = el.tagName.toLowerCase();
+  const cls = el.classList.length ? '.' + CSS.escape(el.classList[0]) : '';
+  /* `data-tip` is hover text, not a key — it changes with the figure. */
+  const keys = [...el.attributes]
+    .filter(a => a.name.startsWith('data-') && a.name !== 'data-tip')
+    .map(a => `[${a.name}="${CSS.escape(a.value)}"]`).join('');
+  if (keys) return tag + cls + keys;
+  const name = el.getAttribute('aria-label');
+  return name ? `${tag}${cls}[aria-label="${CSS.escape(name)}"]` : null;
+}
+const canHoldFocus = (el) => !!el && el.isConnected && !el.disabled
+  && el.getClientRects().length > 0;
+function landFocus(targets) {
+  const now = document.activeElement;
+  if (now && now !== document.body && canHoldFocus(now)) return now;
+  for (const t of targets) {
+    let el = null;
+    try { el = typeof t === 'function' ? t() : typeof t === 'string' ? document.querySelector(t) : t; }
+    catch (e) { /* an odd key finds nothing — try the next */ }
+    if (!canHoldFocus(el)) continue;
+    el.focus({ preventScroll: true });
+    return el;
+  }
+  return null;
+}
+function keepFocus(run, ...fallbacks) {
+  const key = focusKey(document.activeElement);
+  const out = run();
+  if (key) landFocus([key, ...fallbacks]);
+  return out;
+}
+function moveFocus(run, ...targets) {
+  const had = focusKey(document.activeElement);
+  const out = run();
+  if (had) landFocus(targets);
+  return out;
+}
+/* Where you are, in whichever strip is showing — the fallback for a press that
+   changed the year or the month. */
+const CHOSEN_YEAR = '#yearRail [aria-checked="true"]';
+const CHOSEN_MONTH = '#monthRail [aria-checked="true"]';
 
 /* ── Splitting a month into several amounts ─────────────────────────────────
    A month is often more than one number: two grocery runs and a delivery, or
@@ -31673,8 +31776,11 @@ F('calcTape').addEventListener('click', (e) => {
   if (use) { const en = calc.tape[Number(use.dataset.i)]; if (en) useInBox(en.v, en.k); return; }
   const b2 = e.target.closest('.calc-del');
   if (!b2) return;
-  calc.tape.splice(Number(b2.dataset.i), 1);
-  renderTape(); saveCalc();
+  const i = Number(b2.dataset.i);
+  calc.tape.splice(i, 1);
+  /* The ✕ now at this place belongs to the entry below, which moved up; the
+     last one hands on to the one above, and an emptied tape to the box. */
+  keepFocus(() => { renderTape(); saveCalc(); }, `.calc-del[data-i="${i - 1}"]`, calcExpr);
 });
 
 /* Where the window lives right now: inside the topmost open dialog, else body. */

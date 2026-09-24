@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1239;
+const EXPECTED = 1240;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -23075,6 +23075,147 @@ t('the strip’s step arrows are at least 24px square at every width, in both le
       }
     } finally { f.remove(); }
   }
+});
+
+/* ── A press that redraws its own button keeps the keyboard (WCAG 2.4.3) ────
+   Every one of these ends in a render that throws away the button you pressed,
+   and focus went with it to <body> — the top of the page, a Tab back through
+   the header and the tabs to get anywhere, and nothing said. Pressed the way
+   a keyboard presses — focused, then activated — each must leave the focus on
+   something real: the same control drawn again, or, where it has gone or gone
+   grey, the chip that says where you now are (or the neighbour its job hands
+   on to). A dozen sites, one helper. */
+t('a keyboard press that redraws its own control leaves the focus on its replacement, never on <body>', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'keepfocus');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const on = () => D.activeElement;
+    const lost = () => !on() || on() === D.body;
+    /* Pressed as the keyboard does, located fresh each time: a snapshot of a
+       button the app has redrawn is a detached node. */
+    const press = async (sel, what) => {
+      const el = typeof sel === 'string' ? D.querySelector(sel) : sel;
+      ok(el && el.getClientRects().length && !el.disabled, 'fixture: ' + what + ' is on screen to press');
+      el.focus();
+      ok(on() === el, 'fixture: ' + what + ' takes the focus');
+      el.click();
+      await wait(150);
+      ok(!lost(), what + ': the focus is not dropped to <body>');
+      return on();
+    };
+    const chip = (rail) => D.querySelector('#' + rail + ' [aria-checked="true"]');
+
+    D.getElementById('tab-budget').click();
+    await wait(250);
+    /* THE YEAR STRIP: both arrows land on themselves, a chip on the same year,
+       and "This year" — grey once it has done its job — on the year it chose. */
+    let at = await press('#yearPrev', 'the year before');
+    ok(at.id === 'yearPrev' || at === chip('yearRail'), 'the year before: the focus is the arrow again, or the chosen year', at.id || at.className);
+    at = await press('#yearNow', 'This year');
+    ok(at === chip('yearRail'), 'This year: the focus is on the year it took you to', at.id || at.className);
+    const other = D.querySelector('#yearRail .yearchip[aria-checked="false"]:not(.y-summary)')
+      || D.querySelector('#yearRail .yearchip[aria-checked="false"]');
+    const otherYear = other.dataset.year;
+    at = await press(other, 'a year chip');
+    ok(at.dataset.year === otherYear && at.getAttribute('aria-checked') === 'true', 'a year chip: the focus is on that year, now chosen');
+    at = await press('#yearNext', 'the year after');
+    ok(at.id === 'yearNext' || at === chip('yearRail'), 'the year after: the focus is the arrow again, or the chosen year', at.id || at.className);
+
+    /* THE GRID CARD'S MONTH BUTTONS. Build 2027 takes you to the new year, so
+       the focus goes where you went — the year it chose — and not to the
+       "Build 2028" that now stands in its place. */
+    D.getElementById('yearNow').click();
+    await wait(200);
+    at = await press('#closeMonthBtn', 'Mark the month entered (grid)');
+    at = await press('#reopenMonthBtn', 'Re-open the month (grid)');
+    const newest = W.newestGridYear();
+    at = await press('#rolloverBtn', 'Build next year');
+    ok(at === chip('yearRail') && at.dataset.year === String(+newest + 1), 'Build next year: the focus is on the year it built', at.id || at.dataset.year);
+
+    /* THE MONTH STRIP and the month page. */
+    D.getElementById('yearNow').click();
+    await wait(200);
+    D.querySelector('.vswitch[data-mode="month"]').click();
+    await wait(250);
+    at = await press('#monthPrev', 'the month before');
+    ok(at.id === 'monthPrev' || at === chip('monthRail'), 'the month before: the focus is the arrow again, or the chosen month', at.id || at.className);
+    at = await press('#monthNow', 'This month');
+    ok(at === chip('monthRail'), 'This month: the focus is on the month it took you to', at.id || at.className);
+    at = await press('#monthNext', 'the month after');
+    const mchip = D.querySelector('#monthRail .yearchip[aria-checked="false"]');
+    const mKey = mchip.dataset.month;
+    at = await press(mchip, 'a month chip');
+    ok(at.dataset.month === mKey, 'a month chip: the focus is on that month, now chosen');
+    D.getElementById('monthNow').click();
+    await wait(200);
+    const reveal = [...D.querySelectorAll('#views [data-reveal]')];
+    ok(reveal.length, 'fixture: this month has empty rows folded away');
+    at = await press(reveal[reveal.length - 1], 'show the empty rows');
+    ok(at.matches('[data-reveal]'), 'show the empty rows: the focus is on the same line, which now hides them', at.className);
+    const pointer = D.querySelector('#views .revealrows[data-close="month"]');
+    const toM = pointer && pointer.dataset.m;
+    at = await press(pointer, 'last month isn’t closed yet — Open it');
+    ok(at === chip('monthRail') && at.dataset.month === toM, 'Open it: the focus is on the month it opened', at.dataset.month);
+    D.getElementById('monthNow').click();
+    await wait(200);
+    at = await press('#closeMonthBtn', 'Mark the month entered (month page)');
+    at = await press('#reopenMonthBtn', 'Re-open the month (month page)');
+
+    /* PREVIOUS YEARS: "Re-open 2025 as a Year" goes to that year. */
+    D.querySelector('.vswitch[data-mode="year"]').click();
+    await wait(250);
+    D.querySelector('#yearRail .y-summary').click();
+    await wait(250);
+    const unfold = D.querySelector('[data-yearact="unfold"]');
+    const uy = unfold && unfold.dataset.year;
+    at = await press(unfold, 'Re-open a folded year');
+    ok(at === chip('yearRail') && at.dataset.year === uy, 'Re-open as a Year: the focus is on the year it re-opened', at.dataset.year || at.className);
+
+    /* PROGRESS: recording the net worth. */
+    D.getElementById('tab-goals').click();
+    await wait(300);
+    at = await press('#recordWorthBtn', 'Record today’s figures');
+    ok(at.id === 'recordWorthBtn', 'Record today’s figures: the focus is on the button again', at.id);
+
+    /* THE ROW EDITOR'S MOVE BUTTONS close the window over a page they have just
+       redrawn, so the dialog's own hand-back aims at a dead row. The focus
+       goes to the row that moved, in its new place. */
+    const goal = D.querySelector('#views [data-edit="goal"][data-idx="0"]');
+    const name = goal.textContent.trim().slice(0, 20);
+    goal.focus(); goal.click();
+    await wait(200);
+    ok(D.getElementById('rowDialog').open, 'fixture: the goal’s editor is open');
+    await press('#rowDownBtn', 'Move down');
+    ok(!D.getElementById('rowDialog').open, 'Move down: the window has closed');
+    ok(on().matches('[data-edit="goal"][data-idx="1"]') && on().textContent.trim().startsWith(name),
+      'Move down: the focus is on the goal that moved, one place down', on().className);
+
+    /* A SPLIT TRIP LINE'S "✓ Paid — part N" redraws the list it sits in; the
+       window stays open, and the focus stays on that part's button. */
+    D.getElementById('tab-vacations').click();
+    await wait(300);
+    const split = D.querySelector('#views tr.editrow.hasparts[data-edit="tripItem"]');
+    split.focus(); split.click();
+    await wait(200);
+    const paid = [...D.querySelectorAll('#rowDialog .partbtns .btn')].find((b) => /part 2$/.test(b.getAttribute('aria-label') || '') && !/Remove/.test(b.getAttribute('aria-label')));
+    ok(paid, 'fixture: the second part has a Paid button');
+    const label = paid.getAttribute('aria-label');
+    at = await press(paid, 'Paid on part 2');
+    ok(D.getElementById('rowDialog').open && at.getAttribute('aria-label') === label, 'Paid on part 2: the window is open and the focus is on that part’s button', at.getAttribute('aria-label'));
+    D.getElementById('rowDialog').close();
+    await wait(150);
+
+    /* THE CALCULATOR'S TAPE: ✕ lands on the entry that took its place, the
+       one above when it was the last, and the box when the tape is empty. */
+    D.getElementById('calcBtn').click();
+    await wait(200);
+    W.addToTape(5, 'one'); W.addToTape(7, 'two');
+    await wait(100);
+    at = await press('.calc-del[data-i="0"]', 'the first ✕ on the tape');
+    ok(at.matches('.calc-del[data-i="0"]'), 'the first ✕: the focus is on the entry that moved up into its place');
+    at = await press('.calc-del[data-i="0"]', 'the last ✕ on the tape');
+    ok(at.id === 'calcExpr', 'the last ✕: the tape is empty and the focus is in the box', at.id || at.className);
+  } finally { f.remove(); }
 });
 
 async function run() {

@@ -8530,3 +8530,26 @@ accessibility audit" at the foot of `tests.html`.
   The rail loses under a pixel an arrow; the "chosen chip shows whole" test still passes at 320,
   360 and 375, mouse and touch. Test: every visible `.ynav` in the strip, both lenses, at 320,
   375, 430 and 1280.
+- **A press that redrew its own button dropped the focus to `<body>` (WCAG 2.4.3).** Twenty
+  controls, every one a real-keys Enter that landed on `<body>` before and on something real
+  after: the strips' ‹ › / chips / "This year" / "This month" (the old comment in
+  `wireYearStrip` saying "the arrow is still there after the redraw" was wrong — the strip is
+  drawn whole, and `yearKeyMove` covered only the arrow KEYS), Mark entered / Re-open on the grid
+  card and the month page, ⊕ Build, the empty-rows line, the close checklist's "Open it",
+  "Re-open YYYY as a Year", "Record Today's Figures", the row editor's Move up/down, a split
+  line's ✓ Paid and Remove, and the tape's ✕. **One pair of helpers beside `refocusEditRow`,
+  not a dozen hand-backs:** `keepFocus(run, ...fallbacks)` runs the press and, only if the
+  focus is LOST (on `<body>`, detached, `disabled`, or not laid out), lands it on the same
+  control drawn again — `focusKey` finds it by id, else first class + data keys (`data-tip`
+  excluded, it is hover text), else `aria-label` — then on the fallbacks in order.
+  `moveFocus(run, ...targets)` is for a press that TAKES you somewhere: it skips the
+  same-control step, because "Build 2028" standing where "Build 2027" was is not where the
+  reader went. `CHOSEN_YEAR` / `CHOSEN_MONTH` (the checked chip) are the navigation landing —
+  the same place a rail arrow-key move already hands focus to, so no heading needed a
+  `tabIndex`. Neither helper acts if the press did not start from a focused control, and a
+  script focus after a mouse press does not ring (Chromium's own rule; measured). The two
+  special keys: the empty-rows line flips its own `data-reveal`, so it is found again by its
+  POSITION among the lines; and `moveRow` refocuses after `rowDialog.close()` (the dialog's
+  own return aims at the dead row) with `bidx`, else `idx`, stepped by `dir` — id-keyed rows
+  keep their id. Row DELETE was left as it was: the row is gone and "the next row" is a
+  judgement per section, not a fix. Test: one walk pressing all of them in a 1280×900 frame.

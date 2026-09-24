@@ -1996,6 +1996,16 @@ A Find result that **opens a record** holds too: the editor is over the cell you
 searched for, and moving the page would leave you at the top of a long grid the
 moment you closed it.
 
+**The keyboard stays where you pressed, too** (fixed 2026-09-24). Most buttons
+redraw the page, and the redraw used to throw away the button you had just
+pressed — so from the keyboard, pressing ‹, "Mark Sep 26 entered", a split
+line's ✓ Paid or the calculator tape's ✕ sent you back to the very top of the
+page. Now the press leaves you on the same button drawn again; where that
+button has gone or greyed out, on the one that takes over its job (Re-open
+after Mark entered) or on the year or month chip you have landed on (This
+Year, Build 2027, Re-open 2025 as a Year). Moving a row up or down in its
+editor leaves you on that row in its new place.
+
 ### Arranging Things
 
 - **The tabs are yours to arrange** — drag one anywhere along the bar, with a
