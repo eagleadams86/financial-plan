@@ -8510,3 +8510,23 @@ plan newer still is stored and halts again, as before (item 3's test relies on t
 A shared view never reaches `finAdopt` — the module does not start under `finViewOnly` — so the
 guard only ever means "halted". Proven by test: halt, hand over an older plan, storage byte for
 byte what it was, nothing taken into memory, no throw. EXPECTED 1173 → 1174.
+
+## Fixes From the 2026-09-24 Accessibility Audit
+
+The third accessibility pass (the 2026-09-05 harness, re-run over everything that had landed
+since: axe in four themes at 1440 and 390, the keyboard walk, a real-keys activation of every
+non-destructive control, target sizes, forced colours). One fix per commit, each with a test
+that went red against the build before it, in the group "Fixes from the 2026-09-24
+accessibility audit" at the foot of `tests.html`.
+
+- **The strip's arrows were 23.1px wide on a phone with a mouse (WCAG 2.5.8).** The
+  `max-width: 430px` rule from `81b5d2b` trims `.ynav.snav` to `padding: 6px 8px` so the chosen
+  chip shows whole, and 8px round a single ‹ came to 23.1×30.7 — two targets abutting, so the
+  spacing exception could not rescue either. `.ynav.snav` now carries `min-width: 24px` in its
+  BASE rule (the 12px padding clears it at every wider width, and the coarse-pointer 40px floor
+  after it still wins on touch), and "This year"/"This month" `min-height: 24px` (it measured
+  23.6 at `--fs-xs`). px, not em, deliberately: 24 CSS px is the criterion's own unit and no
+  media query changes these controls' type — the em-floor rule is for a label that changes size.
+  The rail loses under a pixel an arrow; the "chosen chip shows whole" test still passes at 320,
+  360 and 375, mouse and touch. Test: every visible `.ynav` in the strip, both lenses, at 320,
+  375, 430 and 1280.

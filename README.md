@@ -1951,7 +1951,9 @@ scrolled it: picking a year never slides the others sideways, and a year half
 off an edge is scrolled only far enough to show it. On a phone the strip tightens so the
 year or month you're reading always shows whole: that button reads **Now**, and
 on the narrowest screens (under 360px) it steps aside — the underscore still
-marks this year, and the arrows still walk you back.
+marks this year, and the arrows still walk you back. However tight the strip gets, the
+arrows and that button stay at least 24 pixels square — big enough to hit
+without catching the one beside it (fixed 2026-09-24).
 
 The same strip carries the Budget's **Year / Month** switch at its left end, and
 in the Month lens the years are replaced by the plan's months — the arrows step

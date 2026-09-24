@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1238;
+const EXPECTED = 1239;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -23038,6 +23038,43 @@ t('nothing of it shows on a fine pointer', async () => {
     eq(keys.filter((k) => k.getClientRects().length).length, 0, 'nor in the layout at all');
     D.getElementById('cellDialog').close();
   } finally { f.remove(); }
+});
+
+group('Fixes from the 2026-09-24 accessibility audit');
+
+/* ── The strip's arrows keep a 24px target on a phone (WCAG 2.5.8) ──────────
+   Under 430px the strip tightens its padding so the chosen chip still shows
+   whole (2026-09-15), and `6px 8px` round a single ‹ left each arrow 23.1px
+   wide with a mouse — two of them abutting, so neither the size nor the
+   spacing exception held. A touch screen was never short: its 40px floor
+   comes from the coarse-pointer rule. A frame is a fine pointer, which is the
+   case that failed. */
+t('the strip’s step arrows are at least 24px square at every width, in both lenses', async () => {
+  for (const width of [320, 375, 430, 1280]) {
+    const { f, W, D } = await auditFrame(width, 700, 'snav24');
+    try {
+      D.getElementById('tab-budget').click();
+      await new Promise((r) => setTimeout(r, 250));
+      for (const mode of ['year', 'month']) {
+        if (mode === 'month') {
+          D.querySelector('.vswitch[data-mode="month"]').click();
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        /* The arrows by id, and "This year"/"This month" beside them whenever
+           it is showing — it sits in the same row of abutting targets. */
+        const arrows = [...D.querySelectorAll('.yearstrip .ynav')]
+          .filter((a) => a.getClientRects().length);
+        ok(arrows.filter((a) => /^(year|month)(Prev|Next)$/.test(a.id)).length === 2,
+          width + 'px ' + mode + ': fixture — both arrows are drawn', arrows.map((a) => a.id).join());
+        for (const a of arrows) {
+          const r = a.getBoundingClientRect();
+          ok(r.width >= 24 - 0.01 && r.height >= 24 - 0.01,
+            width + 'px ' + mode + ': #' + a.id + ' is at least 24x24',
+            r.width.toFixed(1) + 'x' + r.height.toFixed(1));
+        }
+      }
+    } finally { f.remove(); }
+  }
 });
 
 async function run() {
