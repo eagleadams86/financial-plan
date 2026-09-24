@@ -1951,7 +1951,9 @@ scrolled it: picking a year never slides the others sideways, and a year half
 off an edge is scrolled only far enough to show it. On a phone the strip tightens so the
 year or month you're reading always shows whole: that button reads **Now**, and
 on the narrowest screens (under 360px) it steps aside — the underscore still
-marks this year, and the arrows still walk you back.
+marks this year, and the arrows still walk you back. However tight the strip gets, the
+arrows and that button stay at least 24 pixels square — big enough to hit
+without catching the one beside it (fixed 2026-09-24).
 
 The same strip carries the Budget's **Year / Month** switch at its left end, and
 in the Month lens the years are replaced by the plan's months — the arrows step
@@ -1993,6 +1995,16 @@ switches inside a card — holds the page in the same way.
 A Find result that **opens a record** holds too: the editor is over the cell you
 searched for, and moving the page would leave you at the top of a long grid the
 moment you closed it.
+
+**The keyboard stays where you pressed, too** (fixed 2026-09-24). Most buttons
+redraw the page, and the redraw used to throw away the button you had just
+pressed — so from the keyboard, pressing ‹, "Mark Sep 26 entered", a split
+line's ✓ Paid or the calculator tape's ✕ sent you back to the very top of the
+page. Now the press leaves you on the same button drawn again; where that
+button has gone or greyed out, on the one that takes over its job (Re-open
+after Mark entered) or on the year or month chip you have landed on (This
+Year, Build 2027, Re-open 2025 as a Year). Moving a row up or down in its
+editor leaves you on that row in its new place.
 
 ### Arranging Things
 
@@ -2158,6 +2170,12 @@ choice actually uses.
   clickable row on the other tabs — a donation, a trip line, a comp year, a
   goal card, a gathered note — takes a tab stop of its own, so Enter or Space
   opens it without a mouse.
+- **A table too wide for its card scrolls from the keyboard too.** On a phone
+  the Retirement projections and the Tax tables run past the edge of their
+  cards, and there is nothing in them to click — so while one is wider than
+  its card it takes a tab stop of its own, named after its card, and the left
+  and right arrow keys scroll it. A table that fits, or one whose rows already
+  take the Tab, gets no extra stop. (Fixed 2026-09-24.)
 
 ### CSV, Out and Back
 
@@ -2568,7 +2586,10 @@ drawn UNDERNEATH it: the app had stopped, and you were left looking at an
 editor whose every press did nothing, with the explanation and its Reload
 button hidden behind it. Since 2026-09-18 the stop closes whatever is open
 first, so the message and Reload are always what you see and what the keyboard
-is on.
+is on. Since 2026-09-24 the message also takes over the page completely: a
+screen reader announces it, the keyboard lands on Reload however the stop
+came about, nothing behind it can be reached with Tab, and no later message
+can pop up over it.
 
 A stopped window also stops syncing, completely. A change you had made a moment
 before is normally sent to the cloud about a second later, and that send used to
@@ -2828,7 +2849,7 @@ unchanged.
 
 Every page in this repo passes axe-core at WCAG 2.1 A and AA, the 2.2 AA additions and its
 best-practice rules, in all four themes, with data loaded, on every tab and in every window
-(last run 2026-09-05). The things axe cannot see are checked by hand the same day: a Tab
+(last run 2026-09-24). The things axe cannot see are checked by hand the same day: a Tab
 through every view reading the focus ring, every window opened from the keyboard and closed
 with Esc, hover colours, a 320px-wide window, widened text spacing and reduced motion.
 

@@ -8510,3 +8510,92 @@ plan newer still is stored and halts again, as before (item 3's test relies on t
 A shared view never reaches `finAdopt` — the module does not start under `finViewOnly` — so the
 guard only ever means "halted". Proven by test: halt, hand over an older plan, storage byte for
 byte what it was, nothing taken into memory, no throw. EXPECTED 1173 → 1174.
+
+## Fixes From the 2026-09-24 Accessibility Audit
+
+The third accessibility pass (the 2026-09-05 harness, re-run over everything that had landed
+since: axe in four themes at 1440 and 390, the keyboard walk, a real-keys activation of every
+non-destructive control, target sizes, forced colours). One fix per commit, each with a test
+that went red against the build before it, in the group "Fixes from the 2026-09-24
+accessibility audit" at the foot of `tests.html`.
+
+- **The strip's arrows were 23.1px wide on a phone with a mouse (WCAG 2.5.8).** The
+  `max-width: 430px` rule from `81b5d2b` trims `.ynav.snav` to `padding: 6px 8px` so the chosen
+  chip shows whole, and 8px round a single ‹ came to 23.1×30.7 — two targets abutting, so the
+  spacing exception could not rescue either. `.ynav.snav` now carries `min-width: 24px` in its
+  BASE rule (the 12px padding clears it at every wider width, and the coarse-pointer 40px floor
+  after it still wins on touch), and "This year"/"This month" `min-height: 24px` (it measured
+  23.6 at `--fs-xs`). px, not em, deliberately: 24 CSS px is the criterion's own unit and no
+  media query changes these controls' type — the em-floor rule is for a label that changes size.
+  The rail loses under a pixel an arrow; the "chosen chip shows whole" test still passes at 320,
+  360 and 375, mouse and touch. Test: every visible `.ynav` in the strip, both lenses, at 320,
+  375, 430 and 1280.
+- **A press that redrew its own button dropped the focus to `<body>` (WCAG 2.4.3).** Twenty
+  controls, every one a real-keys Enter that landed on `<body>` before and on something real
+  after: the strips' ‹ › / chips / "This year" / "This month" (the old comment in
+  `wireYearStrip` saying "the arrow is still there after the redraw" was wrong — the strip is
+  drawn whole, and `yearKeyMove` covered only the arrow KEYS), Mark entered / Re-open on the grid
+  card and the month page, ⊕ Build, the empty-rows line, the close checklist's "Open it",
+  "Re-open YYYY as a Year", "Record Today's Figures", the row editor's Move up/down, a split
+  line's ✓ Paid and Remove, and the tape's ✕. **One pair of helpers beside `refocusEditRow`,
+  not a dozen hand-backs:** `keepFocus(run, ...fallbacks)` runs the press and, only if the
+  focus is LOST (on `<body>`, detached, `disabled`, or not laid out), lands it on the same
+  control drawn again — `focusKey` finds it by id, else first class + data keys (`data-tip`
+  excluded, it is hover text), else `aria-label` — then on the fallbacks in order.
+  `moveFocus(run, ...targets)` is for a press that TAKES you somewhere: it skips the
+  same-control step, because "Build 2028" standing where "Build 2027" was is not where the
+  reader went. `CHOSEN_YEAR` / `CHOSEN_MONTH` (the checked chip) are the navigation landing —
+  the same place a rail arrow-key move already hands focus to, so no heading needed a
+  `tabIndex`. Neither helper acts if the press did not start from a focused control, and a
+  script focus after a mouse press does not ring (Chromium's own rule; measured). The two
+  special keys: the empty-rows line flips its own `data-reveal`, so it is found again by its
+  POSITION among the lines; and `moveRow` refocuses after `rowDialog.close()` (the dialog's
+  own return aims at the dead row) with `bidx`, else `idx`, stepped by `dir` — id-keyed rows
+  keep their id. Row DELETE was left as it was: the row is gone and "the next row" is a
+  judgement per section, not a fix. Test: one walk pressing all of them in a 1280×900 frame.
+- **An overflowing `.tablewrap` with nothing focusable in it could not be scrolled from the
+  keyboard (WCAG 2.1.1, axe `scrollable-region-focusable`).** Retirement's first Traditional vs
+  Roth table, "…at Retirement", "Where the IRAs Land", "Year by Year in Retirement"; Tax's
+  "What 2026 Owes", "What the Pot Has to Pay" and "Years You've Stored" — at 390 and 320 (none
+  overflow at 1440 with the sample). `wireScrollBoxes()` runs at the end of `render()`, after
+  `wireBoxes` (the name is read off the folded heading's `.box-title`), and gives each such box
+  `tabindex=0`, `role=region` and an `aria-label` from the nearest heading above it in its card
+  (`scrollBoxName` drops ✎ Edit and the info dot). **Only while it overflows and only if it has no
+  focusable descendant** — a stop on a table that fits does nothing, and one on a box whose rows
+  take Tab is a second way to the same place. Overflow moves with the width, so one module-level
+  `ResizeObserver` watches every wrap (disconnected and re-armed per render): a resized window,
+  a folded card opened (0 → real width) and the docked calculator all re-mark. `data-scrollbox`
+  marks what it added, so it only ever removes its own attributes. The ring is
+  `.tablewrap[data-scrollbox]:focus-visible`, `outline-offset: -2px` — inside the edge, since the
+  box is as wide as its card; measured 5.18–14.45:1 against the card and the table in all four
+  themes. Real keys: Tab from the tab reaches the region, ArrowRight scrolls it 40px; axe's rule
+  clean at 390/320/1440. Test: Retirement and Tax at 320 (≥5 marked) and 1280 (none), every
+  unmarked box either fits or has its own stops, plus the ring read off the cascade.
+- **The month chips' names did not start with their words (WCAG 2.5.3, noted by the audit
+  though not counted).** "Jan 26" was `aria-label="January 2026"`, so "click Jan 26" reached
+  nothing. `monthPickerHtml` now names a chip `Jan 26 (January 2026)`, `…, still to come)` for
+  a month ahead and `— this month` for now; the `title` keeps the long form. The year chips
+  already passed ("2026 — this year"; "Previous years — …" starts with "Prev" at ≤430px too).
+  Test: every chip in both strips at 1280 and 375, name starts with `innerText`.
+
+Checked and needing nothing: **every selected state that is drawn only as a fill already says
+so in ARIA**, which is what the theme pack's forced-colours rule (arriving separately) hooks on —
+the view tabs (`aria-selected`), the Year/Month switch, the year and month chips, the Net Worth
+"settled / this month" pair and the calculator's four readouts (`role=radio` +
+`aria-checked`), and the calculator's Pick (`aria-pressed`); each was driven in forced-colours
+mode and read back flipping with the press. No app-level forced-colours CSS was added. Left
+alone, outside what the audit counted: the grid's block selection (`td.selrange`) is a fill
+plus an inset box-shadow, both of which forced colours removes — it is a range of cells, not a
+control, and there is no ARIA attribute for "inside a drag-selection" on a `td`; and axe's
+EXPERIMENTAL `label-content-name-mismatch` rule (not in the WCAG tag set the audit runs) flags
+the Month page's rows, whose names are the row's own words re-ordered into a sentence.
+- **The newer-build halt card is modal** (2.1.1/2.4.3/4.1.3 — found when Sprint Predictability's
+  identical card was fixed; Money Map already closed open dialogs since 2026-09-18, so this is the
+  rest). `haltForNewerData()` marks the card `role=alertdialog aria-modal`, labelled by its heading
+  and described by the format sentence; `attach()` makes every other body child `inert` and focuses
+  Reload on EVERY road (it was focused only when a dialog had been open); and `window.finHalted`
+  makes `toast()` refuse, since a popover is top layer over the card. A WINDOW flag, not a `let` —
+  the `rowCtx` TDZ trap below. Test: "the newer-build halt card is modal…" (finAdopt road, no window
+  open; `<script>` children are skipped in the inert check). SV and FM carry the same fix.
+- **Theme pack rule 19 (forced colours) is taken** — `theme.css` copied from the pack. No app-level
+  `forced-colors` block; the pack's `check_consumers.py` flags one that restyles selected states.

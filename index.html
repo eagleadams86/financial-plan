@@ -717,7 +717,7 @@ header *, html[data-pin] .tabrow * { scroll-margin-top: calc(0px - var(--pin-cle
    shouting at the arrows' own size — and given a thumb-sized box on touch. The
    arrows beside it get one too, since 2026-09-05: they step the year now, so
    both controls in here are things somebody navigates with. */
-.ynav.ynow { font-size: var(--fs-xs); }
+.ynav.ynow { font-size: var(--fs-xs); min-height: 24px; }   /* 23.6px at this size — see the 24px floor on `.ynav.snav` */
 @media (pointer: coarse) { .ynav.ynow { min-height: 40px; } }
 .ynav { background: none; border: 0; border-radius: var(--radius-sm);
   padding: 4px 8px; cursor: pointer; color: var(--text-secondary);
@@ -898,6 +898,11 @@ label.field { display: block; font-size: var(--fs-xs); color: var(--text-seconda
    it is only ever visible on the phone. Mirrored in Sprint Predictability, Flow Metrics
    and Golf Handicap. */
 .tablewrap { overflow-x: auto; position: relative; }
+/* A table box that scrolls with nothing focusable inside it is made a tab stop
+   by `markScrollBox` (2026-09-24). Its ring sits INSIDE the edge: the box is as
+   wide as its card, and a ring outside it would be drawn in — or cut off by —
+   whatever it sits in. */
+.tablewrap[data-scrollbox]:focus-visible { outline: 2px solid var(--focus-border); outline-offset: -2px; }
 table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums; }
 th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border); }
@@ -2179,7 +2184,14 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
    took the month strip's arrows and the name `.mnav` stopped being true — until
    then the year arrows only scrolled the rail and were left deliberately small,
    on the grounds that nobody navigated the plan with them. Now they do. */
-.ynav.snav { padding: 6px 12px; font-size: var(--fs-md); line-height: 1.1; }
+.ynav.snav { padding: 6px 12px; font-size: var(--fs-md); line-height: 1.1;
+  min-width: 24px; }
+/* THE 24px FLOOR (2026-09-24 accessibility audit, WCAG 2.5.8). The phone rule
+   below trims the arrows' padding to 8px so the chosen chip still shows whole,
+   and 8px round a single ‹ came to 23.1px with a mouse — two such targets
+   abutting, so neither the size nor the spacing exception held. The floor
+   costs the rail under a pixel an arrow; at every wider width the 12px padding
+   already clears it, and a touch screen's 40px floor is the rule after this. */
 .ynav.snav.mnow { font-size: var(--fs-xs); }
 @media (pointer: coarse) { .ynav.snav { min-width: 40px; min-height: 40px; } }
 /* A PHONE'S STRIP IS BUDGETED (2026-09-15 review). On one line the rail gets
@@ -7468,10 +7480,27 @@ function haltForNewerData(found) {
   const card = document.createElement('div');
   card.setAttribute('style', 'max-width:34em;border:1px solid var(--border,#262f4a);'
     + 'border-radius:12px;padding:24px 26px;background:var(--surface,#121829)');
+  /* A MODAL CARD, NOT A PICTURE OF ONE (2026-09-24 accessibility audit). Closing
+     the windows below put the card on top, but the dead app behind it stayed in
+     the Tab order, a screen reader was never told the card had arrived, and a
+     late toast could still rise over it (a popover is top layer too). So the card
+     is an alertdialog named by its heading, everything else on the page is made
+     inert once it is attached, focus goes to Reload whatever road got here, and
+     `window.finHalted` turns toast() away. A WINDOW flag, not a `let`: at boot this
+     runs inside `let state = load()`, before any later declaration exists — the
+     same trap as `rowCtx` below. Sprint Predictability and Flow Metrics carry the
+     same card and the same fix. */
+  window.finHalted = true;
+  card.setAttribute('role', 'alertdialog');
+  card.setAttribute('aria-modal', 'true');
+  card.setAttribute('aria-labelledby', 'haltTitle');
+  card.setAttribute('aria-describedby', 'haltWhy');
   const h = document.createElement('h1');
+  h.id = 'haltTitle';
   h.setAttribute('style', 'margin:0 0 12px;font-size:var(--fs-lg)');
   h.textContent = 'This Plan Was Saved by a Newer Version';
   const p1 = document.createElement('p');
+  p1.id = 'haltWhy';
   p1.setAttribute('style', 'margin:0 0 12px');
   p1.textContent = 'Your saved plan uses data format ' + String(found)
     + ', and the copy of the app running here only understands ' + String(SCHEMA)
@@ -7517,7 +7546,11 @@ function haltForNewerData(found) {
   });
   card.append(h, p1, p2, p3, btn);
   wrap.appendChild(card);
-  const attach = () => document.body.appendChild(wrap);
+  const attach = () => {
+    document.body.appendChild(wrap);
+    for (const el of document.body.children) if (el !== wrap) el.inert = true;
+    btn.focus({ preventScroll: true });
+  };
   if (document.body) attach();
   else document.addEventListener('DOMContentLoaded', attach, { once: true });
   /* ── Nothing may sit ABOVE this card (2026-09-18) ──────────────────────────
@@ -10351,6 +10384,9 @@ function dropToast(el) {
 function toast(msg) {
   /* A success line from a handler whose save was just refused — see adoptOtherCopy. */
   if (writeRefused) return;
+  /* Nor anything once the app has stopped: a popover is top layer, over the
+     halt card — see haltForNewerData. */
+  if (window.finHalted) return;
   const el = F('toast');
   clearTimeout(toastTimer);
   clearTimeout(toastHideTimer);
@@ -11578,7 +11614,7 @@ function wireYearStrip() {
     if (!chip || chip.getAttribute('aria-checked') === 'true') return;
     yearKeyMove = byKey;
     state.ui.activeYear = chip.dataset.year;
-    save(); render();
+    keepFocus(() => { save(); render(); }, CHOSEN_YEAR);
   };
   rail.onclick = (e) => pick(e.target.closest('.yearchip'), false);
   rail.onkeydown = (e) => {
@@ -11594,9 +11630,12 @@ function wireYearStrip() {
   /* ONE CHIP ALONG, and `pick` is the same door a click on that chip uses — so
      the year lands, the rail follows it and the strip is redrawn by exactly the
      one path, rather than by an arrow that knows how to choose a year on its
-     own. `false` for `byKey`: the pointer is on the arrow and the arrow is still
-     there after the redraw, so there is no focus to hand back. A disabled button
-     never fires, which is what makes the ends safe without a guard here. */
+     own. `false` for `byKey`: the chip is not where the reader is. The arrow is
+     NOT still there after the redraw — the whole strip is drawn again — which a
+     comment here once claimed; `pick`'s `keepFocus` hands the focus to the new
+     arrow, or to the chosen year when the new one is grey at the end. A
+     disabled button never fires, which is what makes the ends safe without a
+     guard here. */
   const step = (dir) => {
     const i = chips.findIndex(c => c.getAttribute('aria-checked') === 'true');
     if (i < 0) return;
@@ -11610,7 +11649,7 @@ function wireYearStrip() {
   const nowBtn = F('yearNow');
   if (nowBtn) nowBtn.onclick = () => {
     state.ui.activeYear = nowBtn.dataset.year;
-    save(); render();
+    keepFocus(() => { save(); render(); }, CHOSEN_YEAR);   // grey now: the year it chose
   };
   const on = chips.find(c => c.getAttribute('aria-checked') === 'true');
   settleRail(rail, on);
@@ -13824,10 +13863,16 @@ function monthPickerHtml(active, all) {
     const ahead = monthAhead(state.years[yearOfMonth(state, m)], m);
     const label = monthTitle(m) + (ahead ? ' (still to come)' : '')
       + (isNow ? ' — this month' : '');
+    /* The NAME starts with the words on the chip (2026-09-24 accessibility
+       audit, WCAG 2.5.3): "Jan 26" was named "January 2026", so "click Jan 26"
+       said to a voice control reached nothing. The whole month stays, after
+       the short one, and the hover text keeps the long form. */
+    const name = `${monthLabel(m)} (${monthTitle(m)}${ahead ? ', still to come' : ''})`
+      + (isNow ? ' — this month' : '');
     return `<button type="button" role="radio" data-month="${esc(m)}"
       class="yearchip${ahead ? ' y-future' : ''}${isNow ? ' chip-now' : ''}"
       aria-checked="${on ? 'true' : 'false'}" tabindex="${on ? 0 : -1}"
-      aria-label="${esc(label)}" title="${esc(label)}">${esc(monthLabel(m))}</button>`;
+      aria-label="${esc(name)}" title="${esc(label)}">${esc(monthLabel(m))}</button>`;
   }).join('');
   /* "This month" is rendered BEFORE the arrows, and that order is load-bearing.
      `.yearnav` is sized by its contents at the right-hand end of a flex row, so
@@ -14776,7 +14821,11 @@ function wireMonthStrip() {
   const chips = [...rail.querySelectorAll('.yearchip')];
   const all = chips.map(ch => ch.dataset.month);
   const at = all.indexOf(activeMonthKey());
-  const go = (m, byKey) => { if (!m) return; monthKeyMove = byKey; pickMonth(m); };
+  const go = (m, byKey) => {
+    if (!m) return;
+    monthKeyMove = byKey;
+    keepFocus(() => pickMonth(m), CHOSEN_MONTH);
+  };
   rail.onclick = (e) => go(e.target.closest('.yearchip')?.dataset.month, false);
   rail.onkeydown = (e) => {
     const step = { ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last' }[e.key];
@@ -14816,7 +14865,11 @@ function wireMonthRows() {
     if (!rev) return;
     if (rev.dataset.reveal === 'on') state.ui.showNotDue = true;
     else delete state.ui.showNotDue;
-    save(); render();
+    /* Its own key flips on/off with the press, so the same line is found by
+       where it stood: every card's line flips together. */
+    const lines = () => [...document.querySelectorAll('#views [data-reveal]')];
+    const at = lines().indexOf(rev);
+    keepFocus(() => { save(); render(); }, () => lines()[at]);
   }, true);
   zone.addEventListener('click', (e) => open(e.target.closest('.mrow[data-cat], .mrow[data-bal]')));
   /* The Close card's lines, and the pointer to last month's card. Each goes to
@@ -14833,7 +14886,7 @@ function wireMonthRows() {
       if (el.dataset.settled) state.ui.worthAsOf = 'settled';
       goToView(view);
     } else if (kind === 'month') {
-      if (pickMonth(m)) window.scrollTo(0, 0);
+      if (moveFocus(() => pickMonth(m), CHOSEN_MONTH)) window.scrollTo(0, 0);
     } else if (kind === 'backup') {
       openModal(dataDialog);
     } else if (kind === 'enter') {
@@ -21672,6 +21725,60 @@ function wireBoxes(view) {
   }
 }
 
+/* ── A TABLE THAT SCROLLS SIDEWAYS, REACHABLE FROM THE KEYBOARD (2026-09-24) ──
+   A `.tablewrap` scrolls its table sideways once the card is narrower than the
+   table — most of them on a phone, some in a narrow window. Where the table
+   holds a button or an editable row, Tab reaches that and the browser scrolls
+   it into view. Where it holds NOTHING focusable (the Retirement projections,
+   the Tax tables), the columns past the edge could only be reached with a
+   pointer (WCAG 2.1.1; axe's scrollable-region-focusable). Such a box becomes a
+   tab stop — arrow keys scroll a focused scroll box — and a region named by
+   the card heading above it, so the stop says what it is.
+
+   ONLY those boxes, and only WHILE they overflow: a stop on a table that fits
+   is a Tab press that does nothing, and one on a box that already has its own
+   stops is a second way to the same place. Overflow is a fact about the width,
+   so each box is watched rather than measured once — a ResizeObserver sees a
+   window resized, a folded card opened (0 wide to its real width) and the
+   calculator docking beside the page. `data-scrollbox` marks what this added,
+   so it only ever takes away its own. */
+const scrollBoxWatch = typeof ResizeObserver === 'function'
+  ? new ResizeObserver((seen) => seen.forEach((e) => markScrollBox(e.target))) : null;
+const SCROLLBOX_STOPS = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+function scrollBoxName(wrap) {
+  const card = wrap.closest('.card');
+  const heads = card ? [...card.querySelectorAll('h2, h3, h4')]
+    .filter((h) => h.compareDocumentPosition(wrap) & Node.DOCUMENT_POSITION_FOLLOWING) : [];
+  const h = heads[heads.length - 1];
+  if (!h) return 'Table';
+  /* A folded card's title is its `.box-title`; any other heading loses its
+     buttons (✎ Edit, the info dot) so the name is only the words. */
+  const title = h.querySelector('.box-title');
+  const text = title ? title.textContent : [...h.childNodes]
+    .filter((n) => !(n.nodeType === 1 && n.matches('button, a, .tile-help')))
+    .map((n) => n.textContent).join('');
+  return text.replace(/\s+/g, ' ').trim() || 'Table';
+}
+function markScrollBox(wrap) {
+  if (!wrap.isConnected) return;
+  const need = wrap.scrollWidth > wrap.clientWidth && !wrap.querySelector(SCROLLBOX_STOPS);
+  if (need) {
+    wrap.dataset.scrollbox = '';
+    wrap.tabIndex = 0;
+    wrap.setAttribute('role', 'region');
+    wrap.setAttribute('aria-label', scrollBoxName(wrap));
+  } else if (wrap.hasAttribute('data-scrollbox')) {
+    for (const a of ['data-scrollbox', 'tabindex', 'role', 'aria-label']) wrap.removeAttribute(a);
+  }
+}
+function wireScrollBoxes() {
+  if (scrollBoxWatch) scrollBoxWatch.disconnect();
+  for (const wrap of document.querySelectorAll('#views .tablewrap')) {
+    markScrollBox(wrap);
+    if (scrollBoxWatch) scrollBoxWatch.observe(wrap);
+  }
+}
+
 /* An id built from a box key, which holds a slash and may hold a tilde. */
 const cssId = (key) => key.replace(/[^a-z0-9]+/gi, '-');
 
@@ -21768,7 +21875,7 @@ function wireView(view) {
       if (nw.hasProperty) snap.property = nw.property;
       if (nw.hasDebts) snap.debts = nw.debts;
       const replaced = upsertSnapshot(state.side.snapshots, snap);
-      save(); render();
+      keepFocus(() => { save(); render(); });
       const when = asOf === cur ? 'today' : `the end of ${monthLabelFull(asOf)}`;
       toast(replaced ? `Restated the snapshot for ${when} — ${fmtMoney(total)}`
         : `Recorded ${fmtMoney(total)} as of ${when}`);
@@ -21903,6 +22010,8 @@ function wireView(view) {
      itself to nothing; drawing them first and folding the box afterwards means
      each one is already the right size when its box is opened again. */
   wireBoxes(view);
+  /* After wireBoxes too: the name is read off the folded heading's title. */
+  wireScrollBoxes();
   /* AFTER wireBoxes, which is not a preference: folding the card reparents its
      contents into `.card-body`, and reinserting the gridwrap resets its scroll
      to 0 — a scroll set any earlier is silently thrown away. */
@@ -23780,8 +23889,9 @@ function renderPartsList(host, f) {
       settle.setAttribute('aria-label', `${f.settle.label} — part ${i + 1}`);
       settle.onclick = () => {
         f.settle.run((k) => part[k] || 0, (k, n) => { part[k] = round2(n); });
-        renderPartsList(host, f);
-        partsCommitted(host, f);
+        /* The list is rebuilt whole; the focus goes back to this part's button
+           (it is found by its name, "… — part N"). */
+        keepFocus(() => { renderPartsList(host, f); partsCommitted(host, f); });
       };
       btns.appendChild(settle);
     }
@@ -23796,8 +23906,12 @@ function renderPartsList(host, f) {
          at a plain row whose own boxes are live again. Leaving an empty list
          standing would be a split that claims the line is nothing. */
       if (!parts.length) host._parts = null;
-      renderPartsList(host, f);
-      partsCommitted(host, f);
+      /* "Remove part N" is the NEXT part's button once this one has gone; the
+         last part's hands on to the one above it, and an emptied list to the
+         button that splits the line again. */
+      keepFocus(() => { renderPartsList(host, f); partsCommitted(host, f); },
+        () => host.querySelector(`.partbtns .btn[aria-label="Remove part ${i}"]`),
+        () => host.querySelector('.parts-add'), () => host.querySelector('.parts-toggle'));
     };
     btns.appendChild(del);
     line.appendChild(btns);
@@ -24935,11 +25049,22 @@ F('rowDeleteBtn').onclick = () => {
 };
 F('rowUpBtn').onclick = () => moveRow(-1);
 F('rowDownBtn').onclick = () => moveRow(1);
+/* A move redraws the page UNDER the open window, so the dialog's own focus
+   return aims at the row as it was drawn before — a dead node — and drops to
+   <body>. The row is handed the focus in its new place instead: the same keys,
+   with the index that moved stepped along (a bucket's `bidx`, else `idx`; a row
+   keyed by id keeps its id and is simply found again). */
 function moveRow(dir) {
   const { section, ds } = rowCtx;
   rowCtx = null;
-  if (EDITORS[section].move(ds, dir)) { save(); render(); }
+  const moved = EDITORS[section].move(ds, dir);
+  if (moved) { save(); render(); }
   rowDialog.close();
+  if (!moved) return;
+  const to = { ...ds };
+  const k = to.bidx !== undefined ? 'bidx' : to.idx !== undefined ? 'idx' : null;
+  if (k) to[k] = String(+to[k] + dir);
+  refocusEditRow({ section, ds: to });
 }
 
 /* Shared list helpers — most sections are "array of objects somewhere". */
@@ -28554,7 +28679,7 @@ F('views').addEventListener('click', (e) => {
     if (!y || !state.years[y]) return;
     if (act.dataset.yearact === 'csv') exportYearCsv(y);
     else if (act.dataset.yearact === 'delete') deleteYear(y);
-    else if (act.dataset.yearact === 'unfold') reopenYearFromSummary(y);
+    else if (act.dataset.yearact === 'unfold') moveFocus(() => reopenYearFromSummary(y), CHOSEN_YEAR);
     return;
   }
   const add = e.target.closest('[data-add]');
@@ -28946,9 +29071,13 @@ function wireBudget() {
     };
   });
   const closeBtn = F('closeMonthBtn');
-  if (closeBtn) closeBtn.onclick = markMonthEntered;
+  /* Each hands on to the other when it goes: marking the last open month
+     brings out Re-open, and re-opening brings Mark back. */
+  if (closeBtn) closeBtn.onclick = () =>
+    keepFocus(markMonthEntered, '#reopenMonthBtn', CHOSEN_MONTH, CHOSEN_YEAR);
   const reopenBtn = F('reopenMonthBtn');
-  if (reopenBtn) reopenBtn.onclick = reopenMonth;
+  if (reopenBtn) reopenBtn.onclick = () =>
+    keepFocus(reopenMonth, '#closeMonthBtn', CHOSEN_MONTH, CHOSEN_YEAR);
   const freezeBtn = F('freezeYearBtn');
   if (freezeBtn) freezeBtn.onclick = () => freezeYear(activeYearKey());
   const liveBtn = F('reopenLiveBtn');
@@ -28967,7 +29096,7 @@ function wireBudget() {
     const created = rolloverYear(state, C, from);
     if (created) {
       state.ui.activeYear = created;
-      save(); render();
+      moveFocus(() => { save(); render(); }, CHOSEN_YEAR);   // on the year it built
       toast(early ? `${created} is built — every month is a projection for now`
                   : `${created} is ready — check the seeded balances`);
     }
@@ -29365,6 +29494,78 @@ function refocusEditRow(ctx) {
   try { el = document.querySelector(sel); } catch (e) { /* odd key — no focus */ }
   if (el) el.focus({ preventScroll: true });
 }
+
+/* ── A PRESS THAT REDRAWS ITS OWN BUTTON (2026-09-24 accessibility audit) ────
+   Most presses here end in `save(); render()`, and the render throws away the
+   very button that was pressed. The browser leaves the focus on a node that is
+   no longer in the page, so it falls to <body> — the top of the document — and
+   a keyboard reader is sent back through the header and the tabs with nothing
+   said. The audit found a dozen of them: the strips' arrows, chips and "This
+   year"/"This month", the month buttons on the grid card and the month page,
+   the empty-rows line, the close checklist's pointer, "Re-open as a Year",
+   "Record Today's Figures", a split line's "✓ Paid", the tape's ✕.
+
+   So one pair of helpers rather than a dozen hand-backs. `keepFocus` runs the
+   press and, if the focus has gone, puts it on the SAME control drawn again —
+   found by its id, else its first class and its data keys, else its name —
+   and failing that on the fallbacks it is handed, in order: the neighbour its
+   job hands on to, or the chip that says where you now are. `moveFocus` is the
+   one for a press that TAKES you somewhere ("Build 2027", "Open it"): it skips
+   the same-control step, because the button standing in the old one's place
+   ("Build 2028") is not where the reader went.
+
+   It only ever acts on a focus that is LOST. If the press left it anywhere real
+   — the control survived, or the handler placed it itself — it is not touched,
+   and a press that did not start from a focused control asks for nothing, so a
+   pointer that never focused anything is left alone. A control that is still
+   in the page but went `disabled` or hidden by its own success (the arrow at
+   the end of the strip, "This year" once you are there) counts as lost: it can
+   hold no focus a keyboard can use. The ring follows the browser's own rule —
+   a focus moved by script after a mouse press does not ring. */
+function focusKey(el) {
+  if (!el || el === document.body || !el.isConnected) return null;
+  if (el.id) return '#' + CSS.escape(el.id);
+  const tag = el.tagName.toLowerCase();
+  const cls = el.classList.length ? '.' + CSS.escape(el.classList[0]) : '';
+  /* `data-tip` is hover text, not a key — it changes with the figure. */
+  const keys = [...el.attributes]
+    .filter(a => a.name.startsWith('data-') && a.name !== 'data-tip')
+    .map(a => `[${a.name}="${CSS.escape(a.value)}"]`).join('');
+  if (keys) return tag + cls + keys;
+  const name = el.getAttribute('aria-label');
+  return name ? `${tag}${cls}[aria-label="${CSS.escape(name)}"]` : null;
+}
+const canHoldFocus = (el) => !!el && el.isConnected && !el.disabled
+  && el.getClientRects().length > 0;
+function landFocus(targets) {
+  const now = document.activeElement;
+  if (now && now !== document.body && canHoldFocus(now)) return now;
+  for (const t of targets) {
+    let el = null;
+    try { el = typeof t === 'function' ? t() : typeof t === 'string' ? document.querySelector(t) : t; }
+    catch (e) { /* an odd key finds nothing — try the next */ }
+    if (!canHoldFocus(el)) continue;
+    el.focus({ preventScroll: true });
+    return el;
+  }
+  return null;
+}
+function keepFocus(run, ...fallbacks) {
+  const key = focusKey(document.activeElement);
+  const out = run();
+  if (key) landFocus([key, ...fallbacks]);
+  return out;
+}
+function moveFocus(run, ...targets) {
+  const had = focusKey(document.activeElement);
+  const out = run();
+  if (had) landFocus(targets);
+  return out;
+}
+/* Where you are, in whichever strip is showing — the fallback for a press that
+   changed the year or the month. */
+const CHOSEN_YEAR = '#yearRail [aria-checked="true"]';
+const CHOSEN_MONTH = '#monthRail [aria-checked="true"]';
 
 /* ── Splitting a month into several amounts ─────────────────────────────────
    A month is often more than one number: two grocery runs and a delivery, or
@@ -31666,8 +31867,11 @@ F('calcTape').addEventListener('click', (e) => {
   if (use) { const en = calc.tape[Number(use.dataset.i)]; if (en) useInBox(en.v, en.k); return; }
   const b2 = e.target.closest('.calc-del');
   if (!b2) return;
-  calc.tape.splice(Number(b2.dataset.i), 1);
-  renderTape(); saveCalc();
+  const i = Number(b2.dataset.i);
+  calc.tape.splice(i, 1);
+  /* The ✕ now at this place belongs to the entry below, which moved up; the
+     last one hands on to the one above, and an emptied tape to the box. */
+  keepFocus(() => { renderTape(); saveCalc(); }, `.calc-del[data-i="${i - 1}"]`, calcExpr);
 });
 
 /* Where the window lives right now: inside the topmost open dialog, else body. */
