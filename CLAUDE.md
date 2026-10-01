@@ -161,6 +161,12 @@ family names as well as balances.
   is off the end, parking the strip against one edge;
   (4) **no smooth scrolling** — an animated scroll is a silent no-op in some
   engines (it was in the pane this was built in), and the arrows must land.
+  (4b) **divide by `zoomScale` before writing `scrollLeft`** (`settleRail`,
+  2026-10-01) — the rects are screen pixels, `scrollLeft` is layout pixels.
+  Missed until Charles opened his plan at 95%: 84 months on the rail, the
+  centring under-shot by 5% of ~7,000px and the current month opened 65px past
+  the right-hand end. A short rail hides it (the centring clamps at the end),
+  which is why the test builds a 60-chip rail of its own.
   (5) **the CURRENT year wears `chip-now`** — an accent underscore under the
   chip — since 2026-08-24, the mark the month strip already had. It is the
   CALENDAR year (`todayISO().slice(0,4)`), the same kind of fact `thisMonth()`

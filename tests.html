@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1243;
+const EXPECTED = 1244;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -20135,6 +20135,54 @@ t('the current month is scrolled into view at any zoom, not zoom times too far',
       ok(nr.right <= wr.right + 1,
          `${z}%: and its right edge is inside the window`,
          Math.round(nr.right - wr.right) + 'px over');
+    }
+  } finally {
+    f.remove();
+    if (keepZoom === null) localStorage.removeItem('fin-zoom');
+    else localStorage.setItem('fin-zoom', keepZoom);
+  }
+});
+/* ── The seventh: the year and month rails (2026-10-01) ─────────────────────
+   Charles: "upon first opening money map, the current month is scrolled off
+   to the side instead of being visible" — at 95%, on his plan's 84 months.
+   settleRail() had the same seam scrollGridToNow() had: it measured with two
+   getBoundingClientRects and wrote the difference into scrollLeft undivided.
+   Below 100% that under-shoots, and on a long rail 5% of ~7000px left October
+   65px past the right-hand end. The sample's month rail is too short to show
+   it (the centring clamps at the end and hides the fault), so this builds a
+   rail of its own: 60 chips, a probe 50 in, and both of settleRail's branches
+   — the first draw that CENTRES, and the remembered rail that only nudges. */
+t('a year or month rail brings its chosen chip into view at any zoom', async () => {
+  const keepZoom = localStorage.getItem('fin-zoom');
+  const { f, W, D } = await auditFrame(1150, 900, 'railzoom');
+  try {
+    for (const z of [75, 95, 100, 150, 200]) {
+      W.applyZoom(z);
+      await new Promise((r) => setTimeout(r, 300));
+      const rail = D.createElement('div');
+      rail.id = `railProbe${z}`;   // fresh id: nothing remembered, so it centres
+      rail.style.cssText = 'display:flex;overflow-x:auto;width:300px';
+      for (let i = 0; i < 60; i++) {
+        const c = D.createElement('span');
+        c.style.cssText = 'flex:0 0 80px;height:20px';
+        rail.appendChild(c);
+      }
+      D.body.appendChild(rail);
+      const box = () => rail.getBoundingClientRect();
+      const at = (i) => rail.children[i].getBoundingClientRect();
+      try {
+        W.settleRail(rail, rail.children[50]);
+        const b = box(), c = at(50);
+        ok(Math.abs((c.left + c.right) / 2 - (b.left + b.right) / 2) <= 2,
+           `${z}%: a first draw centres the chosen chip`,
+           Math.round((c.left + c.right) / 2 - (b.left + b.right) / 2) + 'px off centre');
+        /* Now remembered: a chip off the far end is nudged in, no further. */
+        W.settleRail(rail, rail.children[58]);
+        const b2 = box(), c2 = at(58);
+        ok(c2.left >= b2.left - 1 && c2.right <= b2.right + 1,
+           `${z}%: a remembered rail scrolls a chip off its end back into view`,
+           Math.round(c2.right - b2.right) + 'px over');
+      } finally { rail.remove(); }
     }
   } finally {
     f.remove();
