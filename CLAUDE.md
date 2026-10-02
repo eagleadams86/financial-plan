@@ -5673,7 +5673,13 @@ on the current month.
     its line survives the year end.
   - *debts* — `asOf >= m`, "at or after": a later statement replaces the earlier one.
   - *invested / retirement / giving / property / backup* — a date stamp on or after
-    the 1st.
+    the **6th** (`CLOSE_GRACE_DAYS` = 5, 2026-10-02). It was the 1st, and closing
+    September on 1 October ticked October's lines the day it began — a stamp
+    carries a day, not the month it was meant for. Days 1–5 now count for the
+    month before only (its own `>= from` takes them); while a month is in those
+    five days its open lines say when checks start counting. Cost, accepted by
+    Charles: a genuine early-month check must be repeated from the 6th. The
+    year's CSV line is untouched (`>= YYYY-12-01`).
   - *December* — `nextYear` (a `years[y+1]`), `figures` (each of comp, limits, the
     EXACT-YEAR federal/state bands, PTO, donations that year y had, present for
     y+1 — **not `taxTableFor`, which falls back to older years**; bonuses are left out

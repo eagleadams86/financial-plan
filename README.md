@@ -862,7 +862,11 @@ the job for you.
     counts; so does **✓ Checked, No Change** on its card, for a month where
     nothing moved. A price the app fetched never counts — that is not you
     looking.
-  - **Backup downloaded** — a backup taken since the month began.
+  - **Backup downloaded** — a backup taken since the 6th.
+  - **The first five days belong to the month before.** A check or a backup
+    on the 1st–5th counts for the previous month, since that is when it gets
+    closed; a month's own lines count from the 6th. Closing September on
+    1 October no longer ticks October's lines the day it begins.
 - **December adds the year's lines:** next year built, next year's figures
   set up (pay, contribution limits, tax tables, time off and giving — each
   asked only if this year had it), the year marked as history, and a CSV of

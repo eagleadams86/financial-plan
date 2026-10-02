@@ -9689,9 +9689,13 @@ const HELP = {
       + 'figures across, marking the old one as history and saving a CSV copy.'],
     ['Share counts, retirement balances and property values carry no month of their own, so each '
       + 'remembers the day its figures last changed. A line ticks when every one of them was '
-      + 'checked on or after the first of the month. If nothing changed, press ',
+      + 'checked on or after the 6th of the month. If nothing changed, press ',
       b('✓ Checked, No Change'), ' on that card to say so. Downloading a backup or a year’s CSV '
       + 'is remembered the same way.'],
+    ['A check in the first five days of a month counts for the month before, because that is '
+      + 'when the month before gets closed — checking your accounts on the 1st to finish '
+      + 'September must not also tick October the day it begins. From the 6th a check counts '
+      + 'for the month you are in.'],
     ['Net worth for a month is a snapshot dated its last day. The Record button can date one '
       + 'there on the last day itself, or afterwards with the Net Worth card set to the last month '
       + 'you marked entered — which is why that line may ask you to mark the month entered first.'],
@@ -12921,6 +12925,9 @@ function stampDay(s) {
   return d >= 1 && d <= last ? s : null;
 }
 
+/* How many days into a month a check still belongs to the month before —
+   read only inside closeChecklist, at render time, never at boot. */
+const CLOSE_GRACE_DAYS = 5;
 function closeChecklist(st, computed, y, m, today) {
   const yr = st && st.years ? st.years[y] : null;
   const c = computed ? computed[y] : null;
@@ -12929,7 +12936,20 @@ function closeChecklist(st, computed, y, m, today) {
   const TM = today.slice(0, 7);
   if (m > TM) return null;
   if (!yearStarted(st, y, today)) return null;
-  const from = `${m}-01`;
+  /* A CHECK IN A MONTH'S FIRST FIVE DAYS IS THE MONTH BEFORE'S (2026-10-02).
+     Closing September happens on 1 October; with the window opening on the
+     1st, those same checks ticked October too, the day it began (Charles:
+     "that checked off a couple of items for october prematurely"). A stamp
+     carries a day and not the month it was meant for, so the day decides:
+     the 1st to the 5th still counts for the month before (the `>= from` of
+     THAT month's list takes it), and a month's own window opens on the 6th.
+     The cost, accepted: a check on 3 October really meant for October has to
+     be pressed again from the 6th. */
+  const from = `${m}-${String(CLOSE_GRACE_DAYS + 1).padStart(2, '0')}`;
+  const inGrace = today < from;
+  const graceNote = inGrace
+    ? ` — checks count from ${fullDayLabel(from)}; one before then closes ${monthLabelFull(monthAdd(m, -1))}`
+    : '';
   const isDec = m === `${y}-12`;
   const recentDec = isDec && +y >= +TM.slice(0, 4) - 1;
 
@@ -13049,14 +13069,14 @@ function closeChecklist(st, computed, y, m, today) {
      Share counts, retirement balances and property values are typed with no
      date, so each carries `checkedOn` — written when a figure really changes,
      or by ✓ Checked, No Change — and a line ticks when every one is dated on
-     or after the first of the month. */
+     or after `from`, the 6th (see CLOSE_GRACE_DAYS above). */
   const fresh = (d) => typeof d === 'string' && d >= from;
   const stampLine = (id, label, list, noun, view) => {
     if (!list.length) return;
     const open = list.filter(x => !fresh(x.checkedOn));
     add('month', id, label, !open.length,
       count(open.length, list.length, noun(list.length))
-        + (open.length ? ` — next: ${open[0].name || '?'}` : ''),
+        + (open.length ? ` — next: ${open[0].name || '?'}${graceNote}` : ''),
       { kind: 'view', view });
   };
   stampLine('invested', 'Investment holdings checked',
@@ -13067,7 +13087,8 @@ function closeChecklist(st, computed, y, m, today) {
     n => n === 1 ? 'account' : 'accounts', 'retirement');
   if ((st.settings || {}).givingFund && (side.daf || []).length)
     add('month', 'giving', 'Giving fund checked', fresh(side.dafCheckedOn),
-      fresh(side.dafCheckedOn) ? `Checked ${fullDayLabel(side.dafCheckedOn)}` : 'Not checked this month',
+      fresh(side.dafCheckedOn) ? `Checked ${fullDayLabel(side.dafCheckedOn)}`
+        : inGrace ? `Not checked yet${graceNote}` : `Not checked since ${fullDayLabel(from)}`,
       { kind: 'view', view: 'giving' });
   stampLine('property', 'Property values checked',
     (Array.isArray(side.property) ? side.property : []).filter(p => p && typeof p.value === 'number'),
@@ -13075,7 +13096,8 @@ function closeChecklist(st, computed, y, m, today) {
 
   const ex = st.exported || {};
   add('month', 'backup', 'Backup downloaded', fresh(ex.backup),
-    fresh(ex.backup) ? `Last one ${fullDayLabel(ex.backup)}` : 'None since the month began',
+    fresh(ex.backup) ? `Last one ${fullDayLabel(ex.backup)}`
+      : inGrace ? `None yet${graceNote}` : `None since ${fullDayLabel(from)}`,
     { kind: 'backup' });
 
   /* ── December: the year ──

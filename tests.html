@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1244;
+const EXPECTED = 1245;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -22601,12 +22601,12 @@ t('debts, holdings, the giving fund and property: left out with nothing to be ab
     liabilities: [{ id: 'car', name: 'Car', balance: 500, asOf: '2030-07' },
                   { id: 'old', name: 'Old', balance: 0, asOf: '2029-01' }],
     portfolios: [{ id: 'b', name: 'Brokerage', rows: [{ ticker: 'VTI', shares: 1, price: 1 }],
-                   checkedOn: '2030-08-01' },
+                   checkedOn: '2030-08-06' },
                  { id: 'e', name: 'Empty', rows: [] }],
     retirementAccounts: [{ name: '401(k)', type: '401k', kind: 'traditional', amount: 5,
                            checkedOn: '2030-07-31' }],
     property: [{ id: 'h', name: 'House', kind: 'home', value: 100, checkedOn: '2030-08-20' }],
-    daf: [{ ticker: 'VTI', shares: 1, price: 1 }], dafCheckedOn: '2030-08-02',
+    daf: [{ ticker: 'VTI', shares: 1, price: 1 }], dafCheckedOn: '2030-08-07',
   };
   /* Said outright: coerceShape turns the fund on by itself for a plan holding
      something in it and saying nothing. */
@@ -22615,7 +22615,7 @@ t('debts, holdings, the giving fund and property: left out with nothing to be ab
   eq(closeItem(l, 'debts').done, false, 'July’s statement is behind August');
   ok(/^Still to do — next: Car$/.test(closeItem(l, 'debts').detail),
      'the paid-off one is not counted', closeItem(l, 'debts').detail);
-  eq(closeItem(l, 'invested').done, true, 'checked on the 1st counts — the empty pane is not asked');
+  eq(closeItem(l, 'invested').done, true, 'checked on the 6th counts — the empty pane is not asked');
   eq(closeItem(l, 'retirement').done, false, 'the 31st of July is last month');
   eq(closeItem(l, 'property').done, true, 'valued in August');
   eq(closeItem(l, 'giving'), undefined, 'the giving fund only once Preferences turns it on');
@@ -22625,6 +22625,38 @@ t('debts, holdings, the giving fund and property: left out with nothing to be ab
   side.liabilities[0].asOf = '2030-09';
   eq(closeItem(closeOf(closeFix({ side }), '2030-08', '2030-09-10'), 'debts').done, true,
      'a later statement is not behind — "at or after", not "equal"');
+});
+
+/* Charles, 2026-10-02: closing September on 1 October ticked October's
+   retirement and giving lines the day October began. A check on the 1st–5th
+   is the month before's; a month's own window opens on the 6th. */
+t('a check in a month’s first five days counts for the month before, not that month', () => {
+  const side = {
+    retirementAccounts: [{ name: '401(k)', type: '401k', kind: 'traditional', amount: 5,
+                           checkedOn: '2030-10-01' }],
+    daf: [{ ticker: 'VTI', shares: 1, price: 1 }], dafCheckedOn: '2030-10-05',
+  };
+  const fix = () => closeFix({ side, settings: { givingFund: true }, exported: { backup: '2030-10-01' } });
+  const sep = closeOf(fix(), '2030-09', '2030-10-02');
+  for (const id of ['retirement', 'giving', 'backup'])
+    eq(closeItem(sep, id).done, true, id + ': a check on Oct 1–5 closes September');
+  const oct = closeOf(fix(), '2030-10', '2030-10-02');
+  for (const id of ['retirement', 'giving', 'backup']) {
+    eq(closeItem(oct, id).done, false, id + ': and does not tick October the day it begins');
+    ok(/checks count from Oct 6 2030; one before then closes Sep(tember)? 2030/.test(closeItem(oct, id).detail),
+       id + ': the line says why, and from when', closeItem(oct, id).detail);
+  }
+  const later = closeOf(fix(), '2030-10', '2030-10-20');
+  ok(/^Not checked since Oct 6 2030$/.test(closeItem(later, 'giving').detail),
+     'past the 5th it names the day the window opened', closeItem(later, 'giving').detail);
+  ok(/^None since Oct 6 2030$/.test(closeItem(later, 'backup').detail), 'the backup line too',
+     closeItem(later, 'backup').detail);
+  side.retirementAccounts[0].checkedOn = '2030-10-06';
+  side.dafCheckedOn = '2030-10-06';
+  const sixth = closeOf(closeFix({ side, settings: { givingFund: true }, exported: { backup: '2030-10-06' } }),
+                        '2030-10', '2030-10-06');
+  for (const id of ['retirement', 'giving', 'backup'])
+    eq(closeItem(sixth, id).done, true, id + ': from the 6th a check is October’s');
 });
 
 t('December: the year’s lines, which only ever navigate', () => {
