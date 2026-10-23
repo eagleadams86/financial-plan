@@ -2289,6 +2289,16 @@ when adding one. Three things it must keep doing:
   placement of a later, deliberate one. Clicking a second time places the caret
   normally — the field is focused by then, so no focusin fires — and that is the
   way back in for editing rather than replacing.
+**A focused number box ignores the mouse wheel (2026-10-23).** Chrome steps a focused
+`type=number` on every wheel or trackpad tick over it, so scrolling a window past a box you
+had just typed in changed what it held — in Wine Cellar it saved Bottles 2 as 0. One
+passive, capture-phase `wheel` listener right after the select-on-focus block blurs a
+focused number box on the first tick, which stops the step and lets the page scroll.
+Reproduced headless in this app before the port (5 → 3 over two ticks); the same listener
+is in every app in the family, from Wine Cellar's 215c32f. The select-on-focus handler
+above is NOT the Wine Cellar one and was left alone: its `mouseup` cancel is attached to
+the box and skipped when the value moved, so it has no spin-arrow runaway. Pinned by
+`a focused number box ignores the mouse wheel` in tests.html.
 **A save hands focus back** (`refocusEditRow` / `refocusGridCell`): the
 re-render destroys the element that opened the dialog, the native <dialog>
 focus-return lands on the dead node, and a keyboard reader fell to <body> and

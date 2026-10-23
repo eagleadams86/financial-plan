@@ -2131,6 +2131,7 @@ choice actually uses.
   are left alone by this — a press there steps the figure once and stops.
   (A note is the exception: those are written over several lines and added to,
   so they're left as they are.)
+- **Scrolling never changes a number box.** A browser steps a number box you have just typed in every time the mouse wheel or trackpad scrolls over it, so scrolling a window down past it used to change the figure without a word. The box now lets go of the cursor the moment you scroll over it, and the page scrolls instead; click it again to carry on typing.
 - **Editing a row saves as you go** (2026-09-07). Finish with a box — tab out of
   it, pick from a list, tick a tick — and the figure is in; the grid behind the
   window keeps up as you work, and the way out is **Done**. There is no Save
