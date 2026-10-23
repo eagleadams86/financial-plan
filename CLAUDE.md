@@ -6198,6 +6198,15 @@ passes locally and fails in CI on a blank one. It happened with
 in CI, and the local green was the WRONG answer. Build the state a test needs
 and pass it in; where a function reads the global, assert over the pure tables
 behind it instead. Real data loaded into the harness is not a fixture.
+**Nor on the CALENDAR (2026-10-23).** The sample counts its dates back from
+the reader's clock — that is what keeps the demo current — so a test asserting
+how many things have gone by under it is asserting today's date. "Two quarters
+stacked up behind the water bill" held from late July and went red in CI on 23
+October, when October's quarter went unpaid too. `auditFrame(w, h, tag, { now })`
+freezes the frame's `Date` (no-argument constructor and `Date.now`) BEFORE the
+sample loads, so the sample and every reader of "today" agree on one fixed day;
+the two waiting-line tests pin `HELD_TODAY`. Any new count-of-periods test over
+the sample takes a `now` too.
 **It only runs on localhost, and enforces that itself** — the family rule from
 Team Dashboard: the iframe is created by the gate at the foot of the script
 (never in the markup — don't put it back), because on the published site the

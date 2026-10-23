@@ -17400,7 +17400,14 @@ function scrollbarW() {
    wherever a test narrows a frame live to watch a media query fire. */
 const frameBox = (width) => (width + scrollbarW()) + 'px';
 
-async function auditFrame(width, height, tag) {
+/* A FRAME CAN BE GIVEN ITS OWN "TODAY" (2026-10-23). The sample counts its
+   dates back from the reader's clock — that is what keeps the demo current — so
+   a test that asserts a count of things gone by under it asserts the CALENDAR.
+   "Two quarters stacked up behind the water bill" was true from late July and
+   went red on 23 October, when October's went unpaid too. `now` freezes the
+   frame's Date (constructor with no arguments, and Date.now) BEFORE the sample
+   loads, so the sample and every reader of "today" agree on one fixed day. */
+async function auditFrame(width, height, tag, { now } = {}) {
   const f = document.createElement('iframe');
   f.setAttribute('data-fin-tests', '');       // or index.html busts out of the frame
   f.setAttribute('aria-hidden', 'true');
@@ -17414,6 +17421,13 @@ async function auditFrame(width, height, tag) {
   W.save = () => {};
   W.confirm = () => true;
   W.alert = () => {};
+  if (now) {
+    const Real = W.Date, at = new Real(now).getTime();
+    W.Date = class extends Real {
+      constructor(...a) { super(...(a.length ? a : [at])); }
+      static now() { return at; }
+    };
+  }
   W.loadSample();
   await new Promise((r) => setTimeout(r, 400));
   return { f, W, D: W.document };
@@ -18903,8 +18917,12 @@ group('The waiting line opens the period it is about (2026-09-08)');
    the September page has to say so first and a total cannot say it, being
    nobody's month in particular. Both frame tests were proven red against the
    unclickable line. */
+/* Mid-September, a fixed day: Water falls due on the 20th of Jan, Apr, Jul and
+   Oct and only January was ever billed, so April and July are behind it and
+   October is not due yet — on every date this suite is ever run. */
+const HELD_TODAY = '2026-09-15T12:00:00';
 t('the waiting line opens the oldest period still unpaid, and names it first', async () => {
-  const { f, W, D } = await auditFrame(1280, 1200, 'heldopen');
+  const { f, W, D } = await auditFrame(1280, 1200, 'heldopen', { now: HELD_TODAY });
   try {
     D.getElementById('tab-budget').click();
     D.querySelector('.vswitch[data-mode="month"]').click();
@@ -18942,7 +18960,7 @@ t('the waiting line opens the oldest period still unpaid, and names it first', a
   } finally { f.remove(); }
 });
 t('recording that bill moves the line on to the period behind it', async () => {
-  const { f, W, D } = await auditFrame(1280, 1200, 'heldnext');
+  const { f, W, D } = await auditFrame(1280, 1200, 'heldnext', { now: HELD_TODAY });
   try {
     D.getElementById('tab-budget').click();
     D.querySelector('.vswitch[data-mode="month"]').click();
