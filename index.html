@@ -1427,7 +1427,7 @@ dialog p { font-size: var(--fs-xs); color: var(--text-secondary); }
 
 /* Footer notes line up with the text inside the last card: 18px padding + 1px border. */
 .privacy { font-size: var(--fs-xs); color: var(--text-muted);
-  margin: 28px 0 0; padding-left: 19px; }
+  margin: 28px 0 0; padding: 0 19px; }
 .privacy-links { margin-top: 6px; }
 .privacy-links a { color: var(--text-muted); }
 .privacy-links a:hover { color: var(--text-secondary); }
@@ -31694,12 +31694,26 @@ const KEYBOARD_TYPES = new Set(['text', 'number', 'search', 'tel', 'url', 'email
 /* Which elements a phone answers with a keyboard — pure over {tagName, type},
    so the list is pinned by tests rather than rediscovered the next time a
    dialog opens on a field nobody thought about. A checkbox, a button and a
-   select all raise nothing, which is why the dialogs that open on one are left
-   exactly as they were. */
+   select raise no keyboard — though a select OPENS on focus, which is what
+   opensOnFocus() below adds. */
 function raisesKeyboard(el) {
   if (!el) return false;
   return el.tagName === 'TEXTAREA'
     || (el.tagName === 'INPUT' && KEYBOARD_TYPES.has(el.type));
+}
+
+/* Which controls OPEN something the moment they are focused, on a touch
+   screen: the keyboard's, plus a <select> and the date and time pickers.
+   iOS 26 opens a focused select's menu at once — Wine Cellar's Share and
+   Settings windows opened with their first dropdown already down (Charles,
+   iPhone, 2026-10-23) — so openModal() asks this, not raisesKeyboard(). */
+function opensOnFocus(el) {
+  if (!el) return false;
+  if (raisesKeyboard(el)) return true;
+  const tag = (el.tagName || '').toUpperCase();
+  if (tag === 'SELECT') return true;
+  return tag === 'INPUT' && ['date', 'time', 'datetime-local', 'month', 'week']
+    .indexOf((el.type || '').toLowerCase()) !== -1;
 }
 function openModal(dlg) {
   dlg.showModal();
@@ -31708,7 +31722,7 @@ function openModal(dlg) {
   if (!window.matchMedia('(pointer: coarse)').matches) return;
   const el = document.activeElement;
   if (!el || !dlg.contains(el)) return;
-  if (!raisesKeyboard(el)) return;
+  if (!opensOnFocus(el)) return;
   /* Set here rather than in the markup: a dialog is only a focus target for
      the moment it opens, and a permanent tabindex would put it in the tab
      order of every dialog in the file for no reason. */
@@ -34063,6 +34077,7 @@ window.__finTestHooks = { SCHEMA, EARNED_ROW_ID, DEFAULT_TAGLINE, round2, roundT
   receivedInto, earningsOver, earningLines, balanceYearTip, avgTipLine,
   flowTransferNote, internalRows,
   raisesKeyboard,
+  opensOnFocus,
   accountEarnings, earningsTip,
   /* The month view: which months the plan holds, which year a month is read
      from, and the one place a month is added up. Pure, so the tiles, the
