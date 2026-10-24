@@ -11,7 +11,7 @@
      by index.html's own CSP, not this one). -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self' https://api.github.com; frame-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Financial Plan — Tests</title>
+<title>Money Map — Tests</title>
 <link rel="stylesheet" href="theme.css">
 <style>
   /* Dev-only page: pins the pure functions in index.html. It loads the real app
@@ -56,7 +56,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Financial Plan — Pure-Function Tests</h1>
+  <h1>Money Map — Pure-Function Tests</h1>
   <p class="sub">Runs against the real <code>index.html</code> in a hidden iframe. Nothing of yours is changed: what a test writes to this browser’s storage, it puts back.</p>
   <div id="summary">Loading app…</div>
   <table><tbody id="out"></tbody></table>
@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1249;
+const EXPECTED = 1248;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -395,14 +395,9 @@ t('blankState carries the spreadsheet constants', () => {
   approx((s.settings.accounts.find(a => a.id === 'long') || {}).rate, 0.07,
      'the 7% lives on the Investments account itself, where it is editable');
   eq(s.settings.ptoAllowance, 32);
-  /* The strapline every sibling app carries, prefilled 2026-08-22 and still a
-     Preference: it is a DEFAULT, not a hardcoded name, and clearing the field
-     sticks because '' is a string that survives coerceShape. Read off the app's
-     own constant rather than repeated here — the markup carries a third copy,
-     and two of the three drifting silently is exactly the failure this catches. */
-  eq(s.settings.tagline, H.DEFAULT_TAGLINE,
-     'a fresh plan wears the family strapline');
-  ok(/Money Map/.test(H.DEFAULT_TAGLINE), 'and it names this app: ' + H.DEFAULT_TAGLINE);
+  /* No subtitle any more (2026-10-24): every "· Charlie's Epic …" strapline in
+     the family went, and this app's was a Preference, which went with it. */
+  eq('tagline' in s.settings, false, 'a fresh plan carries no subtitle');
   eq(Array.isArray(s.people), true, 'a fresh plan has an empty household');
   eq(s.people.length, 0);
   eq(s.settings.filingStatus, 'single',
@@ -5205,44 +5200,25 @@ t('an absent setting is ABSENT, so its default can still win', () => {
      blankState().settings with Object.assign, which copies an explicit
      `undefined` straight over the default. Setting the key is not the same as
      removing it — these have to be deleted or every default is lost. */
-  const d = H.coerceShape({ settings: { ptoAllowance: null, tagline: 7,
+  const d = H.coerceShape({ settings: { ptoAllowance: null,
     midTermRateAnnual: 'x', retirementReturnAnnual: undefined } });
-  ['ptoAllowance', 'tagline', 'midTermRateAnnual', 'retirementReturnAnnual']
+  ['ptoAllowance', 'midTermRateAnnual', 'retirementReturnAnnual']
     .forEach(k => eq(k in d.settings, false, `${k} must be gone, not undefined`));
   const merged = Object.assign(H.blankState().settings, d.settings);
   eq(merged.ptoAllowance, 32, 'so the blank state’s own figure survives the merge');
-  eq(merged.tagline, H.DEFAULT_TAGLINE, 'and the strapline default with it');
   eq(merged.midTermRateAnnual, 0.03);
   eq(merged.retirementReturnAnnual, 0.07);
 });
-t('schema 6 fills an empty strapline ONCE, and never over one you typed', () => {
-  /* The fill has to be a migration rather than a coerceShape default: coerceShape
-     runs on every load, so a fill there could never be cleared — you would empty
-     the field, reload, and it would be back. Here it happens to a plan written
-     before 2026-08-22 and never again. */
+t('a saved or shared subtitle is stripped, now that nothing reads one', () => {
+  /* The subtitle Preference went on 2026-10-24. A plan saved before then, or a
+     share link an older copy built, still carries `tagline` — string or not —
+     and it has to go on the way in rather than ride along unread. */
+  for (const tagline of ['Charlie’s Epic Money Map', '', 12345, 'x'.repeat(200)])
+    eq('tagline' in H.coerceShape({ settings: { tagline } }).settings, false,
+       'tagline ' + JSON.stringify(tagline).slice(0, 30) + ' is dropped');
   const older = H.migrate(H.coerceShape({ schema: 5, settings: {} }));
-  eq(older.settings.tagline, H.DEFAULT_TAGLINE, 'an older plan gains the strapline');
+  eq('tagline' in older.settings, false, 'and the schema-6 step no longer fills one in');
   eq(older.schema, H.SCHEMA);
-
-  const mine = H.migrate(H.coerceShape({ schema: 5, settings: { tagline: 'Our plan' } }));
-  eq(mine.settings.tagline, 'Our plan', 'a subtitle somebody typed is theirs — never overwritten');
-
-  /* And the point of doing it once: a plan already at the current schema with a
-     deliberately empty subtitle stays empty, however many times it is loaded. */
-  const cleared = H.migrate(H.coerceShape({ schema: H.SCHEMA, settings: { tagline: '' } }));
-  eq(cleared.settings.tagline, '', 'clearing the field sticks');
-  eq(H.migrate(cleared).settings.tagline, '', 'and stays stuck on the next load');
-});
-
-t('a subtitle that is not a string cannot take the whole page down', () => {
-  /* render() reads `(state.settings.tagline || '').trim()` before it draws a
-     single tab, so a NUMBER there threw and the app came up completely blank —
-     no card, no message, nothing the reader could act on. */
-  eq('tagline' in H.coerceShape({ settings: { tagline: 12345 } }).settings, false);
-  eq(H.coerceShape({ settings: { tagline: '  Our plan  ' } }).settings.tagline, 'Our plan',
-     'a real subtitle is trimmed, the way Preferences stores it');
-  eq(H.coerceShape({ settings: { tagline: 'x'.repeat(200) } }).settings.tagline.length, 60,
-     'and capped at the same 60 characters');
 });
 t('the assumed rates stay numbers, so the balance chain stays finite', () => {
   const d = H.coerceShape({ settings: { midTermRateAnnual: '0.04',
@@ -17409,7 +17385,7 @@ t('Preferences opens in blocks, and the device-only block holds exactly the thre
 t('the device-only preferences are read from their own keys, not from the plan', () => {
   ok(APP_SRC, 'index.html was not read — the fetch test above must run first');
   const src = stripComments(APP_SRC);
-  const get = src.match(/get: \(\) => \(\{ tagline:[\s\S]*?\}\),/);
+  const get = src.match(/get: \(\) => \(\{ currency:[\s\S]*?\}\),/);
   ok(get, 'the Preferences get() is still written as one object literal');
   for (const [key, from] of [['zoom', 'savedZoom()'], ['pinBars', 'savedPin()'],
                              ['priceApiKey', 'priceKey()']])
@@ -20017,14 +19993,15 @@ t('the header and the tab bar are one scrolling line at every width, with arrows
        930px is a sheet along the bottom, so a 705px docked window no longer
        narrows the page — the header and tabs overflow at 705px on their own. */
     localStorage.setItem('fin-calc', JSON.stringify({ v: 1, open: false, dock: false, x: null, y: null, tape: [] }));
-    /* 900px, not the 705 of the report: the frame carries the SAMPLE's longer
-       subtitle ("A sample household — not real figures"), which at 705px
-       leaves the row under its 15rem and rightly wraps it under the name. At
-       900px the row sits beside the name and still overflows, tabs too. */
-    let fr = await auditFrame(900, 900, 'rowscroll');
+    /* 705px, the width of the report. It was 900px while the frame carried the
+       sample's subtitle, which at 705px left the row under its 15rem and wrapped
+       it under the name; the subtitle went on 2026-10-24, and at 900px the
+       controls then fit. At 705px the row sits beside the name and overflows,
+       tabs too. */
+    let fr = await auditFrame(705, 900, 'rowscroll');
     f = fr.f;
     let { W, D } = fr;
-    eq(D.documentElement.dataset.calc, undefined, '900px, with no column beside the page');
+    eq(D.documentElement.dataset.calc, undefined, '705px, with no column beside the page');
     const ctl = D.querySelector('.headctl'), tabs = D.querySelector('.tabs');
     const headNav = D.querySelector('.headrow > .rownav'), tabNav = D.querySelector('.tabrow > .rownav');
     eq(lines(W, ctl), 1, 'the header controls are one line');
@@ -20391,7 +20368,7 @@ t('the phone header is the name above one scrolling line of controls (2026-09-14
   const html = APP_SRC;
   const head = html.slice(html.indexOf('<div class="headbar">'), html.indexOf('</header>'));
   const at = head.indexOf('<div class="headctl">');
-  ok(at > 0 && at > head.indexOf('id="brandTag"'), 'the controls sit in .headctl, after the name, which is .headbar’s own child');
+  ok(at > 0 && at > head.indexOf('Money&nbsp;Map</h1>'), 'the controls sit in .headctl, after the name, which is .headbar’s own child');
   const inner = head.slice(at);
   for (const id of ['syncBtn', 'undoBtn', 'calcBtn', 'findBtn', 'zoomSel', 'prefsBtn', 'dataBtn', 'shareBtn', 'themeSel'])
     ok(inner.includes(`id="${id}"`), `${id} is inside the wrapper`);
@@ -21090,7 +21067,7 @@ t('the share window’s notes box names every kind of note it carries', () => {
 
 /* ── The privacy page names the merchant ────────────────────────────────────
    A trip line and its parts store who the money went to (`bbebdb0`) — a name,
-   which the "What Financial Plan Stores" paragraph did not list. */
+   which the "What Money Map Stores" paragraph did not list. */
 t('the privacy page says a trip line stores who it was paid to', async () => {
   const txt = stripHtmlComments(await (await bustFetch('privacy.html')).text());
   ok(/who (a|each) trip line (and its parts )?was paid to/.test(txt), 'the stores paragraph names the merchant');
@@ -23649,7 +23626,7 @@ if (LOCAL_HOSTS.includes(location.hostname)) {
     '<code>cd ~/claude-financial-plan &amp;&amp; python3 -m http.server 8016</code><br>' +
     'then open <code>http://localhost:8016/tests.html</code>.<br><br>' +
     'Nothing has been changed by opening this page — ' +
-    '<a href="index.html">back to Financial Plan</a>.' +
+    '<a href="index.html">back to Money Map</a>.' +
     '</td></tr>';
 }
   showLatestRun();

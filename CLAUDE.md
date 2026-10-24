@@ -1,8 +1,8 @@
-# Financial Plan (financial-plan)
+# Money Map (financial-plan)
 
 Charlie's personal financial planner, ported from a Numbers spreadsheet kept
 2011–2026. Deployed via GitHub Pages: https://eagleadams86.github.io/financial-plan/
-On-screen name is **Financial Plan** (tagline: “Charlie’s Epic Money Map”); the repo stays `financial-plan`.
+On-screen name is **Money Map** (no subtitle since 2026-10-24); it was "Financial Plan" until then, and the repo, the folder, the manifest `id` and the service-worker scope all stay `financial-plan`.
 
 ## The one rule that outranks everything
 
@@ -531,7 +531,7 @@ family names as well as balances.
 - **`settings`' free scalars are held to a type too, and that was the branch
   nothing checked** (fixed 2026-08-21). Everything else in `settings` is a
   whitelisted vocabulary (`rowSort`, `filingStatus`) or a boolean, and those were
-  guarded from the start — but `ptoAllowance`, `tagline`, `currency` and the two
+  guarded from the start — but `ptoAllowance`, `currency` and the two
   assumed rates went straight through. That is backwards from how it looks: **a
   share link carries all of `settings` by design**, so these are the most
   attacker-controlled fields in the whole state, not the least. Each failed
@@ -541,9 +541,9 @@ family names as well as balances.
     there executed on the origin every app in the family shares. It goes through
     the same `num()` class fix as `shares` and `nights`, not an `esc()` at the
     one sink.
-  - `tagline` is read as `(tagline || '').trim()` at the top of `render()`, so a
-    NUMBER threw before a single tab was drawn and **the app came up completely
-    blank** — no card, no message, nothing the reader could act on.
+  - `tagline` (the subtitle, removed 2026-10-24) was read as `.trim()` at the top
+    of `render()`, so a NUMBER blanked the whole app. It is now deleted on every
+    load, whatever its type.
   - the two rates feed the balance chain, where a non-numeric value is NaN
     through every month after it.
   **They are DELETED when unreadable, never set to `undefined`.** `load()` and
@@ -1047,12 +1047,10 @@ suite passed while the card was wrong.
   every scroll event, which is no place to open localStorage.
 - **Nothing in the app is one person's.** It shipped with a name in the markup —
   `<title>` and the `<h1>` both said whose plan it was, so every copy and every
-  shared link carried it. `settings.tagline` replaces it: empty by default,
-  capped at 60 chars, written by `render()` into both the header and
-  `document.title` through textContent. **It travels in a share link, like
-  every setting** — see the rule below; the hint on that field used to promise
-  the opposite and was simply wrong. When adding anything that names the app,
-  ask whose name it is.
+  shared link carried it. A `settings.tagline` subtitle Preference replaced it
+  and was itself removed on 2026-10-24 with every strapline in the family; the
+  header and `<title>` are just "Money Map" now. When adding anything that names
+  the app, ask whose name it is.
 - **A dividends row names the accounts it earns on** (`cat.accounts`, read only
   through `dividendAccounts()`). The rule used to read the ids `cash` and `mid`
   literally — invisible to the author, and for anybody else who renamed or
@@ -2734,7 +2732,7 @@ columns, and cut into blocks with a rule and a small heading between them.
   its own grid now, so a field can no longer strand a field in another subject,
   and all three sit where their subject puts them. What still holds: **a `wide`
   field ends the row in progress, so one belongs at the top or the bottom of ITS
-  OWN block, never in the middle** (`tagline` and `pinBars` open their blocks,
+  OWN block, never in the middle** (`pinBars` opens its block,
   `dueLeadDays` closes its own).
 - **`cols: 4` and `.cols4` (new) — a sectioned window must DECLARE its column
   count.** Auto-fit sizes each block by its own field count, so "How Figures
@@ -5770,7 +5768,7 @@ opt-in flag is the one whoever adds the next card forgets, and "this box doesn't
 fold and every other one does" arrives months later.
 - **A card with no heading of its own is left alone**, which is what keeps the
   welcome card out of it: its `<h2>` sits inside `.empty`, as every empty
-  state's does. Folding "Welcome to Financial Plan" would leave a first-time
+  state's does. Folding "Welcome to Money Map" would leave a first-time
   reader looking at a title bar that explains nothing.
 - **`.card-body` is listed beside `.card` in every `.card > x` rule.** The wrap
   reparents a card's second `<h2>` and every one of its `.sub` lines, so a rule
@@ -5989,7 +5987,7 @@ payload's shape changes in a way an older build would silently misread.
   bug in the writing.
 - **`settings` travels in FULL, and is the one thing `SECTION_NEEDS` does not
   gate.** Deliberate, decided 2026-08-14, and the opposite of what this file
-  used to imply: currency, the rates the projections assume and the subtitle are
+  used to imply: currency, the rates the projections assume are
   what make the shared figures mean what the sender meant — a recipient reading
   a plan in their own default currency at their own assumed return is reading
   different numbers. **The only credential that must never be shared is the
@@ -6618,16 +6616,10 @@ page out of five is not a convention.
 - **Firebase is pinned in `package.json` AND in the `firebasejs/…` URL, and a test holds them
   equal.** Dependabot cannot rewrite a URL, so a manifest-only bump has to fail. All three sync
   apps move to the same version together, like the vendored Chart.js.
-- **The header strapline is prefilled with "Charlie's Epic Money Map" (2026-08-22) and is
-  still a Preference.** This was the only app in the family without one, because its subtitle
-  is reader-settable and the default was empty. `DEFAULT_TAGLINE` beside `SCHEMA` is the one
-  source; the markup carries a third copy so the header is at its final width at first paint,
-  and it has to be kept in step. **Clearing the field sticks** — `''` is a string and survives
-  `coerceShape`, where an absent key falls back to the default. Filling an existing plan is
-  **schema 6**, a one-shot in `migrate()` and deliberately NOT a `coerceShape` default: a fill
-  that ran on every load could never be cleared. It only ever fills an EMPTY one — a subtitle
-  somebody typed is theirs. It travels in a share link like everything else in
-  `state.settings`, which is existing deliberate behaviour, not something this changed.
+- **There is no header strapline (2026-10-24).** "· Charlie's Epic Money Map" was a Preference
+  (`settings.tagline`, `DEFAULT_TAGLINE`, filled once by schema 6); it went when the whole
+  family dropped its subtitles. `coerceShape` now deletes `tagline` on every load, and the
+  schema-6 step only stamps the version. Do not bring a subtitle back as a Preference.
 
 ## Six Fixes From the 2026-09-01 Audit
 
@@ -7986,7 +7978,7 @@ from the 2026-09-15 review" at the foot of `tests.html`.
 - **The share window's notes box undersold itself.** It read "notes on months,
   rows, goals and trips" while `stripNotes` has also governed holding notes and
   part notes since they shipped; the words now name both.
-- **privacy.html did not list merchant names.** "What Financial Plan Stores"
+- **privacy.html did not list merchant names.** "What Money Map Stores"
   now says who each trip line and its parts was paid to.
 - **Absurd figures drew as "$∞".** `calcEval` refused only non-finite values,
   and the handler's six-place rounding overflows past ~1e302; it now refuses

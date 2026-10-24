@@ -1,4 +1,4 @@
-# Financial Plan
+# Money Map
 
 Charlie's personal financial planner — the web-app successor to a Numbers
 spreadsheet kept since 2011. A monthly budget that projects itself forward,
@@ -2264,7 +2264,6 @@ above it travels with the plan, and nothing in it does.
 
 | Setting | What it changes |
 | --- | --- |
-| **Subtitle** | Your own words beside "Financial Plan" in the header and the browser tab |
 | **You file taxes as** | Which bracket table the Tax tab reads and which Roth (MAGI) threshold it checks against — always asked, since the Tax tab needs no household. Filing jointly also counts both incomes once there are two of you |
 | **Compensation tab follows** | Which person that tab's salary history is about, once there are two of you |
 
@@ -2337,7 +2336,7 @@ four palettes.
 **⇩ Back Up** in the header opens one dialog for everything to do with the
 file on disk.
 
-- **Export** writes `financial-plan-YYYY-MM-DD.json`. The app remembers the
+- **Export** writes `money-map-YYYY-MM-DD.json`. The app remembers the
   day, which is what ticks **Backup downloaded** on the month's
   [Close card](#closing-a-month); a year's CSV is remembered the same way.
 - **Restore JSON…** reads one back. It's the same path Charlie's one-time
@@ -2663,14 +2662,12 @@ the current schema — and because all of its gates are `<`, a plan from a
 first and halts instead.
 
 It also holds every free scalar in `settings` to a type — the PTO allowance, the
-subtitle, the currency code and the two assumed rates. Those look like the least
+currency code and the two assumed rates. Those look like the least
 important fields in the file and are in fact the most exposed ones: a read-only
 share link carries the whole of `settings` on purpose, so that a recipient reads
 the sender's figures under the sender's own assumptions. Until this landed a
 crafted link could put markup where the PTO card prints its allowance without
-escaping, or a number where the page expects the subtitle to be text — the first
-running script on an origin shared with every other app in the account, the
-second bringing the page up blank. A value that cannot be read is *removed*
+escaping — running script on an origin shared with every other app in the account. A value that cannot be read is *removed*
 rather than blanked, so the app's own default still wins the merge.
 
 **`computeAll()` is the only place numbers are calculated.** Every cell,
@@ -2884,14 +2881,10 @@ instruction: *a newer SDK exists, now change the URL too.*
 
 Never let that pin become a `^` or `~` range — a range cannot be checked against a URL.
 
-## The Header Strapline
+## The Header
 
-The header reads **Financial Plan · Charlie's Epic Money Map**, matching the six sibling apps.
-It is a **Preference**, not a hardcoded name: change it in Preferences and it changes; clear
-it and the app is just "Financial Plan" again, and stays that way. A plan written before
-2026-08-22 gains the default once, through the schema-6 migration, and only if its subtitle
-was empty — one somebody had typed is never overwritten.
-
-It appears in the browser tab as well as the header, and it travels in a share link along with
-everything else in `state.settings`, so a recipient sees the sender's subtitle over the
-sender's figures. That is the existing deliberate pairing, and the Preferences hint says so.
+The header reads just **Money Map**, with no subtitle beside it. Until 2026-10-24 it carried
+a strapline (*· Charlie's Epic Money Map*) that was a Preference you could change or clear;
+every app in the family dropped its strapline that day, and this one's Preference went with
+it. A plan or share link saved before then still has a `tagline` field in it — the app strips
+it on load, so nothing reads it and it is not saved back.

@@ -1,5 +1,5 @@
 'use strict';
-/* Financial Plan — the offline service worker.
+/* Money Map — the offline service worker.
    ==========================================================================
    This file is the most security-sensitive one in the repo, for two reasons
    that are easy to miss:
