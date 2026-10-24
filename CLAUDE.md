@@ -4875,6 +4875,25 @@ thirteen-column table to reach one cell.
 - **The chart has ONE dataset on purpose.** "Left over" is one figure that can
   go either way, so the two directions are two ends of one series rather than
   two series to tell apart.
+- **THE CHART IS ON BOTH LENSES since 2026-10-24** (Charles: *"this should
+  probably be on the year view and include the average and total"*), and it is
+  the one card the two share — `monthTrendCard(y, lens)` draws it, `data-box`
+  `month-trend` or `year-trend` so each lens folds its own copy. This is NOT the
+  chrome-moving the month-lens memory warns about: the chart's subject was
+  always the YEAR (twelve bars), so the Year lens is its natural home and the
+  Month lens keeps it as context. On the Year lens `buildMonthNetChart(y, null)`
+  fills no bar solid, and a click sets `budgetView = 'month'` and `pickMonth`s
+  — the chart is the bridge between the lenses. `pickMonth` returning false
+  (the month already stored) still renders, because the LENS changed.
+- **`monthNetSummary(pts)` adds the bars up, pure and pinned.** The AVERAGE is
+  over the months that have HAPPENED only (`!ahead`) — an estimate is the plan
+  repeating its own rules — while the YEAR figure takes the estimates in, and
+  `monthNetSummaryLine` says which is which. `avg` is null under two months
+  (`avgTipLine`'s rule). The average is drawn by the `avgRule` plugin as a
+  DOTTED rule in `--chart-tick` with an "avg $X" chip on `--bg-card` at its
+  right end: dotted because dashed already means "still to come" on this
+  chart (the Spending chart's average line made the same call), and no hue,
+  because it is a reference mark like the zero line, not a series.
 - **THE ZERO LINE IS DRAWN HEAVY, and this is the only chart in the app where
   that is right.** Above it a month added to your money, below it the month cost
   you some — every other chart here measures a quantity that cannot go

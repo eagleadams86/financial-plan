@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1247;
+const EXPECTED = 1249;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -3669,6 +3669,61 @@ t('a finished year has no months still to come', () => {
   const yr = Object.assign(monthYear(), { model: 'pinned' });
   const pts = H.monthNetPoints({ years: { '2030': yr } }, { '2030': MONTH_COMPUTED }, '2030');
   eq(pts.map(p => p.ahead), [false, false]);
+});
+t('the bars add up: the average is over the months that happened', () => {
+  /* 2026-10-24: the chart moved onto the Year lens with a total and an average.
+     An estimate must not pull the average toward the plan's own guess. */
+  const pts = [{ m: '2030-01', v: 100, ahead: false }, { m: '2030-02', v: -40, ahead: false },
+    { m: '2030-03', v: 300, ahead: false }, { m: '2030-04', v: 1000, ahead: true }];
+  const s = H.monthNetSummary(pts);
+  approx(s.soFar, 360, 'the months that happened');
+  eq(s.months, 3);
+  approx(s.avg, 120, '360 over three months — the estimate is not in it');
+  approx(s.year, 1360, 'the year takes the estimate in');
+  eq(s.ahead, 1);
+  const one = H.monthNetSummary([{ m: '2030-01', v: 50, ahead: false },
+    { m: '2030-02', v: 9, ahead: true }]);
+  eq(one.avg, null, 'one month averaged is that month printed twice');
+  const none = H.monthNetSummary([{ m: '2030-01', v: 5, ahead: true },
+    { m: '2030-02', v: 9, ahead: true }]);
+  eq(none.months, 0);
+  eq(none.avg, null);
+  ok(/None of 2030 has happened yet/.test(H.monthNetSummaryLine(none, '2030')),
+    'a year with nothing behind it says so rather than printing $0.00 so far');
+  ok(/So far/.test(H.monthNetSummaryLine(s, '2030')) && /comes to about/.test(H.monthNetSummaryLine(s, '2030')),
+    'a running year gives both figures');
+  const done = H.monthNetSummary(pts.map(p => Object.assign({}, p, { ahead: false })));
+  ok(!/still\s+to come/.test(H.monthNetSummaryLine(done, '2030')), 'a finished year has no months to come');
+});
+t('the Year lens draws the bars under the grid, and a bar opens that month', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'yearbars');
+  try {
+    const st = W.finGet();
+    st.ui.activeTab = 'budget';
+    delete st.ui.budgetView;
+    const y = Object.keys(st.years).filter((k) => st.years[k].kind === 'grid'
+      && st.years[k].model === 'live').sort().pop();
+    st.ui.activeYear = y;
+    W.render();
+    await new Promise((r) => setTimeout(r, 200));
+    const card = D.querySelector('[data-box="year-trend"]');
+    ok(card, 'the Year lens carries the card');
+    ok(card.querySelector('canvas#monthNetChart'), 'with its chart');
+    ok(/a month on average/.test(card.textContent), 'and the average in words');
+    const grid = D.querySelector('.grid');
+    ok(grid && (grid.compareDocumentPosition(card) & 4), 'under the grid');
+    const ch = W.Chart.getChart(card.querySelector('canvas'));
+    ok(ch, 'the chart was built on the Year lens');
+    const bars = ch.data.datasets[0];
+    eq(new Set(bars.backgroundColor).size <= 2, true, 'no bar is filled solid — no month is being read');
+    ok(ch.options.plugins.avgRule && ch.options.plugins.avgRule.value !== null,
+      'the average is drawn across the bars');
+    const target = W.yearMonths(st.years[y])[3];
+    ch.options.onClick(null, [{ index: 3 }]);
+    await new Promise((r) => setTimeout(r, 100));
+    eq(W.finGet().ui.budgetView, 'month', 'a bar opens the Month lens');
+    eq(W.finGet().ui.activeMonth, target, 'on the month it stands for');
+  } finally { f.remove(); }
 });
 t('monthTitle writes the month out in full', () => {
   eq(H.monthTitle('2030-01'), 'January 2030');

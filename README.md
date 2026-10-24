@@ -166,7 +166,14 @@ the left of the strip along the top picks between them. Whichever you leave it
 on is where it opens next time, on every device you sync to.
 
 **Year** is the grid: twelve columns of rows, the shape the spreadsheet had, and
-the one for planning a whole year on a wide screen.
+the one for planning a whole year on a wide screen. Under it sits **Left Over,
+Month by Month** — the same bar chart the Month page ends on (below), with a
+line over it that adds the year up: what has been left over so far, the average
+month, and roughly where the year ends once the months still to come are
+counted. The average counts only the months that have happened, so the plan's
+own estimates cannot pull it about, and it is drawn across the bars as a
+**dotted** line (dotted because a dash already means "still to come"). Here no
+bar is singled out, and clicking one opens that month on its own page.
 
 **Month** is one month laid out as a page — the shape for a phone, and for
 fixing a single row without pinching into a thirteen-column table. It opens on
@@ -231,7 +238,8 @@ underlined with dots, the same mark a year that hasn't begun wears. It draws:
   and the bar is green; below it the month cost you some and the bar is red.
   Months still to come are outlined with a dash, the month you are reading is
   the one filled solid, and clicking any bar opens that month and takes you back
-  to the top of the page to see it.
+  to the top of the page to see it. The year's total and average month sit
+  above it, as they do on the Year view.
 
 Every figure and every heading on the page carries its own **i**, and each opens
 a window about that one thing rather than about the page.

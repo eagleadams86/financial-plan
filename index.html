@@ -9752,7 +9752,13 @@ const HELP = {
     ['A month still to come is ', b('outlined with a dashed edge'), ' — its figure is the '
       + 'plan projecting itself forward from your rules, not something that happened. The '
       + 'month you are reading is the one bar drawn solid, and clicking any other bar opens '
-      + 'that month and takes you back to the top of the page to see it.'],
+      + 'that month and takes you back to the top of the page to see it. On the Year view no '
+      + 'bar is solid, and clicking one opens that month on its own page.'],
+    ['The line under the heading adds the bars up. ', b('The average counts only the months '
+      + 'that have happened'), ' — an estimate is the plan repeating its own rules, so letting it '
+      + 'in would pull the real figure toward the guess. The figure for the whole year does '
+      + 'include the months still to come, and says so. The ', b('dotted line'), ' across the '
+      + 'bars is that average; it is dotted because dashed already means a month still to come.'],
   ] },
   netWorth: { title: 'What Counts toward Net Worth', body: [
     [b('Five parts'), ', each read from a tab you fill in elsewhere. ', b('Liquid'),
@@ -11686,7 +11692,7 @@ function renderBudget() {
      short card. Which year `activeYearKey()` names still decides the chip, so
      nothing else in the app had to learn a new word for this page. */
   if (yr.kind === 'summary') return picker + previousYearsPage();
-  return picker + gridCard(y, yr) + yearNotes(y);
+  return picker + gridCard(y, yr) + monthTrendCard(y, 'year') + yearNotes(y);
 }
 
 function summaryCard(y, yr, stacked) {
@@ -14677,26 +14683,8 @@ function renderMonthView() {
       data-add="account">＋ Add Account</button></div>`}
   </div>`;
 
-  /* ── A bar per month, so the one you are on has somewhere to sit ──────────
-     ONE dataset, deliberately: "left over" is a single figure that can go
-     either way, and up-or-down carries that without a second colour to tell
-     apart. The months still to come are outlined DASHED by `dashedBarEdge` —
-     Chart.js 4's bar element ignores borderDash, which is what that plugin is
-     for — and the month you are reading is the only solid-filled bar, the same
-     "this one" the spending chart's hover uses. */
-  const chartCard = c.months.length < 2 ? '' : `<div class="card" data-box="month-trend">
-    <h2>Left Over, Month by Month${helpBtn('monthBars', 'these bars')}</h2>
-    <p class="sub">What each month of ${esc(y)} adds to your money — everything that came in,
-      less everything that went out. Money you only moved is left out of every bar,
-      wherever you moved it to. Click a bar to open that month.</p>
-    <div class="chartbox"><canvas id="monthNetChart"></canvas></div>
-    ${/* The swatch sits immediately before the word it explains. Leading the
-         line with it, as a one-mark key does, attached a dashed rectangle to a
-         sentence about which side of zero a bar is on. */''}
-    <p class="chartkey">Above the line the month added to your money; below it,
-      the month cost you some. <i></i> Dashed — a month still to come, so the
-      figure is an estimate.</p>
-  </div>`;
+  /* The bars, shared with the Year lens — see `monthTrendCard`. */
+  const chartCard = monthTrendCard(y, 'month');
 
   /* The Close card sits UNDER the month's four cards (Charles, 2026-09-19): the
      figures are what the page is for, and the list is what you do after
@@ -14717,9 +14705,111 @@ function monthNetPoints(st, computed, y) {
                               ahead: monthAhead(yr, m) }));
 }
 
+/* The year's bars added up (2026-10-24, Charles: "include the average and
+   total in some way"). The AVERAGE is over the months that have happened only:
+   an estimate is the plan repeating its own rules, so letting it in would pull
+   the real figure toward the guess. The YEAR figure does take the estimates in,
+   because "where does the year end up" is a question only they can answer — and
+   the sentence that prints it says so. Pure, so the test pins the arithmetic
+   rather than reading a canvas. `avg` is null under two months, `avgTipLine`'s
+   rule: one month averaged is that month printed twice. */
+function monthNetSummary(pts) {
+  const done = pts.filter(p => !p.ahead);
+  const sum = (list) => round2(list.reduce((a, p) => a + (p.v || 0), 0));
+  const soFar = sum(done);
+  return { soFar, months: done.length, year: sum(pts), ahead: pts.length - done.length,
+           avg: done.length < 2 ? null : round2(soFar / done.length) };
+}
+
+/* The sentence under the chart's heading. Three shapes, because the figures it
+   can honestly give differ: a year with nothing behind it yet has no "so far",
+   a finished one has no "with the months to come", and a running one has both. */
+function monthNetSummaryLine(s, y) {
+  const m = (v) => `<strong>${esc(fmtMoney(v))}</strong>`;
+  const avg = s.avg === null ? '' : ` — ${m(s.avg)} a month on average`;
+  if (!s.months)
+    return `None of ${esc(y)} has happened yet. As planned, it leaves ${m(s.year)} over by the end.`;
+  const months = `${s.months} month${s.months === 1 ? '' : 's'}`;
+  if (!s.ahead) return `${esc(y)} left ${m(s.year)} over across its ${months}${avg}.`;
+  return `So far, ${m(s.soFar)} left over across ${months}${avg}. With the months still
+    to come, the year comes to about ${m(s.year)}.`;
+}
+
+/* ── A bar per month, on BOTH lenses (Year since 2026-10-24) ──────────────────
+   ONE dataset, deliberately: "left over" is a single figure that can go either
+   way, and up-or-down carries that without a second colour to tell apart. The
+   months still to come are outlined DASHED by `dashedBarEdge` — Chart.js 4's
+   bar element ignores borderDash, which is what that plugin is for.
+   On the MONTH lens the month you are reading is the only solid-filled bar, the
+   same "this one" the spending chart's hover uses, and a click moves months.
+   On the YEAR lens no month is being read, so every bar wears the tint, and a
+   click opens that month on its own page — the chart is the bridge between the
+   two lenses. The data-box keys differ so each lens folds its own copy. */
+function monthTrendCard(y, lens) {
+  const pts = monthNetPoints(state, C, y);
+  if (pts.length < 2) return '';
+  const s = monthNetSummary(pts);
+  return `<div class="card" data-box="${lens === 'year' ? 'year' : 'month'}-trend">
+    <h2>Left Over, Month by Month${helpBtn('monthBars', 'these bars')}</h2>
+    <p class="sub">What each month of ${esc(y)} adds to your money — everything that came in,
+      less everything that went out. Money you only moved is left out of every bar,
+      wherever you moved it to. ${lens === 'year'
+        ? 'Click a bar to open that month on its own page.' : 'Click a bar to open that month.'}</p>
+    <p class="sub">${monthNetSummaryLine(s, y)}</p>
+    <div class="chartbox"><canvas id="monthNetChart"></canvas></div>
+    ${/* The swatch sits immediately before the word it explains. Leading the
+         line with it, as a one-mark key does, attached a dashed rectangle to a
+         sentence about which side of zero a bar is on. The average is DOTTED
+         because dashed already means "estimate" on this chart. */''}
+    <p class="chartkey">Above the line the month added to your money; below it,
+      the month cost you some.${s.ahead ? ` <i></i> Dashed — a month still to come, so the
+      figure is an estimate.` : ''}${s.avg === null ? '' : ` <i class="dot"></i> Dotted —
+      your average month${s.ahead ? ' so far' : ''}.`}</p>
+  </div>`;
+}
+
+/* The average month, drawn across the bars as a thin DOTTED rule in the axis
+   label's own ink, with its figure at the right end on a chip of the card's own
+   ground so a bar behind it cannot swallow the text. No hue: it is a reference
+   mark, like the zero line, not a series. */
+const avgRule = {
+  id: 'avgRule',
+  afterDatasetsDraw(chart, args, opts) {
+    if (!opts || opts.value === null || opts.value === undefined) return;
+    const { ctx, chartArea: a } = chart;
+    const py = chart.scales.y.getPixelForValue(opts.value);
+    if (!Number.isFinite(py) || py < a.top || py > a.bottom) return;
+    ctx.save();
+    ctx.strokeStyle = opts.color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([2, 4]);
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+    ctx.setLineDash([]);
+    const f = Chart.defaults.font;
+    ctx.font = `600 ${f.size}px ${f.family}`;
+    const text = opts.label;
+    const w = ctx.measureText(text).width + 12, h = f.size + 8;
+    const x = a.right - w, top = py - h / 2;
+    ctx.fillStyle = opts.ground;
+    ctx.strokeStyle = opts.color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(x, top, w, h, 4) : ctx.rect(x, top, w, h);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = opts.color;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + 6, py + 0.5);
+    ctx.restore();
+  },
+};
+
+/* `active` is the month being read on the Month lens, and null on the Year
+   lens, where no bar is "this one" and a click opens the month instead. */
 function buildMonthNetChart(y, active) {
   const pts = monthNetPoints(state, C, y);
   if (pts.length < 2) return;
+  const sum = monthNetSummary(pts);
   const tick = cssVar('--chart-tick'), grid = cssVar('--chart-grid');
   const ahead = pts.map(p => p.ahead);
   /* RAG, and this is the ONE chart in the app entitled to it. The file's
@@ -14774,11 +14864,22 @@ function buildMonthNetChart(y, active) {
          to land. Only when something actually changed: clicking the month you
          are already reading must not throw the page about. */
       onClick: (e, els) => {
-        if (els.length && pickMonth(pts[els[0].index].m)) window.scrollTo(0, 0);
+        if (!els.length) return;
+        const m = pts[els[0].index].m;
+        /* From the Year lens a bar is the way INTO that month's page:
+           `pickMonth` keeps the year in step, and returns false only when the
+           month is already the stored one — the lens still changed, so draw. */
+        if (!active) {
+          state.ui.budgetView = 'month';
+          if (!pickMonth(m)) { save(); render(); }
+          window.scrollTo(0, 0);
+        } else if (pickMonth(m)) window.scrollTo(0, 0);
       },
       plugins: {
         legend: { display: false },
         dashedBarEdge: { projected: ahead },
+        avgRule: { value: sum.avg, color: tick, ground: cssVar('--bg-card'),
+          label: sum.avg === null ? '' : `avg ${fmtMoney0(sum.avg)}` },
         tooltip: { caretSize: 8, callbacks: { label: (ti) =>
           fmtMoney(ti.parsed.y) + (ahead[ti.dataIndex] ? ' (estimate)' : '') } },
       },
@@ -14794,10 +14895,10 @@ function buildMonthNetChart(y, active) {
         }),
       },
     },
-    plugins: [dashedBarEdge],
+    plugins: [dashedBarEdge, avgRule],
   }, `Left over each month of ${y}: ${
     pts.map(p => `${monthLabel(p.m)}, ${fmtMoney(p.v)}${p.ahead ? ' (estimate)' : ''}`)
-      .join('; ')}.`);
+      .join('; ')}.${sum.avg === null ? '' : ` Average month so far ${fmtMoney(sum.avg)}.`}`);
 }
 
 /* The mode switch, in both strips — it is the one control the two lenses share.
@@ -29061,6 +29162,9 @@ function wireBudget() {
   if (budgetView() === 'month') {
     const mv = activeMonthKey();
     if (mv) buildMonthNetChart(yearOfMonth(state, mv), mv);
+  } else {
+    const y = activeYearKey();
+    if (y && state.years[y] && state.years[y].kind === 'grid') buildMonthNetChart(y, null);
   }
   /* The phone-sized "Actions" toggle over the grid's admin buttons. */
   const actBtn = F('gridActionsBtn');
@@ -34083,7 +34187,8 @@ window.__finTestHooks = { SCHEMA, EARNED_ROW_ID, DEFAULT_TAGLINE, round2, roundT
      from, and the one place a month is added up. Pure, so the tiles, the
      section totals and the chart are pinned by arithmetic rather than by a
      canvas or a card. */
-  planMonths, yearOfMonth, monthTitle, monthTotals, monthNetPoints,
+  planMonths, yearOfMonth, monthTitle, monthTotals, monthNetPoints, monthNetSummary,
+  monthNetSummaryLine,
   /* Due dates: the arithmetic (no Date object anywhere in it), the one verdict,
      the hide predicate and the outstanding count — all pure, all taking their
      today and their lead time as arguments so a test can pin them without a
