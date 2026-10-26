@@ -1233,7 +1233,8 @@ this year compares with the last few, and it gives the tab something to open on.
 
 ## Giving
 
-The donations log, each one filed under the year of its date. Date one in any
+The tab opens on the **giving-over-time chart**, then the giving fund, then
+the donations log, each one filed under the year of its date. Date one in any
 year, past or future, and that year gets its own table — which appears when it
 has something in it and goes when it doesn't.
 
@@ -1242,12 +1243,11 @@ appeal) beside the foundation receiving it, and is either done or
 **planned**. A planned one reads in italics, stays out of the year's totals,
 and is counted up separately as what's still to go.
 
-Under the year tables sits a **donor-advised fund's holdings**, for those who
+Above the year tables sits a **donor-advised fund's holdings**, for those who
 have one — a Preferences switch, since plenty of people don't. It is a holdings
 table like the Investments tab's, with the same [price lookup](#prices) above
 it: the fund's prices are dated there, topped up when the tab opens, and its
-Refresh covers the fund alone. Donations are tracked either way, and the
-giving-over-time chart is last.
+Refresh covers the fund alone. Donations are tracked either way.
 
 ### Giving as a Share of Income
 
