@@ -2478,8 +2478,16 @@ in each — years, goals, people, trips — rather than guessing by timestamp. I
 is the one dialog in the app that a click outside will not close: "which copy
 of your data?" has no safe default.
 
-After that, whichever side changed most recently wins, and an update pushed
-from another device arrives live.
+After that, an update pushed from another device arrives live — and **an edit
+made offline never overwrites a newer copy from another device** (2026-10-26).
+Every save carries a version number that goes up by one, and each device
+remembers the version it last saw. A save is sent only if the cloud is still
+that version; if another device saved in between, you are asked which copy to
+keep rather than one quietly replacing the other. An offline edit waits on this
+device — it is not handed to Firebase to replay later — and is sent through the
+same check when the connection comes back (on reconnect, when the page comes
+back into view, or a minute later). Device clocks no longer decide which copy is
+newer, so a phone whose clock runs fast cannot win every time.
 
 **A change that arrives while a window is open closes that window — if the
 window was filled in from the plan** (2026-09-18). Edit a goal on the laptop

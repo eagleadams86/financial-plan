@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1248;
+const EXPECTED = 1256;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -22364,9 +22364,10 @@ t('a synced change closes only the windows filled from the plan — Find is re-r
     /* One road for every adoption, so the sentence cannot be toasted over. */
     const mod = APP_SRC.slice(APP_SRC.indexOf('<script type="module">'));
     eq((mod.match(/window\.finAdopt\(/g) || []).length, 1, 'the sync module calls finAdopt in ONE place');
-    ok(/const said = window\.finAdopt\(data, ts\);\s*window\.toast\(typeof said === 'string' && said \? `\$\{news\} \$\{said\}` : news\);/.test(mod),
-       'and that place joins what finAdopt said onto the sync toast');
-    eq((mod.match(/adoptFrom\(/g) || []).length, 4, 'all four adoptions go through it');
+    ok(/adopt: \(d\) => \{ adoptSaid = window\.finAdopt\(remotePayload\(d\), d\.updatedAt\); \}/.test(mod),
+       'that place is the sync engine’s adopt hook, which keeps what finAdopt said');
+    ok(/window\.toast\(typeof said === 'string' && said \? `\$\{news\} \$\{said\}` : news\);/.test(mod),
+       'and the engine’s toast hook joins it onto the sync toast — one toast');
   } finally {
     if (f) f.remove();
     tcPutBack(kept);
@@ -22537,9 +22538,12 @@ t('a window halted for a newer build cancels its pending sync push, and can neve
     eq(pushes, 1, 'nothing on a halted page asks for a push again');
 
     const mod = APP_SRC.slice(APP_SRC.indexOf('<script type="module">')).replace(/\/\*[\s\S]*?\*\//g, '');
-    eq((mod.match(/Fs\.setDoc\(/g) || []).length, 1, 'there is ONE sender — a second would need this gate too');
-    ok(/async function pushNow\(\) \{\s*if \(!user \|\| window\.finViewOnly\) return;\s*await Fs\.setDoc\(/.test(mod),
+    eq((mod.match(/Fs\.setDoc\(/g) || []).length, 0, 'no blind setDoc is left — every write is the engine’s transaction');
+    eq((mod.match(/tx\.set\(docRef\(\)/g) || []).length, 1, 'there is ONE write — a second would need this gate too');
+    ok(/async function pushNow\(\) \{\s*if \(!user \|\| window\.finViewOnly\) return;\s*await cloud\.push\(/.test(mod),
        'and it refuses a halted page at SEND time, the line before the write — not when the timer was armed');
+    ok(/uid: \(\) => \(user && !window\.finViewOnly \? user\.uid : null\)/.test(mod),
+       'and the engine itself sees no account on a halted page, so a push it starts on its own cannot send either');
     const hook = mod.slice(mod.indexOf('window.cloudHalt ='), mod.indexOf('window.cloudPush ='));
     ok(/clearTimeout\(pushTimer\); pushTimer = null;/.test(hook), 'the hook cancels the armed push');
     ok(/clearTimeout\(relistenTimer\); relistenTimer = null;/.test(hook), 'and the relisten retry');
@@ -23506,6 +23510,242 @@ t('every year and month chip is named starting with the words it shows', async (
       ok(seen >= 12, 'fixture: both strips drew their chips', seen);
     } finally { f.remove(); }
   }
+});
+
+group('A version number decides which copy is newer, not a clock (2026-10-26)');
+/* Golf Handicap's offline-overwrite fix, ported: syncPlan + makeCloudSync in
+   the classic script, every push a transaction that writes only while the
+   cloud is still the copy this device last saw. The same two-device
+   simulation Golf and Wine Cellar run, verbatim, against a fake cloud. */
+/* Golf Handicap's runSyncSim, verbatim. */
+async function runSyncSim(W) {
+  const clone = (x) => (x == null ? x : JSON.parse(JSON.stringify(x)));
+  let now = 1000;
+  function makeCloud() {
+    const c = { doc: null };
+    c.read = async (dev) => { if (!dev.online) throw { code: 'unavailable' }; return clone(c.doc); };
+    c.transact = async (dev, decide) => {
+      if (!dev.online) throw { code: 'unavailable' };
+      if (dev.beforeCommit) { const f = dev.beforeCommit; dev.beforeCommit = null; await f(); }
+      const out = decide(clone(c.doc));
+      if (out.write) c.doc = clone(out.write);
+      return out;
+    };
+    return c;
+  }
+  function makeDevice(cloud, opts) {
+    const store = new Map(), log = [];
+    const dev = { online: true, skew: (opts && opts.skew) || 0, rounds: [], ts: 0, log: log,
+      takeCloud: true, keepOnEmptied: true, first: true };
+    dev.io = {
+      uid: () => 'u1', keys: { base: 'base', pushed: 'sent' },
+      getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)),
+      stamp: () => dev.ts, touch: () => { dev.ts = (now += 1) + dev.skew; },
+      read: () => cloud.read(dev), transact: (decide) => cloud.transact(dev, decide),
+      localDoc: () => ({ state: { rounds: clone(dev.rounds) } }),
+      localCount: () => dev.rounds.length,
+      remoteCount: (d) => (d && d.state && Array.isArray(d.state.rounds) ? d.state.rounds.length : 0),
+      valid: (d) => !!(d && d.state && Array.isArray(d.state.rounds)),
+      firstSync: () => dev.first,
+      adopt: (d) => { dev.rounds = clone(d.state.rounds); dev.ts = d.updatedAt; },
+      ask: () => { log.push('ask'); return dev.takeCloud; },
+      askEmptied: () => { log.push('askEmptied'); return !dev.keepOnEmptied; },
+      toast: (k) => log.push(k),
+    };
+    dev.sync = W.makeCloudSync(dev.io);
+    dev.edit = (r) => { dev.rounds.push(r); dev.io.touch(); };
+    /* What onSnapshot would hand this device: the cloud as it is now. */
+    dev.hear = () => dev.sync.snapshot(clone(cloud.doc));
+    dev.start = async () => { await dev.sync.start(); dev.first = false; };
+    return dev;
+  }
+  const failed = async (p) => { try { await p; return null; } catch (e) { return e.code || String(e); } };
+  const r = {}, errors = [];
+  /* Each scenario on its own: one that throws must not take the others' records
+     with it, or one fault reads as fifteen. */
+  const step = async (fn) => { try { await fn(); } catch (e) { errors.push(String(e && e.stack || e)); } };
+  /* 1. The bug itself: A edits offline, B edits online, A reconnects. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud), B = makeDevice(cloud);
+    A.edit('a1'); await A.start(); await B.start();
+    r.bothStart = clone({ A: A.rounds, B: B.rounds, rev: cloud.doc.rev });
+    A.online = false; A.edit('a-offline');
+    r.offlinePush = await failed(A.sync.push());
+    r.offlineDirty = A.sync.dirty();
+    B.edit('b-online'); await B.sync.push();
+    A.online = true; A.takeCloud = false;
+    r.beforeAnswer = clone(cloud.doc.state.rounds);
+    await A.sync.push();
+    r.reconnect = { askedA: A.log.includes('ask'), cloud: clone(cloud.doc.state.rounds) };
+    await B.hear();
+    r.reconnect.B = B.rounds; r.reconnect.Bask = B.log.includes('ask');
+  });
+  /* 1b. Same, answering "keep the cloud": A takes B's copy, nothing is pushed. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud), B = makeDevice(cloud);
+    A.edit('a1'); await A.start(); await B.start();
+    A.online = false; A.edit('a-offline'); await failed(A.sync.push());
+    B.edit('b-online'); await B.sync.push();
+    const rev = cloud.doc.rev;
+    A.online = true; A.takeCloud = true;
+    await A.sync.push();
+    r.takeCloud = { A: A.rounds, cloud: cloud.doc.state.rounds, revUnchanged: cloud.doc.rev === rev, dirty: A.sync.dirty() };
+  });
+  /* 2. A fast clock no longer wins: A is a day ahead, B's later edit still lands. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud, { skew: 86400000 }), B = makeDevice(cloud);
+    A.edit('a1'); await A.start(); await B.start();
+    A.edit('a2'); await A.sync.push(); await B.hear();
+    B.edit('b-later'); await B.sync.push();
+    await A.hear();
+    r.skew = { A: A.rounds, asked: A.log.includes('ask') };
+  });
+  /* 3. Offline edit, then a reload, then the next sign-in. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud), B = makeDevice(cloud);
+    A.edit('a1'); await A.start(); await B.start();
+    A.online = false; A.edit('a-offline'); await failed(A.sync.push());
+    B.edit('b-online'); await B.sync.push();
+    A.online = true; A.takeCloud = false;
+    A.sync = W.makeCloudSync(A.io);        // a reload: the storage survives, the engine is new
+    await A.start();
+    r.reload = { asked: A.log.includes('ask'), cloud: clone(cloud.doc.state.rounds) };
+  });
+  /* 4. Offline edit and reload with nobody else writing: sent, no question. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud);
+    A.edit('a1'); await A.start();
+    A.online = false; A.edit('a-offline'); await failed(A.sync.push());
+    A.online = true; A.sync = W.makeCloudSync(A.io);
+    await A.start();
+    r.reloadAlone = { asked: A.log.includes('ask'), cloud: clone(cloud.doc.state.rounds), dirty: A.sync.dirty() };
+  });
+  /* 5. Its own write coming back is ignored; an old-code writer is still heard. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud);
+    A.edit('a1'); await A.start();
+    A.edit('a2'); await A.sync.push();
+    const before = A.log.length;
+    await A.hear();
+    r.echo = A.log.length === before;
+    cloud.doc = { state: { rounds: ['old-code'] }, updatedAt: 5, rev: cloud.doc.rev };   // a blind setDoc, rev carried over by nothing
+    cloud.doc.rev = undefined;
+    await A.hear();
+    r.legacy = A.rounds;
+  });
+  /* 6. A copy that arrives mid-push waits, and is looked at afterwards. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud), B = makeDevice(cloud);
+    A.edit('a1'); await A.start(); await B.start();
+    A.edit('a2');
+    let heard = null;
+    A.beforeCommit = async () => { heard = A.sync.snapshot(clone(cloud.doc)); };
+    await A.sync.push();
+    r.midPush = { heldNull: heard === null, asked: A.log.includes('ask'), cloud: cloud.doc.state.rounds };
+  });
+  /* 7. An edit made while the transaction is out goes up too, not left dirty. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud);
+    A.edit('a1'); await A.start();
+    A.edit('a2');
+    A.beforeCommit = async () => { A.edit('a3'); A.sync.push(); };
+    await A.sync.push();
+    r.again = { cloud: cloud.doc.state.rounds, dirty: A.sync.dirty() };
+  });
+  /* 8. Another device clears everything: this one asks, live. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud), B = makeDevice(cloud);
+    A.edit('a1'); await A.start(); await B.start();
+    B.rounds = []; B.io.touch(); await B.sync.push();
+    A.keepOnEmptied = true;
+    await A.hear();
+    r.emptied = { asked: A.log.includes('askEmptied'), cloud: cloud.doc.state.rounds, A: A.rounds };
+  });
+  /* 9. The first sign-in with rounds on both sides still asks. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud), B = makeDevice(cloud);
+    A.edit('a1'); await A.start();
+    B.edit('b1'); B.takeCloud = true;
+    await B.start();
+    r.firstSync = { asked: B.log.includes('ask'), B: B.rounds };
+  });
+  /* 10. A reconnect while the question is already up asks once, not twice. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud), B = makeDevice(cloud);
+    A.edit('a1'); await A.start(); await B.start();
+    A.edit('a2'); B.edit('b2'); await B.sync.push();
+    let answer;
+    A.io.ask = () => { A.log.push('ask'); return new Promise((res) => { answer = res; }); };
+    const p1 = A.sync.push();
+    await new Promise((res) => setTimeout(res, 0));
+    A.hear();
+    if (answer) answer(true);
+    await p1;
+    r.askOnce = A.log.filter((x) => x === 'ask').length;
+  });
+  r.errors = errors;
+  return r;
+}
+
+let simRun = null;
+const simR = () => { if (!simRun) simRun = runSyncSim(document.getElementById('app').contentWindow); return simRun; };
+const planOf = (o) => document.getElementById('app').contentWindow.syncPlan(Object.assign({
+  base: { rev: 3, at: 50 }, remote: { rev: 3, at: 50 }, dirty: false,
+  localCount: 1, remoteCount: 1, remoteIsNewer: false, firstSync: false }, o));
+t('syncPlan: no base yet the old rules decide once; unchanged sends an edit or nothing', () => {
+  eq(planOf({ base: null, firstSync: true }), 'ask');
+  eq(planOf({ base: null, remoteIsNewer: true }), 'adopt');
+  eq(planOf({}), 'none');
+  eq(planOf({ dirty: true }), 'push');
+  eq(planOf({ remote: null }), 'push');
+});
+t('syncPlan: moved and clean takes it whatever the clocks say; moved and dirty asks', () => {
+  eq(planOf({ remote: { rev: 4, at: 10 } }), 'adopt', 'an OLDER stamp is still a newer copy');
+  eq(planOf({ remote: { rev: 3, at: 60 } }), 'adopt', 'a write by a page on the old code counts');
+  eq(planOf({ remote: { rev: 4, at: 60 }, remoteCount: 0 }), 'ask', 'empty never beats data');
+  eq(planOf({ remote: { rev: 4, at: 60 }, dirty: true }), 'ask');
+  eq(planOf({ remote: { rev: 4, at: 60 }, dirty: true, localCount: 0, remoteCount: 0 }), 'push');
+});
+t('every two-device scenario ran to the end', async () => eq((await simR()).errors, []));
+t('THE BUG: an offline edit is not queued, and reconnecting asks instead of writing over the other device', async () => {
+  const r = await simR();
+  eq(r.offlinePush, 'unavailable');
+  ok(r.offlineDirty, 'the edit stays unsent');
+  eq(r.beforeAnswer, ['a1', 'b-online'], 'the other device’s edit is in the cloud when this one comes back');
+  ok(r.reconnect.askedA, 'it asks');
+  eq([r.reconnect.cloud, r.reconnect.B, r.reconnect.Bask], [['a1', 'a-offline'], ['a1', 'a-offline'], false],
+     'keeping this copy puts it everywhere — the other device takes it rather than ignoring it');
+  eq(r.takeCloud, { A: ['a1', 'b-online'], cloud: ['a1', 'b-online'], revUnchanged: true, dirty: false },
+     'keeping the cloud copy takes it and writes nothing');
+});
+t('a fast clock no longer wins; an offline edit and a reload is asked about, or sent if nobody else wrote', async () => {
+  const r = await simR();
+  eq(r.skew, { A: ['a1', 'a2', 'b-later'], asked: false });
+  ok(r.reload.asked, 'asked at the next sign-in');
+  eq(r.reload.cloud, ['a1', 'a-offline']);
+  eq(r.reloadAlone, { asked: false, cloud: ['a1', 'a-offline'], dirty: false });
+});
+t('its own write is ignored, an old-code write is heard, and a copy mid-push waits', async () => {
+  const r = await simR();
+  ok(r.echo, 'own write');
+  eq(r.legacy, ['old-code']);
+  eq(r.midPush, { heldNull: true, asked: false, cloud: ['a1', 'a2'] });
+  eq(r.again, { cloud: ['a1', 'a2', 'a3'], dirty: false }, 'an edit made mid-push goes up too');
+});
+t('an emptied cloud asks live; a first sign-in with both full asks; one question at a time', async () => {
+  const r = await simR();
+  eq(r.emptied, { asked: true, cloud: ['a1'], A: ['a1'] });
+  eq(r.firstSync, { asked: true, B: ['a1'] });
+  eq(r.askOnce, 1);
+});
+t('the plan is pushed through a transaction behind a verdict gate, and catches up on reconnect', () => {
+  const mod = APP_SRC.slice(APP_SRC.indexOf('<script type="module">')).replace(/\/\*[\s\S]*?\*\//g, '');
+  ok(mod.includes('Fs.runTransaction(db,'), 'a transaction');
+  ok(mod.includes("addEventListener('online', catchUp)"), 'it catches up on reconnect');
+  ok(/window\.cloudPush = \(\) => \{\s*if \(!user\) return;\s*if \(!verdictIn\) \{ pushWanted = true; return; \}/.test(mod),
+     'no push leaves before the sign-in verdict');
+  ok(/verdictIn = false; pushWanted = false;/.test(mod.slice(mod.indexOf('A.onAuthStateChanged('))),
+     'and every auth report closes the gate again');
 });
 
 async function run() {

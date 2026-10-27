@@ -6130,6 +6130,24 @@ never silently beats one with data**; sync failures surface in the button and
 privacy note, with no retry button by design; `save()` is the one chokepoint
 that calls `cloudPush()`. `privacy.html` must be
 updated in the same commit as any change to what sync stores.
+**A version number decides which copy is newer, not a clock (2026-10-26)** —
+Golf Handicap's offline-overwrite fix, ported verbatim: `syncDecision` (new
+here — this module used to write its four branches inline, and the function is
+exactly them), `cloudTag`/`sameTag`/`syncPlan`/`makeCloudSync` in the classic
+script. Every push is a `runTransaction` that writes `{ json, updatedAt, rev }`
+only while the cloud is still this device's base (`fin-cloud-base`, `{uid, rev,
+at}`; dirty = `fin-updated` ≠ `fin-cloud-sent`), else the which-copy question.
+**There is no `setDoc` left in the module.** The engine's `uid` hook answers null
+on a halted page (`finViewOnly`), so neither a push nor a question can start
+there — `pushNow` keeps its own send-time check too, and the halt tests pin both.
+`adoptFrom` is gone: the engine's `adopt` hook keeps what `finAdopt` said and its
+`toast` hook joins it to the news, still one toast. This module had NO push gate
+before; it has the simplest one now (`verdictIn`/`pushWanted`, reset on every
+auth report). `catchUp()` sends an unsent edit on `online` / visible / a minute
+after a failed push (`pushFailed`), and re-runs a sign-in whose verdict never
+came. The suite runs Golf's `runSyncSim` verbatim. Golf's CLAUDE.md has the full
+note.
+
 **Two windows of one browser are ONE device to sync** (shared `fin-updated`, so
 only the first adopts a snapshot) — the second is kept current by the `storage`
 listener, and `finAdopt` must keep `storedRaw` true: see *Two Open Copies No
