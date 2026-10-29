@@ -6148,6 +6148,38 @@ after a failed push (`pushFailed`), and re-runs a sign-in whose verdict never
 came. The suite runs Golf's `runSyncSim` verbatim. Golf's CLAUDE.md has the full
 note.
 
+**Two changed copies are MERGED, not chosen between (2026-10-29).** Charlie
+kept finding typed figures gone. The version engine above was right that both
+copies had moved, but its only answer was "pick one whole copy" — and nearly
+every press saves (a tab, a fold, a price refresh), so both devices were
+"changed" far more often than either had real work the other lacked, and the
+edits were usually to DIFFERENT things. Now:
+- **`fin-cloud-base-copy`** (`{uid, rev, at, json}`) is the CONTENT of the
+  engine's base, recorded in the module's io hooks only — `adopt`, a
+  successful `transact` write, and a `read`/snapshot whose tag IS the base. The
+  engine (`makeCloudSync`, Golf's verbatim) is untouched. `baseCopy()` returns
+  it only while its tag equals `fin-cloud-base`; anything else is no base.
+  Delete-all removes it (it is a whole second copy of the figures).
+- **`settleTwoCopies`** is the engine's `ask` hook. With a base and data on
+  both sides, `mergePlans(base, local, remote)` (classic script, pure, pinned):
+  a change on one side only is kept; lists merge BY ID (order follows the side
+  that reordered; a delete lands unless the other side edited the item — then
+  it is a conflict); `ui` is this device's; `quotes`/`closes`/`exported` merge
+  key by key, newest `ts`, never a conflict. No conflicts → the merged plan is
+  adopted here and the engine's `keep()` pushes it (toast "Combined changes
+  from both devices"; silent when only layout/caches differed). Conflicts →
+  the dialog lists ONLY them (`describeChanges`: cut to one cell / balance /
+  row / goal, named from either copy, a figure only for money cells), and the
+  choice resolves those alone. No base (first sync, or a device not synced
+  since this shipped) → the old whole-copy choice, now listing `diffPlans`
+  and both save times. **An empty copy never merges** (empty-never-wins
+  outranks this), and a NEWER-build copy is never merged (`mergePlans` → null)
+  so `finAdopt`'s halt sees it untouched.
+- Every plan goes through `syncNormal` (= `planFrom(migrate(coerceShape()))`)
+  before comparing, so a default filled in on one side is never a change.
+- The dialog's device time is `fin-updated`, which a tab press also moves —
+  it says "last saved", never "last edited", for that reason.
+
 **Two windows of one browser are ONE device to sync** (shared `fin-updated`, so
 only the first adopts a snapshot) — the second is kept current by the `storage`
 listener, and `finAdopt` must keep `storedRaw` true: see *Two Open Copies No

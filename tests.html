@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1257;
+const EXPECTED = 1264;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -22373,8 +22373,12 @@ t('a synced change closes only the windows filled from the plan — Find is re-r
     /* One road for every adoption, so the sentence cannot be toasted over. */
     const mod = APP_SRC.slice(APP_SRC.indexOf('<script type="module">'));
     eq((mod.match(/window\.finAdopt\(/g) || []).length, 1, 'the sync module calls finAdopt in ONE place');
-    ok(/adopt: \(d\) => \{ adoptSaid = window\.finAdopt\(remotePayload\(d\), d\.updatedAt\); \}/.test(mod),
-       'that place is the sync engine’s adopt hook, which keeps what finAdopt said');
+    /* Since 2026-10-29 that place is adoptInto(), shared by the engine's adopt
+       hook and the two-copies merge — still one road, still keeping what it said. */
+    ok(/function adoptInto\(plan, ts\) \{ adoptSaid = window\.finAdopt\(plan, ts\) \|\| ''; \}/.test(mod),
+       'that place keeps what finAdopt said');
+    ok(/adopt: \(d\) => \{ adoptInto\(remotePayload\(d\), d\.updatedAt\);/.test(mod),
+       'and the sync engine’s adopt hook goes through it');
     ok(/window\.toast\(typeof said === 'string' && said \? `\$\{news\} \$\{said\}` : news\);/.test(mod),
        'and the engine’s toast hook joins it onto the sync toast — one toast');
   } finally {
@@ -23755,6 +23759,90 @@ t('the plan is pushed through a transaction behind a verdict gate, and catches u
      'no push leaves before the sign-in verdict');
   ok(/verdictIn = false; pushWanted = false;/.test(mod.slice(mod.indexOf('A.onAuthStateChanged('))),
      'and every auth report closes the gate again');
+});
+
+group('Keeping both devices’ changes (2026-10-29)');
+/* Two changed copies used to be a whole-copy choice, and nearly every press
+   counts as a change — so one device's real work was routinely thrown away.
+   Now each device keeps the copy it last synced and the two are compared item
+   by item against it; only a thing BOTH changed is asked about. Synthetic
+   edits on the sample plan, never real figures. */
+const MW = () => document.getElementById('app').contentWindow;
+const mSample = () => JSON.parse(JSON.stringify(MW().sampleState()));
+const mCells = (p) => Object.keys(p.years['2026'].cells);
+t('separate edits on each device are both kept, with no question', () => {
+  const W = MW(), base = mSample(), L = mSample(), R = mSample(), ck = mCells(base);
+  L.years['2026'].cells[ck[0]].v = 111;
+  R.years['2026'].cells[ck[1]].v = 222;
+  R.goals.push({ id: 'boat', name: 'Boat', target: 5000, accounts: [], count: 'capped' });
+  L.goals[1].name = 'Renamed here';
+  const m = W.mergePlans(base, L, R, 'local');
+  eq(m.conflicts.length, 0);
+  eq([m.merged.years['2026'].cells[ck[0]].v, m.merged.years['2026'].cells[ck[1]].v], [111, 222]);
+  ok(m.merged.goals.some((g) => g.id === 'boat'), 'the goal added on the other device arrives');
+  ok(m.merged.goals.some((g) => g.name === 'Renamed here'), 'and this device’s rename stays');
+});
+t('a thing both changed is ONE conflict, named with both figures, and the choice decides only it', () => {
+  const W = MW(), base = mSample(), L = mSample(), R = mSample(), ck = mCells(base);
+  L.years['2026'].cells[ck[2]].v = 1;
+  R.years['2026'].cells[ck[2]].v = 2;
+  R.years['2026'].cells[ck[3]].v = 33;
+  const m = W.mergePlans(base, L, R, 'local'), g = W.mergePlans(base, L, R, 'remote');
+  eq(m.conflicts.length, 1);
+  eq([m.merged.years['2026'].cells[ck[2]].v, g.merged.years['2026'].cells[ck[2]].v], [1, 2]);
+  eq(m.merged.years['2026'].cells[ck[3]].v, 33, 'the other device’s unclashing edit is kept either way');
+  const d = W.describeChanges(m.conflicts, L, R);
+  eq(d.length, 1);
+  ok(/^2026 · .+ · Jan 2026$/.test(d[0].label), 'year, row name and month', d[0].label);
+  eq([d[0].local, d[0].remote], ['$1.00', '$2.00']);
+});
+t('lists match by id: a delete on one side lands; a delete against an edit is asked', () => {
+  const W = MW(), base = mSample(), L = mSample(), R = mSample();
+  const gone = L.goals.splice(1, 1)[0];
+  let m = W.mergePlans(base, L, R, 'local');
+  eq([m.conflicts.length, m.merged.goals.some((g) => g.id === gone.id)], [0, false]);
+  R.goals[1].name = 'Edited there';
+  m = W.mergePlans(base, L, R, 'local');
+  eq(m.conflicts.length, 1);
+  eq(W.describeChanges(m.conflicts, L, R)[0].local, 'not there');
+  ok(W.mergePlans(base, L, R, 'remote').merged.goals.some((g) => g.name === 'Edited there'));
+});
+t('layout and price caches are never a conflict and never listed', () => {
+  const W = MW(), base = mSample(), L = mSample(), R = mSample();
+  L.ui.tab = 'budget'; R.ui.tab = 'goals';
+  L.quotes = { VOO: { price: 1, ts: 10 } }; R.quotes = { VOO: { price: 2, ts: 20 }, VTI: { price: 3, ts: 5 } };
+  const m = W.mergePlans(base, L, R, 'local');
+  eq(m.conflicts.length, 0);
+  eq(m.merged.ui.tab, 'budget', 'this device keeps its own layout');
+  eq(m.merged.quotes, { VOO: { price: 2, ts: 20 }, VTI: { price: 3, ts: 5 } }, 'newest quote wins, key by key');
+  eq(W.diffPlans(L, R), []);
+});
+t('a copy from a NEWER build is never merged', () => {
+  const W = MW(), R = mSample();
+  R.schema = W.__finTestHooks.SCHEMA + 1;
+  eq(W.mergePlans(mSample(), mSample(), R, 'local'), null);
+});
+t('with no base the whole copies are diffed, and the window shows both times and the list', async () => {
+  const W = MW(), L = mSample(), R = mSample(), ck = mCells(L);
+  L.years['2026'].cells[ck[0]].v = 5;
+  const items = W.describeChanges(W.diffPlans(L, R), L, R);
+  eq(items.length, 1);
+  const p = W.__finSyncHooks.chooseSyncSource(L, R, 2000, { items, localAt: 1000 });
+  const doc = W.document;
+  const times = doc.getElementById('syncChoiceTimes').textContent;
+  ok(/This device/.test(times) && /Google/.test(times), 'both copies dated', times);
+  ok(/the newer save/.test(times.split('Google')[1]), 'Google’s is marked newer', times);
+  eq(doc.querySelectorAll('#syncChoiceList li').length, 1);
+  ok(doc.getElementById('syncChoiceList').textContent.includes('this device: $5.00'));
+  doc.getElementById('syncKeepDeviceBtn').click();
+  eq(await p, false, 'Keep This Device answers false');
+});
+t('the sync module merges only from a base copy that IS the engine’s base, and never merges an empty copy', () => {
+  const mod = APP_SRC.slice(APP_SRC.indexOf('<script type="module">'));
+  ok(/c\.rev !== b\.rev \|\| c\.at !== b\.at/.test(mod), 'the base copy is checked against the engine tag');
+  ok(mod.includes('const full = window.finHasData(local) && window.finHasData(remote);'), 'empty never merges');
+  ok(/\}\)\.then\(\(out\) => \{ if \(out\.write\) rememberBase\(out\.write\);/.test(mod), 'a written copy becomes the base copy');
+  ok(mod.includes('ask: (localN, remoteN, at, d) => settleTwoCopies(d, at),'), 'the engine asks through the merge');
 });
 
 async function run() {

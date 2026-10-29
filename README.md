@@ -2482,8 +2482,21 @@ After that, an update pushed from another device arrives live — and **an edit
 made offline never overwrites a newer copy from another device** (2026-10-26).
 Every save carries a version number that goes up by one, and each device
 remembers the version it last saw. A save is sent only if the cloud is still
-that version; if another device saved in between, you are asked which copy to
-keep rather than one quietly replacing the other. An offline edit waits on this
+that version; if another device saved in between, the two are **combined**
+(2026-10-29) rather than one replacing the other.
+
+**When both devices changed the plan, both sets of changes are kept.** Each
+device remembers the copy it last synced, so it can tell what each side
+actually changed since then: a figure typed on the phone and a different one
+typed on the laptop both survive, a goal added on one and a row renamed on the
+other both arrive. You are only asked about something **both** devices changed
+to different values — the window names each one (for example "2026 · Parking ·
+Oct 2026 — this device: $122.00; Google: $120.00") and your choice settles just
+those; everything else is kept either way. Which tab you are on and the price
+cache never count as a change. When a device has no remembered copy to compare
+against (the first sign-in on it, or the first sync after this update), the
+window falls back to choosing a whole copy, but it now shows when each copy was
+last saved, marks the newer one, and lists what is different. An offline edit waits on this
 device — it is not handed to Firebase to replay later — and is sent through the
 same check when the connection comes back (on reconnect, when the page comes
 back into view, or a minute later). Device clocks no longer decide which copy is
