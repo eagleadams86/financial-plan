@@ -24969,6 +24969,9 @@ function openRowEditor(section, ds, isNew) {
      and after `link` has primed the derived boxes, so it is what the reader is
      actually looking at. */
   rowCtx.opened = JSON.stringify(readFields(spec));
+  /* What the window OPENED with, never moved by a commit — `finish` compares
+     against it to tell what the whole window changed. */
+  rowCtx.initial = rowCtx.opened;
   openModal(rowDialog);
   /* Only now is the grid laid out and its columns measurable — see the guard
      in applyFieldSpans. */
@@ -25095,7 +25098,7 @@ F('rowFields').addEventListener('change', (e) => {
 function finishRow(ctx) {
   const fin = EDITORS[ctx.section] && EDITORS[ctx.section].finish;
   if (!fin || !ctx.ds) return '';
-  const said = fin(ctx.ds);
+  const said = fin(ctx.ds, ctx.initial ? JSON.parse(ctx.initial) : {});
   if (!said) return '';
   const wasUndoing = undoing;
   if (ctx.banked) undoing = true;
@@ -25308,6 +25311,36 @@ function yearsDroppingRow(st, years, id, stop) {
     if (yearMonths(yr).some(mm => mm <= stop)) return false;
     return !Object.keys(yr.cells || {}).some(k => k.startsWith(id + '|'));
   });
+}
+/* THE OTHER DIRECTION: which years ahead a row returns to when its stop month
+   is cleared or moved LATER. Pure, beside its twin. `was` is the stop the
+   window opened with and `now` the one it closed with ('' = in use again).
+   Nothing comes back unless the stop really moved later — so a row missing
+   from a year for some other reason is never resurrected by an unrelated edit
+   — and only into a grid year that lacks the row and still holds a month at or
+   before the new stop. */
+function yearsRestoringRow(st, years, id, was, now) {
+  const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+  if (!id || !MONTH.test(was || '')) return [];
+  if (now && !(MONTH.test(now) && now > was)) return [];
+  return (years || []).filter(y => {
+    const yr = st.years[y];
+    if (!yr || yr.kind !== 'grid') return false;
+    if (yr.categories.some(c => c.id === id)) return false;
+    return !now || yearMonths(yr).some(mm => mm <= now);
+  });
+}
+/* Put a copy of `cat` back into `yr` where it sat in `src`: after the nearest
+   row above it that this year also has, else at the top. A fresh object per
+   year, for `applyToRow`'s reason. */
+function restoreRow(yr, src, cat) {
+  const copy = JSON.parse(JSON.stringify(cat));
+  const i = src.categories.findIndex(c => c.id === cat.id);
+  for (let j = i - 1; j >= 0; j--) {
+    const at = yr.categories.findIndex(c => c.id === src.categories[j].id);
+    if (at >= 0) { yr.categories.splice(at + 1, 0, copy); return; }
+  }
+  yr.categories.unshift(copy);
 }
 function dropRow(yrs, id) {
   for (const yr of yrs) {
@@ -25989,11 +26022,26 @@ const EDITORS = {
        it back, because the row was gone. The `until` a wrong month leaves in
        THIS year is harmless (the next commit overwrites it); a deleted row is
        not, so the delete waits for the last word. */
-    finish(ds) {
+    finish(ds, was) {
       const yr = state.years[ds.year];
       const cat = yr && ds.id && yr.categories.find(c => c.id === ds.id);
-      if (!cat || !cat.until) return;
-      const dropped = yearsDroppingRow(state, projectionsAfter(ds.year), ds.id, cat.until);
+      if (!cat) return;
+      const ahead = projectionsAfter(ds.year);
+      /* AND IT COMES BACK when the stop is cleared or moved later (2026-10-30,
+         Charlie: "removing that date should add it back to future projected
+         years"). Only when THIS window moved the stop — a row missing from a
+         year ahead for any other reason (deleted from that year alone) is left
+         alone. It returns with no figures: the ones it had went with it, and
+         its rule estimates the months from the year before, the way a year
+         built today would. */
+      const back = yearsRestoringRow(state, ahead, ds.id, (was || {}).until, cat.until || '');
+      for (const y of back) restoreRow(state.years[y], yr, cat);
+      if (back.length)
+        return cat.until
+          ? `Now stops after ${monthLabelFull(cat.until)}, and added back to ${andList(back)}`
+          : `In use again, and added back to ${andList(back)}`;
+      if (!cat.until) return;
+      const dropped = yearsDroppingRow(state, ahead, ds.id, cat.until);
       for (const y of dropped) dropRow([state.years[y]], ds.id);
       /* Said out loud, because the year you can see isn't the only one that
          changed — a row vanishing from a year you weren't looking at is
@@ -34218,7 +34266,7 @@ window.__finTestHooks = { SCHEMA, EARNED_ROW_ID, round2, roundTo, roundToDollar,
      skip is pinned through the state it leaves behind. */
   DUE_PAY, DUE_LEAD_DEFAULT, daysInMonth, dayNumber, daysBetween,
   dueMonthsOf, dueOn, dueStatus, leadDaysOf, monthDues, outstandingDues,
-  rowHideable, monthUntouched, scheduledIn, paysIn, rowEnded, yearsDroppingRow, partialMonth, ordinal, dueFootWords, duePillWords, dueScheduleWords,
+  rowHideable, monthUntouched, scheduledIn, paysIn, rowEnded, yearsDroppingRow, yearsRestoringRow, restoreRow, partialMonth, ordinal, dueFootWords, duePillWords, dueScheduleWords,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its
      prose over a fixture). */

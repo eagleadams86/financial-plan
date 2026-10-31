@@ -5286,6 +5286,15 @@ copied into next year for him to delete by hand.
   unreadable text, and the delete waits for the last word so a wrong calendar
   click can't cost a row either. **Verify close-dependent paths with Playwright**
   — the Browser pane never fires the dialog's `close`.
+- **And the row comes BACK when the stop is cleared or moved later** (same day,
+  Charlie: "removing that date should add it back to future projected years").
+  `yearsRestoringRow(st, years, id, was, now)` is the pure twin of
+  `yearsDroppingRow`; `was` is `rowCtx.initial` — the window's OPENING values,
+  which no commit moves — so only a stop THIS window moved later restores
+  anything, and a row missing from a year for another reason (deleted from that
+  year alone) is never resurrected by an unrelated edit. `restoreRow` puts a
+  fresh copy after the nearest row above it that the year has. No cells come
+  back; the rule estimates from the prior year.
 - **`yearsDroppingRow` is the OTHER half of "it doesn't carry over"** — the
   years already built ahead, which `rolloverYear` can never reach. Pure and
   exported so its two guards can be pinned, and both guards are about not

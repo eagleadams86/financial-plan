@@ -484,6 +484,13 @@ close the window, so the months a date box passes through while you type a year
 calendar can't remove it on the way. A year that still has a leading zero when
 the window closes is refused and the box goes back to what it was.
 
+**Clearing the date, or moving it later, puts the row back** into the years
+you've built ahead that it had been taken out of — in the same place in the
+list, estimating from the year before like a freshly built year would. Its old
+figures in those years don't come back (they went when the row did). A row
+that's missing from a later year for any other reason — say you deleted it from
+that year alone — is left alone.
+
 **A figure you type into a later month still stands.** A charge that turned up
 after you thought you were done is a fact, and it keeps the row on that month's
 page. Nothing in the year you were using it moves, either: the row and every
