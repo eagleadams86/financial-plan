@@ -4633,6 +4633,29 @@ lifted OUT of a `.cards2` pair leaves its partner half-width with nothing
 beside it. All four moves above are between full-width cards, which is why
 none of them needed a layout change.
 
+## Content wells (2026-10-31) — theme pack rule 21
+
+**Every table on a page card is a `--surface-alt` box, the tiles' fill.** One
+rule under the table defaults: `#views :is(.tablewrap, .gridwrap)` gets a
+`--border` edge, `--radius-sm` and `--surface-alt`; inside a `.tablewrap` the
+`thead th` band and `tbody tr:hover` are `--surface`. That one selector covers
+every table on all nine tabs (each is rendered in a `.tablewrap`; the sample
+draws at least one on every tab, and none bare). Never `--bg` or a bare
+`--surface` — the pack's ladder runs the other way in Light/Sepia.
+**The budget grid's cells that paint themselves moved with it:** the two pinned
+columns (`th.lbl`/`td.lbl`, `rowtot`) are `--surface-alt` in the body and
+`--surface` in the month row, or they would stand as two stripes once the months
+scroll under them; the cell hover, the section bands (`tr.sechead`, incl. its
+pinned cells) and the dragged row (`tr.rowdrag`) went `--bg-card-alt` →
+`--surface`. Colours only — no scroll, zoom or pinning code changed.
+**Left as they were:** the current-month column (`td.now`, `--accent-bg`, a
+column of figures — pre-dates the rule, and its landmark job outranks it),
+the selected-block tint (`td.selrange`), the Compare window's table (a
+`<dialog>`, not a page card), and the Month lens's `.mrows` lists (a ruled
+list on the card, not a table; not asked for). Print sets no colour (pack rule
+13) and was not touched. Pinned by "content wells: every table on every tab…"
+in four themes, which also scrolls the grid sideways and reads both pinned cells.
+
 ## The tile rows (2026-08-23)
 
 **A `.goalgrid` fills ONE line when the line has room for every tile, and splits

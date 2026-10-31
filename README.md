@@ -2339,6 +2339,10 @@ unrecognised falls back to **Auto** — the default since 2026-08-22, which foll
 your own system rather than opening dark on a machine set to light — and the
 picker's own options are the only list of themes the app has.
 
+**Every table sits in its own box, the same shade as the summary tiles** —
+the budget grid and every table on every tab — so tiles and tables read as one
+surface in all four themes, with the heading row a step apart.
+
 **Colour is never the only thing saying what a figure is.** A projection is
 *italic*, a total spanning actual and projected months is dashed, a snapshot's
 estimate carries a dashed rail — the same conventions read the same way in all
