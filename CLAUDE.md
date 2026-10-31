@@ -4695,6 +4695,12 @@ plates are canvas, so they print as small `--surface-alt` chips on white paper. 
 the tile fill and edged, no canvas outside one, the avg chip's PIXELS equal the tile fill,
 the full-screen box keeps the well, and no `cssVar('--bg-card')` is left in the script.
 
+**Plates on paper:** the chart box prints white (its fill is a background), so while printing
+`chartWellFill()` returns the card colour (`--surface`) via the `printing` flag that
+`printForPaper()` sets — otherwise the avg chip and the retirement-name backings printed as grey
+chips on white. Light and Sepia now re-render for print too (still keeping their palette), since
+their plates move. Pinned in the chart-wells test.
+
 ## The tile rows (2026-08-23)
 
 **A `.goalgrid` fills ONE line when the line has room for every tile, and splits
