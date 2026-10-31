@@ -4671,6 +4671,30 @@ top (the rule that used to sit under the heading is the band's edge now). A flat
 summary year, the Month lens's own notes) has no heading and is just the box. The
 content-wells test reads both groups of the sample's notes in all four themes.
 
+**Charts are wells too (same day, pack rule 21's "charts are wells too").** The card keeps
+the chart's name and sub; the `.chartbox` the canvas sits in is the well — `--surface-alt`,
+`--border`, `--radius-sm`, padding `--sp-4 --sp-5` — via `#views .chartbox, #chartMaxi
+.chartbox`, so all fourteen charts (Budget's Left Over in both lenses; Goals' Net Worth,
+goal, end-of-year, flow, spending and mix; Vacations; Giving; Investments' Where It's Held
+and drift; Retirement's Roth ladder and Where the Pot Is Heading; Comp's Raises over Time)
+and the full-screen (⤢) view are covered by one rule. Household and Tax draw no chart.
+**`box-sizing: content-box` on purpose:** each box's height (an inline style on most) is the
+CHART's height, and Chart.js sizes to the parent's content box — so the padding and edge go
+outside and no chart got shorter (measured: every canvas kept its height; widths lose the
+26px of padding + edge). **What the charts paint on their own ground reads
+`chartWellFill()`** (= `cssVar('--surface-alt')`): the month-net bars' "avg" chip
+(`avgRule.ground`) and the retirement names' backing in `retirementMarkerLines` — both were
+`--bg-card` and would have been card-coloured patches on the well. **Not changed:**
+`tintOf()` still mixes bar tints toward `--surface` (that is the series' fill, not a plate;
+moving it would shift every ramp bar's colour), and the tooltip was already `--surface-alt`
+(its `--border-strong` edge separates it from the well). No doughnuts in this app, no chart
+inside a non-full-screen dialog. Print: the box's fill drops with every background (only
+`canvas` is `print-color-adjust: exact`), so the plot prints white — but the two painted
+plates are canvas, so they print as small `--surface-alt` chips on white paper. Pinned by
+"content wells: every chart on every tab…" in four themes: every `.chartbox` on every tab is
+the tile fill and edged, no canvas outside one, the avg chip's PIXELS equal the tile fill,
+the full-screen box keeps the well, and no `cssVar('--bg-card')` is left in the script.
+
 ## The tile rows (2026-08-23)
 
 **A `.goalgrid` fills ONE line when the line has room for every tile, and splits

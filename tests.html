@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1271;
+const EXPECTED = 1272;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14838,6 +14838,69 @@ t('content wells: every table on every tab, the Month lens’s lists and the yea
       const nh = groups.map((g) => g.querySelector(':scope > h3')).find(Boolean);
       ok(nh && bg(nh) !== tile && bg(nh) !== 'rgba(0, 0, 0, 0)', th + ': its month is a band that stands apart', nh && bg(nh));
     }
+  } finally { f.remove(); }
+});
+t('content wells: every chart on every tab, and the full-screen view, sits in the tiles’ fill — and so do the plates it paints, in all four themes', async () => {
+  /* Theme pack rule 21, "charts are wells too" (2026-10-31). Each chart's
+     `.chartbox` is the well; what the chart code PAINTS to sit on its own
+     ground — the average chip on the month-net bars, the retirement names'
+     backing — reads chartWellFill() and must land on the same colour, read
+     off the canvas's pixels, not off the source. Every chart in the sample
+     is counted, so a chart drawn outside a `.chartbox` (bare on its card) fails. */
+  const f = await tripFrame('chartwells');
+  try {
+    const W = f.contentWindow, D = W.document, el = D.documentElement;
+    W.save = () => {}; W.confirm = () => true; W.alert = () => {};
+    W.loadSample();
+    const bg = (e) => W.getComputedStyle(e).backgroundColor;
+    const rgbOf = (c) => { const p = D.createElement('i'); p.style.color = c; D.body.appendChild(p);
+      const v = W.getComputedStyle(p).color; p.remove(); return v; };
+    const TABS = ['budget', 'goals', 'vacations', 'giving', 'investments', 'retirement',
+      'household', 'comp', 'tax'];
+    for (const th of ['midnight', 'dark', 'light', 'sepia']) {
+      el.setAttribute('data-theme', th);
+      W.render();               // charts read their colours at construction
+      D.getElementById('tab-goals').click();
+      const tile = bg(D.querySelector('#views .goal'));
+      eq(rgbOf(W.chartWellFill()), tile, th + ': the ground the chart code paints on is the tiles’ fill');
+      const seen = new Set();
+      for (const tab of TABS) {
+        D.getElementById('tab-' + tab).click();
+        const canvases = [...D.querySelectorAll('#views canvas')];
+        canvases.forEach((c) => seen.add(c.id));
+        eq(canvases.filter((c) => !c.parentElement.matches('.chartbox')).map((c) => c.id), [],
+           `${th}/${tab}: no chart sits bare on its card`);
+        const off = [...D.querySelectorAll('#views .chartbox')].filter((b) => bg(b) !== tile
+          || W.getComputedStyle(b).borderTopStyle !== 'solid');
+        eq(off.length, 0, `${th}/${tab}: every chart box is an edged well of the tiles’ fill (${tile})`,
+           off.map((b) => bg(b)).join(' / '));
+      }
+      ok(seen.size >= 13, th + ': the sample draws a chart on every charting tab', [...seen].join(','));
+      /* The average chip, read off the bitmap: 3px in from its right end and
+         3px above the rule, inside the chip and clear of its text and edge. */
+      D.getElementById('tab-budget').click();
+      const ch = W.Chart.getChart(D.getElementById('monthNetChart'));
+      ok(!!ch, th + ': the month-net chart is built');
+      const o = ch.options.plugins.avgRule;
+      ok(o && o.value !== null && o.value !== undefined, th + ': the sample draws an average to chip');
+      const py = ch.scales.y.getPixelForValue(o.value), a = ch.chartArea;
+      ok(py > a.top + 12 && py < a.bottom - 12, th + ': the average sits inside the plot', py);
+      const r = ch.canvas.width / ch.canvas.clientWidth;
+      const px = ch.canvas.getContext('2d').getImageData(Math.round((a.right - 3) * r),
+        Math.round((py - 3) * r), 1, 1).data;
+      eq(`rgb(${px[0]}, ${px[1]}, ${px[2]})`, tile, th + ': the average chip is painted in the well’s fill');
+      /* The full-screen view is the same box moved into #chartMaxi: it keeps it. */
+      D.querySelector('#views .card .chart-max').click();
+      const mx = D.querySelector('#chartMaxi .chartbox');
+      ok(!!mx, th + ': a chart opened full screen');
+      eq(bg(mx), tile, th + ': the full-screen chart keeps its well');
+      W.closeMaxi();
+      ok(!D.querySelector('#chartMaxi .chartbox'), th + ': and closed again');
+    }
+    /* No plate left on the card's colour: --bg-card was the token both plates
+       read before the rule, and is the habit this guards against. */
+    const src = [...D.querySelectorAll('script:not([src])')].map((x) => x.textContent).join('\n');
+    eq((src.match(/cssVar\('--bg-card'\)/g) || []).length, 0, 'no chart paints with the card’s colour');
   } finally { f.remove(); }
 });
 t('a split of one is drawn only when it says something its line does not', async () => {

@@ -2339,9 +2339,10 @@ unrecognised falls back to **Auto** — the default since 2026-08-22, which foll
 your own system rather than opening dark on a machine set to light — and the
 picker's own options are the only list of themes the app has.
 
-**Every table sits in its own box, the same shade as the summary tiles** —
-the budget grid, every table on every tab and the Month page's lists — so tiles and tables read as one
-surface in all four themes, with the heading row a step apart.
+**Every table and every chart sits in its own box, the same shade as the summary tiles** —
+the budget grid, every table on every tab, the Month page's lists and the plot area of every
+chart (full screen too) — so tiles, tables and charts read as one surface in all four themes,
+with the heading row a step apart. On paper the boxes print white.
 
 **Colour is never the only thing saying what a figure is.** A projection is
 *italic*, a total spanning actual and projected months is dashed, a snapshot's
