@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1264;
+const EXPECTED = 1266;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1843,6 +1843,16 @@ t('no stop month drops nothing at all', () => {
   eq(H.yearsDroppingRow(s, ['2031', '2032'], 'internet', ''), []);
   eq(H.yearsDroppingRow(s, ['2031', '2032'], 'internet', 'whenever'), []);
   eq(H.yearsDroppingRow(s, ['2031', '2032'], 'nosuchrow', '2030-04'), []);
+});
+/* ── A MONTH BOX HALF WAY THROUGH ITS YEAR (2026-10-30) ──────────────────
+   Chrome fills a month input's year a digit at a time and fires `change` on
+   each step: 0002-12, 0020-12, 0202-12, 2029-12 — measured with real
+   keystrokes. The row editor saves as you go, and stopping a car loan "Dec
+   2029" deleted it from every year ahead on the 0002 keystroke. */
+t('a year with a leading zero is still being typed', () => {
+  ok(H.partialMonth('0002-12') && H.partialMonth('0020-12') && H.partialMonth('0202-12'));
+  ok(!H.partialMonth('2029-12'), 'a whole year is a month somebody meant');
+  ok(!H.partialMonth('') && !H.partialMonth('1999-01'));
 });
 t('a rule change lands ahead, and skips a year that dropped the row', () => {
   const yrs = [
@@ -11803,6 +11813,18 @@ t('sw.js and its kill switch are both present', async () => {
   SW_SRC = await a.text(); KILL_SRC = await b.text(); APP_SRC = await c.text();
 });
 
+t('the row editor skips a half-typed month, and drops rows only as the window ends', () => {
+  ok(/e\.target\.type === 'month' && partialMonth\(e\.target\.value\)\) return;/.test(APP_SRC),
+    'the auto-save must not commit 0002-12 on the way to 2029-12');
+  const save = APP_SRC.slice(APP_SRC.indexOf('if (/^\\d{4}-(0[1-9]|1[0-2])$/.test(v.until'),
+    APP_SRC.indexOf('    finish(ds) {'));
+  ok(save.length > 0 && !/dropRow\(/.test(save),
+    'the per-box save must never delete the row from a year ahead');
+  ok(/if \(speak\) \{\s*\n\s*const fin = finishRow\(ctx\);/.test(APP_SRC),
+    'the window\u2019s last commit runs the drop');
+  ok(/if \(ctx\.committed\) \{\s*\n\s*const fin = finishRow\(ctx\);/.test(APP_SRC),
+    'and so does a close with nothing left under the cursor');
+});
 t('a dialog focused as a container does not ring itself', () => {
   /* openModal focuses the dialog on a coarse pointer so opening a form does not drag
      the on-screen keyboard up with it. That also makes the dialog match :focus-visible,

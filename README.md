@@ -476,6 +476,14 @@ the month after:
   you have already built ahead — unless that year holds the month it stopped in,
   or holds a figure you typed there, in which case it stays.
 
+**A stop month in the future is fine** — a loan you expect to pay off in
+December 2029 keeps estimating every month up to then, in this year and in every
+year you've built ahead. Taking the row out of the years ahead waits until you
+close the window, so the months a date box passes through while you type a year
+(Chrome reads 2029 as 0002, then 0020, then 0202) or pick the wrong one on the
+calendar can't remove it on the way. A year that still has a leading zero when
+the window closes is refused and the box goes back to what it was.
+
 **A figure you type into a later month still stands.** A charge that turned up
 after you thought you were done is a fact, and it keeps the row on that month's
 page. Nothing in the year you were using it moves, either: the row and every

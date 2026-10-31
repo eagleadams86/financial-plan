@@ -24856,12 +24856,23 @@ function readFields(fields) {
    the six minus signs), so it is the one this exists for. */
 function unreadableFields(fields) {
   return fields.filter((f) => f && !f.sec
-    && ['money', 'number', 'percent'].includes(f.type)).filter((f) => {
+    && ['money', 'number', 'percent', 'month'].includes(f.type)).filter((f) => {
     const el = F(`rf-${f.key}`);
     const raw = el ? el.value.trim() : '';
     if (raw === '') return false;
+    if (f.type === 'month') return partialMonth(raw);
     return f.type === 'money' ? parseMoney(raw) === null : Number.isNaN(parseFloat(raw));
   });
+}
+
+/* A MONTH BOX HALF WAY THROUGH ITS YEAR (2026-10-30). Chrome's month input
+   fills the year segment a digit at a time and reports each step as a whole
+   value — typing 2029 reads 0002-12, 0020-12, 0202-12 and only then 2029-12 —
+   and fires `change` on every one. A year with a leading zero is never a year
+   anybody means in a budget, so it is read as "still typing": the auto-save
+   skips it, and a window that closes on one refuses it like unreadable text. */
+function partialMonth(raw) {
+  return /^0\d{3}-\d{2}$/.test(raw || '');
 }
 
 function openRowEditor(section, ds, isNew) {
@@ -25025,7 +25036,10 @@ function commitRow(ctx, speak) {
       setFieldValue(f, el, was);
       return `“${raw.length > 40 ? raw.slice(0, 40) + '…' : raw}” in ${f.label}`;
     });
-    refused = `${andList(named)} ${bad.length > 1 ? 'aren’t numbers' : 'isn’t a number'}`
+    const months = bad.every(f => f.type === 'month');
+    refused = `${andList(named)} ${bad.length > 1
+      ? (months ? 'aren’t whole months' : 'aren’t numbers')
+      : (months ? 'isn’t a whole month' : 'isn’t a number')}`
       + ` — left ${bad.length > 1 ? 'them as they were' : 'it as it was'}`;
   }
   /* What is now written down, so a close that follows with nothing further
@@ -25049,6 +25063,10 @@ function commitRow(ctx, speak) {
   if (state !== planWas) return;
   if (banked) ctx.banked = true;
   render();
+  if (speak) {
+    const fin = finishRow(ctx);
+    if (fin) said = typeof said === 'string' ? `${said}. ${fin}` : fin;
+  }
   /* A section that did something the reader can't see on the page in front of
      them — or refused to do what it was asked — says so by returning the
      sentence to show; saving is otherwise silent, because the change is right
@@ -25064,9 +25082,29 @@ function commitRow(ctx, speak) {
    the way to 1,800, re-rendering the whole plan each time. Delegated on the
    host, because #rowFields is emptied and rebuilt on every open and listeners
    wired to the boxes themselves would be a fresh stack per window. */
-F('rowFields').addEventListener('change', () => {
+F('rowFields').addEventListener('change', (e) => {
+  if (e.target && e.target.type === 'month' && partialMonth(e.target.value)) return;
   if (rowCtx && rowCtx.auto && rowMoved(rowCtx)) commitRow(rowCtx, false);
 });
+
+/* THE WINDOW'S LAST WORD ON THE PLAN BEYOND IT: a section's `finish`, run once
+   as the window ends and never per box (see the category editor's, which is
+   the reason this exists). Its own save borrows the window's undo latch, so
+   it is part of the window's one undo step rather than a second. Returns the
+   sentence to show, or ''. */
+function finishRow(ctx) {
+  const fin = EDITORS[ctx.section] && EDITORS[ctx.section].finish;
+  if (!fin || !ctx.ds) return '';
+  const said = fin(ctx.ds);
+  if (!said) return '';
+  const wasUndoing = undoing;
+  if (ctx.banked) undoing = true;
+  const banked = save();
+  undoing = wasUndoing;
+  if (banked) ctx.banked = true;
+  render();
+  return said;
+}
 
 /* Adding still commits here, unchanged: it is the one mode where the close
    below writes nothing, so this must not depend on an event that may not
@@ -25115,7 +25153,14 @@ rowDialog.addEventListener('close', () => {
      render rebuilt the row the window was opened from, so the browser's own
      focus return has nothing to land on and drops to <body> (2026-09-17). The
      hand-back `commitRow(ctx, true)` does is owed here too. */
-  if (!rowMoved(ctx)) { if (ctx.committed) refocusEditRow(ctx); return; }
+  if (!rowMoved(ctx)) {
+    if (ctx.committed) {
+      const fin = finishRow(ctx);
+      if (fin) toast(fin);
+      refocusEditRow(ctx);
+    }
+    return;
+  }
   commitRow(ctx, true);
 });
 F('rowCancelBtn').onclick = () => rowDialog.close();
@@ -25930,21 +25975,33 @@ const EDITORS = {
            and it takes these settings rather than being duplicated. */
         applyToRow(yrs, id, apply, () => { const cat = { id }; apply(cat); return cat; });
       }
-      /* A STOPPED ROW LEAVES THE YEARS ALREADY BUILT AHEAD — see
-         `yearsDroppingRow`, which owns the two guards and is pure so they can
-         be pinned. */
-      const stop = /^\d{4}-(0[1-9]|1[0-2])$/.test(v.until || '') ? v.until : '';
-      const dropped = yearsDroppingRow(state, ahead, rowId, stop);
-      for (const y of dropped) dropRow([state.years[y]], rowId);
-      /* Said out loud, because the year you can see isn't the only one that
-         changed — and a row turning up in a year you weren't looking at is
-         exactly the kind of surprise a plan shouldn't spring on you. Losing
-         one is a bigger surprise still, so that sentence wins where both
-         apply. */
-      if (dropped.length)
-        return `Saved — stopped after ${monthLabelFull(stop)}, and taken out of ${
-          andList(dropped)}`;
+      /* Taking a stopped row out of the years built ahead is NOT done here —
+         see `finish` below. */
       if (ahead.length) return `Saved — ${andList(ahead)} updated to match`;
+    },
+    /* A STOPPED ROW LEAVES THE YEARS ALREADY BUILT AHEAD — see
+       `yearsDroppingRow`, which owns the two guards and is pure so they can be
+       pinned. Run once, when the window ENDS, and never from `save` above
+       (2026-10-30). The window saves as you go, and a month box passes through
+       months nobody meant on its way to the one they did: typing "2029" into
+       Chrome's year segment commits 0002, 0020 and 0202 first, and picking from
+       the calendar commits every wrong click. Dropping on each of those took
+       Charlie's planned car loan, stopping December 2029, out of every year
+       ahead on the very first keystroke — and nothing typed after could bring
+       it back, because the row was gone. The `until` a wrong month leaves in
+       THIS year is harmless (the next commit overwrites it); a deleted row is
+       not, so the delete waits for the last word. */
+    finish(ds) {
+      const yr = state.years[ds.year];
+      const cat = yr && ds.id && yr.categories.find(c => c.id === ds.id);
+      if (!cat || !cat.until) return;
+      const dropped = yearsDroppingRow(state, projectionsAfter(ds.year), ds.id, cat.until);
+      for (const y of dropped) dropRow([state.years[y]], ds.id);
+      /* Said out loud, because the year you can see isn't the only one that
+         changed — a row vanishing from a year you weren't looking at is
+         exactly the kind of surprise a plan shouldn't spring on you. */
+      if (dropped.length)
+        return `Stopped after ${monthLabelFull(cat.until)}, and taken out of ${andList(dropped)}`;
     },
     del(ds) {
       const ahead = projectionsAfter(ds.year);
@@ -34163,7 +34220,7 @@ window.__finTestHooks = { SCHEMA, EARNED_ROW_ID, round2, roundTo, roundToDollar,
      skip is pinned through the state it leaves behind. */
   DUE_PAY, DUE_LEAD_DEFAULT, daysInMonth, dayNumber, daysBetween,
   dueMonthsOf, dueOn, dueStatus, leadDaysOf, monthDues, outstandingDues,
-  rowHideable, monthUntouched, scheduledIn, paysIn, rowEnded, yearsDroppingRow, ordinal, dueFootWords, duePillWords, dueScheduleWords,
+  rowHideable, monthUntouched, scheduledIn, paysIn, rowEnded, yearsDroppingRow, partialMonth, ordinal, dueFootWords, duePillWords, dueScheduleWords,
   /* Overflow sweep rows: the ordering, the receiving-end reader, the share-time
      freeze, and ruleDesc (which takes a state precisely so tests can pin its
      prose over a fixture). */

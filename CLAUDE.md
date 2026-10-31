@@ -5274,6 +5274,18 @@ copied into next year for him to delete by hand.
 - **A TYPED FIGURE STILL WINS**, above the gate, the way it wins everywhere in
   this file. A charge that turned up after you stopped is a fact and it keeps
   the row on that month's page.
+- **The drop into the years ahead runs at the END of the window, never per box
+  (2026-10-30)** — `EDITORS.category.finish`, called through `finishRow` from
+  `commitRow(ctx, true)` and from the close handler's nothing-left branch.
+  Reported by Charlie planning a car loan: he typed "December 2029" and the row
+  vanished from every year ahead. Chrome fires `change` on each year digit
+  (0002-12, 0020-12, 0202-12, 2029-12 — measured with real keystrokes), the row
+  editor saves on `change`, and the 0002 commit deleted the row from 2027+; the
+  final 2029 could not bring a deleted row back. Two guards: `partialMonth(raw)`
+  (leading-zero year) is skipped by the auto-save and refused on close like
+  unreadable text, and the delete waits for the last word so a wrong calendar
+  click can't cost a row either. **Verify close-dependent paths with Playwright**
+  — the Browser pane never fires the dialog's `close`.
 - **`yearsDroppingRow` is the OTHER half of "it doesn't carry over"** — the
   years already built ahead, which `rolloverYear` can never reach. Pure and
   exported so its two guards can be pinned, and both guards are about not
