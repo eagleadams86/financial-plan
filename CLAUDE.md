@@ -4650,11 +4650,20 @@ pinned cells) and the dragged row (`tr.rowdrag`) went `--bg-card-alt` →
 `--surface`. Colours only — no scroll, zoom or pinning code changed.
 **Left as they were:** the current-month column (`td.now`, `--accent-bg`, a
 column of figures — pre-dates the rule, and its landmark job outranks it),
-the selected-block tint (`td.selrange`), the Compare window's table (a
-`<dialog>`, not a page card), and the Month lens's `.mrows` lists (a ruled
-list on the card, not a table; not asked for). Print sets no colour (pack rule
-13) and was not touched. Pinned by "content wells: every table on every tab…"
-in four themes, which also scrolls the grid sideways and reads both pinned cells.
+the selected-block tint (`td.selrange`), and the Compare window's table (a
+`<dialog>`, not a page card). Print sets no colour (pack rule 13) and was not
+touched.
+**The Month lens's lists are wells too** (`#views .mrows:has(> :not([hidden]))`
+— a list with every line hidden draws no empty box): same fill, edge and
+radius, lines padded `0 var(--sp-3)` inside the box (League Night's list
+padding), and the `.mrow` hover `--bg-card-alt` → `--surface`. The reveal line
+(`.revealrows`) hovers `--surface` only INSIDE a list — the Close pointer under
+the summary tiles is the same button sitting on the card, and keeps
+`--bg-card-alt` there. Known nit: the Close card's two-column list keeps a rule
+under every line, the last included (`.closecols`), so its box's bottom edge
+sits under a line rule. Pinned by "content wells: every table on every tab, and
+the Month lens's lists…" in four themes, which also scrolls the grid sideways,
+reads both pinned cells, and switches to the Month lens to read its lists.
 
 ## The tile rows (2026-08-23)
 
