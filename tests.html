@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1270;
+const EXPECTED = 1271;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -14743,6 +14743,36 @@ t('every noted row’s dot is really painted, and it is the grid’s own dot', a
    pair of themes (the pack's ladder runs the other way in Light and Sepia).
    Every tab must carry at least one well in the SAMPLE: a tab whose tables the
    demo never draws would pass by checking nothing. */
+t('the current-month column: every figure in it clears AA on its accent tint, in all four themes', async () => {
+  /* 2026-10-31: estimates there were --text-secondary, 4.32 on Dark's
+     --accent-bg. Measured from what is drawn, so a later palette move that
+     breaks it again fails here rather than in a reader's eyes. */
+  const f = await tripFrame('nowcol');
+  try {
+    const W = f.contentWindow, D = W.document, el = D.documentElement;
+    W.save = () => {}; W.confirm = () => true; W.alert = () => {};
+    W.loadSample();
+    D.getElementById('tab-budget').click();
+    const rgb = (x) => (x.match(/[\d.]+/g) || []).map(Number);
+    const L = (c) => { const v = c.slice(0, 3).map((x) => { x /= 255; return x <= .03928 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4; });
+      return .2126 * v[0] + .7152 * v[1] + .0722 * v[2]; };
+    const cr = (a, b) => { const x = L(a), y = L(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+    for (const th of ['midnight', 'dark', 'light', 'sepia']) {
+      el.setAttribute('data-theme', th);
+      const cells = [...D.querySelectorAll('.grid td.now')];
+      ok(cells.some((c) => c.classList.contains('c-auto')), th + ': the sample draws an estimate in the column');
+      let worst = 99, where = '';
+      cells.forEach((cell) => {
+        const bg = rgb(W.getComputedStyle(cell).backgroundColor);
+        const w = D.createTreeWalker(cell, W.NodeFilter.SHOW_TEXT);
+        let n; while ((n = w.nextNode())) { if (!n.textContent.trim()) continue;
+          const r = cr(rgb(W.getComputedStyle(n.parentElement).color), bg);
+          if (r < worst) { worst = r; where = cell.className; } }
+      });
+      ok(worst >= 4.5, th + ': lowest text contrast in the column is ' + worst.toFixed(2), where);
+    }
+  } finally { f.remove(); }
+});
 t('content wells: every table on every tab, and the Month lens’s lists, are the tiles’ fill, in all four themes', async () => {
   const f = await tripFrame('wells');
   try {
