@@ -4665,6 +4665,12 @@ sits under a line rule. Pinned by "content wells: every table on every tab, and
 the Month lens's lists…" in four themes, which also scrolls the grid sideways,
 reads both pinned cells, and switches to the Month lens to read its lists.
 
+**The year's notes (same day, Charles approved a mock-up):** each `.notegroup` is a well —
+`--surface-alt`, `--border`, `--radius-sm` — and its month `h3` a `--surface` band across the
+top (the rule that used to sit under the heading is the band's edge now). A flat group (a
+summary year, the Month lens's own notes) has no heading and is just the box. The
+content-wells test reads both groups of the sample's notes in all four themes.
+
 ## The tile rows (2026-08-23)
 
 **A `.goalgrid` fills ONE line when the line has room for every tile, and splits
