@@ -4335,6 +4335,85 @@ const bonusBase = (c) => round2((c && c.salary) || 0);
 const bonusShare = (bonus, base) =>
   (!base || bonus === null || bonus === undefined) ? null : bonus / base;
 
+/* THE BONUS A PAYCHECK ROW EXPECTS (2026-11-03). A bonus that arrives inside
+   an ordinary paycheck once a year had nowhere to live in a year built ahead:
+   the rule knew only per-check × paychecks, so every projected year was a year
+   without one, and every goal paced on that. The row says which month it rides
+   on (any month — whose bonus lands in February is a fact about one employer),
+   what share of salary it is, and how much of it survives withholding.
+
+   The salary is the Compensation tab's, measured the way Bonuses by Year
+   measures it: the year's OPENING salary (`bonusBase`). A year with no comp
+   record opens where the newest earlier one closed — the same carry-forward the
+   Comp editor offers for a new year — and flat from there; the plan holds no
+   guess at future raises, so this doesn't invent one. A bonus already RECORDED
+   for the year is what landed, and it replaces the percentage outright.
+   Returns the take-home figure, or 0 when any part of the question is missing:
+   no month, no share, no salary to take it of. */
+function bonusSalaryFor(st, y) {
+  const comp = (st && st.side && st.side.comp) || {};
+  if (comp[y] && comp[y].salary) return { salary: bonusBase(comp[y]), from: 'year' };
+  const earlier = Object.keys(comp).filter(k => k < y && comp[k] && comp[k].salary).sort();
+  const last = earlier[earlier.length - 1];
+  return last ? { salary: afterRaise(comp[last]), from: 'carried', year: last }
+    : { salary: 0, from: 'none' };
+}
+/* The Compensation tab is ONE person's salary, so a row tagged to somebody else
+   has no salary here to take a share of — `bonusOwnerMismatch` says so rather
+   than handing a second earner the first one's bonus. An untagged row (a
+   one-person plan) reads the tab as it stands. */
+function bonusOwnerMismatch(st, cat) {
+  if (!cat || !cat.person || !st || !st.settings || !Array.isArray(st.people)) return false;
+  return cat.person !== compPersonId(st);
+}
+function paycheckBonus(st, cat, m) {
+  if (!cat || !cat.bonusMonth || +m.slice(5, 7) !== cat.bonusMonth) return 0;
+  /* A share link with no salary in it carries the sender's figure instead
+     (`freezePaycheckBonuses`) — the threshold-freeze precedent. */
+  if (typeof cat.bonusTakeHome === 'number') return cat.bonusTakeHome;
+  if (typeof cat.bonusPct !== 'number' || typeof cat.bonusKeep !== 'number') return 0;
+  if (bonusOwnerMismatch(st, cat)) return 0;
+  const y = m.slice(0, 4);
+  const recorded = ((st && st.side && st.side.bonuses) || {})[y];
+  const gross = typeof recorded === 'number' ? recorded
+    : cat.bonusPct * bonusSalaryFor(st, y).salary;
+  return round2(gross * cat.bonusKeep) || 0;
+}
+/* Which year the editor's sentence is about: the year being edited, unless
+   its bonus month is already entered — then the next one, the first bonus the
+   rule will actually estimate. */
+function bonusPreviewYear(yearKey, month, st = state) {
+  const yr = st.years && st.years[yearKey];
+  const m = `${yearKey}-${String(month || 1).padStart(2, '0')}`;
+  return yr && yr.enteredThrough && yr.enteredThrough >= m ? String(+yearKey + 1) : String(yearKey);
+}
+/* What the row editor says under the bonus boxes: the figure the engine will
+   use and what it was worked out from, or why there is none. Pure over the
+   values on the FORM (`cat`), so it moves as you type and nothing is saved. */
+function bonusPreview(st, cat, year) {
+  if (!cat || !cat.bonusMonth) return '';
+  if (typeof cat.bonusPct !== 'number' || typeof cat.bonusKeep !== 'number')
+    return 'Fill in both percentages to see the estimate.';
+  if (bonusOwnerMismatch(st, cat)) {
+    const who = personById(st, compPersonId(st))?.name || 'someone else';
+    return `No bonus estimated — the Compensation tab is ${who}'s salary, not this row's earner's.`;
+  }
+  const m = `${year}-${String(cat.bonusMonth).padStart(2, '0')}`;
+  const when = monthLabelFull(m);
+  const recorded = ((st.side && st.side.bonuses) || {})[year];
+  const pct = `${round2(cat.bonusKeep * 100)}% kept`;
+  if (typeof recorded === 'number')
+    return `${fmtMoney(paycheckBonus(st, cat, m))} take-home in ${when} — the ${fmtMoney(recorded)}
+      bonus recorded for ${year} on the Compensation tab, ${pct}.`;
+  const sal = bonusSalaryFor(st, String(year));
+  if (!sal.salary)
+    return 'No bonus estimated yet — there is no salary on the Compensation tab to take a share of.';
+  const base = sal.from === 'year' ? `the salary ${year} opened on`
+    : `${sal.year}'s salary after its raise`;
+  return `About ${fmtMoney(paycheckBonus(st, cat, m))} take-home in ${when} —
+    ${round2(cat.bonusPct * 100)}% of ${fmtMoney(sal.salary)} (${base}), ${pct}.`;
+}
+
 /* Whether a year's salary picked up where the year before it left off.
 
    It is NOT a year-on-year comparison of what you earn — that is the raise
@@ -5996,6 +6075,26 @@ function coerceShape(data) {
          schema bump, no migration, the `dueMonths` precedent. */
       if (cat.rule === 'samemonth' && cat.keepCents === true) cat.keepCents = true;
       else delete cat.keepCents;
+      /* A paycheck row's yearly bonus (2026-11-03), read STRICTLY — a share
+         link carries rows, so each field is attacker-controlled, and num()
+         would mint a junk share into a real-looking 0%. Nothing survives
+         without a valid month on a paycheck row; a month may stand alone (the
+         editor saves as you go, so it is a question being answered), and each
+         share is kept only when it is in range. A month with both shares, or a
+         frozen take-home figure, is a bonus; anything less estimates nothing. */
+      {
+        const bm = cat.bonusMonth, bp = rateOrNone(cat.bonusPct), bk = rateOrNone(cat.bonusKeep);
+        const bt = rateOrNone(cat.bonusTakeHome);
+        if (cat.rule === 'paycheck' && Number.isInteger(bm) && bm >= 1 && bm <= 12) {
+          if (bp !== undefined && bp >= 0 && bp <= 1) cat.bonusPct = bp; else delete cat.bonusPct;
+          if (bk !== undefined && bk > 0 && bk <= 1) cat.bonusKeep = bk; else delete cat.bonusKeep;
+          /* The frozen form a salary-less share link carries. */
+          if (bt !== undefined && bt >= 0) cat.bonusTakeHome = round2(bt);
+          else delete cat.bonusTakeHome;
+        } else {
+          delete cat.bonusMonth; delete cat.bonusPct; delete cat.bonusKeep; delete cat.bonusTakeHome;
+        }
+      }
       if (cat.rule === 'overflow') {
         /* A sweep is a move between the reader's own accounts, whatever a
            hand-edited file says: the editor already forces Transfers, and
@@ -8415,7 +8514,7 @@ const RULES = {
 
   /* Paycheck: per-check amount × that month's paycheck count. */
   paycheck(cat, m, ctx) {
-    return (cat.perCheck || 0) * ctx.paychecks[m];
+    return (cat.perCheck || 0) * ctx.paychecks[m] + paycheckBonus(ctx.st, cat, m);
   },
 };
 
@@ -9969,6 +10068,11 @@ const HELP = {
     ['A row on the paycheck rule multiplies its per-check amount by that month\'s paycheck '
       + 'count from the Paychecks row at the foot of the grid. Set the per-check amount in '
       + 'the row\'s settings, and correct any month\'s count by clicking it.'],
+    [b('A yearly bonus can ride along'), ': pick the month it arrives in, what share of salary '
+      + 'it is, and how much of it reaches your account after withholding. The salary is the '
+      + 'Compensation tab\'s — the one the year opened on, or the latest one carried forward for '
+      + 'a year with no record yet — and a bonus already recorded for a year in Bonuses by Year '
+      + 'replaces the estimate for that year. The bonus is its own amount when you open the month.'],
     ['If you don\'t get paid this way, turn the whole thing off in Preferences.'],
   ] },
   rowTotal: { title: 'The Year-Total Column', body: [
@@ -10866,7 +10970,10 @@ function sampleState() {
          Progress count the household's whole pay and not just the row whose rule
          happens to be 'paycheck'. */
       { id: 'rosa-pay',   name: 'Rosa — paycheck',  rule: 'paycheck', role: 'normal', section: 'income',
-        person: 'rosa', perCheck: 2950, isPay: true },
+        person: 'rosa', perCheck: 2950, isPay: true,
+        /* A March bonus — any month but the author's, so the demo shows the
+           month is a choice — at about what her recorded bonuses come to. */
+        bonusMonth: 3, bonusPct: 0.065, bonusKeep: 0.6 },
       { id: 'ben-pay',    name: 'Ben — paycheck',   rule: 'carry',    role: 'normal', section: 'income',
         person: 'ben', isPay: true },
       { id: 'other-income', name: 'Other income',   rule: 'none',     role: 'normal', section: 'income' },
@@ -11956,7 +12063,7 @@ function gridCard(y, yr) {
        noise wearing a uniform. Only kind `auto`: an entered month owns real
        figures, and a manual one is a figure you typed, not the rule's. */
     if (!r.parts && r.kind === 'auto' && (cat.rule || 'none') === 'paycheck') {
-      const pp = paycheckParts(cat, c.paychecks[m], true);
+      const pp = paycheckParts(cat, c.paychecks[m], true, m);
       if (pp) tipCell = { ...r, parts: pp.map(p => ({ v: p.v })) };
     }
     return `<td class="${cls}" data-cat="${esc(cat.id)}" data-m="${m}"
@@ -12837,7 +12944,12 @@ const RULE_LABEL = {
 function ruleDesc(cat, st = state, goals = st === state ? liveGoals() : st.goals) {
   const r = cat.rule || 'none';
   if (r === 'paycheck')
-    return `${fmtMoney(cat.perCheck || 0)} per check × that month's paychecks`;
+    return `${fmtMoney(cat.perCheck || 0)} per check × that month's paychecks${
+      cat.bonusMonth && typeof cat.bonusTakeHome === 'number'
+        ? `, plus a ${fmtMoney(cat.bonusTakeHome)} bonus in ${MONTH_FULL[cat.bonusMonth - 1]}`
+      : cat.bonusMonth && typeof cat.bonusPct === 'number' && typeof cat.bonusKeep === 'number'
+        ? `, plus a bonus each ${MONTH_FULL[cat.bonusMonth - 1]}: ${round2(cat.bonusPct * 100)}% of salary, ${
+            round2(cat.bonusKeep * 100)}% kept` : ''}`;
   if (r === 'quarterly')
     return `repeats every ${Math.max(1, Math.round(cat.every || 3))} months`;
   if (r === 'grow')
@@ -25714,6 +25826,22 @@ const EDITORS = {
          question the reader has to decide to ignore. */
       { key: 'perCheck', label: 'Per-check amount', type: 'money',
         showIf: (v) => v.rule === 'paycheck' },
+      /* A bonus that rides inside one of the month's paychecks (2026-11-03).
+         The month is the reader's — nobody's employer pays in the same one —
+         and the two shares only show once a month is picked. */
+      { key: 'bonusMonth', label: 'Yearly bonus arrives in', type: 'select',
+        showIf: (v) => v.rule === 'paycheck',
+        options: [['', 'No bonus'], ...MONTH_FULL.map((n, i) => [String(i + 1), n])] },
+      { key: 'bonusPct', label: 'Bonus, % of salary', type: 'percent',
+        showIf: (v) => v.rule === 'paycheck' && !!v.bonusMonth,
+        hint: 'Before tax, of the salary on the Compensation tab. Not guaranteed? '
+            + 'Pick a figure you would usually beat.' },
+      { key: 'bonusKeep', label: 'Take-home share', type: 'percent',
+        showIf: (v) => v.rule === 'paycheck' && !!v.bonusMonth,
+        hint: 'How much of the bonus reaches your account after withholding — the '
+            + 'paycheck it came in, less an ordinary one, over the bonus.' },
+      { key: 'bonusPreview', label: 'Bonus estimate', type: 'readout', wide: true,
+        showIf: (v) => v.rule === 'paycheck' && !!v.bonusMonth },
       { key: 'every', label: 'Months between payments', type: 'number', step: 1,
         showIf: (v) => v.rule === 'quarterly',
         hint: 'Counted from the last month you typed a figure into — so a bill paid late '
@@ -25920,6 +26048,8 @@ const EDITORS = {
           || (typeof cat.capAmount === 'number' ? 'amt' : ''),
         isPay: isPayRow(cat.name, cat.rule, cat.isPay),
         keepCents: !!cat.keepCents,
+        bonusMonth: cat.bonusMonth ? String(cat.bonusMonth) : '',
+        bonusPreview: bonusPreview(state, cat, bonusPreviewYear(ds.year, cat.bonusMonth)),
         /* The tick is derived from the marker rather than stored beside it —
            two spellings of one fact is how they come to disagree. The picker
            opens with EVERY month ticked when the list is absent, because that
@@ -25930,6 +26060,22 @@ const EDITORS = {
         duePayAhead: cat.duePayAhead ? 'ahead' : '',
         until: cat.until || '',
         dueMonths: dueMonthsOf(cat).map(String) };
+    },
+    /* The bonus sentence follows the boxes as you type — the holdings
+       editor's readout pattern: reads the FORM, never commits anything. */
+    link(key, ds) {
+      const out = F('rf-bonusPreview');
+      if (!out) return;
+      const pct = (id) => {
+        const raw = F(id)?.value;
+        const n = raw === undefined || raw === '' ? NaN : parseFloat(raw);
+        return Number.isFinite(n) ? n / 100 : undefined;
+      };
+      const month = Math.round(+(F('rf-bonusMonth')?.value || 0));
+      const person = F('rf-person')?.value;
+      const form = { bonusMonth: month || undefined, bonusPct: pct('rf-bonusPct'),
+        bonusKeep: pct('rf-bonusKeep'), person: person || undefined };
+      out.textContent = bonusPreview(state, form, bonusPreviewYear(ds.year, month));
     },
     /* `blank` has always been CALLED with the dataset; it simply never read it.
        The month page's per-section Add button carries `data-sec`, so the editor
@@ -26010,6 +26156,23 @@ const EDITORS = {
         }
         if (v.rule === 'paycheck') cat.perCheck = v.perCheck || 0;
         else delete cat.perCheck;
+        /* The bonus is answered a box at a time, because this window SAVES AS
+           YOU GO: picking the month commits before either share is typed, so a
+           three-or-none rule here threw the month away and hid the very boxes
+           it had just revealed. The month alone is kept — the engine reads it
+           as no bonus until both shares are there — and a share is kept only
+           beside a month. Never `undefined` (the Firestore rule). */
+        const bMonth = Math.round(+v.bonusMonth);
+        if (v.rule === 'paycheck' && bMonth >= 1 && bMonth <= 12) {
+          cat.bonusMonth = bMonth;
+          if (typeof v.bonusPct === 'number' && v.bonusPct >= 0 && v.bonusPct <= 1)
+            cat.bonusPct = v.bonusPct;
+          else delete cat.bonusPct;
+          if (typeof v.bonusKeep === 'number' && v.bonusKeep > 0 && v.bonusKeep <= 1)
+            cat.bonusKeep = v.bonusKeep;
+          else delete cat.bonusKeep;
+        } else { delete cat.bonusMonth; delete cat.bonusPct; delete cat.bonusKeep; }
+        delete cat.bonusTakeHome;
         if (v.rule === 'quarterly' && v.every) cat.every = Math.max(1, Math.round(v.every));
         else delete cat.every;
         if (v.rule === 'dividends' && v.rate !== null && v.rate !== undefined)
@@ -29935,13 +30098,19 @@ function partsTotal() {
 
    A fractional count (the sheet has half-check months) puts the remainder in a
    part of its own, so what's on screen still adds up to the estimate. */
-function paycheckParts(cat, n, future) {
+function paycheckParts(cat, n, future, m, st = state) {
   if (!future || (cat.rule || 'none') !== 'paycheck' || !cat.perCheck) return null;
   const parts = [];
   for (let i = 0; i < Math.floor(n); i++)
     parts.push({ v: round2(cat.perCheck), kind: 'manual' });
   const rest = round2((n - Math.floor(n)) * cat.perCheck);
   if (rest) parts.push({ v: rest, kind: 'manual' });
+  /* The month's bonus is an amount of its own (2026-11-03), so the split still
+     adds up to the estimate the engine computed — and the bonus can be
+     corrected on its own when the real one lands. `m` is optional: the pinned
+     three-argument calls ask about the checks alone. */
+  const bonus = m ? paycheckBonus(st, cat, m) : 0;
+  if (bonus) parts.push({ v: bonus, kind: 'manual' });
   return parts.length ? parts : null;
 }
 
@@ -30406,7 +30575,7 @@ function openCellEditor(yearKey, type, id, m) {
     F('cellRowBtn').hidden = false;
     F('cellSplitBtn').hidden = false;
     setParts(stored?.parts
-      || paycheckParts(cat, C[yearKey]?.paychecks[m] ?? PAYCHECKS_DEFAULT, future), future);
+      || paycheckParts(cat, C[yearKey]?.paychecks[m] ?? PAYCHECKS_DEFAULT, future, m), future);
     revertBtn.hidden = !(stored && future && hasRule);
     clearBtn.hidden = !stored;
     /* The overflow warnings come first — a half-configured sweep, or one
@@ -30817,7 +30986,7 @@ F('cellSplitBtn').onclick = () => {
      the lot — but only while the total still IS the rule's estimate, so this
      can never quietly replace a figure that was typed over it. */
   const cat = yr.categories.find(c => c.id === id);
-  const checks = cat && paycheckParts(cat, C[yearKey]?.paychecks[m] ?? PAYCHECKS_DEFAULT, future);
+  const checks = cat && paycheckParts(cat, C[yearKey]?.paychecks[m] ?? PAYCHECKS_DEFAULT, future, m);
   const isRuleTotal = checks
     && round2(checks.reduce((s, p) => s + p.v, 0)) === round2(start);
   setParts(isRuleTotal ? checks : [{ v: start, kind }], future);
@@ -33163,8 +33332,9 @@ const SHARE_FORMAT = 1;
    missing whatever their build added. Unlike SCHEMA there is no stored copy at
    stake, so nothing is written and nothing halts — the family pattern from
    Sprint Velocity. */
-const SHARE_PAYLOAD_V = 4;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05);
-                             // 4: a summary year's isGrowth rows (2026-09-20)
+const SHARE_PAYLOAD_V = 5;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05);
+                             // 4: a summary year's isGrowth rows (2026-09-20);
+                             // 5: a paycheck row's yearly bonus (2026-11-03)
 
 const b64urlEncode = (bytes) => {
   let s = '';
@@ -33626,6 +33796,25 @@ function reseedShareYears(data) {
    recipient loses is the live tie they couldn't have had anyway. A link that
    DOES carry the goals resolves the id and nothing is frozen. Pure over the
    payload, like reseedShareYears — it never touches the real state. */
+/* A paycheck row's bonus is a share of the Compensation tab's salary, and a
+   link without `side.comp` would hand the recipient a bonus of nothing — a
+   different plan from the one shared. So each carried year's row freezes to
+   the take-home figure the sender's engine used for that year, and the share
+   and salary behind it stay home. Pure over the payload; `st` is the sender. */
+function freezePaycheckBonuses(data, st) {
+  if (data.side && data.side.comp) return data;
+  for (const [yearKey, yr] of Object.entries(data.years || {})) {
+    if (!yr || yr.kind !== 'grid') continue;
+    for (const cat of yr.categories || []) {
+      if (cat.rule !== 'paycheck' || !cat.bonusMonth) continue;
+      const m = `${yearKey}-${String(cat.bonusMonth).padStart(2, '0')}`;
+      cat.bonusTakeHome = paycheckBonus(st, cat, m);
+      delete cat.bonusPct; delete cat.bonusKeep;
+    }
+  }
+  return data;
+}
+
 function freezeOverflowThresholds(data, goalsIn, bal = () => 0, order) {
   const kept = new Set((data.goals || []).map(g => g.id));
   /* The sender's account order travels with the figure, because the
@@ -33762,6 +33951,7 @@ function buildSharePayload({ sections, scope, includeNames, includeNotes, includ
     freezeOverflowThresholds(data, (y) => goalsOfYear(y),
       live && C[live] ? (id) => C[live].balances[`${id}|${at}`] || 0 : () => 0,
       accountsOf(state).map(a => a.id));
+    freezePaycheckBonuses(data, state);
   }
   stripStamps(data);
   stripFoldedGrids(data);
@@ -34323,6 +34513,7 @@ window.__finTestHooks = { SCHEMA, EARNED_ROW_ID, round2, roundTo, roundToDollar,
   normRole, gridToSummary, summaryToGrid, gridToPinned, pinnedToLive,
   foldableYear, unfoldableYear, summaryYears, folded, stripFoldedGrids,
   rulesNeedingYear, partsKind, sumKind, paycheckParts,
+  paycheckBonus, bonusSalaryFor, bonusPreview, freezePaycheckBonuses,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
   ownerSubtotals, validOwner, accountOption, suggestedTargetDate,

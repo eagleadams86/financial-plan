@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1272;
+const EXPECTED = 1282;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -5346,6 +5346,90 @@ t('a future per-check month previews the same split its dialog opens with', () =
     .map(p => ({ v: p.v }));
   eq(H.cellTip({ v: 250, kind: 'auto', parts: frac }),
     'Total $250.00 · auto estimate\n\n$100.00\n$100.00\n$50.00');
+});
+/* ── A paycheck row's yearly bonus (2026-11-03) ─────────────────────────── */
+const BONUS_ROW = (extra) => Object.assign({ id: 'paycheck', name: 'Paycheck', role: 'normal',
+  rule: 'paycheck', perCheck: 1000, bonusMonth: 4, bonusPct: 0.1, bonusKeep: 0.5 }, extra || {});
+t('a bonus is a share of the salary the year opened on, times what is kept', () => {
+  const st = { side: { comp: { '2030': { salary: 100000, raisePct: 0.04 } }, bonuses: {} } };
+  eq(H.paycheckBonus(st, BONUS_ROW(), '2030-04'), 5000);
+  eq(H.paycheckBonus(st, BONUS_ROW(), '2030-05'), 0, 'only its own month');
+  eq(H.paycheckBonus(st, BONUS_ROW({ bonusMonth: 11 }), '2030-11'), 5000, 'any month, not February');
+});
+t('a year with no comp record takes the newest earlier year after its raise', () => {
+  const st = { side: { comp: { '2029': { salary: 90000 }, '2030': { salary: 100000, raisePct: 0.04 } },
+    bonuses: {} } };
+  eq(H.bonusSalaryFor(st, '2032').salary, 104000);
+  eq(H.paycheckBonus(st, BONUS_ROW(), '2032-04'), 5200);
+});
+t('a bonus recorded for the year replaces the percentage', () => {
+  const st = { side: { comp: { '2030': { salary: 100000 } }, bonuses: { '2030': 15000 } } };
+  eq(H.paycheckBonus(st, BONUS_ROW(), '2030-04'), 7500);
+});
+t('no salary, or half a bonus, estimates nothing', () => {
+  eq(H.paycheckBonus({ side: { comp: {}, bonuses: {} } }, BONUS_ROW(), '2030-04'), 0);
+  const st = { side: { comp: { '2030': { salary: 100000 } }, bonuses: {} } };
+  eq(H.paycheckBonus(st, BONUS_ROW({ bonusKeep: undefined }), '2030-04'), 0);
+  ok(/no salary/.test(H.bonusPreview({ side: { comp: {}, bonuses: {} } }, BONUS_ROW(), '2030')));
+});
+t('a row tagged to someone other than the Compensation person gets no bonus', () => {
+  const st = { settings: { compPerson: 'sam' },
+    people: [{ id: 'sam', name: 'Sam', role: 'adult' }, { id: 'robin', name: 'Robin', role: 'adult' }],
+    side: { comp: { '2030': { salary: 100000 } }, bonuses: {} } };
+  eq(H.paycheckBonus(st, BONUS_ROW({ person: 'robin' }), '2030-04'), 0);
+  eq(H.paycheckBonus(st, BONUS_ROW({ person: 'sam' }), '2030-04'), 5000);
+  ok(/Sam's salary/.test(H.bonusPreview(st, BONUS_ROW({ person: 'robin' }), '2030')));
+});
+t('the engine adds the bonus to its month of estimates and never over a typed figure', () => {
+  const s = fixtureState();
+  s.side = { comp: { '2030': { salary: 100000 } }, bonuses: {} };
+  s.years['2030'].categories[0] = BONUS_ROW();
+  let c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2030'];
+  approx(c.cells['paycheck|2030-04'].v, 7000, 'April: 1000 × 2 + 5000');
+  approx(c.cells['paycheck|2030-06'].v, 2000, 'June: no bonus');
+  s.years['2030'].cells['paycheck|2030-04'] = { v: 1234, kind: 'manual' };
+  c = H.computeAll(H.coerceShape(s), TODAY_FIX)['2030'];
+  approx(c.cells['paycheck|2030-04'].v, 1234, 'a typed figure wins');
+});
+t('the cell editor opens a bonus month with the bonus as its own amount', () => {
+  const st = { side: { comp: { '2030': { salary: 100000 } }, bonuses: {} } };
+  const parts = H.paycheckParts(BONUS_ROW(), 2, true, '2030-04', st);
+  eq(parts.map(p => p.v), [1000, 1000, 5000]);
+  eq(H.paycheckParts(BONUS_ROW(), 2, true, '2030-05', st).length, 2);
+  eq(H.paycheckParts(BONUS_ROW(), 2, true).length, 2, 'no month, checks only');
+});
+t('a bonus needs a month on a paycheck row, and each share must be in range', () => {
+  const s = fixtureState();
+  s.years['2030'].categories[0] = BONUS_ROW({ bonusPct: '0.1' });
+  s.years['2030'].categories[1] = Object.assign(s.years['2030'].categories[1],
+    { bonusMonth: 4, bonusPct: 0.1, bonusKeep: 0.5 });   // not a paycheck row
+  s.years['2030'].categories[2] = Object.assign(s.years['2030'].categories[2],
+    { rule: 'paycheck', perCheck: 10, bonusMonth: 13, bonusPct: 0.1, bonusKeep: 0.5 });
+  const d = H.coerceShape(s);
+  const [a, b, c] = d.years['2030'].categories;
+  eq(a.bonusPct, 0.1, 'a numeric string is read strictly');
+  eq([b.bonusMonth, b.bonusPct, b.bonusKeep], [undefined, undefined, undefined]);
+  eq([c.bonusMonth, c.bonusPct, c.bonusKeep], [undefined, undefined, undefined]);
+  /* A month alone survives — the editor saves as you go, and picking the month
+     comes before typing either share — but it estimates nothing yet. */
+  const s2 = fixtureState();
+  s2.years['2030'].categories[0] = BONUS_ROW({ bonusPct: undefined, bonusKeep: 7 });
+  const half = H.coerceShape(s2).years['2030'].categories[0];
+  eq([half.bonusMonth, half.bonusPct, half.bonusKeep], [4, undefined, undefined]);
+  eq(H.paycheckBonus({ side: { comp: { '2030': { salary: 1e5 } }, bonuses: {} } }, half, '2030-04'), 0);
+});
+t('a share link without the salary carries each year\'s take-home figure', () => {
+  const st = { side: { comp: { '2030': { salary: 100000 } }, bonuses: {} } };
+  const data = { years: { '2030': { kind: 'grid', categories: [BONUS_ROW()] } } };
+  H.freezePaycheckBonuses(data, st);
+  const cat = data.years['2030'].categories[0];
+  eq([cat.bonusTakeHome, cat.bonusPct, cat.bonusKeep], [5000, undefined, undefined]);
+  eq(H.paycheckBonus({ side: {} }, cat, '2030-04'), 5000, 'the recipient computes the same figure');
+  ok(/\$5,000\.00 bonus in April/.test(H.ruleDesc(cat, { goals: [], years: {}, settings: {} }, [])));
+});
+t('the rule says what the bonus is', () => {
+  eq(H.ruleDesc(BONUS_ROW(), { goals: [], years: {}, settings: {} }, []),
+    '$1,000.00 per check × that month\'s paychecks, plus a bonus each April: 10% of salary, 50% kept');
 });
 t('a lone amount only breaks out when its note says something the total does not', () => {
   eq(H.cellTip({ v: 100, kind: 'actual', parts: [{ v: 100, kind: 'actual' }] }),
@@ -11087,13 +11171,14 @@ t('a link from a newer build is refused, and marked as such', async () => {
   eq(back.sections, ['budget'], 'the current version still opens');
 });
 
-t('the payload version is 4: a summary year can carry growth rows', () => {
+t('the payload version is 5: a paycheck row can carry a yearly bonus', () => {
   /* v1 would read `capped` + `overflowOf` as a plain capped goal and draw the
      claim away; v2 would read a months goal at $0; v3 would read a summary
      year's `isGrowth` row as an ordinary flow and count a paper gain as income
-     in money in and in the savings rate — each the silent misread the version
-     exists to refuse. */
-  eq(H.SHARE_PAYLOAD_V, 4);
+     in money in and in the savings rate; v4 would drop a paycheck row's bonus
+     and show a year without it — each the silent misread the version exists
+     to refuse. */
+  eq(H.SHARE_PAYLOAD_V, 5);
 });
 
 t('an unknown tab in a link is dropped, not drawn', async () => {

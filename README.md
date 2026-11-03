@@ -302,6 +302,14 @@ paychecks · overflow sweep.
 **A number you type into a month always beats the rule**, and moves the same
 way.
 
+**A per-check row can carry a yearly bonus.** Pick the month it arrives in, its
+share of salary, and how much of it you keep after withholding; the row's
+settings show the take-home figure it works out. The salary comes from the
+Compensation tab (the one the year opened on, or the latest one carried forward
+into years with no record), and a bonus already recorded for a year replaces the
+estimate. The bonus opens as its own amount in that month's cell. A share link
+that carries no salary carries each year's take-home figure instead.
+
 **Both averages say which months they're over**, because neither is quite what
 its name suggests. *Average of the months so far* falls back to **last year's**
 average while this year has no months of its own — which is every month of a
