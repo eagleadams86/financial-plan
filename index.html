@@ -6316,9 +6316,14 @@ function coerceShape(data) {
     if (typeof tm === 'number' && tm > 0) {
       g.targetMonths = Math.min(TARGET_MONTHS_MAX, tm); delete g.target;
     } else delete g.targetMonths;
-    /* Who the goal is for — a child, usually, for a college pot. Only ever a
-       label and a target-date suggestion; `computeGoals` never reads it. */
+    /* Who the goal is for — a child, usually, for a college pot. A label, a
+       target-date suggestion, and — only on a goal counting Roth IRA
+       contributions — whose Roth IRAs count (`rothBasisAt`). */
     if (g.for && !peopleIds.has(g.for)) delete g.for;
+    /* Counting Roth IRA contributions is a tick: true or absent, never false
+       or a string (the `keepCents` discipline — two spellings of one fact). */
+    if (g.countRothBasis === true) g.countRothBasis = true;
+    else delete g.countRothBasis;
   }
   /* "Claimed first by" must name another goal that exists, and the chain it
      forms must end — `pruneGoalLinks`, shared with the goal editor's delete
@@ -9536,6 +9541,9 @@ function ownedElsewhere(computed, keys, key, m) {
 
 function goalPace(g, ctx) {
   const { need, held, cur, computed, keys, priorC, years, goals, order } = ctx;
+  /* Money the goal counts that no account holds — Roth IRA contributions —
+     by year. Absent for every goal that does not tick it. */
+  const basisFor = ctx.basisFor || (() => 0);
   const ids = g.accounts || [];
   /* null, not 0, when not one of the goal's accounts has a balance that month:
      "nothing to pace by" and "flat" are different answers and the tile says so. */
@@ -9545,7 +9553,8 @@ function goalPace(g, ctx) {
       const v = c.balances[`${id}|${m}`];
       if (v !== undefined) { seen = true; t += v; }
     }
-    return seen ? t : null;
+    const basis = basisFor(m.slice(0, 4));
+    return seen || basis ? t + basis : null;
   };
   const gapAt = (c, m) => {
     const h = heldAt(c, m);
@@ -9594,7 +9603,10 @@ function goalPace(g, ctx) {
       open += carried !== undefined ? carried
         : (((years && years[lastKey] || {}).seeds || {})[id] || 0);
     }
-    paceMo = seen ? round2((end - open) / lms.length) : null;
+    /* The contributions the goal counts grow by that year's amount, spread
+       across its months — the same rate the extrapolation then carries on. */
+    const basisGrowth = basisFor(lastKey) - basisFor(String(+lastKey - 1));
+    paceMo = seen || basisGrowth ? round2((end - open + basisGrowth) / lms.length) : null;
   }
 
   /* 3. Past the end of what is built. */
@@ -9669,16 +9681,24 @@ function computeGoals(st, computed, todayIso) {
        ahead are waiting for it. */
     const { remaining, taken } = goalDraw(g, goals, accountOrder, bal);
     const claimed = round2(Math.max(0, held - remaining));
-    let saved = remaining;
+    /* Roth IRA contributions, when the goal counts them — its own money and
+       nobody else's: the goals ahead draw from budget accounts, so none of
+       them can claim it, and it goes on AFTER the claim. */
+    const basisFor = g.countRothBasis
+      ? (y) => rothBasisAt(st, g, y).basis : () => 0;
+    const roth = g.countRothBasis ? rothBasisAt(st, g, liveKey) : null;
+    const basisNow = roth ? roth.basis : 0;
+    let saved = remaining + basisNow;
     if (g.count !== 'all') saved = Math.min(saved, g.target || 0);   // capped: never more than the goal
     saved = round2(Math.max(0, saved));
     const monthsLeft = g.targetDate
       ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
     const need = goalNeed(g, goals, bal, accountOrder);
-    const pace = goalPace(g, { need, held, cur, computed, keys: paceKeys,
-      priorC, years: st.years, goals, order: accountOrder });
+    const pace = goalPace(g, { need, held: round2(held + basisNow), cur, computed, keys: paceKeys,
+      priorC, years: st.years, goals, order: accountOrder, basisFor });
     return {
-      ...g, saved, held, claimed,
+      ...g, saved, held: round2(held + basisNow), claimed,
+      rothBasis: roth && roth.basis > 0 ? roth : null,
       /* The goals that actually TOOK the money, front of the queue first —
          or, when nothing was taken, the link itself, so a queued goal reading
          its accounts in full still says it is queued (2026-09-07 audit, fix 4). */
@@ -10263,6 +10283,10 @@ const HELP = {
       + 'every bonus taken out. Where the bonus moves a goal\'s date, the tile and this line '
       + 'give the date without it too, and the chart below draws that version dotted. The '
       + 'gap is how much the goal leans on money nobody has promised.'],
+    [b('A goal can count Roth IRA contributions'), ' — what you put in, which can come '
+      + 'out at any time without tax or penalty, never what it grew into. Each year\'s '
+      + 'contribution from the Retirement tab counts from that January; years you have not '
+      + 'typed repeat the latest one, so the pace carries on at the rate you are contributing.'],
   ] },
   k401Limit: { title: 'The 401(k) Limit Check', body: [
     ['Your own contributions are salary × the salary percentage, plus bonus × the bonus '
@@ -11198,6 +11222,11 @@ function sampleState() {
           overflowOf: 'roof', target: 6000, targetDate: `${Y + 2}-06` },
         { id: 'college-fund', name: "Mia's college", count: 'all', accounts: ['college'],
           for: 'mia', target: 90000, targetDate: '2033-09' },
+        /* A bridge to 59½: the brokerage plus what Rosa has put into her Roth
+           IRA, which can come out early — the demo of `countRothBasis`, and of
+           the tile saying how much of its figure the contributions are. */
+        { id: 'retire-early', name: 'Retire early', count: 'all', accounts: ['long'],
+          countRothBasis: true, target: 250000, targetDate: `${Y + 15}-06` },
       ],
       years: {
         /* The two history years, as REAL yearly summaries — a list of what each
@@ -15327,6 +15356,10 @@ function goalCard(g, idx) {
              up; the goals ahead draw account by account now, so there is
              nothing left to explain away. */
         g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}` : ''}
+      ${/* Money no account holds is said, or the tile cannot be added up. */
+        g.rothBasis ? ` · includes ${fmtMoney(g.rothBasis.basis)} of Roth IRA contributions${
+          g.etaMonths !== 0 && g.rothBasis.yearly > 0
+            ? `, ${fmtMoney(g.rothBasis.yearly)}/yr assumed after ${esc(g.rothBasis.lastTyped)}` : ''}` : ''}
       ${g.targetMonths > 0 ? ` · ${g.targetMonths} month${g.targetMonths === 1 ? '' : 's'} of this year's expenses` : ''}</div>
   </div>`;
 }
@@ -16687,6 +16720,33 @@ function contribYears(st, filter) {
       out[y] = round2((out[y] || 0) + (v || 0));
   }
   return out;
+}
+
+/* WHAT A ROTH IRA HOLDS THAT YOU CAN SPEND EARLY (2026-11-03). What you put
+   in — the contributions, not what they have grown into — can come back out at
+   any time without tax or penalty, which makes it early-retirement money; the
+   growth stays put until 59½. A goal that ticks `countRothBasis` counts this on
+   top of its accounts. It is the CONTRIBUTIONS typed on the Retirement tab,
+   added up through `year` (a year counts from its January), across every Roth
+   IRA — or only the child's, for a goal saved for one. Years after the last
+   one typed repeat that year's amount, Charles's choice: the basis keeps
+   growing at the rate he is contributing, and typing a later year replaces
+   the guess. Retirement accounts have no id, so nothing here names one. */
+function rothBasisAt(st, goal, year) {
+  const typed = {};
+  for (const a of ((st && st.side && st.side.retirementAccounts) || [])) {
+    if (a.type !== 'roth-ira' || (goal && goal.for && a.owner !== goal.for)) continue;
+    for (const [y, v] of Object.entries(a.contribs || {}))
+      if (/^\d{4}$/.test(y) && typeof v === 'number') typed[y] = (typed[y] || 0) + v;
+  }
+  const years = Object.keys(typed).sort();
+  if (!years.length) return { basis: 0, yearly: 0, lastTyped: null, assumed: false };
+  const last = years[years.length - 1];
+  const yearly = round2(typed[last]);
+  let basis = years.filter(y => +y <= +year).reduce((t, y) => t + typed[y], 0);
+  const assumed = +year > +last;
+  if (assumed) basis += yearly * (+year - +last);
+  return { basis: round2(basis), yearly, lastTyped: last, assumed };
 }
 
 /* ── Household ─────────────────────────────────────────────────────────────
@@ -27558,6 +27618,13 @@ const EDITORS = {
             + 'takes what it needs in the order the accounts are listed on the Household tab, '
             + 'so drag the ones to spend first to the top. An account you have closed is not '
             + 'offered — it holds nothing to count.' },
+      /* Offered only when there is a Roth IRA to count (2026-11-03). */
+      ...((state.side.retirementAccounts || []).some(a => a.type === 'roth-ira')
+        ? [{ key: 'countRothBasis', label: 'Count Roth IRA contributions', type: 'check', wide: true,
+            hint: 'What you have put into a Roth IRA — not what it has grown into — can '
+                + 'come out at any time without tax or penalty, so it can pay for retiring early. '
+                + 'The growth stays put until 59½. The contributions come from the Retirement '
+                + 'tab, and years you have not typed yet repeat the latest one.' }] : []),
       /* Two questions, not one three-way list (2026-09-05): how far the bar
          runs, and who is paid first. They used to be one field whose third
          option ("only what another goal has not claimed") was always uncapped,
@@ -27610,7 +27677,8 @@ const EDITORS = {
        as a goal with no target at all. */
     get: (ds) => ({ ...state.goals[+ds.idx],
                     target: goalTargetOf(state.goals[+ds.idx], liveMonthlySpend()),
-                    accounts: state.goals[+ds.idx].accounts || [] }),
+                    accounts: state.goals[+ds.idx].accounts || [],
+                    countRothBasis: !!state.goals[+ds.idx].countRothBasis }),
     blank: () => ({ count: 'capped',
                     accounts: [hubAccount(state)?.id].filter(Boolean) }),
     save(ds, v) {
@@ -27634,6 +27702,11 @@ const EDITORS = {
         .map(a => a.name || a.id);
       Object.assign(g, { name: v.name, accounts: v.accounts || [],
         count: v.count, targetDate: v.targetDate || null });
+      /* Only when the box was on the form — a plan whose Roth IRA was deleted
+         does not offer it, and that must not quietly untick the goal. */
+      if ('countRothBasis' in v) {
+        if (v.countRothBasis) g.countRothBasis = true; else delete g.countRothBasis;
+      }
       let said;
       /* One claim, never both: months set means the target is derived and the
          stored figure goes; otherwise the figure stands and months goes.
@@ -33429,9 +33502,10 @@ const SHARE_FORMAT = 1;
    missing whatever their build added. Unlike SCHEMA there is no stored copy at
    stake, so nothing is written and nothing halts — the family pattern from
    Sprint Velocity. */
-const SHARE_PAYLOAD_V = 5;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05);
+const SHARE_PAYLOAD_V = 6;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05);
                              // 4: a summary year's isGrowth rows (2026-09-20);
-                             // 5: a paycheck row's yearly bonus (2026-11-03)
+                             // 5: a paycheck row's yearly bonus (2026-11-03);
+                             // 6: a goal counting Roth IRA contributions (same day)
 
 const b64urlEncode = (bytes) => {
   let s = '';
@@ -34611,7 +34685,7 @@ window.__finTestHooks = { SCHEMA, EARNED_ROW_ID, round2, roundTo, roundToDollar,
   foldableYear, unfoldableYear, summaryYears, folded, stripFoldedGrids,
   rulesNeedingYear, partsKind, sumKind, paycheckParts,
   paycheckBonus, bonusSalaryFor, bonusPreview, freezePaycheckBonuses,
-  planHasBonus, withoutBonuses, bonusDependence,
+  planHasBonus, withoutBonuses, bonusDependence, rothBasisAt,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
   ownerSubtotals, validOwner, accountOption, suggestedTargetDate,

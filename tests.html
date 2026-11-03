@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1286;
+const EXPECTED = 1289;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -955,6 +955,47 @@ t('monthly requirement divides the gap by the months left', () => {
   const goals = H.computeGoals(s, H.computeAll(s, TODAY_FIX), TODAY_FIX);
   eq(goals[0].monthsLeft, 8, 'Apr 2030 → Dec 2030');
   approx(goals[0].monthlyReq, 0, 'already at target');
+});
+/* ── A goal counting Roth IRA contributions (2026-11-03) ──────────────── */
+const ROTH = (owner, contribs) => ({ name: 'Roth IRA', type: 'roth-ira', kind: 'roth',
+  owner, amount: 99999, contribs });
+t('Roth contributions add up, repeat the latest year, and never count growth', () => {
+  const st = { side: { retirementAccounts: [
+    ROTH('sam', { 2028: 6000, 2029: 7000 }),
+    ROTH('mia', { 2029: 1000 }),
+    { name: '401(k)', type: '401k', kind: 'roth', contribs: { 2029: 20000 } },
+  ] } };
+  eq(H.rothBasisAt(st, {}, '2029').basis, 14000, 'both Roth IRAs, the 401(k) and the balance ignored');
+  eq(H.rothBasisAt(st, { for: 'mia' }, '2029').basis, 1000, 'a child\'s goal counts their own');
+  eq(H.rothBasisAt(st, {}, '2028').basis, 6000, 'a year counts only through itself');
+  const later = H.rothBasisAt(st, {}, '2031');
+  eq([later.basis, later.yearly, later.assumed], [30000, 8000, true], '2030 and 2031 repeat 2029');
+  st.side.retirementAccounts[0].contribs[2031] = 500;
+  eq(H.rothBasisAt(st, {}, '2031').basis, 14500, 'a typed later year replaces the guess');
+  eq(H.rothBasisAt({ side: {} }, {}, '2029').basis, 0, 'no Roth IRA, nothing counted');
+});
+t('a goal counting Roth contributions saves them on top, and nobody ahead claims them', () => {
+  const s = H.coerceShape(fixtureState());
+  s.side.retirementAccounts = [ROTH(undefined, { 2029: 6000, 2030: 7000 })];
+  const computed = H.computeAll(s, TODAY_FIX);
+  const before = H.computeGoals(s, computed, TODAY_FIX)[3];
+  s.goals[3].countRothBasis = true;
+  s.goals[3].overflowOf = 'g1';      // a goal ahead that cannot reach it
+  const after = H.computeGoals(s, computed, TODAY_FIX)[3];
+  approx(after.saved - before.saved, 13000, 'saved rises by the contributions');
+  eq(after.rothBasis.basis, 13000);
+  ok(after.etaMonths === null || before.etaMonths === null || after.etaMonths <= before.etaMonths,
+    'it lands no later', `${before.etaMonths} → ${after.etaMonths}`);
+  ok(after.paceMo > before.paceMo, 'and its pace carries the yearly contribution',
+    `${before.paceMo} → ${after.paceMo}`);
+});
+t('counting Roth contributions is a tick: true or absent', () => {
+  const s = fixtureState();
+  s.goals[0].countRothBasis = 'yes';
+  s.goals[1].countRothBasis = true;
+  s.goals[2].countRothBasis = false;
+  const d = H.coerceShape(s);
+  eq(d.goals.map(g => g.countRothBasis), [undefined, true, undefined, undefined]);
 });
 /* ── Goals that queue behind each other (2026-09-05) ──────────────────────
    `count` used to be a three-way field whose third option, "only what another
@@ -4773,7 +4814,7 @@ t('it survives the boundary intact — every collection still there', () => {
   const n = (v) => Array.isArray(v) ? v.length : Object.keys(v || {}).length;
   ok(n(d.people) === 3, 'three people');
   ok(n(d.settings.accounts) === 5, "five accounts — a sixth means something minted one");
-  ok(n(d.goals) === 4, 'four goals — the kitchen queues behind the roof (2026-09-05)');
+  ok(n(d.goals) === 5, 'five goals — the kitchen queues behind the roof (2026-09-05), and retire early counts Roth contributions (2026-11-03)');
   ok(n(d.years) === 3, 'this year plus two of history');
   ok(n(d.side.retirementAccounts) === 4, 'four retirement accounts');
   ok(n(d.side.snapshots) === 4, 'four net-worth snapshots — the last closes the month the sample is entered through');
@@ -11209,14 +11250,14 @@ t('a link from a newer build is refused, and marked as such', async () => {
   eq(back.sections, ['budget'], 'the current version still opens');
 });
 
-t('the payload version is 5: a paycheck row can carry a yearly bonus', () => {
+t('the payload version is 6: a goal can count Roth IRA contributions', () => {
   /* v1 would read `capped` + `overflowOf` as a plain capped goal and draw the
      claim away; v2 would read a months goal at $0; v3 would read a summary
      year's `isGrowth` row as an ordinary flow and count a paper gain as income
      in money in and in the savings rate; v4 would drop a paycheck row's bonus
-     and show a year without it — each the silent misread the version exists
-     to refuse. */
-  eq(H.SHARE_PAYLOAD_V, 5);
+     and show a year without it; v5 would drop the Roth contributions a goal
+     counts — each the silent misread the version exists to refuse. */
+  eq(H.SHARE_PAYLOAD_V, 6);
 });
 
 t('an unknown tab in a link is dropped, not drawn', async () => {
@@ -17259,8 +17300,10 @@ t('the goal window opens at the common width, in three blocks (2026-09-07)', asy
     for (const key of ['name', 'targetDate', 'for', 'note'])
       ok(blocks[0].fields.includes(key), key + ' belongs with what the goal IS');
     eq(blocks[1].fields, ['target', 'targetMonths'], 'the two ways of stating a target, together');
-    eq(blocks[2].fields, ['accounts', 'count', 'overflowOf'],
-       'the accounts, how far the bar runs, and who is paid first');
+    /* The Roth tick sits under the accounts it adds to (2026-11-03) — the
+       sample has a Roth IRA, so it is offered here. */
+    eq(blocks[2].fields, ['accounts', 'countRothBasis', 'count', 'overflowOf'],
+       'the accounts, the Roth contributions, how far the bar runs, and who is paid first');
     /* A wide field ends the row it is in, so one belongs at the top or the
        bottom of its own block — never stranding what follows it. */
     const cell = (k) => D.querySelector(`[data-field="${k}"]`);

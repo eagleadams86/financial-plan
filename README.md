@@ -317,6 +317,15 @@ pace without bonuses" — the next-dated-goal line gives the without-bonus verdi
 and *Where the Total Is Heading* draws the without-bonus plan as a dotted line.
 A plan with no bonus is worked out once, exactly as before.
 
+**A goal can count Roth IRA contributions** — a tick in the goal's *What
+Counts Toward It*, offered when there is a Roth IRA. What you put into a Roth
+IRA (not its growth) can be withdrawn at any time without tax or penalty, which
+is what makes it early-retirement money. The goal adds the contributions typed
+on the Retirement tab, each year counted from its January; years not typed yet
+repeat the latest year's amount, so the pace check sees the basis keep growing.
+The goals ahead in a queue cannot claim it — no budget account holds it — and
+the tile says how much of its figure it is.
+
 **Both averages say which months they're over**, because neither is quite what
 its name suggests. *Average of the months so far* falls back to **last year's**
 average while this year has no months of its own — which is every month of a
