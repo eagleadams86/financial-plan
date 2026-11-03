@@ -4379,6 +4379,39 @@ function paycheckBonus(st, cat, m) {
     : cat.bonusPct * bonusSalaryFor(st, y).salary;
   return round2(gross * cat.bonusKeep) || 0;
 }
+/* WITH AND WITHOUT THE BONUS (2026-11-03). A bonus is money the plan expects
+   and nobody promised, so the Progress tab shows how much each goal leans on
+   it: the same plan run again with every bonus taken out. `planHasBonus` says
+   whether there is anything to compare — a row with a month and both shares,
+   or a share link's frozen figure — so a plan without one runs once, as it
+   always has. `withoutBonuses` is the second plan: a copy, every bonus field
+   gone, the real state untouched. */
+const bonusActive = (cat) => cat && cat.rule === 'paycheck' && cat.bonusMonth
+  && (typeof cat.bonusTakeHome === 'number'
+    || (typeof cat.bonusPct === 'number' && typeof cat.bonusKeep === 'number'));
+function planHasBonus(st) {
+  return Object.values((st && st.years) || {}).some(yr =>
+    yr && yr.kind === 'grid' && (yr.categories || []).some(bonusActive));
+}
+function withoutBonuses(st) {
+  const copy = JSON.parse(JSON.stringify(st));
+  for (const yr of Object.values(copy.years || {}))
+    for (const cat of (yr && yr.categories) || []) {
+      delete cat.bonusMonth; delete cat.bonusPct; delete cat.bonusKeep; delete cat.bonusTakeHome;
+    }
+  return copy;
+}
+/* The verdict beside a goal's date: what the same goal does without the bonus,
+   or null when there is nothing worth saying — no bonus in the plan, a goal
+   already met, or a date the bonus does not move. `never` is a goal that lands
+   with the bonus and not without it, which is the most important case of all. */
+function bonusDependence(g, nb) {
+  if (!g || !nb || g.etaMonths === null || g.etaMonths <= 0) return null;
+  if (nb.etaMonths === null) return { never: true };
+  if (nb.etaMonths === g.etaMonths) return null;
+  return { eta: nb.eta, etaMonths: nb.etaMonths, later: nb.etaMonths - g.etaMonths };
+}
+
 /* Which year the editor's sentence is about: the year being edited, unless
    its bonus month is already entered — then the next one, the first bonus the
    rule will actually estimate. */
@@ -10226,6 +10259,10 @@ const HELP = {
       + 'growing in the last year you built, or none of them holds a balance yet. ',
       b('A goal with no date gets the same answer on its own tile'),
       ', and a goal that cannot be paced says so there too, rather than guessing a date.'],
+    [b('A plan with a yearly bonus is checked twice'), ': once as it stands, and once with '
+      + 'every bonus taken out. Where the bonus moves a goal\'s date, the tile and this line '
+      + 'give the date without it too, and the chart below draws that version dotted. The '
+      + 'gap is how much the goal leans on money nobody has promised.'],
   ] },
   k401Limit: { title: 'The 401(k) Limit Check', body: [
     ['Your own contributions are salary × the salary percentage, plus bonus × the bonus '
@@ -10588,6 +10625,22 @@ function toast(msg) {
 
 
 let C = {};   // computeAll() output, rebuilt on every render
+/* The same plan without its bonuses, worked out only when something asks and
+   only once per render — the second `computeAll` costs as much as the first,
+   and most renders never draw a goal. Keyed on `C` itself, which every render
+   replaces, so it can never outlive the figures it is compared with. */
+let noBonusMemo = { for: null, st: null, C: null, goals: null };
+function noBonusPlan() {
+  if (noBonusMemo.for === C) return noBonusMemo;
+  noBonusMemo = { for: C, st: null, C: null, goals: null };
+  if (!planHasBonus(state)) return noBonusMemo;
+  const st = withoutBonuses(state);
+  const nc = computeAll(st, todayISO());
+  noBonusMemo = { for: C, st, C: nc,
+    goals: latestGridYear() ? computeGoals(st, nc, todayISO()) : [] };
+  return noBonusMemo;
+}
+const goalWithoutBonus = (id) => (noBonusPlan().goals || []).find(g => g.id === id) || null;
 
 /* The tabs this page is allowed to draw. Everything in a normal session; only
    what the sender put in the link in a shared one — and the order still comes
@@ -15258,6 +15311,12 @@ function goalCard(g, idx) {
              that a pace would describe a division that never happened. */''}
       ${!done && g.etaMonths > 0 ? ` · ${g.etaFrom === 'projected' ? 'your plan reaches it'
         : 'at this pace'} about ${esc(monthLabelFull(g.eta))}` : ''}
+      ${/* How much of that date is the bonus — said only where it moves it. */
+        (() => {
+          const d = done ? null : bonusDependence(g, goalWithoutBonus(g.id));
+          return !d ? '' : d.never ? ' · never at this pace without bonuses'
+            : ` · ${esc(monthLabelFull(d.eta))} without bonuses`;
+        })()}
       ${!done && g.etaMonths === null && g.gap > 0 && g.paceMo !== null && g.paceMo <= 0
         ? ` · not growing ${esc(paceWhen(g))}` : ''}
       ${!done && g.etaMonths === null && g.gap > 0 && g.paceMo === null
@@ -15911,10 +15970,24 @@ function renderGoals() {
       ? `the years you have built reach it in ${esc(monthLabelFull(next.eta))}`
       : `its own accounts are growing ${fmtMoney(next.paceMo)}/mo ${esc(paceWhen(next))},
          so it lands about ${esc(monthLabelFull(next.eta))}`;
+    /* And how much of that date rests on bonuses nobody promised (2026-11-03):
+       the same goal, the same plan, every bonus taken out. */
+    const dep = bonusDependence(next, goalWithoutBonus(next.id));
+    const target = next.targetDate.slice(0, 7);
+    const depHtml = !dep ? ''
+      : dep.never ? ` Without bonuses its own accounts never get it there at this pace.`
+      : (() => {
+          /* Both dates are counted from the same month, so the gap between
+             them is all that moves the verdict. */
+          const ahead = next.aheadMonths - dep.later;
+          const side = ahead === 0 ? ', on time'
+            : `, ${fmtYrMo(Math.abs(ahead))} ${ahead < 0 ? 'behind' : 'ahead'}`;
+          return ` Without bonuses: about ${esc(monthLabelFull(dep.eta))}${side}.`;
+        })();
     paceHtml = `<p class="sub" style="margin-top:12px">Next dated goal — ${esc(next.name)}${
       helpBtn('paceCheck', 'the pace check')}: ${how}
-      against a target of ${esc(monthLabelFull(next.targetDate.slice(0, 7)))} —
-      <span class="pill ${behind ? 'warn' : 'good'}">${verdict}</span></p>`;
+      against a target of ${esc(monthLabelFull(target))} —
+      <span class="pill ${behind ? 'warn' : 'good'}">${verdict}</span>${depHtml}</p>`;
   }
 
   /* Where the line goes dashed, said in words — and read off the SAME points
@@ -15990,6 +16063,9 @@ function renderGoals() {
         previewYears().length ? ` and the ${esc(previewYears().join(', '))} plan${
           previewYears().length > 1 ? 's' : ''} you've built ahead` : ''}. ${chartDashNote}</p>
       <div class="chartbox"><canvas id="goalChart"></canvas></div>
+      ${/* The second line exists only when a bonus does — see buildGoalChart. */
+        noBonusPlan().C ? `<p class="chartkey"><i class="dot"></i> Dotted — the same plan
+        without any bonuses. The gap between the two lines is what the bonuses add.</p>` : ''}
     </div>
     <div class="card">
       <h2>Total Liquidity, Year by Year</h2>
@@ -23246,6 +23322,15 @@ function buildGoalChart() {
   const pts = goalChartPoints(state, C, liveKey, previewYears());
   if (!pts.length) return;
   const firstAhead = pts.find(p => p.ahead);
+  /* The same months without any bonus (2026-11-03): a dotted line in the
+     muted text colour — the chart key's own swatch — so it is told apart by
+     its line style and never by hue. Matched to the main line month by month
+     rather than by position, so a month the second plan lacks is a gap. */
+  const nb = noBonusPlan();
+  const nbByM = nb.C ? new Map(goalChartPoints(nb.st, nb.C, liveKey, previewYears())
+    .map(p => [p.m, p.v])) : null;
+  const nbData = nbByM ? pts.map(p => nbByM.has(p.m) ? nbByM.get(p.m) : null) : null;
+  const nbLast = nbData ? nbData[nbData.length - 1] : null;
   newChart('goalChart', {
     type: 'line',
     data: { labels: pts.map(p => monthLabel(p.m)), datasets: [{
@@ -23260,7 +23345,16 @@ function buildGoalChart() {
       pointHoverBackgroundColor: cssVar('--accent'),
       pointHoverBorderColor: cssVar('--accent'),
       segment: { borderDash: (ctx) => pts[ctx.p1DataIndex]?.ahead ? [6, 4] : undefined },
-    }]},
+    }, ...(nbData ? [{
+      label: 'Without bonuses',
+      data: nbData,
+      borderColor: cssVar('--text-secondary'),
+      backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 0, tension: .25, borderDash: [2, 3],
+      pointHoverRadius: 4,
+      pointHoverBackgroundColor: cssVar('--text-secondary'),
+      pointHoverBorderColor: cssVar('--text-secondary'),
+    }] : [])]},
     options: {
       /* Hovering ANYWHERE in a month's column reads that month. The points are
          drawn at radius 0, so with the default `intersect: true` the tooltip
@@ -23269,7 +23363,9 @@ function buildGoalChart() {
          chart already carries; it was reported broken here too. */
       interaction: { mode: 'index', intersect: false },
       plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: (t) => fmtMoney(t.parsed.y)
+        tooltip: { callbacks: { label: (t) => t.datasetIndex === 1
+          ? `Without bonuses: ${fmtMoney(t.parsed.y)}`
+          : (nbData ? 'With bonuses: ' : '') + fmtMoney(t.parsed.y)
           + (!pts[t.dataIndex].ahead ? ''
              : pts[t.dataIndex].built ? ' (year built ahead)' : ' (estimate)') } } },
       scales: {
@@ -23283,7 +23379,8 @@ function buildGoalChart() {
     monthLabel(pts[pts.length - 1].m)}: from ${fmtMoney(pts[0].v || 0)} to ${
     fmtMoney(pts[pts.length - 1].v || 0)}.${firstAhead
       ? ` ${firstAhead === pts[0] ? 'Every month' : `${monthLabel(firstAhead.m)} onwards`
-        } is the plan's own projection.` : ''}`);
+        } is the plan's own projection.` : ''}${typeof nbLast === 'number'
+      ? ` Without bonuses it ends at ${fmtMoney(nbLast)}.` : ''}`);
 }
 
 function buildRothChart() {
@@ -34514,6 +34611,7 @@ window.__finTestHooks = { SCHEMA, EARNED_ROW_ID, round2, roundTo, roundToDollar,
   foldableYear, unfoldableYear, summaryYears, folded, stripFoldedGrids,
   rulesNeedingYear, partsKind, sumKind, paycheckParts,
   paycheckBonus, bonusSalaryFor, bonusPreview, freezePaycheckBonuses,
+  planHasBonus, withoutBonuses, bonusDependence,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
   ownerSubtotals, validOwner, accountOption, suggestedTargetDate,

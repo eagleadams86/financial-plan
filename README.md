@@ -310,6 +310,13 @@ into years with no record), and a bonus already recorded for a year replaces the
 estimate. The bonus opens as its own amount in that month's cell. A share link
 that carries no salary carries each year's take-home figure instead.
 
+**Progress shows what each goal owes to the bonus.** With a bonus set up, the
+plan is worked out a second time with every bonus taken out. A goal whose date
+moves says both — "about Mar 2061 · Nov 2079 without bonuses", or "never at this
+pace without bonuses" — the next-dated-goal line gives the without-bonus verdict,
+and *Where the Total Is Heading* draws the without-bonus plan as a dotted line.
+A plan with no bonus is worked out once, exactly as before.
+
 **Both averages say which months they're over**, because neither is quite what
 its name suggests. *Average of the months so far* falls back to **last year's**
 average while this year has no months of its own — which is every month of a

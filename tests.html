@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1282;
+const EXPECTED = 1286;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -5426,6 +5426,44 @@ t('a share link without the salary carries each year\'s take-home figure', () =>
   eq([cat.bonusTakeHome, cat.bonusPct, cat.bonusKeep], [5000, undefined, undefined]);
   eq(H.paycheckBonus({ side: {} }, cat, '2030-04'), 5000, 'the recipient computes the same figure');
   ok(/\$5,000\.00 bonus in April/.test(H.ruleDesc(cat, { goals: [], years: {}, settings: {} }, [])));
+});
+t('only a complete bonus makes a plan worth checking twice', () => {
+  const plan = (cat) => ({ years: { '2030': { kind: 'grid', categories: [cat] } } });
+  ok(H.planHasBonus(plan(BONUS_ROW())));
+  ok(!H.planHasBonus(plan(BONUS_ROW({ bonusKeep: undefined }))), 'half a bonus');
+  ok(H.planHasBonus(plan(BONUS_ROW({ bonusPct: undefined, bonusKeep: undefined,
+    bonusTakeHome: 500 }))), 'a frozen share-link figure');
+  ok(!H.planHasBonus(plan({ id: 'x', rule: 'carry' })));
+});
+t('the without-bonus plan is a copy with every bonus gone', () => {
+  const st = { years: { '2030': { kind: 'grid', categories: [BONUS_ROW({ bonusTakeHome: 9 })] } } };
+  const nb = H.withoutBonuses(st);
+  const cat = nb.years['2030'].categories[0];
+  eq([cat.bonusMonth, cat.bonusPct, cat.bonusKeep, cat.bonusTakeHome, cat.perCheck],
+    [undefined, undefined, undefined, undefined, 1000]);
+  eq(st.years['2030'].categories[0].bonusMonth, 4, 'the real plan is untouched');
+});
+t('a goal states its date without bonuses only when the bonus moves it', () => {
+  eq(H.bonusDependence({ etaMonths: 20, eta: '2032-01' }, { etaMonths: 20, eta: '2032-01' }), null);
+  eq(H.bonusDependence({ etaMonths: 20, eta: '2032-01' }, { etaMonths: 50, eta: '2034-07' }),
+    { eta: '2034-07', etaMonths: 50, later: 30 });
+  eq(H.bonusDependence({ etaMonths: 20 }, { etaMonths: null }), { never: true });
+  eq(H.bonusDependence({ etaMonths: 0 }, { etaMonths: 9 }), null, 'already met');
+  eq(H.bonusDependence({ etaMonths: null }, { etaMonths: null }), null, 'never lands either way');
+  eq(H.bonusDependence({ etaMonths: 20 }, null), null, 'no bonus in the plan');
+});
+t('the without-bonus plan computes the same months with the bonus taken out', () => {
+  const s = fixtureState();
+  s.side = { comp: { '2030': { salary: 100000 } }, bonuses: {} };
+  /* May, not April: the fixture PINS April's cash balance, and a pinned month
+     states its figure whatever flowed in — the bonus would vanish into it. */
+  s.years['2030'].categories[0] = BONUS_ROW({ bonusMonth: 5 });
+  const st = H.coerceShape(s);
+  const withC = H.computeAll(st, TODAY_FIX)['2030'];
+  const noC = H.computeAll(H.withoutBonuses(st), TODAY_FIX)['2030'];
+  approx(withC.cells['paycheck|2030-05'].v - noC.cells['paycheck|2030-05'].v, 5000);
+  approx(withC.balances['total|2030-06'] - noC.balances['total|2030-06'], 5000, 'and the total carries it',
+    60);
 });
 t('the rule says what the bonus is', () => {
   eq(H.ruleDesc(BONUS_ROW(), { goals: [], years: {}, settings: {} }, []),
