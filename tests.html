@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1296;
+const EXPECTED = 1310;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -498,6 +498,76 @@ function projectNextYear(s, categories, cells, paychecks) {
 const PAYROW = () => [{ id: 'paycheck', name: 'Paycheck', role: 'normal',
   rule: 'paycheck', perCheck: 1000 }];
 
+/* ── What the engine reads without asking (2026-11-12) ───────────────────
+   A crafted or damaged backup used to be written over the plan and THEN
+   refused, and the next load threw at boot. These are the fields that did it. */
+t('a row\'s rule is one of the rules, or it is no rule at all', () => {
+  eq(H.ruleNames().slice().sort(), Object.keys(H.RULES).sort(),
+     'the boundary\'s list and the engine\'s table name the same rules');
+  const s = fixtureState();
+  const cats = s.years['2030'].categories;
+  cats[0].rule = 'bogus';
+  cats[1].rule = { toString: 1 };
+  cats[2].rule = 'constructor';
+  const d = H.coerceShape(s);
+  eq(d.years['2030'].categories.slice(0, 3).map(c => c.rule), [undefined, undefined, undefined]);
+  let threw = null;
+  try { H.computeAll(d, TODAY_FIX); } catch (e) { threw = String(e); }
+  eq(threw, null, 'and the plan computes');
+  /* The sink holds on its own too — a row that reached the engine some other way. */
+  const raw = H.coerceShape(fixtureState());
+  raw.years['2030'].categories[0].rule = 'valueOf';
+  threw = null;
+  try { H.computeAll(raw, TODAY_FIX); } catch (e) { threw = String(e); }
+  eq(threw, null, 'an unknown rule at the engine estimates nothing rather than throwing');
+});
+t('a row\'s amounts are numbers, its section is a section, or they are gone', () => {
+  const s = fixtureState();
+  const cats = s.years['2030'].categories;
+  Object.assign(cats[0], { rule: 'paycheck', perCheck: { a: 1 }, every: 'soon', isPay: 'yes', section: 7 });
+  Object.assign(cats[1], { rule: 'paycheck', perCheck: '1200.50', section: 'income', isPay: false });
+  const d = H.coerceShape(s);
+  const [a, b] = d.years['2030'].categories;
+  eq([a.perCheck, a.every, a.isPay], [undefined, undefined, undefined]);
+  ok(['income', 'expense', 'transfer'].includes(a.section), 'the section is guessed afresh', a.section);
+  eq([b.perCheck, b.section, b.isPay], [1200.5, 'income', false], 'what can be read is kept');
+  let threw = null;
+  try { H.computeAll(d, TODAY_FIX); } catch (e) { threw = String(e); }
+  eq(threw, null);
+});
+t('an id that is already a name on every object is moved off it', () => {
+  for (const bad of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf'])
+    ok(!(H.cleanId(bad) in Object.prototype) && /^[A-Za-z0-9_-]{1,64}$/.test(H.cleanId(bad)),
+       bad + ' is not kept as an id', H.cleanId(bad));
+  eq(H.cleanId('cash'), 'cash', 'an ordinary id is left exactly as it was');
+  const s = H.coerceShape(fixtureState());
+  const first = s.settings.accounts[0].id;
+  const swap = (v) => v === first ? 'constructor' : v;
+  s.settings.accounts[0].id = 'constructor';
+  const yr = s.years['2030'];
+  for (const k of ['seeds', 'balAdjust', 'overrides'])
+    if (yr[k]) yr[k] = Object.fromEntries(Object.entries(yr[k]).map(([key, v]) =>
+      [key.split('|').map(swap).join('|'), v]));
+  for (const c of yr.categories) if (c.transferTo === first) c.transferTo = 'constructor';
+  const d = H.coerceShape(s);
+  eq(d.settings.accounts[0].id, 'constructor-id');
+  let threw = null;
+  try { H.computeAll(d, TODAY_FIX); } catch (e) { threw = String(e); }
+  eq(threw, null, 'and the plan computes');
+  eq(Object.keys({}).length, 0, 'nothing was written to a prototype');
+});
+t('a goal\'s target and date, and a donation\'s date, are read strictly', () => {
+  const s = fixtureState();
+  s.goals = [{ id: 'a', name: 'A', target: 'lots', targetDate: 5, accounts: [] },
+             { id: 'b', name: 'B', target: '5000', targetDate: '2031-06', accounts: [] },
+             { id: 'c', name: 'C', target: { n: 1 }, targetDate: '2031-06-30', accounts: [] }];
+  s.side = Object.assign({}, s.side, { donations: { '2030': [
+    { date: ['2030-01-01'], cash: -50 }, { date: '2030-02-01', cash: -25 }] } });
+  const d = H.coerceShape(s);
+  eq(d.goals.map(g => [g.target, g.targetDate]),
+     [[undefined, undefined], [5000, '2031-06'], [undefined, '2031-06-30']]);
+  eq(d.side.donations['2030'].map(r => r.date), [undefined, '2030-02-01']);
+});
 t('a junk stop month is deleted rather than believed', () => {
   const s = fixtureState();
   s.years['2030'].categories[0].until = 'whenever';
@@ -1012,8 +1082,8 @@ t('a goal counting Roth contributions saves them on top, and nobody ahead claims
 });
 t('an overdrawn account cannot eat into a queued goal or over-state its claim', () => {
   /* Charles's plan, 2026-11-03: the goals ahead took every positive dollar and
-     an account $8.89 below zero was left over, so Retire Early read $45,991.11
-     while saying it included $46,000.00 of Roth contributions. */
+     an account a few dollars below zero was left over, so a goal read LESS
+     than the Roth contributions it said it included. */
   const s = H.coerceShape(fixtureState());
   s.side.retirementAccounts = [ROTH(undefined, { 2030: 1000 })];
   const computed = H.computeAll(s, TODAY_FIX);
@@ -3835,6 +3905,25 @@ t('the bars add up: the average is over the months that happened', () => {
   const done = H.monthNetSummary(pts.map(p => Object.assign({}, p, { ahead: false })));
   ok(!/still\s+to come/.test(H.monthNetSummaryLine(done, '2030')), 'a finished year has no months to come');
 });
+t('a month with nothing in it is not one that happened', () => {
+  /* 2026-11-12. A plan begun in October divided two months' money by eleven. */
+  const pts = [{ m: '2030-01', v: 0, ahead: false, blank: true },
+    { m: '2030-02', v: 0, ahead: false, blank: true },
+    { m: '2030-03', v: 100, ahead: false }, { m: '2030-04', v: 300, ahead: false },
+    { m: '2030-05', v: 50, ahead: true }];
+  const s = H.monthNetSummary(pts);
+  eq([s.months, s.blank, s.ahead], [2, 2, 1]);
+  approx(s.avg, 200, 'the average is over the two months with figures');
+  ok(/across 2 months/.test(H.monthNetSummaryLine(s, '2030')), 'and the sentence counts those two');
+  const fresh = H.monthNetSummary(pts.slice(0, 2).concat(pts.slice(4)));
+  eq([fresh.months, fresh.avg], [0, null]);
+  ok(/Nothing is recorded for 2030 yet/.test(H.monthNetSummaryLine(fresh, '2030')),
+     'a fresh plan does not report $0.00 across the months before it began');
+  /* And the points say which months those are. */
+  const yr = monthYear('2030-02');
+  const real = H.monthNetPoints({ years: { '2030': yr } }, { '2030': MONTH_COMPUTED }, '2030');
+  eq(real.some(p => p.blank), false, 'a month with figures is never blank');
+});
 t('the Year lens draws the bars under the grid, and a bar opens that month', async () => {
   const { f, W, D } = await auditFrame(1280, 900, 'yearbars');
   try {
@@ -3860,6 +3949,11 @@ t('the Year lens draws the bars under the grid, and a bar opens that month', asy
       'the average is drawn across the bars');
     const target = W.yearMonths(st.years[y])[3];
     ch.options.onClick(null, [{ index: 3 }]);
+    /* 2026-11-12: the render used to run INSIDE the handler and destroy the
+       chart while Chart.js was still dispatching the click — a TypeError on
+       every bar pressed. It must still be standing when the handler returns. */
+    ok(W.Chart.getChart(card.querySelector('canvas')) === ch,
+       'the chart outlives its own click handler');
     await new Promise((r) => setTimeout(r, 100));
     eq(W.finGet().ui.budgetView, 'month', 'a bar opens the Month lens');
     eq(W.finGet().ui.activeMonth, target, 'on the month it stands for');
@@ -10072,6 +10166,45 @@ t('a year that stated no earnings gains no row for them', () => {
   ok(!H.gridToSummary(s, '2020').categoryTotals
     .some(r => r.name === 'Interest & Dividends'));
 });
+t('the fold warning names the rows that OPEN next year from this one', () => {
+  /* 2026-11-12. carry, grow, quarterly and avg start a year built ahead from
+     the year before; only two rules were named, so folding blanked the rest
+     with no warning. */
+  const s = withYearsAhead();
+  eq(H.rulesNeedingYear(s, '2030'), ['Internet'], 'a carried row with nothing stored in 2031');
+  s.years['2031'].cells['internet|2031-01'] = { v: -70, kind: 'actual' };
+  eq(H.rulesNeedingYear(s, '2030'), [], 'once it has its own January it no longer reaches back');
+  delete s.years['2031'].cells['internet|2031-01'];
+  s.years['2031'].categories[0].rule = 'none';
+  eq(H.rulesNeedingYear(s, '2030'), [], 'a row with no rule estimates nothing either way');
+});
+t('the sample\'s net-worth snapshots add up', () => {
+  for (const r of H.coerceShape(H.sampleState()).side.snapshots)
+    eq(r.total, r.liquid + r.invested + r.retirement + r.property - (r.debts || 0), r.date);
+});
+t('the without-bonus line is drawn only where it differs', async () => {
+  /* 2026-11-12. The sample's bonus month is already entered and no year is
+     built ahead, so both plans are the same — and the chart drew a second line
+     on the first under a key describing the gap between them. */
+  const { f, W, D } = await auditFrame(1100, 800, 'nobonusline');
+  try {
+    const st = W.finGet();
+    ok(W.__finTestHooks.planHasBonus(st), 'fixture: the sample has a bonus row');
+    st.ui.activeTab = 'goals';
+    W.render();
+    await new Promise((r) => setTimeout(r, 200));
+    const canvas = D.getElementById('goalChart');
+    ok(canvas, 'fixture: Progress drew its chart');
+    const ch = W.Chart.getChart(canvas);
+    const same = ch.data.datasets.length === 1;
+    const key = /Dotted — the same plan\s+without any bonuses/.test(canvas.closest('.card').textContent);
+    eq(key, !same, 'the key is there exactly when the second line is');
+    if (!same) ok(ch.data.datasets[1].data.some((v, i) => v !== ch.data.datasets[0].data[i]),
+      'and a second line differs somewhere');
+    else ok(!/Without bonuses it ends/.test(canvas.getAttribute('aria-label') || ''),
+      'no without-bonus figure is announced for a line that is not there');
+  } finally { f.remove(); }
+});
 t('converting warns when next year looks back into this one', () => {
   const s = H.coerceShape(fixtureState());
   /* 2030 has a same-month-last-year row, which reads 2029 */
@@ -13477,6 +13610,14 @@ t('the Restore path refuses a backup from a newer build', () => {
   ok(guard < coerce, 'the refusal must come before coerceShape sees the file');
 });
 
+t('Restore works the plan out before it replaces anything', () => {
+  /* Source-pinned: the live handler writes this browser's storage. */
+  const at = APP_SRC.indexOf('computeAll(restored, todayISO());');
+  ok(at > -1, 'the trial run has moved — recheck this test');
+  const after = APP_SRC.slice(at, at + 400);
+  ok(/state = restored;\s*\n\s*claimStorage\(\);[^\n]*\n\s*save\(\);/.test(after),
+     'the plan is assigned and saved only after it has computed');
+});
 t('finAdopt halts on a plan from a newer build instead of adopting it', () => {
   /* Not exercised live, deliberately: the real finAdopt writes this browser's
      fin-state and the halt THROWS with its card drawn over the frame, which

@@ -171,7 +171,9 @@ the one for planning a whole year on a wide screen. Under it sits **Left Over,
 Month by Month** — the same bar chart the Month page carries under its Close card (below), with a
 line over it that adds the year up: what has been left over so far, the average
 month, and roughly where the year ends once the months still to come are
-counted. The average counts only the months that have happened, so the plan's
+counted. The average counts only the months that have happened — and that have
+something in them, so the blank months before a plan began are left out of
+both the count and the average — so the plan's
 own estimates cannot pull it about, and it is drawn across the bars as a
 **dotted** line (dotted because a dash already means "still to come"). Here no
 bar is singled out, and clicking one opens that month on its own page.
@@ -309,7 +311,9 @@ settings show the take-home figure it works out. The salary comes from the
 Compensation tab (the one the year opened on, or the latest one carried forward
 into years with no record), and a bonus already recorded for a year replaces the
 estimate. The bonus opens as its own amount in that month's cell. A share link
-that carries no salary carries each year's take-home figure instead. The
+that carries no salary carries each year's take-home figure instead. A share outside its range (the bonus from 0 to 100% of salary, the take-home
+share more than 0 and up to 100%) is refused by name and the box keeps what it
+held. The
 Compensation tab is one person's salary, so a row tagged to somebody else
 estimates no bonus — its settings say so rather than lend a second earner the
 first one's.
@@ -326,7 +330,9 @@ Counts Toward It*, offered when there is a Roth IRA. What you put into a Roth
 IRA (not its growth) can be withdrawn at any time without tax or penalty, which
 is what makes it early-retirement money. The goal adds the contributions typed
 on the Retirement tab, each year counted from its January; years not typed yet
-repeat the latest year's amount, so the pace check sees the basis keep growing.
+repeat the latest year's amount — account by account, so a Roth IRA typed
+through 2025 keeps its own amount going while another is typed through 2026 —
+and the pace check sees the basis keep growing.
 The goals ahead in a queue cannot claim it — no budget account holds it — and
 the tile says how much of its figure it is. A goal saved for a child counts
 only that child's Roth IRA. And an overdrawn account cannot eat into it: when
@@ -519,7 +525,9 @@ the window closes is refused and the box goes back to what it was.
 **Clearing the date, or moving it later, puts the row back** into the years
 you've built ahead that it had been taken out of — in the same place in the
 list, estimating from the year before like a freshly built year would. Its old
-figures in those years don't come back (they went when the row did). A row
+figures in those years don't come back (they went when the row did). A year
+built ahead keeps a stop month of its own: changing something else about the
+row from an earlier year leaves it where it was. A row
 that's missing from a later year for any other reason — say you deleted it from
 that year alone — is left alone.
 
@@ -2229,8 +2237,10 @@ choice actually uses.
   closes it first, and the chart is still there behind it. (Fixed 2026-09-04;
   the dots on a full-screen card used to do nothing at all.)
 - **The budget grid is keyboard-operable**: Tab into it, move between cells
-  with the arrow keys, and press Enter to edit the one you're on. Every
-  clickable row on the other tabs — a donation, a trip line, a comp year, a
+  with the arrow keys, and press Enter to edit the one you're on. A cell that
+  takes the keyboard is brought out from under the pinned Category and Total
+  columns, and when you close a row's settings the focus goes back to that row.
+  Every clickable row on the other tabs — a donation, a trip line, a comp year, a
   goal card, a gathered note — takes a tab stop of its own, so Enter or Space
   opens it without a mouse.
 - **A table too wide for its card scrolls from the keyboard too.** On a phone
@@ -2395,7 +2405,8 @@ file on disk.
   day, which is what ticks **Backup downloaded** on the month's
   [Close card](#closing-a-month); a year's CSV is remembered the same way.
 - **Restore from Backup…** reads one back. It's the same path Charlie's one-time
-  spreadsheet import uses.
+  spreadsheet import uses. The file is worked out in full before it replaces
+  anything, so one the app cannot compute is refused with the plan untouched.
 - **Import a Year's CSV…** brings one budget year back from a spreadsheet —
   see [CSV, Out and Back](#csv-out-and-back).
 - **Compare with a Backup…** opens a saved plan beside the live one.
@@ -2484,7 +2495,10 @@ history, so a Giving link carries it).
 
 Trimming the years shortens the **link**, never the figures: the oldest year
 kept is re-seeded with the balances it opened on, so the recipient sees the
-same numbers you do.
+same numbers you do. Two things travel for that reason even when their tab or
+their years do not: a paycheck bonus goes as each year's take-home figure
+whenever the link could not work it out for itself, and a Roth IRA keeps every
+year of contributions while a goal in the link is counting them.
 
 It's a snapshot — later edits don't appear, and **a link can't be withdrawn
 once sent**, so treat one like emailing a spreadsheet.
