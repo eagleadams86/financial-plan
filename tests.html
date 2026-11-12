@@ -24308,6 +24308,78 @@ t('the chosen Year / Month segment is ringed like the chosen year chip, in every
   } finally { f.remove(); }
 });
 
+/* ── A bonus share outside its range is refused out loud (WCAG 3.3.1) ───────
+   The paycheck bonus keeps each share only when it is in range — 0 to 100 for
+   the bonus, above 0 to 100 for what is kept — and a figure outside it was
+   dropped in silence: type 500, Tab, and the box emptied itself. Now the box
+   states its range (attributes and hint), the figure is turned away BY NAME
+   with the range it would have taken, and what the box held stays. Both ends
+   of each range are pinned, because "0 is allowed" is true of one share and
+   not the other. */
+t('a bonus percentage outside its range is refused by name and the box keeps what it held', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'bonusrange');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    D.getElementById('tab-budget').click();
+    await wait(250);
+    D.querySelector('.grid th.lbl[data-edit="category"][data-id="rosa-pay"]').click();
+    await wait(250);
+    ok(D.getElementById('rowDialog').open, 'fixture: the paycheck row’s editor is open');
+    const box = (k) => D.getElementById('rf-' + k);
+    const row = () => W.finGet().years[W.activeYearKey()].categories.find((c) => c.id === 'rosa-pay');
+    const toast = D.getElementById('toast');
+    const type = async (k, v) => {
+      toast.textContent = '';
+      box(k).value = v;
+      box(k).dispatchEvent(new W.Event('change', { bubbles: true }));
+      await wait(120);
+      return toast.textContent;
+    };
+    eq([row().bonusPct, row().bonusKeep], [0.065, 0.6], 'fixture: the sample paycheck has a bonus');
+    ok(box('bonusPct').getClientRects().length && box('bonusKeep').getClientRects().length,
+      'fixture: both share boxes are showing');
+
+    /* The range is stated where the box is read. */
+    for (const k of ['bonusPct', 'bonusKeep']) {
+      eq([box(k).min, box(k).max], ['0', '100'], k + ': the box carries its limits');
+      const hint = D.getElementById(box(k).getAttribute('aria-describedby'));
+      ok(hint && /0\b.*\b100\b/.test(hint.textContent), k + ': and its hint states the range',
+        hint && hint.textContent.slice(-40));
+    }
+    ok(/From 0 to 100/.test(D.getElementById('rf-bonusPct-hint').textContent)
+      && /More than 0, up to 100/.test(D.getElementById('rf-bonusKeep-hint').textContent),
+      'the two hints say which end is open');
+
+    /* Outside: refused by name, the box and the plan left as they were. */
+    for (const [k, v, was, stored, takes] of [
+      ['bonusPct', '500', '6.5', 0.065, 'from 0 to 100'],
+      ['bonusPct', '-5', '6.5', 0.065, 'from 0 to 100'],
+      ['bonusKeep', '150', '60', 0.6, 'more than 0, up to 100'],
+      ['bonusKeep', '0', '60', 0.6, 'more than 0, up to 100'],
+    ]) {
+      const said = await type(k, v);
+      eq(box(k).value, was, k + ' ' + v + ': the box goes back to what it held');
+      eq(row()[k], stored, k + ' ' + v + ': and the plan keeps it');
+      ok(said.includes('“' + v + '”') && said.includes(takes) && said.includes('left it as it was'),
+        k + ' ' + v + ': the refusal names the figure and the range', said);
+    }
+    /* The ends that ARE in range go in without a word. */
+    for (const [k, v, stored] of [['bonusPct', '0', 0], ['bonusPct', '100', 1],
+                                  ['bonusKeep', '100', 1], ['bonusKeep', '0.5', 0.005]]) {
+      const said = await type(k, v);
+      eq(row()[k], stored, k + ' ' + v + ': is kept');
+      eq(said, '', k + ' ' + v + ': and nothing is said');
+    }
+    /* An emptied box is still "no figure", not an error. */
+    const said = await type('bonusPct', '');
+    ok(row().bonusPct === undefined && said === '', 'an emptied box clears the share, silently', said);
+
+    /* The estimate is a figure that moves while another box is typed in. */
+    eq(D.getElementById('rf-bonusPreview').getAttribute('role'), 'status',
+      'the Bonus estimate readout is announced as it changes');
+  } finally { f.remove(); }
+});
+
 group('A version number decides which copy is newer, not a clock (2026-10-26)');
 /* Golf Handicap's offline-overwrite fix, ported: syncPlan + makeCloudSync in
    the classic script, every push a transaction that writes only while the
