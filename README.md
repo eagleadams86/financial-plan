@@ -54,7 +54,8 @@ it, the same rule that shows no net-worth tile for a part you have never
 recorded. They appear together the moment a plan exists. (A read-only link is
 the exception: its tabs are what the sender chose to send.)
 
-Open the page and press **Start Fresh**. That sets up the current year's
+Open the page and press **Start Fresh** (the welcome card also offers **Load
+Sample Data** and **Restore a Backup**). That sets up the current year's
 budget with a starter set of rows — all renameable, deletable and
 reorderable — and every tab's ＋ Add button does the rest. No import, no
 account, nothing to configure first.
@@ -167,7 +168,7 @@ on is where it opens next time, on every device you sync to.
 
 **Year** is the grid: twelve columns of rows, the shape the spreadsheet had, and
 the one for planning a whole year on a wide screen. Under it sits **Left Over,
-Month by Month** — the same bar chart the Month page ends on (below), with a
+Month by Month** — the same bar chart the Month page carries under its Close card (below), with a
 line over it that adds the year up: what has been left over so far, the average
 month, and roughly where the year ends once the months still to come are
 counted. The average counts only the months that have happened, so the plan's
@@ -178,8 +179,8 @@ bar is singled out, and clicking one opens that month on its own page.
 **Month** is one month laid out as a page — the shape for a phone, and for
 fixing a single row without pinching into a thirteen-column table. It opens on
 the current month and steps back and forward with the ‹ › arrows, across a year
-end as easily as within one; a **This month** button appears once you have
-wandered off it, and the strip itself lists every month the plan holds — this
+end as easily as within one; a **This month** button, greyed out while you are
+on it, takes you back, and the strip itself lists every month the plan holds — this
 month underscored wherever it has got to, and every month still to come
 underlined with dots, the same mark a year that hasn't begun wears. It draws:
 
@@ -308,7 +309,10 @@ settings show the take-home figure it works out. The salary comes from the
 Compensation tab (the one the year opened on, or the latest one carried forward
 into years with no record), and a bonus already recorded for a year replaces the
 estimate. The bonus opens as its own amount in that month's cell. A share link
-that carries no salary carries each year's take-home figure instead.
+that carries no salary carries each year's take-home figure instead. The
+Compensation tab is one person's salary, so a row tagged to somebody else
+estimates no bonus — its settings say so rather than lend a second earner the
+first one's.
 
 **Progress shows what each goal owes to the bonus.** With a bonus set up, the
 plan is worked out a second time with every bonus taken out. A goal whose date
@@ -324,7 +328,11 @@ is what makes it early-retirement money. The goal adds the contributions typed
 on the Retirement tab, each year counted from its January; years not typed yet
 repeat the latest year's amount, so the pace check sees the basis keep growing.
 The goals ahead in a queue cannot claim it — no budget account holds it — and
-the tile says how much of its figure it is.
+the tile says how much of its figure it is. A goal saved for a child counts
+only that child's Roth IRA. And an overdrawn account cannot eat into it: when
+the goals ahead have taken every dollar and one of the goal's accounts is below
+zero, what is left of the accounts is held at $0.00 before the contributions
+are added, so the tile never shows less than the contributions it includes.
 
 **Both averages say which months they're over**, because neither is quite what
 its name suggests. *Average of the months so far* falls back to **last year's**
@@ -1666,7 +1674,7 @@ Equity, not a balance: nothing flows through a house, so the budget engine
 never sees these rows, and the [Progress](#progress) tab's net worth is where
 the figure lands.
 
-#### Looking a value up
+#### Looking a Value Up
 
 A value you state goes stale the moment you look away, so each property's
 editor carries a link to somewhere that will tell you what it is worth today —
@@ -1805,7 +1813,8 @@ Each button wears a glyph in front of its word. They are plain text
 characters rather than an icon font or emoji, so nothing extra is fetched for
 a header that paints before anything else runs, and each takes the theme's own
 text colour — no meaning ever rides on hue alone. A screen reader is told to
-skip them; the word beside each one is the whole label.
+skip them; the word beside each one is the whole label. The one exception is
+the sync button, which keeps its cloud ☁️.
 
 **The row is always one line that scrolls sideways, beside the app's name.**
 When the controls don't all fit, the row keeps its place next to the name and
@@ -2060,7 +2069,9 @@ editor leaves you on that row in its new place.
 ### Arranging Things
 
 - **The tabs are yours to arrange** — drag one anywhere along the bar, with a
-  mouse or a finger, or hold Alt and use the arrow keys. The order is saved
+  mouse (or a finger on a tablet-width screen), or hold Alt and use the arrow
+  keys. On a phone a sideways swipe scrolls the bar instead, so reorder there
+  with a keyboard or on another device. The order is saved
   and follows you to your other devices.
 - **Budget rows drag into place** — grab a row's name and move it up or down
   within its own section. The order follows into the years you've built ahead,
@@ -2380,14 +2391,14 @@ four palettes.
 **⇩ Back Up** in the header opens one dialog for everything to do with the
 file on disk.
 
-- **Export** writes `money-map-YYYY-MM-DD.json`. The app remembers the
+- **Download Backup (JSON)** writes `money-map-YYYY-MM-DD.json`. The app remembers the
   day, which is what ticks **Backup downloaded** on the month's
   [Close card](#closing-a-month); a year's CSV is remembered the same way.
-- **Restore JSON…** reads one back. It's the same path Charlie's one-time
+- **Restore from Backup…** reads one back. It's the same path Charlie's one-time
   spreadsheet import uses.
-- **Import a year's CSV…** brings one budget year back from a spreadsheet —
+- **Import a Year's CSV…** brings one budget year back from a spreadsheet —
   see [CSV, Out and Back](#csv-out-and-back).
-- **Compare with a backup…** opens a saved plan beside the live one.
+- **Compare with a Backup…** opens a saved plan beside the live one.
 
 ### Comparing Two Plans
 
@@ -2415,8 +2426,8 @@ answer is kept and dashed, because that is itself the finding. More spending
 and more owed read as worse, not better, and a gap between two percentages is
 stated in points.
 
-Folded away at the foot of that dialog, under **Start again**, is **Delete all
-data**. It's behind a fold on purpose: the one irreversible action in the app
+Folded away at the foot of that dialog, under **Start Again**, is **Delete All
+Data**. It's behind a fold on purpose: the one irreversible action in the app
 shouldn't sit a mis-click away from Export.
 
 Pressing it opens a confirmation of its own that:
@@ -2434,7 +2445,8 @@ plan — "everything" includes the credential.
 emptied plan goes out through the normal save path, so the phone sees it land
 and asks *"another device has cleared its data — clear this one too?"*;
 cancelling keeps the phone's copy and restores it everywhere. The surviving
-document holds `{ json: "<blank plan>", updatedAt }` — no name, no month and
+document holds `{ json: "<blank plan>", updatedAt, rev }` (`rev` is the
+version counter described below) — no name, no month and
 no figure in it.
 
 *(Until 2026-08-14 this button deleted the Firestore document and signed you
@@ -2638,7 +2650,8 @@ This is `sw.js`, a small service worker, and it was refused here for a long
 time. Two rules make it safe enough to have changed that:
 
 **It only ever caches files that are already public in this repo** — the page
-itself, the vendored chart library, the stylesheet, the icons. Never your
+itself, the vendored chart library, the stylesheet, the icons, the privacy
+page and the install manifest. Never your
 plan, never a sync reply, never a price quote. That matters because these apps
 share one browser origin, and a cache is shared across the whole origin rather
 than belonging to one app: keeping it to public files means there is nothing
@@ -2646,9 +2659,10 @@ in there that could not be read straight off GitHub anyway.
 
 **It always tries the network first.** The cache is a fallback for a
 connection that actually failed, never a shortcut taken while you are online.
-So you can never be quietly running yesterday's version — if the network
-answers, you get the current app, every time. Offline costs you a few seconds'
-wait before it gives up and uses the saved copy.
+If the network answers within five seconds you get the current app, every
+time. Offline falls back to the saved copy at once; on a connection slower
+than five seconds it shows the saved copy and fetches the current one in the
+background, ready for the next time you open it.
 
 Belt and braces on the one risk that remains: if this device is running an
 older version from its cache and finds a plan saved by a newer one — another
@@ -2702,12 +2716,17 @@ the same door a backup does, which is worth saying because `coerceShape` is buil
 shape rather than throw: a key in the wrong place there does not fail, it settles to a default and
 the feature it was meant to show draws $0.00 or nothing at all. Its tests therefore read the
 values the way their readers do rather than only counting entries. **The figures are
-invented**, the app says so in its own header while the sample is loaded, and the tax bands are
+invented**, the app says so when you load it, and the tax bands are
 round numbers labelled *"not real tax brackets"* in the field the reader is shown — the app's
 promise that it ships no tax figure of its own is kept by making the demo's obviously fake. It
 saves like any other plan and is removed with Back Up → Start Again.
 
-**State is versioned.** The schema is `7` today, as the `SCHEMA` constant.
+**State is versioned.** The schema is `10` today, as the `SCHEMA` constant.
+Schemas 8, 9 and 10 rewrite nothing — each is a gate, so that a plan saved
+after the change is refused by a build from before it rather than misread: 8
+split an account's rate into interest and growth, 9 moved a balance month's
+note beside that month's corrections, and 10 let a folded year keep the months
+it was folded from.
 Schema 7 moved what was owed off the property rows and into debts of their own,
 once — a pure re-filing that leaves the net worth identical to the cent, since
 a debt secured on a property reduces that property's equity exactly as the old
@@ -2793,7 +2812,8 @@ CI (`.github/workflows/tests.yml`) runs the same page headless on every push.
 publishes `tests.html` next to the app, and on that origin the hidden frame
 would be a live session — a signed-in browser would start real cloud sync
 inside a frame nobody can see. Anywhere but localhost it refuses, explains
-itself, and changes nothing. The frame is also marked `data-fin-tests`, which
+itself, and changes nothing — it makes one sign-in-free read of GitHub's public
+API to show whether the latest CI run was green, and that is all. The frame is also marked `data-fin-tests`, which
 the app's sync module checks so it never initialises inside the harness — the
 same guard as the sibling apps.
 
@@ -2805,7 +2825,7 @@ Charlie's own one-time migration from the Numbers spreadsheet:
 python3 import_xlsx.py "~/Downloads/Financial Plan.xlsx"
 ```
 
-Then open the app → **⇩ Back Up** → **Restore JSON…** → pick
+Then open the app → **⇩ Back Up** → **Restore from Backup…** → pick
 `financial-plan-data.json`.
 
 `migrate_local_data.py` does the one thing the app deliberately won't do to
@@ -2853,9 +2873,9 @@ total is unchanged, writes a new file beside the input, and never modifies the
 original.
 
 **Why there is a `package.json` in a repo with no build step.** It is not a package and it
-installs nothing — it exists so Dependabot has a manifest to scan. Its only entry is the
-Chart.js that is *vendored* as `chart.min.js` beside the app, pinned exactly, and CI passes
-`--omit=dev` so npm never downloads it. Dependabot cannot re-vendor a file, so a version-bump
+installs nothing — it exists so Dependabot has a manifest to scan. Its two entries are the
+Chart.js that is *vendored* as `chart.min.js` beside the app and the Firebase SDK the page
+loads by URL, both pinned exactly, and CI passes `--omit=dev` so npm never downloads either. Dependabot cannot re-vendor a file, so a version-bump
 PR would otherwise raise the manifest while the app went on serving the old bytes; a test pins
 the two to the same version, which makes a manifest-only bump fail and turns the PR into the
 right instruction — update the file too, in all four repos that carry it.
@@ -2902,10 +2922,10 @@ not have run yet, and the button has to be pressable in order to be what causes 
 
 ## Firebase Version
 
-All three sync apps are on the **same** Firebase version, moved together, exactly like the
+All six sync apps are on the **same** Firebase version, moved together, exactly like the
 vendored Chart.js: `package.json` pins it for Dependabot and `tests.html` pins the manifest to
 the `firebasejs/…` URL in `index.html`, so a manifest-only bump fails. Bumping means changing
-the URL and the pin in the same commit, in all three repos, and then proving a real Google
+the URL and the pin in the same commit, in all six repos, and then proving a real Google
 sign-in still works on the live origin.
 
 ## The Landmarks (2026-08-21)
