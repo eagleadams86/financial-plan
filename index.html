@@ -24743,6 +24743,9 @@ function buildFields(fields, values, link) {
          type. */
       input = document.createElement('p');
       input.className = 'field-readout';
+      /* `status`, like the split tally above: a figure that moves as you type
+         in ANOTHER box is one a reader who cannot see it is never told about. */
+      input.setAttribute('role', 'status');
       input.setAttribute('aria-labelledby', `rf-${f.key}-lbl`);
     } else if (f.type === 'note') {
       input = document.createElement('textarea');
@@ -24779,6 +24782,10 @@ function buildFields(fields, values, link) {
          makes the browser reject anything finer as invalid. */
       if (f.type === 'percent') {
         input.step = 'any'; input.inputMode = 'decimal';
+        /* A percent box may state its range too, the way a number box does
+           below (2026-11-12) — `rangeRefusals` is what speaks for it. */
+        if (f.min !== undefined) input.min = f.min;
+        if (f.max !== undefined) input.max = f.max;
         /* AND IT SHOWS YOU WHAT IT KEPT. `readFields` rounds a percent to 2dp
            on the way to state (`dp` asks for more), so typing 3.456 stored
            3.46 and the box went on reading 3.456 until the dialog was next
@@ -25263,6 +25270,27 @@ function unreadableFields(fields) {
   });
 }
 
+/* A PERCENT OUTSIDE THE RANGE ITS BOX STATES (2026-11-12). Only percent boxes
+   that declare one — today the paycheck bonus's two shares. A number box with
+   a `min`/`max` is left to its own section, which may have a kinder answer
+   than a refusal (the goal editor caps months of expenses and says so).
+   Returns the fields with the words for what each will take. */
+function rangeRefusals(fields) {
+  return fields.filter((f) => f && !f.sec && f.type === 'percent'
+    && (f.min !== undefined || f.max !== undefined)).map((f) => {
+    const el = F(`rf-${f.key}`);
+    const n = el && el.value.trim() !== '' ? parseFloat(el.value) : NaN;
+    if (Number.isNaN(n)) return null;       // empty, or unreadable — not this one's to refuse
+    const low = f.min !== undefined && (f.minOpen ? n <= f.min : n < f.min);
+    const high = f.max !== undefined && n > f.max;
+    if (!low && !high) return null;
+    const takes = f.min === undefined ? `no more than ${f.max}`
+      : f.max === undefined ? `${f.minOpen ? 'more than' : 'at least'} ${f.min}`
+      : f.minOpen ? `more than ${f.min}, up to ${f.max}` : `from ${f.min} to ${f.max}`;
+    return { f, el, takes };
+  }).filter(Boolean);
+}
+
 /* A MONTH BOX HALF WAY THROUGH ITS YEAR (2026-10-30). Chrome's month input
    fills the year segment a digit at a time and reports each step as a whole
    value — typing 2029 reads 0002-12, 0020-12, 0202-12 and only then 2029-12 —
@@ -25442,6 +25470,22 @@ function commitRow(ctx, speak) {
       ? (months ? 'aren’t whole months' : 'aren’t numbers')
       : (months ? 'isn’t a whole month' : 'isn’t a number')}`
       + ` — left ${bad.length > 1 ? 'them as they were' : 'it as it was'}`;
+  }
+  /* And a percent outside its stated range, the same way and for the same
+     reason: the section's `save` would drop it without a word, and the box
+     would come back empty. What it held stays, and the sentence names the
+     figure that was typed and the range that would have been taken. */
+  const off = rangeRefusals(ctx.spec);
+  if (off.length) {
+    const was = JSON.parse(ctx.opened);
+    const named = off.map(({ f, el, takes }) => {
+      const raw = el.value.trim();
+      values[f.key] = was[f.key];
+      setFieldValue(f, el, was);
+      return `“${raw.length > 40 ? raw.slice(0, 40) + '…' : raw}” in ${f.label} has to be ${takes}`;
+    });
+    const said = `${andList(named)} — left ${off.length > 1 ? 'them as they were' : 'it as it was'}`;
+    refused = refused ? `${refused}. ${said}` : said;
   }
   /* What is now written down, so a close that follows with nothing further
      typed knows it has nothing to do. */
@@ -26049,14 +26093,25 @@ const EDITORS = {
       { key: 'bonusMonth', label: 'Yearly bonus arrives in', type: 'select',
         showIf: (v) => v.rule === 'paycheck',
         options: [['', 'No bonus'], ...MONTH_FULL.map((n, i) => [String(i + 1), n])] },
-      { key: 'bonusPct', label: 'Bonus, % of salary', type: 'percent',
+      /* THE RANGE IS STATED, AND A FIGURE OUTSIDE IT IS REFUSED OUT LOUD
+         (2026-11-12, WCAG 3.3.1). `save` and the boundary keep each share only
+         when it is in range — 0 to 100 for the bonus, above 0 to 100 for what
+         is kept of it — and anything else was simply dropped: type 500, Tab,
+         and the box emptied itself with nothing said. The limits below are
+         those same two ranges, so `commitRow` can turn the figure away by name
+         before it reaches `save`. `minOpen` is "more than", for the share that
+         cannot be nothing; the box's own `min` stays 0 either way, because a
+         fractional one would set the spin arrows stepping from it. */
+      { key: 'bonusPct', label: 'Bonus, % of salary', type: 'percent', min: 0, max: 100,
         showIf: (v) => v.rule === 'paycheck' && !!v.bonusMonth,
         hint: 'Before tax, of the salary on the Compensation tab. Not guaranteed? '
-            + 'Pick a figure you would usually beat.' },
-      { key: 'bonusKeep', label: 'Take-home share', type: 'percent',
+            + 'Pick a figure you would usually beat. From 0 to 100.' },
+      { key: 'bonusKeep', label: 'Take-home share', type: 'percent', min: 0, max: 100,
+        minOpen: true,
         showIf: (v) => v.rule === 'paycheck' && !!v.bonusMonth,
         hint: 'How much of the bonus reaches your account after withholding — the '
-            + 'paycheck it came in, less an ordinary one, over the bonus.' },
+            + 'paycheck it came in, less an ordinary one, over the bonus. '
+            + 'More than 0, up to 100.' },
       { key: 'bonusPreview', label: 'Bonus estimate', type: 'readout', wide: true,
         showIf: (v) => v.rule === 'paycheck' && !!v.bonusMonth },
       { key: 'every', label: 'Months between payments', type: 'number', step: 1,
