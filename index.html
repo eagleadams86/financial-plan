@@ -16740,21 +16740,30 @@ function contribYears(st, filter) {
    one typed repeat that year's amount, Charles's choice: the basis keeps
    growing at the rate he is contributing, and typing a later year replaces
    the guess. Retirement accounts have no id, so nothing here names one. */
+/* EACH ACCOUNT REPEATS ITS OWN LATEST YEAR (2026-11-12). The years used to be
+   added across accounts first and the household's latest year repeated — so
+   with two Roth IRAs typed through different years, the one typed further
+   stood for both: typing 2026 into one account dropped the other's yearly
+   amount out of every year from 2026 on, and the goal's date moved LATER for
+   having been told more. `yearly` is what the plan assumes per year once every
+   account is past its typed years; `lastTyped` is the latest year typed
+   anywhere, which is where that whole figure applies from. */
 function rothBasisAt(st, goal, year) {
-  const typed = {};
+  let basis = 0, yearly = 0, lastTyped = null, assumed = false;
   for (const a of ((st && st.side && st.side.retirementAccounts) || [])) {
     if (a.type !== 'roth-ira' || (goal && goal.for && a.owner !== goal.for)) continue;
+    const typed = {};
     for (const [y, v] of Object.entries(a.contribs || {}))
-      if (/^\d{4}$/.test(y) && typeof v === 'number') typed[y] = (typed[y] || 0) + v;
+      if (/^\d{4}$/.test(y) && typeof v === 'number') typed[y] = v;
+    const years = Object.keys(typed).sort();
+    if (!years.length) continue;
+    const last = years[years.length - 1];
+    basis += years.filter(y => +y <= +year).reduce((t, y) => t + typed[y], 0);
+    if (+year > +last) { basis += typed[last] * (+year - +last); assumed = true; }
+    yearly += typed[last];
+    if (lastTyped === null || +last > +lastTyped) lastTyped = last;
   }
-  const years = Object.keys(typed).sort();
-  if (!years.length) return { basis: 0, yearly: 0, lastTyped: null, assumed: false };
-  const last = years[years.length - 1];
-  const yearly = round2(typed[last]);
-  let basis = years.filter(y => +y <= +year).reduce((t, y) => t + typed[y], 0);
-  const assumed = +year > +last;
-  if (assumed) basis += yearly * (+year - +last);
-  return { basis: round2(basis), yearly, lastTyped: last, assumed };
+  return { basis: round2(basis), yearly: round2(yearly), lastTyped, assumed };
 }
 
 /* ── Household ─────────────────────────────────────────────────────────────
@@ -26404,9 +26413,18 @@ const EDITORS = {
            the `limitsFor` discipline: a field that changes what the engine
            computes is checked where it is WRITTEN, not only where a stored plan
            is read. Deleted when empty, never `''` (the Firestore rule). */
-        if (/^\d{4}-(0[1-9]|1[0-2])$/.test(v.until || '')) cat.until = v.until;
+        /* A YEAR AHEAD KEEPS ITS OWN STOP unless this save moved the field
+           (2026-11-12). A stop typed from 2027 lives on 2027's row and not on
+           2026's — the row runs all of 2026 — so a save from 2026 that touched
+           something else used to "match" 2027 to it and delete the stop, with
+           the row still missing from 2028: half un-stopped, and nothing said. */
+        if (cat !== own && !untilMoved) return;
+        if (untilNow) cat.until = untilNow;
         else delete cat.until;
       };
+      const own = ds.id ? yr.categories.find(c => c.id === ds.id) : null;
+      const untilNow = /^\d{4}-(0[1-9]|1[0-2])$/.test(v.until || '') ? v.until : '';
+      const untilMoved = !own || (own.until || '') !== untilNow;
       const ahead = projectionsAfter(ds.year);
       const yrs = [yr, ...ahead.map(y => state.years[y])];
       if (ds.id) {
@@ -33844,8 +33862,17 @@ function trimShareYearMaps(data, cutoff, ceiling) {
   const s = data.side || {};
   for (const k of ['comp', 'bonuses', 'limits', 'donations'])
     if (s[k]) s[k] = trimShareYearMap(s[k], cutoff, ceiling);
+  /* A Roth IRA's contributions are NOT trimmed while a carried goal counts them
+     (2026-11-12). That goal's figure is a running sum of every year typed, so a
+     "last year only" window handed the recipient a goal several years of
+     contributions short of the sender's — a different saved figure and a later
+     date, on a link whose whole promise is the sender's own numbers. The years
+     travel because the figure is made of them; no other account type is read
+     this way, so the rest are trimmed exactly as before. */
+  const rothCounted = (data.goals || []).some(g => g && g.countRothBasis === true);
   for (const a of s.retirementAccounts || [])
-    if (a.contribs) a.contribs = trimShareYearMap(a.contribs, cutoff, ceiling);
+    if (a.contribs && !(rothCounted && a.type === 'roth-ira'))
+      a.contribs = trimShareYearMap(a.contribs, cutoff, ceiling);
   /* Cutoff only, and never the newest — see trimTaxYearMap. */
   for (const j of TAX_JURISDICTIONS)
     if (s.tax && s.tax[j]) s.tax[j] = trimTaxYearMap(s.tax[j], cutoff);
@@ -33979,15 +34006,29 @@ function reseedShareYears(data) {
    link without `side.comp` would hand the recipient a bonus of nothing — a
    different plan from the one shared. So each carried year's row freezes to
    the take-home figure the sender's engine used for that year, and the share
-   and salary behind it stay home. Pure over the payload; `st` is the sender. */
+   and salary behind it stay home. Pure over the payload; `st` is the sender.
+
+   THE TEST IS THE FIGURE, NOT THE BRANCH (2026-11-12). This used to return
+   early whenever `data.side.comp` existed — and it always exists: the payload's
+   `side` starts as a blank state's, whose `comp` is `{}`, and an empty object
+   is truthy. So the freeze never ran on a real link and every Budget or
+   Progress link without the Compensation tab showed a plan with no bonus in
+   it. Asking "is the branch there" was also the wrong question when it IS
+   there: a year window trims `comp` and `bonuses`, and a salary carried forward
+   from a year outside the window goes with them. So each row is worked out
+   twice — as the sender's engine has it and as the payload alone would — and
+   frozen wherever the two differ. */
 function freezePaycheckBonuses(data, st) {
-  if (data.side && data.side.comp) return data;
   for (const [yearKey, yr] of Object.entries(data.years || {})) {
     if (!yr || yr.kind !== 'grid') continue;
     for (const cat of yr.categories || []) {
       if (cat.rule !== 'paycheck' || !cat.bonusMonth) continue;
       const m = `${yearKey}-${String(cat.bonusMonth).padStart(2, '0')}`;
-      cat.bonusTakeHome = paycheckBonus(st, cat, m);
+      const want = paycheckBonus(st, cat, m);
+      let got;
+      try { got = paycheckBonus(data, cat, m); } catch (e) { got = NaN; }
+      if (got === want) continue;
+      cat.bonusTakeHome = want;
       delete cat.bonusPct; delete cat.bonusKeep;
     }
   }
