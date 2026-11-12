@@ -968,7 +968,7 @@ suite passed while the card was wrong.
   localStorage key `fin-zoom` beside the theme, never in state: it describes a
   screen, not a plan, so it must not sync or ride along in a backup. Applied in
   the head boot script as well, for the same reason the theme is — otherwise the
-  page paints at 100% and jumps a frame later. Quarter steps in the header
+  page paints at 100% and jumps a frame later. 5% steps (since 2026-09-21) in the header
   picker, an exact percentage in Preferences; a custom figure is injected into
   the picker as its own option so the two can never disagree.
   **FIVE things break under zoom, and all five are the same root cause — CSS
@@ -1726,9 +1726,10 @@ suite passed while the card was wrong.
     OUTSIDE the successor's set — so the moment pred stops counting the shared
     account, every dollar it holds is "elsewhere", its whole unmet target
     becomes the claim, and it is levied against an account pred does not name
-    and cannot reach. On Charles's own plan, moving Emergencies ($37,026) off
-    Cash Mgmt left Renovations reading $4,905 of the $36,701 sitting in an
-    account nothing ahead of it could touch. `goalClaim` returns 0 unless
+    and cannot reach. On Charles's own plan, moving the first goal off the
+    shared account left the second reading a fraction of a balance sitting in an
+    account nothing ahead of it could touch (the figures are not recorded here —
+    this repo is public). `goalClaim` returns 0 unless
     pred's accounts and the successor's share one.
     - **The test is STRUCTURAL, never a balance, and that is not style.** The
       same claim is the threshold a sweep row starts at and the figure a
@@ -1750,8 +1751,8 @@ suite passed while the card was wrong.
       three-way partition, and inventing a number for it is what this fixes.
     - **Nothing moves where the queue meets on an account** — sharing one is
       enough, and from there the arithmetic is untouched. Verified against the
-      real plan: with all three goals on Cash Mgmt the tiles read $37,026 /
-      $4,905 / $0 before and after, and the real-data cross-check passes.
+      real plan: with all three goals on one account the tiles read the same
+      before and after, and the real-data cross-check passes.
   - **THE GOALS AHEAD DRAW, ACCOUNT BY ACCOUNT, IN THE READER'S ORDER
     (2026-09-07, asked for — and it SUPERSEDES the inferred shortfall rule
     above).** Charles: *"i want the goals to take the order into account or
@@ -1792,8 +1793,8 @@ suite passed while the card was wrong.
     - **This CHANGES figures for a plan whose queue meets on a shared account
       listed above the goal's other accounts** — four suite tests had to state
       an order to keep their old answers, and each now tests both orders. On
-      Charles's plan the tiles read $37,026 / $4,904.94 / $0 / $13,555.98,
-      which is what he asked for.
+      Charles's plan the four tiles read what he asked for (figures not
+      recorded here — this repo is public).
     - **A per-GOAL order was considered and not built.** One list for the plan
       is what he asked for ("or let me set the order manually" — the Household
       list already is manual), and a second ordering UI inside every goal is a
@@ -1808,7 +1809,7 @@ suite passed while the card was wrong.
       `computeGoals` subtracted `claimed` from everything the goal held,
       including accounts NO goal ahead of it counts. Retire Early — counting
       Long-term Savings on top of the six accounts the three goals ahead of it
-      share — read $0.00 with $13,555.98 sitting in Long-term that nothing
+      share — read $0.00 with a five-figure balance sitting in Long-term that nothing
       else had a claim on. `saved` is now `mine + max(0, shared − claimed)`,
       where `shared` is the goal's balances in `claimAccounts(g, goals)` and
       `mine` is the rest. `mine` is 0 for the ordinary queue on one account,
@@ -1821,15 +1822,15 @@ suite passed while the card was wrong.
         ARRIVES lands in the swept accounts, where the goals ahead are waiting
         for it. The consequence is that `saved + gap ≠ target` for a queued
         goal, which was already true and is deliberate.
-      - **The FOOT had to say so or the tile cannot be added up**: $55,486.92
-        held, $13,555.98 saved, a claim of $137,026.00. `mine > 0` appends
+      - **The FOOT had to say so or the tile cannot be added up**: it held
+        several times what it showed as saved, under a claim larger than both. `mine > 0` appends
         ", out of the accounts they share"; the ordinary queue's sentence is
         untouched, and `HELP.goalClaims` carries the same rule in words.
     - **A later goal may still read $0 for an honest reason**, and the two
       look identical on the tile: on that plan, unticking Cash Mgmt from
-      Emergencies lifts Renovations to $36,701 and leaves New Car at $0,
-      because Renovations is directly ahead of it on the same account and
-      needs $50,000 out of $36,701. Check WHICH goal is doing the claiming
+      the first goal lifts the second to the account's whole balance and leaves
+      the third at $0, because the second is directly ahead of it on the same
+      account and its target is larger than that balance. Check WHICH goal is doing the claiming
       before calling a $0 wrong — the tile's foot names it.
   - **Four readers, one function**: `computeGoals` (the tile's `saved`, plus
     `claimed`/`claimedBy` so the foot says why a goal reads low), the engine's
@@ -5405,7 +5406,7 @@ that matters, so the first is written down here as the mistake it was.
 month is entered or the year is pinned" — three conditions, `rowHideable` with
 a `finalized` argument, `monthDues` taking one more parameter. **What killed
 it**: a phone screenshot from Charlie. One Expenses list, four rows reading
-"nothing recorded" (ATM, Chase Zelle, Checks, M&T Zelle) sitting directly above
+"nothing recorded" (an ATM row, a Checks row and two Zelle rows) sitting directly above
 a line offering to hide two OTHER blank rows — with nothing on the page to tell
 the two groups apart, because the difference was an invisible fact about the
 month. His words: "with the new wording it's confusing to see some empty rows
@@ -6194,7 +6195,7 @@ Authorized JavaScript origins list `https://eagleadams86.github.io` and
 `http://localhost:8016` — a new local port needs registering there or sign-in
 fails with origin_mismatch. Sign-in is GIS → `signInWithCredential`
 (`initializeAuth`, never `getAuth` — see the comment in the module).
-**The cloud doc stores the state as ONE JSON string** (`{ json, updatedAt }`),
+**The cloud doc stores the state as ONE JSON string** (`{ json, updatedAt, rev }` — `rev` since the 2026-10-26 offline-overwrite fix),
 never as Firestore fields: Firestore rejects arrays nested inside arrays
 (invalid-argument), and the free-form tables are exactly that. Charlie's real
 data hit this on the first sign-in — don't "improve" the doc back to
@@ -6508,7 +6509,7 @@ CSP. That is the whole feature; it adds no runtime code beyond one line in
 - Keep README.md current whenever the app meaningfully changes.
 - Help/info icons never sit flush against the word they follow (standing
   preference).
-- **`package.json` is a Dependabot manifest, not a build step.** It installs nothing, declares nothing but the vendored `chart.min.js`, is `private: true` with no scripts, and CI passes `--omit=dev` so npm never downloads it. **Dependabot cannot re-vendor a file**, so a version-bump PR would raise the manifest while the app kept serving the old bytes — `tests.html` pins the manifest's pin to the version string inside the bundle, which makes a manifest-only bump fail and turns the PR into the right instruction: update the file too, in all four repos that carry it (lottery, team-dashboard, financial-plan, sprint-velocity). Never add a `scripts` block, and never let the pin become a `^` range — a range cannot be checked against a file.
+- **`package.json` is a Dependabot manifest, not a build step.** It installs nothing, declares nothing but the vendored `chart.min.js` and the Firebase SDK the page loads by URL, is `private: true` with no scripts, and CI passes `--omit=dev` so npm never downloads it. **Dependabot cannot re-vendor a file**, so a version-bump PR would raise the manifest while the app kept serving the old bytes — `tests.html` pins the manifest's pin to the version string inside the bundle, which makes a manifest-only bump fail and turns the PR into the right instruction: update the file too, in all four repos that carry it (lottery, team-dashboard, financial-plan, sprint-velocity). Never add a `scripts` block, and never let the pin become a `^` range — a range cannot be checked against a file.
 
 ## The Nine Gaps (2026-08-22)
 
