@@ -35244,7 +35244,7 @@ function makeCloudSync(io) {
     if (pushing || asking || !held) return;
     const d = held;
     held = null;
-    snapshot(d);
+    return snapshot(d);
   }
   async function push() {
     if (!io.uid()) return;
@@ -35265,12 +35265,30 @@ function makeCloudSync(io) {
         setBase(out.tag);
         markSent(at);
       } while (again);
-    } finally { pushing = false; }
-    if (moved) return resolve(moved, 'live');
+    } catch (e) {
+      /* A push that THROWS (offline, most often) still has to look at the copy
+         parked behind it. Left parked, it sat there until the next push that
+         worked and was replayed then — by which time it was OLDER than this
+         device's own write, and a device with nothing unsent adopts what it
+         hears: the screen went back to the old copy until the next snapshot
+         put it right (2026-11-12). Looked at now, it is judged against the
+         base this failure left untouched, which is the one it arrived under.
+         Whatever that look goes on to do reports itself; the failure being
+         thrown here is this push's. */
+      pushing = false;
+      try { Promise.resolve(drain()).catch(() => {}); } catch (x) { /* e is the one to report */ }
+      throw e;
+    }
+    pushing = false;
+    /* The copy the transaction read is the cloud as it is; anything parked
+       meanwhile is that copy or an older one, and is dropped, not replayed. */
+    if (moved) { held = null; return resolve(moved, 'live'); }
     drain();
   }
   function snapshot(data) {
     if (pushing || asking) { held = data; return null; }
+    /* Looked at directly, so it is newer than anything still parked. */
+    held = null;
     if (sameTag(base(), cloudTag(data))) return null;
     return resolve(data, 'live');
   }
@@ -35279,6 +35297,7 @@ function makeCloudSync(io) {
        that is not a cellar of ours (no state) is written over, never adopted. */
     start: async () => {
       const data = await io.read();
+      if (!pushing && !asking) held = null;      /* a fresh read outranks a parked copy */
       if (data && !io.valid(data)) { setBase(cloudTag(data)); return push(); }
       return resolve(data, 'start', io.firstSync());
     },
@@ -35717,7 +35736,10 @@ function shouldBootSync() {
    not race into two Firebase apps. */
 let initPromise = null;
 function ensureInit() {
-  if (!initPromise) initPromise = init();
+  /* A failed load (offline for a moment) is forgotten, so the next ask tries
+     again rather than failing until a reload. It fails before initializeApp,
+     so a retry can't make a second Firebase app. Golf Handicap's. */
+  if (!initPromise) initPromise = init().catch((e) => { initPromise = null; throw e; });
   return initPromise;
 }
 
@@ -36359,7 +36381,18 @@ addEventListener('pagehide', flushPush);
    nothing else would. A sign-in whose verdict never came (getDoc failed
    offline) is started again rather than pushed past. */
 const catchUp = () => {
-  if (!user || !Fs || window.finViewOnly) return;
+  /* A signed-in device that OPENED offline never loaded Firebase: the boot
+     branch failed, hid the button, and nothing asked again — so an installed
+     app left open for days never synced, with no warning. The signal coming
+     back (or the page being looked at again) is the retry (2026-11-12, Golf
+     Handicap's). Only where the boot branch would have loaded it. */
+  if (!Fs) {
+    if (FIREBASE_CONFIG && !inTestHarness && !window.finViewOnly && shouldBootSync() && navigator.onLine !== false) {
+      ensureInit().then(() => { btn.hidden = false; }).catch(() => { /* still no signal; the next event tries again */ });
+    }
+    return;
+  }
+  if (!user || window.finViewOnly) return;
   if (!verdictIn) { startSync().catch(setSyncError); return; }
   if (cloud.dirty()) window.cloudFlush();
   if (!unsub) listen();

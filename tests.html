@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1310;
+const EXPECTED = 1312;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -24692,6 +24692,50 @@ async function runSyncSim(W) {
     await p1;
     r.askOnce = A.log.filter((x) => x === 'ask').length;
   });
+  /* 11. A push that THROWS with a copy parked behind it (2026-11-12). The copy
+     heard mid-push used to stay parked when the push failed — nothing reached
+     drain() — and the next push that worked replayed it: by then it was older
+     than this device's own write, and a device with nothing unsent adopts
+     whatever it hears, so the screen went back to the old copy until the next
+     snapshot put it right. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud);
+    A.edit('a1'); await A.start();
+    A.edit('a2');
+    A.beforeCommit = async () => { A.sync.snapshot(clone(cloud.doc)); throw { code: 'unavailable' }; };
+    const err = await failed(A.sync.push());
+    const before = A.log.length;
+    await A.sync.push();
+    await new Promise((res) => setTimeout(res, 0));
+    r.failParked = { err: err, A: clone(A.rounds), cloud: clone(cloud.doc.state.rounds),
+      quiet: A.log.length === before, dirty: A.sync.dirty() };
+  });
+  /* 11b. The same failure with ANOTHER device's write parked: it is looked at
+     as soon as the push gives up, not forgotten — nothing here is unsent, so
+     it is simply taken. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud), B = makeDevice(cloud);
+    A.edit('a1'); await A.start(); await B.start();
+    B.edit('b1'); await B.sync.push();
+    A.beforeCommit = async () => { A.sync.snapshot(clone(cloud.doc)); throw { code: 'unavailable' }; };
+    const err = await failed(A.sync.push());
+    await new Promise((res) => setTimeout(res, 0));
+    r.failHeard = { err: err, A: clone(A.rounds), asked: A.log.includes('ask') };
+  });
+  /* 12. A push that finds the cloud moved takes the copy the transaction read;
+     the one parked meanwhile is older or the same, and must not come back
+     after the next push. */
+  await step(async () => {
+    const cloud = makeCloud(), A = makeDevice(cloud), B = makeDevice(cloud);
+    A.edit('a1'); await A.start(); await B.start();
+    B.edit('b1'); await B.sync.push();
+    A.beforeCommit = async () => { A.sync.snapshot(clone(cloud.doc)); };
+    await A.sync.push();
+    const took = clone(A.rounds);
+    A.edit('a2'); await A.sync.push();
+    await new Promise((res) => setTimeout(res, 0));
+    r.movedParked = { took: took, A: clone(A.rounds), cloud: clone(cloud.doc.state.rounds) };
+  });
   r.errors = errors;
   return r;
 }
@@ -24746,6 +24790,28 @@ t('an emptied cloud asks live; a first sign-in with both full asks; one question
   eq(r.emptied, { asked: true, cloud: ['a1'], A: ['a1'] });
   eq(r.firstSync, { asked: true, B: ['a1'] });
   eq(r.askOnce, 1);
+});
+t('a push that throws, or finds the cloud moved, leaves no parked copy to be replayed (2026-11-12)', async () => {
+  const r = await simR();
+  eq(r.failParked, { err: 'unavailable', A: ['a1', 'a2'], cloud: ['a1', 'a2'], quiet: true, dirty: false },
+     'a parked copy must not come back over this device’s later write');
+  eq(r.failHeard, { err: 'unavailable', A: ['a1', 'b1'], asked: false },
+     'another device’s write parked behind the failure is looked at, not forgotten');
+  eq(r.movedParked, { took: ['a1', 'b1'], A: ['a1', 'b1', 'a2'], cloud: ['a1', 'b1', 'a2'] });
+});
+t('a signed-in device that opened with no signal asks again when it comes back (2026-11-12)', () => {
+  /* The boot load failed offline, hid the button, and nothing asked again:
+     catchUp returned on `!Fs`, and ensureInit handed every later caller the
+     same rejected promise. Read as text — the real thing needs Google. */
+  const mod = APP_SRC.slice(APP_SRC.lastIndexOf('<script type="module">')).replace(/\/\*[\s\S]*?\*\//g, '');
+  ok(/initPromise = init\(\)\.catch\(\(e\) => \{ initPromise = null; throw e; \}\)/.test(mod),
+     'a failed load must be forgotten, or every retry is handed the same rejection');
+  const cu = mod.slice(mod.indexOf('const catchUp = '), mod.indexOf("addEventListener('online', catchUp)"));
+  ok(/if \(!Fs\) \{/.test(cu), 'catchUp must have a branch for Firebase never having loaded');
+  ok(/shouldBootSync\(\)/.test(cu) && /!inTestHarness/.test(cu) && /!window\.finViewOnly/.test(cu),
+     'it retries only where the boot branch would have loaded it');
+  ok(/ensureInit\(\)\.then\(\(\) => \{ btn\.hidden = false; \}\)/.test(cu),
+     'the retry loads Firebase and puts the button the failed boot hid back');
 });
 t('the plan is pushed through a transaction behind a verdict gate, and catches up on reconnect', () => {
   const mod = APP_SRC.slice(APP_SRC.indexOf('<script type="module">')).replace(/\/\*[\s\S]*?\*\//g, '');

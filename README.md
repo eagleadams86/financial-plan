@@ -2572,6 +2572,14 @@ same check when the connection comes back (on reconnect, when the page comes
 back into view, or a minute later). Device clocks no longer decide which copy is
 newer, so a phone whose clock runs fast cannot win every time.
 
+**A signed-in device opened with no signal starts syncing by itself when the
+signal returns** (2026-11-12). Before, the failed start hid the sync button and
+nothing tried again until the page was reloaded. And a save that fails part-way
+no longer flashes an older copy: a copy that arrived from the cloud while a save
+was being sent used to be set aside and, if that save failed, replayed after the
+next one that worked. It is now looked at straight away, or dropped when a
+fresher one has been seen.
+
 **A change that arrives while a window is open closes that window — if the
 window was filled in from the plan** (2026-09-18). Edit a goal on the laptop
 while the phone deletes another one, and the laptop's editor used to stay up
