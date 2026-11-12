@@ -24212,6 +24212,58 @@ t('the Budget row editor leaves the focus on the row it edited, moved or added, 
   } finally { f.remove(); }
 });
 
+/* ── A grid label's info dot survives the phone's narrow column (WCAG 1.4.10) ─
+   The label column is capped on a phone and cuts what does not fit. The dot
+   came after the name, so it was what got cut: "Sweep to emergency" drew its
+   dot wholly outside the cell at 390px — nowhere to see, nowhere to press —
+   and the Transfers heading lost the edge of its own. The name is what
+   shortens now. Each dot must lie inside its own cell and be what a press at
+   its centre reaches; half a pixel of slack for sub-pixel column widths. */
+t('every info dot in the grid’s label column is whole and pressable at phone widths', async () => {
+  for (const width of [320, 390, 700, 1280]) {
+    const { f, W, D } = await auditFrame(width, 900, 'lbldot');
+    try {
+      D.getElementById('tab-budget').click();
+      await new Promise((r) => setTimeout(r, 300));
+      const dots = [...D.querySelectorAll('table.grid .lbl .tile-help')];
+      ok(dots.length >= 3, width + 'px fixture: the sample grid has its three label dots', dots.length);
+      ok(dots.some((d) => d.closest('th[data-edit="category"]')),
+        width + 'px fixture: one of them is on a row somebody named');
+      for (const dot of dots) {
+        const th = dot.closest('.lbl');
+        const name = th.textContent.trim().slice(0, 18);
+        /* The PAGE is scrolled to the row, never the dot into view: a cell
+           that clips is still scrollable by script, and scrollIntoView would
+           slide the label along inside it and find the dot a reader cannot. */
+        W.scrollTo(0, W.scrollY + th.getBoundingClientRect().top - 400);
+        eq(th.scrollLeft, 0, width + 'px “' + name + '”: fixture — the label has not been scrolled inside its cell');
+        const c = th.getBoundingClientRect(), r = dot.getBoundingClientRect();
+        ok(r.width >= 15.5 && r.height >= 15.5, width + 'px “' + name + '”: the dot is drawn full size',
+          r.width.toFixed(1) + 'x' + r.height.toFixed(1));
+        ok(r.left >= c.left - 0.5 && r.right <= c.right + 0.5 && r.top >= c.top - 0.5 && r.bottom <= c.bottom + 0.5,
+          width + 'px “' + name + '”: the dot lies inside its label cell',
+          'dot ' + r.left.toFixed(1) + '..' + r.right.toFixed(1) + ', cell ' + c.left.toFixed(1) + '..' + c.right.toFixed(1));
+        const hit = D.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        ok(hit === dot, width + 'px “' + name + '”: a press at the dot’s centre reaches the dot',
+          hit ? hit.tagName + '.' + hit.className : 'nothing');
+        /* The cell is still a cell, still pinned: a <th> laid out as flex
+           would stop being either. */
+        const cs = W.getComputedStyle(th);
+        ok(cs.display === 'table-cell' && cs.position === 'sticky',
+          width + 'px “' + name + '”: the label is a pinned table cell', cs.display + '/' + cs.position);
+      }
+      /* A named row still keeps to the phone's cap, by shortening its NAME. */
+      if (width <= 700) {
+        const text = D.querySelector('table.grid th[data-edit="category"] .lbltext');
+        ok(text && text.scrollWidth > text.clientWidth,
+          width + 'px fixture: the sweep row’s name is too long for the column, and is what shortens',
+          text && text.scrollWidth + '/' + text.clientWidth);
+        eq(W.getComputedStyle(text).textOverflow, 'ellipsis', width + 'px: with an ellipsis');
+      }
+    } finally { f.remove(); }
+  }
+});
+
 group('A version number decides which copy is newer, not a clock (2026-10-26)');
 /* Golf Handicap's offline-overwrite fix, ported: syncPlan + makeCloudSync in
    the classic script, every push a transaction that writes only while the
