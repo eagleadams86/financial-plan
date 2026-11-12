@@ -25419,7 +25419,16 @@ function commitRow(ctx, speak) {
   /* What is now written down, so a close that follows with nothing further
      typed knows it has nothing to do. */
   ctx.opened = JSON.stringify(values);
+  /* A row being ADDED has no id until its section's save makes one, and the
+     hand-back at the end needs to find the row that was added — so the year's
+     ids are read either side of the save (2026-11-12, see refocusEditRow). */
+  const addingTo = ctx.section === 'category' && ctx.ds.add && state.years[ctx.ds.year];
+  const idsWas = addingTo ? new Set(addingTo.categories.map(c => c.id)) : null;
   let said = EDITORS[ctx.section].save(ctx.ds, values);
+  if (idsWas) {
+    const fresh = (state.years[ctx.ds.year].categories || []).find(c => !idsWas.has(c.id));
+    if (fresh) ctx.added = fresh.id;
+  }
   ctx.committed = true;   // the row this window opened from is about to be redrawn
   if (refused) said = typeof said === 'string' ? `${refused}. ${said}` : refused;
   const planWas = state;   // save() may ADOPT another window's plan — see below
@@ -25489,6 +25498,13 @@ F('rowForm').onsubmit = () => {
   const ctx = rowCtx;
   if (!ctx || ctx.auto) return;
   rowCtx = null;
+  /* The window is still OPEN while this runs — the form closes it afterwards —
+     and the page behind a modal refuses the focus, so the hand-back to the row
+     just added was turned away and the browser's own return then aimed at the
+     dead ＋ Add button (2026-11-12; the cell editor's Save met the same thing).
+     Closed first, the close that follows is a no-op. Budget rows only: theirs
+     is the one hand-back that knows which row was added. */
+  if (ctx.section === 'category') rowDialog.close();
   commitRow(ctx, true);
 };
 
@@ -30208,7 +30224,49 @@ function refocusEditRow(ctx) {
       }="${CSS.escape(v)}"]`).join('');
   let el = null;
   try { el = document.querySelector(sel); } catch (e) { /* odd key — no focus */ }
-  if (el) el.focus({ preventScroll: true });
+  const took = (n) => {
+    if (!n) return false;
+    n.focus({ preventScroll: true });
+    return document.activeElement === n;
+  };
+  if (took(el)) return;
+  /* A BUDGET ROW HAS NO SUCH ELEMENT TO FIND (2026-11-12, WCAG 2.4.3). On the
+     Year grid the match is the row's label — a <th> that takes a click and no
+     focus, so the focus() above did nothing — and the Month page draws no
+     [data-edit] at all. Every committed change in this window (Done or Escape
+     after an edit, Move up/down, a row just added) therefore dropped the
+     keyboard on <body>, in both lenses. The row's own stop is what it has: a
+     cell of its line on the grid, made the roving one the way refocusGridCell
+     does, or its line on the Month page. The cell the editor was reached
+     through if there was one, else one already clear of the pinned columns, so
+     the hand-back does not also drag the grid sideways.
+     Still only ever a focus on something that is there: a row that was
+     deleted, or one the Month page is not showing, matches nothing. */
+  if (ctx.section !== 'category') return;
+  const id = ctx.added || ctx.ds.id;
+  const key = id ? CSS.escape(id) : '';
+  const cells = key ? [...document.querySelectorAll(`.grid tr[data-move="${key}"] td.cell`)] : [];
+  if (cells.length) {
+    const run = gridRun(cells[0].closest('.gridwrap'));
+    const inRun = (c) => {
+      const r = c.getBoundingClientRect();
+      return r.left >= run.left - 0.5 && r.right <= run.right + 0.5;
+    };
+    const td = (editing && editing.type === 'cat' && editing.id === id
+        && cells.find(c => c.dataset.m === editing.m))
+      || (run && cells.find(inRun)) || cells[0];
+    td.closest('table').querySelectorAll('td.cell[tabindex="0"]')
+      .forEach(c => { c.tabIndex = -1; });
+    td.tabIndex = 0;
+    if (took(td)) return;
+  }
+  if (key && took([...document.querySelectorAll(`.mrow[data-cat="${key}"]`)]
+    .find(r => r.getClientRects().length))) return;
+  /* A new row the page is not drawing (the Month page hides a line with
+     nothing in it): back to the button that added it, drawn again. */
+  if (ctx.ds.add) took([...document.querySelectorAll('[data-add="category"]')]
+    .find(b => b.dataset.year === ctx.ds.year && b.dataset.sec === ctx.ds.sec
+      && b.getClientRects().length));
 }
 
 /* ── A PRESS THAT REDRAWS ITS OWN BUTTON (2026-09-24 accessibility audit) ────

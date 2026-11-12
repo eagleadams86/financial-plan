@@ -24110,6 +24110,108 @@ t('a grid cell that takes the keyboard focus is clear of both pinned columns', a
   }
 });
 
+/* ── The Budget row editor hands the keyboard back to the row (WCAG 2.4.3) ──
+   The hand-back looked for the row's label — a <th> on the Year grid that
+   takes a click and no focus, and nothing at all on the Month page — so every
+   committed change in the window (Done after an edit, Move down, a row just
+   added) dropped the keyboard on <body>, in both lenses. The row's own stop
+   takes it now: a cell of its line on the grid, the roving one, or its line on
+   the Month page. Deleting the row still lands on the page — that one is a
+   recorded judgement, and not asserted here. */
+t('the Budget row editor leaves the focus on the row it edited, moved or added, in both lenses', async () => {
+  const { f, W, D } = await auditFrame(1280, 900, 'rowhandback');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const on = () => D.activeElement;
+    const dlg = D.getElementById('rowDialog');
+    const press = async (sel, what) => {
+      const el = D.querySelector(sel);
+      ok(el && el.getClientRects().length && !el.disabled, 'fixture: ' + what + ' is on screen to press');
+      el.focus();
+      el.click();
+      await wait(200);
+      if (!dlg.open) dlg.dispatchEvent(new W.Event('close'));   // the harness does not always deliver it
+      await wait(50);
+    };
+    const type = (id, v) => {
+      const el = D.getElementById(id);
+      el.value = v;
+      el.dispatchEvent(new W.Event('input', { bubbles: true }));
+      el.dispatchEvent(new W.Event('change', { bubbles: true }));
+    };
+    const where = () => on() === D.body ? '<body>' : on().tagName + '.' + on().className;
+    const onGridRow = (id, what) => {
+      ok(!dlg.open, what + ': the window has closed');
+      ok(on().matches('td.cell') && on().parentElement.dataset.move === id,
+        what + ': the focus is on a cell of that row', where());
+      ok(on().tabIndex === 0 && D.querySelectorAll('.grid td.cell[tabindex="0"]').length === 1,
+        what + ': and it is the grid’s one roving cell',
+        D.querySelectorAll('.grid td.cell[tabindex="0"]').length);
+    };
+    const openFromLabel = async (id) => {
+      D.querySelector(`.grid th.lbl[data-edit="category"][data-id="${id}"]`).click();
+      await wait(200);
+      ok(dlg.open, 'fixture: the row editor is open on ' + id);
+    };
+    D.getElementById('tab-budget').click();
+    await wait(250);
+
+    /* THE YEAR GRID. */
+    await openFromLabel('dining');
+    type('rf-name', 'Eating out');
+    await wait(100);
+    await press('#rowSaveBtn', 'Done after a rename');
+    onGridRow('dining', 'Done after a rename (grid)');
+    eq(on().parentElement.querySelector('th.lbl').textContent.trim().slice(0, 10), 'Eating out',
+      'fixture: the rename landed');
+
+    const order = () => [...D.querySelectorAll('.grid tr[data-move]')].map((r) => r.dataset.move);
+    const was = order().indexOf('dining');
+    await openFromLabel('dining');
+    await press('#rowDownBtn', 'Move down');
+    eq(order().indexOf('dining'), was + 1, 'fixture: the row moved one place down');
+    onGridRow('dining', 'Move down (grid)');
+
+    const ids = new Set(order());
+    D.querySelector('.addbar [data-add="category"], [data-add="category"]').click();
+    await wait(200);
+    ok(dlg.open, 'fixture: the Add a Budget Row window is open');
+    type('rf-name', 'Bus pass');
+    await press('#rowSaveBtn', 'Done on a new row');
+    const added = order().filter((id) => !ids.has(id));
+    eq(added.length, 1, 'fixture: one row was added');
+    onGridRow(added[0], 'a row just added (grid)');
+
+    /* THE MONTH PAGE, reached the way the page reaches it: the line, then
+       Row Settings in the cell window. */
+    D.querySelector('.vswitch[data-mode="month"]').click();
+    await wait(300);
+    const line = () => [...D.querySelectorAll('#views .mrow[data-cat="rosa-pay"]')]
+      .find((r) => r.getClientRects().length);
+    const openFromLine = async () => {
+      ok(line(), 'fixture: the paycheck line is on the Month page');
+      line().click();
+      await wait(200);
+      D.getElementById('cellRowBtn').click();
+      await wait(200);
+      ok(dlg.open, 'fixture: the row editor is open from the Month page');
+    };
+    const onLine = (what) => {
+      ok(!dlg.open, what + ': the window has closed');
+      ok(on().matches('.mrow[data-cat="rosa-pay"]') && on().getClientRects().length > 0,
+        what + ': the focus is on that row’s line', where());
+    };
+    await openFromLine();
+    type('rf-name', 'Rosa, salary');
+    await wait(100);
+    await press('#rowSaveBtn', 'Done after a rename');
+    onLine('Done after a rename (month page)');
+    await openFromLine();
+    await press('#rowDownBtn', 'Move down');
+    onLine('Move down (month page)');
+  } finally { f.remove(); }
+});
+
 group('A version number decides which copy is newer, not a clock (2026-10-26)');
 /* Golf Handicap's offline-overwrite fix, ported: syncPlan + makeCloudSync in
    the classic script, every push a transaction that writes only while the
