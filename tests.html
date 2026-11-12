@@ -24027,6 +24027,89 @@ t('every year and month chip is named starting with the words it shows', async (
   }
 });
 
+group('Fixes from the 2026-11-12 accessibility audit');
+/* Five things the 2026-11-12 audit reproduced with real key presses. Same
+   routine as the audit groups above: each test was written first and proven
+   red against the unfixed page. */
+
+/* ── A focused grid cell is not left under a pinned column (WCAG 2.4.11) ────
+   The label column is pinned over the left of the grid's scroller and the year
+   total over the right, both opaque. The grid opens scrolled to the current
+   month, so Tab from the toolbar landed on January with none of it showing;
+   on a phone every other ArrowLeft stopped on a cell wholly under the labels.
+   Measured the way a reader sees it: the part of the focused cell that lies
+   between the two pinned columns. A pixel of slack for sub-pixel column
+   widths; nothing here depends on how wide a scrollbar is. */
+t('a grid cell that takes the keyboard focus is clear of both pinned columns', async () => {
+  for (const width of [1280, 390]) {
+    const { f, W, D } = await auditFrame(width, 800, 'gridcover');
+    try {
+      D.getElementById('tab-budget').click();
+      await new Promise((r) => setTimeout(r, 300));
+      const wrap = D.querySelector('.gridwrap');
+      ok(wrap && wrap.scrollWidth > wrap.clientWidth + 100,
+        width + 'px fixture: the grid scrolls sideways', wrap && wrap.scrollWidth + '/' + wrap.clientWidth);
+      const shown = (td) => {
+        const r = td.getBoundingClientRect(), row = td.parentElement;
+        const box = wrap.getBoundingClientRect();
+        const tot = row.querySelector('.rowtot');
+        const left = Math.max(r.left, row.querySelector('.lbl').getBoundingClientRect().right);
+        const right = Math.min(r.right, W.getComputedStyle(tot).position === 'sticky'
+          ? tot.getBoundingClientRect().left : box.left + wrap.clientLeft + wrap.clientWidth);
+        return { gap: r.width - Math.max(0, right - left), w: r.width };
+      };
+      const clear = (td, how) => {
+        const s = shown(td);
+        ok(s.gap <= 1, width + 'px ' + how + ': ' + td.dataset.m + ' is wholly in view',
+          'covered ' + s.gap.toFixed(1) + ' of ' + s.w.toFixed(1) + 'px, scrollLeft ' + wrap.scrollLeft);
+      };
+      const key = (k) => D.activeElement.dispatchEvent(
+        new W.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+      const first = D.querySelector('.grid td.cell[tabindex="0"]');
+      ok(first && first.dataset.m, width + 'px fixture: the grid has its roving cell');
+      /* Tab into the grid from the far end, the worst the scroller can be. */
+      wrap.scrollLeft = wrap.scrollWidth;
+      first.focus();
+      ok(D.activeElement === first, width + 'px fixture: the cell took the focus');
+      clear(first, 'focused with the grid scrolled to December');
+      let steps = 0;
+      for (const k of ['ArrowRight', 'ArrowLeft']) {
+        for (let i = 0; i < 11; i++) {
+          const before = D.activeElement;
+          key(k);
+          ok(D.activeElement !== before && D.activeElement.matches('td.cell'),
+            width + 'px fixture: ' + k + ' moved to the next cell');
+          clear(D.activeElement, k);
+          steps++;
+        }
+      }
+      eq(steps, 22, width + 'px: walked the row to December and back');
+      /* The browser is told about the covered edges too, in its own terms, so
+         its own scroll-into-view stops short of them. */
+      const cs = W.getComputedStyle(wrap);
+      const lblW = D.querySelector('.grid thead th.lbl').offsetWidth;
+      const tot = D.querySelector('.grid thead th.rowtot');
+      const totW = W.getComputedStyle(tot).position === 'sticky' ? tot.offsetWidth : 0;
+      ok(Math.abs(parseFloat(cs.scrollPaddingLeft) - lblW) <= 1,
+        width + 'px: scroll-padding-left is the label column', cs.scrollPaddingLeft + ' vs ' + lblW);
+      ok(Math.abs((parseFloat(cs.scrollPaddingRight) || 0) - totW) <= 1,
+        width + 'px: scroll-padding-right is the total column only while it is pinned',
+        cs.scrollPaddingRight + ' vs ' + totW);
+      if (width === 390) eq(totW, 0, 'fixture: a phone unpins the year total');
+      else ok(totW > 0, 'fixture: the year total is pinned at a desktop width');
+      /* A PRESS must not move the grid: the cell is focused on the way down,
+         and a grid that slid before the finger came up would hand the click to
+         another cell. */
+      wrap.scrollLeft = wrap.scrollWidth;
+      const at = wrap.scrollLeft;
+      D.activeElement.blur();
+      first.dispatchEvent(new W.PointerEvent('pointerdown', { bubbles: true }));
+      first.focus({ preventScroll: true });
+      eq(wrap.scrollLeft, at, width + 'px: a cell focused by a press leaves the grid where it is');
+    } finally { f.remove(); }
+  }
+});
+
 group('A version number decides which copy is newer, not a clock (2026-10-26)');
 /* Golf Handicap's offline-overwrite fix, ported: syncPlan + makeCloudSync in
    the classic script, every push a transaction that writes only while the
