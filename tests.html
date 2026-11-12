@@ -24264,6 +24264,50 @@ t('every info dot in the grid’s label column is whole and pressable at phone w
   }
 });
 
+/* ── The Year / Month switch's chosen segment has an edge (WCAG 1.4.11) ─────
+   Its fill against the bar measured 1.04:1 in Light, so which lens was on was
+   told by the weight of a word. It wears the ring the chosen year chip beside
+   it wears — the same token, inset, so it is a boundary and not an elevation
+   shadow — and the ring is checked against the bar in all four themes. */
+t('the chosen Year / Month segment is ringed like the chosen year chip, in every theme', async () => {
+  const { f, W, D } = await auditFrame(1280, 800, 'vswitchring');
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    D.getElementById('tab-budget').click();
+    await wait(250);
+    const rgb = (c) => { const m = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(c); return m && m.slice(1).map(Number); };
+    const lum = (c) => {
+      const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const ratio = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+    for (const theme of ['midnight', 'dark', 'light', 'sepia']) {
+      const sel = D.getElementById('themeSel');
+      sel.value = theme;
+      sel.dispatchEvent(new W.Event('change', { bubbles: true }));
+      await wait(250);
+      eq(D.documentElement.getAttribute('data-theme'), theme, 'fixture: the theme is ' + theme);
+      const on = [...D.querySelectorAll('.viewswitch .vswitch[aria-checked="true"]')].find((e) => e.getClientRects().length);
+      const off = [...D.querySelectorAll('.viewswitch .vswitch[aria-checked="false"]')].find((e) => e.getClientRects().length);
+      const chip = D.querySelector('.yearchip[aria-checked="true"]');
+      ok(on && off && chip, theme + ' fixture: the switch and the chosen year chip are drawn');
+      const shadow = W.getComputedStyle(on).boxShadow;
+      const m = /^(rgb\(\d+, \d+, \d+\)) 0px 0px 0px 1px inset$/.exec(shadow);
+      ok(m, theme + ': the chosen segment wears a 1px inset ring', shadow);
+      /* The chip may wear more than the ring (its underline is a second inset
+         shadow), so the ring is looked for as the first of them. */
+      ok(W.getComputedStyle(chip).boxShadow.startsWith(shadow),
+        theme + ': the same ring as the chosen year chip', W.getComputedStyle(chip).boxShadow);
+      eq(W.getComputedStyle(off).boxShadow, 'none', theme + ': and the other segment wears none');
+      let bar = on.parentElement, bg = null;
+      while (bar && !(bg = rgb(W.getComputedStyle(bar).backgroundColor))) bar = bar.parentElement;
+      ok(bg, theme + ' fixture: the bar behind the switch has a solid fill');
+      const r = ratio(rgb(m[1]), bg);
+      ok(r >= 3, theme + ': the ring is at least 3:1 against the bar', r.toFixed(2));
+    }
+  } finally { f.remove(); }
+});
+
 group('A version number decides which copy is newer, not a clock (2026-10-26)');
 /* Golf Handicap's offline-overwrite fix, ported: syncPlan + makeCloudSync in
    the classic script, every push a transaction that writes only while the
