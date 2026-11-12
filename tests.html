@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1290;
+const EXPECTED = 1296;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -971,8 +971,29 @@ t('Roth contributions add up, repeat the latest year, and never count growth', (
   const later = H.rothBasisAt(st, {}, '2031');
   eq([later.basis, later.yearly, later.assumed], [30000, 8000, true], '2030 and 2031 repeat 2029');
   st.side.retirementAccounts[0].contribs[2031] = 500;
-  eq(H.rothBasisAt(st, {}, '2031').basis, 14500, 'a typed later year replaces the guess');
+  /* Sam's 2030 was never typed and is now BETWEEN two typed years, so it counts
+     nothing; Mia's account still repeats its own latest year (2026-11-12). */
+  eq(H.rothBasisAt(st, {}, '2031').basis, 16500,
+     'a typed later year replaces the guess — for the account it was typed on');
   eq(H.rothBasisAt({ side: {} }, {}, '2029').basis, 0, 'no Roth IRA, nothing counted');
+});
+t('each Roth IRA repeats its OWN latest year, however far the other is typed', () => {
+  /* 2026-11-12. The years were added across accounts and the household's latest
+     repeated, so the account typed further stood for both: here the second
+     account's 5,000 a year fell out of 2026 and every year after. */
+  const st = { side: { retirementAccounts: [
+    ROTH('sam', { 2024: 6500, 2025: 7000, 2026: 7000 }),
+    ROTH('robin', { 2024: 5000, 2025: 5000 }),
+  ] } };
+  const at26 = H.rothBasisAt(st, {}, '2026');
+  eq([at26.basis, at26.yearly, at26.lastTyped, at26.assumed], [35500, 12000, '2026', true],
+     '20,500 typed + 10,000 typed + one repeated 5,000');
+  eq(H.rothBasisAt(st, {}, '2030').basis, 83500, 'and both keep going: 12,000 a year after 2026');
+  eq(H.rothBasisAt(st, {}, '2025').assumed, false, 'nothing is assumed inside the typed years');
+  /* Typing more must never make the goal later. */
+  const before = H.rothBasisAt({ side: { retirementAccounts: [
+    ROTH('sam', { 2024: 6500, 2025: 7000 }), ROTH('robin', { 2024: 5000, 2025: 5000 })] } }, {}, '2030').basis;
+  ok(H.rothBasisAt(st, {}, '2030').basis >= before, 'typing one account\'s next year did not lower the basis');
 });
 t('a goal counting Roth contributions saves them on top, and nobody ahead claims them', () => {
   const s = H.coerceShape(fixtureState());
@@ -1915,6 +1936,33 @@ t('clearing a stop month brings the row back to the years ahead', () => {
     'moved later: only the years it is alive in again');
   eq(H.yearsRestoringRow(s, ['2031', '2032'], 'internet', '2030-04', '2030-09'), [],
     'moved later but still before 2031 starts');
+});
+t('an edit made from the earlier year leaves a later year\'s own stop month alone', async () => {
+  /* 2026-11-12. A stop typed from next year lives on next year's row only. A
+     save from this year that touched something else used to "match" next year
+     to it and delete the stop — with the row still missing from the year after. */
+  const { f, W } = await auditFrame(900, 700, 'stopahead');
+  try {
+    const HK = W.__finTestHooks, s = W.finGet();
+    const Y = String(new Date().getFullYear()), N = String(+Y + 1);
+    const base = s.years[Y];
+    ok(base && base.kind === 'grid' && base.categories.some(c => c.id === 'dining'),
+       'fixture: the sample\'s live year has a Dining row');
+    s.years[N] = Object.assign(JSON.parse(JSON.stringify(base)),
+      { startMonth: `${N}-01`, enteredThrough: `${Y}-12`, cells: {}, paychecks: {}, overrides: {} });
+    eq(HK.projectionYearsAfter(s, Y), [N], 'fixture: next year is built ahead');
+    const row = (y) => s.years[y].categories.find(c => c.id === 'dining');
+    row(N).until = `${N}-06`;
+    const ds = { year: Y, id: 'dining' };
+    const v = HK.EDITORS.category.get(ds);
+    HK.EDITORS.category.save(ds, Object.assign({}, v, { name: 'Dining out more' }));
+    eq(row(N).name, 'Dining out more', 'the edit itself reached the year ahead');
+    eq(row(N).until, `${N}-06`, 'and that year\'s stop month is still there');
+    HK.EDITORS.category.save(ds, Object.assign({}, v, { until: `${Y}-09` }));
+    eq([row(Y).until, row(N).until], [`${Y}-09`, `${Y}-09`], 'a stop typed HERE still reaches it');
+    HK.EDITORS.category.save(ds, Object.assign({}, v, { until: '' }));
+    eq([row(Y).until, row(N).until], [undefined, undefined], 'and so does clearing it');
+  } finally { f.remove(); }
 });
 t('nothing comes back unless the stop really moved later', () => {
   const s = withYearsAhead();
@@ -5483,6 +5531,36 @@ t('a share link without the salary carries each year\'s take-home figure', () =>
   eq([cat.bonusTakeHome, cat.bonusPct, cat.bonusKeep], [5000, undefined, undefined]);
   eq(H.paycheckBonus({ side: {} }, cat, '2030-04'), 5000, 'the recipient computes the same figure');
   ok(/\$5,000\.00 bonus in April/.test(H.ruleDesc(cat, { goals: [], years: {}, settings: {} }, [])));
+});
+t('the bonus freeze runs on a REAL payload, whose side always has a comp branch', () => {
+  /* 2026-11-12. `buildSharePayload` starts `side` from a blank state's, so
+     `comp` is `{}` on every link — and the freeze used to return early on
+     seeing it, which is to say always. */
+  const st = { side: { comp: { '2030': { salary: 100000 } }, bonuses: {} } };
+  const data = { side: { comp: {}, bonuses: {} },
+    years: { '2030': { kind: 'grid', categories: [BONUS_ROW()] } } };
+  H.freezePaycheckBonuses(data, st);
+  const cat = data.years['2030'].categories[0];
+  eq([cat.bonusTakeHome, cat.bonusPct, cat.bonusKeep], [5000, undefined, undefined]);
+  eq(H.paycheckBonus(data, cat, '2030-04'), 5000, 'the recipient computes the sender\'s figure');
+});
+t('a year window that trims the salary away freezes the bonus too', () => {
+  /* Comp travels, but the year the salary is CARRIED from is outside the window. */
+  const st = { side: { comp: { '2028': { salary: 100000 } }, bonuses: {} } };
+  const data = { side: { comp: { '2030': {} }, bonuses: {} },
+    years: { '2030': { kind: 'grid', categories: [BONUS_ROW()] } } };
+  H.freezePaycheckBonuses(data, st);
+  eq(data.years['2030'].categories[0].bonusTakeHome, H.paycheckBonus(st, BONUS_ROW(), '2030-04'));
+  ok(data.years['2030'].categories[0].bonusTakeHome > 0, 'fixture: the sender has a bonus');
+});
+t('a link that carries the salary keeps the live bonus, share and all', () => {
+  const st = { side: { comp: { '2030': { salary: 100000 } }, bonuses: {} } };
+  const data = { side: JSON.parse(JSON.stringify(st.side)),
+    years: { '2030': { kind: 'grid', categories: [BONUS_ROW()] } } };
+  H.freezePaycheckBonuses(data, st);
+  const cat = data.years['2030'].categories[0];
+  eq([cat.bonusTakeHome, cat.bonusPct, cat.bonusKeep], [undefined, 0.1, 0.5],
+     'nothing to freeze when the payload works the same figure out itself');
 });
 t('only a complete bonus makes a plan worth checking twice', () => {
   const plan = (cat) => ({ years: { '2030': { kind: 'grid', categories: [cat] } } });
@@ -10840,6 +10918,22 @@ t('a window drops what is older and never what is newer', () => {
   eq(H.trimShareYearMap(undefined, '2025'), {});
 });
 
+t('a year window keeps a Roth IRA\'s contributions while a carried goal counts them', () => {
+  /* 2026-11-12. The goal's figure is a running sum of every year typed; trimmed
+     to the window, the recipient's goal read years of contributions short. */
+  const make = (goals) => ({ goals, side: { retirementAccounts: [
+    ROTH('sam', { 2020: 6000, 2026: 7000 }),
+    { name: '401(k)', type: '401k', kind: 'traditional', contribs: { 2020: 1, 2026: 2 } }] } });
+  const counted = H.trimShareYearMaps(make([{ id: 'g', countRothBasis: true }]), '2025');
+  eq(Object.keys(counted.side.retirementAccounts[0].contribs), ['2020', '2026'],
+     'the Roth IRA keeps every year the goal adds up');
+  eq(Object.keys(counted.side.retirementAccounts[1].contribs), ['2026'],
+     'and nothing else is spared the window');
+  eq(H.rothBasisAt(counted, {}, '2026').basis, 13000, 'so the goal reads what the sender\'s does');
+  const plain = H.trimShareYearMaps(make([{ id: 'g' }]), '2025');
+  eq(Object.keys(plain.side.retirementAccounts[0].contribs), ['2026'],
+     'with no goal counting them, the window applies as before');
+});
 t('the window reaches the salary history, the donations and the PTO too', () => {
   /* The bug this pins: trimming only the budget grid, so "the last 3 years"
      shipped twenty years of salary alongside it. */
@@ -12026,7 +12120,7 @@ t('sw.js and its kill switch are both present', async () => {
 t('the row editor skips a half-typed month, and drops rows only as the window ends', () => {
   ok(/e\.target\.type === 'month' && partialMonth\(e\.target\.value\)\) return;/.test(APP_SRC),
     'the auto-save must not commit 0002-12 on the way to 2029-12');
-  const save = APP_SRC.slice(APP_SRC.indexOf('if (/^\\d{4}-(0[1-9]|1[0-2])$/.test(v.until'),
+  const save = APP_SRC.slice(APP_SRC.indexOf('if (cat !== own && !untilMoved) return;'),
     APP_SRC.indexOf('    finish(ds'));
   ok(save.length > 0 && !/dropRow\(/.test(save),
     'the per-box save must never delete the row from a year ahead');
