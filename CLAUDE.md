@@ -8781,3 +8781,109 @@ the Month page's rows, whose names are the row's own words re-ordered into a sen
   open; `<script>` children are skipped in the inert check). SV and FM carry the same fix.
 - **Theme pack rule 19 (forced colours) is taken** — `theme.css` copied from the pack. No app-level
   `forced-colors` block; the pack's `check_consumers.py` flags one that restyles selected states.
+
+## Fixes From the 2026-11-12 Review
+
+Five read-only reviewers over the 34 commits since 2026-09-24 (engine figures, security
+boundaries, accessibility, docs against code, and one USING the app end to end), then the
+fixes below. Each has a test proven red on the build before it. **Axe was clean in all four
+themes; security found no XSS, no pollution and no key leak** — every finding was a wrong
+figure, a dead page, or a doc that had fallen behind.
+
+### Figures
+
+- **A share link without the Compensation tab showed a plan with no bonus.**
+  `freezePaycheckBonuses` returned early on `data.side.comp`, which is ALWAYS there — the
+  payload's `side` starts as a blank state's, and `{}` is truthy. The old test passed a
+  payload with no `side` at all. It now works each row out twice (sender's engine, payload
+  alone) and freezes where they differ, which also covers a year window that trims away the
+  year the salary is carried from. **A presence check on a branch a blank state always has is
+  no check** — compare the figure.
+- **Each Roth IRA repeats its OWN latest year** (`rothBasisAt`). Summed across accounts first,
+  the account typed furthest stood for the household and typing one account's next year moved
+  the goal LATER. An untyped year BETWEEN two typed ones on one account still counts nothing
+  (pinned before and kept).
+- **A year-window link keeps a Roth IRA's contributions while a carried goal counts them**
+  (`trimShareYearMaps`). The basis is a running sum of every typed year, so trimming it to the
+  window changed the goal. Left open: a Household-only link carries goals but no retirement
+  accounts, so a child's goal counting the child's Roth IRA would read short there.
+- **A year ahead keeps its own stop month** unless the save moved the field
+  (`EDITORS.category.save`: `own`, `untilMoved`). A stop typed from 2027 is on 2027's row only;
+  an unrelated save from 2026 deleted it and left the row missing from 2028.
+- **The fold warning names every row that OPENS next year from this one** (`rulesNeedingYear`):
+  `carry`, `grow`, `quarterly` and `avg` with nothing stored in next year's first month, as well
+  as the two look-back rules. Folding still blanks them — the warning is what was missing. The
+  deeper fix (compute the folded year's kept grid as `prior`) is NOT done; raise it if Charles
+  wants a fold to change nothing ahead.
+- **A blank past month is not a month that happened** (`monthNetPoints` marks `blank`,
+  `monthNetSummary` leaves them out of the count and the average). A plan begun in October
+  divided two months by eleven.
+- **The without-bonus line is drawn only where it differs** (`noBonusLine`, one function for
+  the chart, its key and its aria label). The sample drew the second line on top of the first.
+- **A capped goal's "includes $X of Roth IRA contributions" never exceeds the goal's own
+  figure.**
+- **A bar click defers its render** (`setTimeout 0` in the Left Over chart's `onClick`): the
+  render destroyed the chart while Chart.js was still dispatching the click — an uncaught
+  TypeError on every bar pressed since 2026-08-24.
+- **The sample's net-worth snapshots add up**, in scale with the live card.
+
+### The boundary
+
+- **A crafted or damaged backup was written over the plan, THEN refused, and the next load
+  threw at boot.** Three changes: `coerceShape` holds `cat.rule` to `ruleNames()` (a hoisted
+  function with a literal list — `RULES` is a `const` below `load()`, the TDZ trap; a test holds
+  the two to each other), `section` to its three values, `perCheck`/`every`/`goal.target` to
+  numbers, `goal.targetDate` and a donation's `date` to strings; the engine's own dispatch
+  falls back to `none`; and Restore runs `computeAll` on the new plan BEFORE assigning `state`
+  or saving.
+- **An id that is a name on every object is moved off it** (`cleanId` → `reservedId`):
+  `constructor`, `toString`, `__proto__`… passed `ID_OK` and made `outs[id].push` a call on
+  Object's own. Never pollution; a dead render. Suffixed `-id`, so it is an ordinary moved id.
+- NOT done, recorded: unknown keys are still kept on every object; free-text fields
+  (`name`, `note`, `label`…) are not forced to strings; `finAdopt` has no trial compute (the
+  boundary fixes above are what protect it). No XSS came from any of them in ~500–950 driven
+  clicks per field.
+
+### Accessibility
+
+Axe cannot see any of these; all five came from real key presses and measured boxes.
+
+- **A keyboard-focused grid cell is brought clear of both pinned columns** (2.4.11).
+  `padGridScroll()` sets `scroll-padding` on `.gridwrap` from the MEASURED label and total
+  columns (the total only while it is pinned), and a `focusin` listener calls
+  `revealGridCell()` — scroll-padding alone was not enough, because Chrome scrolls nothing for
+  a cell that is partly visible. Pointer focus is skipped (`gridFocusByPointer`) so the grid
+  never slides out from under a click. Zoom-corrected: rect = screen px, scrollLeft = layout
+  px — the seam again.
+- **The Budget row editor hands focus back to the row** after Done, Esc, Move or Add, in both
+  lenses (2.4.3). `refocusEditRow` matched a `th.lbl` with no tabindex, so `.focus()` did
+  nothing; it falls back to the row's cell (made the roving one) or its Month-page line.
+  `commitRow` finds a new row's id by diffing the year's ids either side of the save
+  (`ctx.added`), and `rowForm.onsubmit` closes the dialog BEFORE the hand-back for a category.
+  Row Delete still lands on `<body>` — the 2026-09-24 judgement, unchanged.
+- **Info dots in the label column are whole at phone widths** (1.4.10). The ellipsis moved to
+  an inner `.lbltext`; the dot sits outside the clipped box (`lblDot`, `.lblrow`). **The phone
+  label column grew from 116px to about 129px** so the section headings are not cut short
+  (`.grid tr.sechead th.lbl { max-width: none }` at ≤700px) — delete that one rule to get
+  116px back with truncated headings. Test trap: `scrollIntoView` on the dot scrolls the
+  clipping `th` and makes the broken build pass.
+- **The chosen Year / Month segment wears the chosen year chip's ring** (1.4.11):
+  `inset 0 0 0 1px var(--border-control)`. No new colour; an inset ring is not a shadow.
+- **A bonus percentage outside its range is refused by name** (3.3.1) and the box keeps what
+  it held. Percent fields may now declare `min`/`max`/`minOpen`; `rangeRefusals()` runs in
+  `commitRow` on the "isn't a number" pattern. Every `p.field-readout` is `role="status"`.
+
+### Left for Charles to decide
+
+- **A goal already full on Roth money still claims its whole target from the shared account**,
+  starving the goal behind it (`goalDraw`'s `want = ahead.target`), and every goal ticking the
+  box counts the whole basis. The commit that added the feature says thresholds measure
+  accounts only, so this may be the intent.
+- **A new bill with a due date reads as "late" for every earlier scheduled month** of the year
+  (`outstandingDues`). A floor at the row's first figure was written and backed out: "with
+  nothing ever recorded the count is 2" is pinned on purpose.
+- **Row names ellipsise at ≤700px** (1.4.12 under text-spacing overrides) — wrapping them is a
+  layout trade.
+- A future bonus month saved as its prefilled split survives "without bonuses"; the demo never
+  shows the bonus moving a date until a year is built ahead.
+- The public tests.html names the birth year the fixture rule exists to keep out.

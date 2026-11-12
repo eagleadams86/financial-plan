@@ -5606,7 +5606,30 @@ const ID_OK = /^[A-Za-z0-9_-]{1,64}$/;
    mints from a name can collide with it, while ID_OK still admits it. */
 const EARNED_ROW_ID = '_earned';
 
+/* THE RULES A ROW CAN HAVE, as a list a boundary can read (2026-11-12). `RULES`
+   itself is a `const` further down the file and `load()` runs above it, so
+   `coerceShape` reading it at boot would be the temporal-dead-zone trap — a
+   function declaration is hoisted and a literal needs nothing. A test holds
+   this to `RULES`' own keys, so a new rule cannot be added to one and not the
+   other. */
+function ruleNames() {
+  return ['none', 'overflow', 'carry', 'grow', 'quarterly', 'avg', 'avglastyear',
+          'samemonth', 'dividends', 'paycheck'];
+}
+/* An id is used as a KEY in plain objects all over the engine, and a handful
+   of names are already there on every object: `constructor`, `toString`,
+   `__proto__`… `ID_OK` let them through, and an account called `constructor`
+   made `outs[id].push` a call on Object's own constructor — a render that
+   throws, on a plan Restore had already written to storage (2026-11-12). Not
+   pollution, nothing was ever written to a prototype; a dead page all the same.
+   Such an id is given a suffix, which makes it an ordinary moved id that every
+   reference and `<id>|<month>` key follows. */
+function reservedId(s) { return s in Object.prototype; }
 function cleanId(raw, fallback) {
+  const id = cleanIdShape(raw, fallback);
+  return reservedId(id) ? `${id.slice(0, 60)}-id` : id;
+}
+function cleanIdShape(raw, fallback) {
   const s = (raw === null || raw === undefined) ? '' : String(raw);
   if (ID_OK.test(s)) return s;
   /* Re-slug the ID itself, not the name: a mangled id is usually a good id with
@@ -6087,6 +6110,22 @@ function coerceShape(data) {
        by role, everything else by the sign of what's stored — which sticks
        on the next save, so a hand-picked section is never re-guessed. */
     for (const cat of yr.categories) {
+      /* FOUR FIELDS THE ENGINE READS WITHOUT ASKING (2026-11-12). A rule that
+         is not one of the rules made `RULES[cat.rule]` a call on undefined —
+         every tab dead, at boot, on a plan Restore had already stored while
+         its toast said the file was refused. A per-check amount or a "repeats
+         every" that was an object threw inside the arithmetic. None of it was
+         markup (every sink escapes); all of it was a plan that could not be
+         opened. Read strictly, and an unreadable one is DELETED so the field's
+         own default speaks: no rule, the section guessed below, no amount. */
+      if (typeof cat.rule !== 'string' || !ruleNames().includes(cat.rule)) delete cat.rule;
+      if (!['income', 'expense', 'transfer'].includes(cat.section)) delete cat.section;
+      for (const k of ['perCheck', 'every']) {
+        if (cat[k] === undefined) continue;
+        const n = rateOrNone(cat[k]);
+        if (n !== undefined) cat[k] = n; else delete cat[k];
+      }
+      if (cat.isPay !== undefined && typeof cat.isPay !== 'boolean') delete cat.isPay;
       /* Pass-throughs on a bank account (the old "zelle" role) grouped as
          transfers too; money paid straight out of investments (the old
          "charitable" role) never did. */
@@ -6325,6 +6364,14 @@ function coerceShape(data) {
        Every load normalises it, so no schema bump and nothing to migrate. */
     if (g.count === 'overflow') g.count = 'all';
     if (!['all', 'capped'].includes(g.count)) g.count = 'capped';
+    /* The target and its date reach arithmetic and `.slice()` (2026-11-12): a
+       number or nothing, a month or a day or nothing. */
+    if (g.target !== undefined) {
+      const t = rateOrNone(g.target);
+      if (t !== undefined) g.target = t; else delete g.target;
+    }
+    if (g.targetDate !== undefined && (typeof g.targetDate !== 'string'
+        || !/^\d{4}-(0[1-9]|1[0-2])(-\d{2})?$/.test(g.targetDate))) delete g.targetDate;
     /* A target can be N months of expenses (2026-09-05): read strictly — a
        positive number or nothing — and when it is set the stored `target`
        goes, since the figure is derived and a stale copy beside it would be
@@ -6895,6 +6942,9 @@ function coerceShape(data) {
     /* same num() guard as the other money maps */
     for (const r of s.donations[y]) {
       r.funding = num(r.funding); r.grant = num(r.grant); r.cash = num(r.cash);
+      /* The table sorts on the date with `localeCompare` — a string or
+         nothing, or the Giving tab throws (2026-11-12). */
+      if (r.date !== undefined && typeof r.date !== 'string') delete r.date;
     }
     if (!s.donations[y].length) delete s.donations[y];
   }
@@ -8953,7 +9003,7 @@ function computeYearWith(st, yearKey, prior, goals) {
          Only the ESTIMATE is withheld — a typed figure wins above this line, as
          everywhere: it is somebody saying the money left. */
       const v = paysIn(cat, m) && targetRunning(st, yr, cat, m, hubId)
-        ? RULES[cat.rule || 'none'](cat, m, ctx) : null;
+        ? RULES[ruleNames().includes(cat.rule) ? cat.rule : 'none'](cat, m, ctx) : null;
       /* `|| 0`: an average of cents that cancel, or a dividend on a slightly
          negative balance, rounds to -0, which every money sink downstream
          would print as "-$0.00" (2026-09-17). */
@@ -9414,9 +9464,9 @@ function claimAccounts(goal, goals, seen = new Set()) {
    the later goal read $0. The shortfall rule reads what pred holds OUTSIDE
    the set — so once pred stops counting the shared account, every dollar it
    holds is outside, its whole unmet target becomes the claim, and it is
-   levied against accounts pred does not name and cannot reach. Emergencies,
-   $37,026, moved off Cash Mgmt: New Car went on counting $36,701 of its own
-   and reported nothing.
+   levied against accounts pred does not name and cannot reach: with the first
+   goal moved off the shared account, a later one went on counting its own
+   balance and reported nothing.
    The test is STRUCTURAL, never a balance — the claim is also the threshold a
    sweep row starts at, and a threshold that moved with the balances the sweep
    is computing would be circular.
@@ -9702,8 +9752,8 @@ function computeGoals(st, computed, todayIso) {
        the goals ahead have taken every positive dollar, and the replay hands
        it back as a NEGATIVE remainder. Unfloored it was subtracted from the
        Roth contributions added below, and it made the claim read more than
-       the accounts held ($64,698.26 claimed out of $64,689.37 on Charles's
-       plan) — a goal cannot owe the goals ahead of it. */
+       the accounts held, by the few dollars the account was overdrawn —
+       a goal cannot owe the goals ahead of it. */
     const remaining = Math.max(0, drawn);
     const claimed = round2(Math.max(0, held - remaining));
     /* Roth IRA contributions, when the goal counts them — its own money and
@@ -9803,7 +9853,8 @@ const HELP = {
       + 'figure. Its rate is the market moving, not money arriving: it raises the balance, '
       + 'and it is yours only on paper until you sell. Counting it here would inflate every '
       + 'month by a gain you cannot spend, and flatter the savings rate with it.'],
-    ['That money is not hidden — it is on the ', b('Growth line under Accounts'), ', which is '
+    ['That money is not hidden — it is on the ', b('account that grew'), ' (hover or tap '
+      + 'its balance, or read its year-total column), which is '
       + 'also the answer when your closing total climbs by more than Money In less Money Out '
       + 'explains.'],
   ] },
@@ -9848,7 +9899,8 @@ const HELP = {
       + 'recorded is left out rather than counted as a zero.'],
     ['The other reason is ', b('growth'), '. An account set to grow raises this total every '
       + 'month without any of it passing through Money In, because a gain on paper is not '
-      + 'money that came in. The Growth line under Accounts is that figure, and it is what '
+      + 'money that came in. Each growing account says its own figure — hover or tap its '
+      + 'balance, or read its year-total column — and that is what '
       + 'closes the gap.'],
   ] },
   monthRows: { title: 'How These Lists Are Ordered', body: [
@@ -10267,8 +10319,8 @@ const HELP = {
       + 'investment rising — and it counts as income nowhere, because you cannot spend it '
       + 'until you sell. Both move the balance the same way; only one is pay.'],
     ['Growth has nowhere to be paid into, so it stays where it grew: sending it somewhere '
-      + 'spendable would mean you had sold, and a percentage does not say that. It is added '
-      + 'up on the ', b('Growth line under the accounts'), ', apart from the Income block.'],
+      + 'spendable would mean you had sold, and a percentage does not say that. It is said '
+      + 'on the ', b('account itself'), ' — hover or tap its balance — apart from the Income block.'],
     ['Any month\'s figure can be ', b('overridden with what really arrived'), ', by clicking '
       + 'that month\'s balance.'],
     ['A ', b('past year'), ' works the other way round: nothing is computed there, so '
@@ -10688,6 +10740,18 @@ function noBonusPlan() {
   noBonusMemo = { for: C, st, C: nc,
     goals: latestGridYear() ? computeGoals(st, nc, todayISO()) : [] };
   return noBonusMemo;
+}
+/* The without-bonus LINE, or null when it would sit exactly on the other one
+   (2026-11-12). A bonus whose month is already entered changes nothing ahead,
+   and the chart drew a second line on top of the first under a key describing
+   "the gap between the two lines". One function, so the key and the chart
+   cannot disagree about whether there is a gap. */
+function noBonusLine(pts, liveKey) {
+  const nb = noBonusPlan();
+  if (!nb.C) return null;
+  const byM = new Map(goalChartPoints(nb.st, nb.C, liveKey, previewYears()).map(p => [p.m, p.v]));
+  const data = pts.map(p => byM.has(p.m) ? byM.get(p.m) : null);
+  return data.some((v, i) => v !== pts[i].v) ? data : null;
 }
 const goalWithoutBonus = (id) => (noBonusPlan().goals || []).find(g => g.id === id) || null;
 
@@ -11409,16 +11473,20 @@ function sampleState() {
             note: 'Cleared most months, so there is no fixed payment to project from.' },
         ],
         snapshots: [
-          { date: `${PREV2}-12-31`, total: 214800, liquid: 28400, invested: 51200,
-            retirement: 292000, property: 168000 },
-          { date: `${PREV}-12-31`,  total: 248300, liquid: 31900, invested: 58600,
-            retirement: 341000, property: 175000 },
-          { date: `${Y}-06-30`,     total: 271500, liquid: 34700, invested: 62500,
-            retirement: 384000, property: 181000 },
+          /* Each total IS its parts — liquid + invested + retirement + property
+             less debts — and in scale with what the live card works out
+             (2026-11-12): the table used to print a total smaller than the
+             retirement figure beside it. */
+          { date: `${PREV2}-12-31`, total: 725000, liquid: 98000, invested: 61000,
+            retirement: 352000, property: 228000, debts: 14000 },
+          { date: `${PREV}-12-31`,  total: 814000, liquid: 112000, invested: 70500,
+            retirement: 398000, property: 246000, debts: 12500 },
+          { date: `${Y}-06-30`,     total: 871800, liquid: 121000, invested: 76000,
+            retirement: 428000, property: 258000, debts: 11200 },
           /* The last day of the month the sample is entered through, so that
              month's Close card has a net worth line already done. */
-          { date: `${Y}-08-31`,     total: 276900, liquid: 35200, invested: 64100,
-            retirement: 391000, property: 182000 },
+          { date: `${Y}-08-31`,     total: 882600, liquid: 123000, invested: 77500,
+            retirement: 433000, property: 260000, debts: 10900 },
         ],
         /* `type` is the account kind (the list the editor offers) and `kind` is
            only ever 'traditional' or 'roth' — both are written out here rather
@@ -14944,9 +15012,8 @@ function renderMonthView() {
      list is CATEGORY ROWS, and a derived row among rows is a different claim
      from a derived row among accounts.
      So the month page explains growth where the growth happened — on the
-     account — and the YEAR grid keeps the Growth row, which sits below Total
-     rather than among the accounts and is the only place the figure is visible
-     month by month rather than one account at a time. */
+     account. (The YEAR grid drew a Growth row below Total for a few hours on
+     2026-08-31 and dropped it for the same reason — see `NO GROWTH ROW HERE`.) */
   const acctCard = !shown.length ? '' : `<div class="card" data-box="month-accounts">
     <h2>Accounts${helpBtn('monthAccounts', 'these balances')}</h2>
     <p class="sub">Where every account stood at the end of ${esc(monthTitle(m))}.${
@@ -14981,8 +15048,15 @@ function monthNetPoints(st, computed, y) {
   const c = computed[y];
   if (!yr || !c || yr.kind !== 'grid') return [];
   const prior = computed[String(+y - 1)] || null;
-  return c.months.map(m => ({ m, v: monthTotals(c, yr, m, prior).net.v,
-                              ahead: monthAhead(yr, m) }));
+  return c.months.map(m => {
+    const net = monthTotals(c, yr, m, prior).net;
+    /* `blank`: a month already past with nothing in it at all — the months
+       before a plan began. Present only when true, so every other point is the
+       shape it always was. */
+    const p = { m, v: net.v, ahead: monthAhead(yr, m) };
+    if (!p.ahead && net.kind === 'missing') p.blank = true;
+    return p;
+  });
 }
 
 /* The year's bars added up (2026-10-24, Charles: "include the average and
@@ -14993,11 +15067,17 @@ function monthNetPoints(st, computed, y) {
    the sentence that prints it says so. Pure, so the test pins the arithmetic
    rather than reading a canvas. `avg` is null under two months, `avgTipLine`'s
    rule: one month averaged is that month printed twice. */
+/* A BLANK month is not one that happened (2026-11-12): a plan started in
+   October read "left over across 11 months" and divided two months' money by
+   eleven, and a fresh one said "$0.00 across 10 months". Such months are in
+   neither the count nor the average; `blank` says how many there were. */
 function monthNetSummary(pts) {
-  const done = pts.filter(p => !p.ahead);
+  const past = pts.filter(p => !p.ahead);
+  const done = past.filter(p => !p.blank);
   const sum = (list) => round2(list.reduce((a, p) => a + (p.v || 0), 0));
   const soFar = sum(done);
-  return { soFar, months: done.length, year: sum(pts), ahead: pts.length - done.length,
+  return { soFar, months: done.length, year: sum(pts), ahead: pts.length - past.length,
+           blank: past.length - done.length,
            avg: done.length < 2 ? null : round2(soFar / done.length) };
 }
 
@@ -15008,9 +15088,13 @@ function monthNetSummaryLine(s, y) {
   const m = (v) => `<strong>${esc(fmtMoney(v))}</strong>`;
   const avg = s.avg === null ? '' : ` — ${m(s.avg)} a month on average`;
   if (!s.months)
-    return `None of ${esc(y)} has happened yet. As planned, it leaves ${m(s.year)} over by the end.`;
+    return s.blank
+      ? `Nothing is recorded for ${esc(y)} yet. As planned, it leaves ${m(s.year)} over by the end.`
+      : `None of ${esc(y)} has happened yet. As planned, it leaves ${m(s.year)} over by the end.`;
   const months = `${s.months} month${s.months === 1 ? '' : 's'}`;
-  if (!s.ahead) return `${esc(y)} left ${m(s.year)} over across its ${months}${avg}.`;
+  if (!s.ahead) return s.blank
+    ? `${esc(y)} left ${m(s.year)} over across the ${months} with figures${avg}.`
+    : `${esc(y)} left ${m(s.year)} over across its ${months}${avg}.`;
   return `So far, ${m(s.soFar)} left over across ${months}${avg}. With the months still
     to come, the year comes to about ${m(s.year)}.`;
 }
@@ -15147,14 +15231,20 @@ function buildMonthNetChart(y, active) {
       onClick: (e, els) => {
         if (!els.length) return;
         const m = pts[els[0].index].m;
-        /* From the Year lens a bar is the way INTO that month's page:
-           `pickMonth` keeps the year in step, and returns false only when the
-           month is already the stored one — the lens still changed, so draw. */
-        if (!active) {
-          state.ui.budgetView = 'month';
-          if (!pickMonth(m)) { save(); render(); }
-          window.scrollTo(0, 0);
-        } else if (pickMonth(m)) window.scrollTo(0, 0);
+        /* AFTER Chart.js has finished with the click (2026-11-12). The render
+           below destroys this chart, and done inside the handler it destroyed
+           it while Chart.js was still handing the same event to the tooltip —
+           an uncaught TypeError on every bar pressed, on both lenses. */
+        setTimeout(() => {
+          /* From the Year lens a bar is the way INTO that month's page:
+             `pickMonth` keeps the year in step, and returns false only when the
+             month is already the stored one — the lens still changed, so draw. */
+          if (!active) {
+            state.ui.budgetView = 'month';
+            if (!pickMonth(m)) { save(); render(); }
+            window.scrollTo(0, 0);
+          } else if (pickMonth(m)) window.scrollTo(0, 0);
+        }, 0);
       },
       plugins: {
         legend: { display: false },
@@ -15392,7 +15482,8 @@ function goalCard(g, idx) {
              nothing left to explain away. */
         g.claimed > 0 ? ` · after ${fmtMoney(g.claimed)} claimed first by ${esc(g.claimedBy)}` : ''}
       ${/* Money no account holds is said, or the tile cannot be added up. */
-        g.rothBasis ? ` · includes ${fmtMoney(g.rothBasis.basis)} of Roth IRA contributions${
+        g.rothBasis ? ` · includes ${fmtMoney(g.count === 'all' ? g.rothBasis.basis
+            : Math.min(g.rothBasis.basis, g.saved))} of Roth IRA contributions${
           g.etaMonths !== 0 && g.rothBasis.yearly > 0
             ? `, ${fmtMoney(g.rothBasis.yearly)}/yr assumed after ${esc(g.rothBasis.lastTyped)}` : ''}` : ''}
       ${g.targetMonths > 0 ? ` · ${g.targetMonths} month${g.targetMonths === 1 ? '' : 's'} of this year's expenses` : ''}</div>
@@ -16132,7 +16223,8 @@ function renderGoals() {
           previewYears().length > 1 ? 's' : ''} you've built ahead` : ''}. ${chartDashNote}</p>
       <div class="chartbox"><canvas id="goalChart"></canvas></div>
       ${/* The second line exists only when a bonus does — see buildGoalChart. */
-        noBonusPlan().C ? `<p class="chartkey"><i class="dot"></i> Dotted — the same plan
+        liveKey && noBonusLine(goalChartPoints(state, C, liveKey, previewYears()), liveKey)
+          ? `<p class="chartkey"><i class="dot"></i> Dotted — the same plan
         without any bonuses. The gap between the two lines is what the bonuses add.</p>` : ''}
     </div>
     <div class="card">
@@ -21994,12 +22086,24 @@ function pinnedToLive(st, y) {
 
 /* Rules that reach a year back need the previous year's GRID; converting it
    would quietly blank those estimates. Warn with the row names, not a shrug. */
+/* FOUR MORE RULES REACH BACK, when the row has nothing of its own to start
+   from (2026-11-12). `carry`, `grow`, `quarterly` and `avg` open a year built
+   ahead from the year before — December's figure, or its run — and only stop
+   needing it once the row has a stored figure in its own first month. The list
+   named two rules, so folding the year just finished blanked the mortgage, the
+   groceries and a paycheck in the next one with no warning at all, under a
+   confirm that promised nothing else would change. */
 function rulesNeedingYear(st, y) {
   const nextKey = String(+y + 1);
   const next = st.years[nextKey];
   if (!next || next.kind !== 'grid') return [];
+  const opens = (cat) => {
+    const cell = (next.cells || {})[`${cat.id}|${next.startMonth}`];
+    return cell !== undefined && cell !== null;
+  };
   return (next.categories || [])
-    .filter(cat => cat.rule === 'samemonth' || cat.rule === 'avglastyear')
+    .filter(cat => cat.rule === 'samemonth' || cat.rule === 'avglastyear'
+      || (['carry', 'grow', 'quarterly', 'avg'].includes(cat.rule) && !cat.until && !opens(cat)))
     .map(cat => cat.name);
 }
 
@@ -23430,10 +23534,7 @@ function buildGoalChart() {
      muted text colour — the chart key's own swatch — so it is told apart by
      its line style and never by hue. Matched to the main line month by month
      rather than by position, so a month the second plan lacks is a gap. */
-  const nb = noBonusPlan();
-  const nbByM = nb.C ? new Map(goalChartPoints(nb.st, nb.C, liveKey, previewYears())
-    .map(p => [p.m, p.v])) : null;
-  const nbData = nbByM ? pts.map(p => nbByM.has(p.m) ? nbByM.get(p.m) : null) : null;
+  const nbData = noBonusLine(pts, liveKey);
   const nbLast = nbData ? nbData[nbData.length - 1] : null;
   newChart('goalChart', {
     type: 'line',
@@ -26953,7 +27054,7 @@ const EDITORS = {
         ['growth', 'Growth — a gain on paper, not money yet'],
       ], hint: 'Interest counts as income: it lands in Money In and the savings rate. '
           + 'Growth counts as income nowhere — it moves the balance and shows on the '
-          + 'Growth line under Accounts. Dividends below are money either way.' },
+          + 'account itself, under its balance. Dividends below are money either way.' },
       /* Shown only for interest, and hidden rather than disabled because the
          claim it makes is genuinely withdrawn: an account set to Growth has its
          destination forced back to itself when the plan is read, so there is no
@@ -31092,7 +31193,7 @@ function openCellEditor(yearKey, type, id, m) {
       ? (isGrowth
         ? 'Growth and dividends are stated for a past year, the way the balance is: '
           + 'type what the account really made this month. The growth counts as income '
-          + `nowhere — it shows on the Growth line for ${yearKey} — and the dividends do. `
+          + `nowhere — it shows on the account itself for ${yearKey} — and the dividends do. `
           + 'Either way the balance above is left alone, which already holds them.'
         : 'Interest and dividends are stated for a past year, the way the balance is: '
           + 'type what the account really earned this month. It counts as income for '
@@ -32346,11 +32447,19 @@ F('importFile').onchange = (e) => {
       const msg = `Replace everything in this browser with ${nYears} year(s) of data from this file? `
         + `Your current data will be lost.`;
       if (!confirm(msg)) return;
-      state = Object.assign(blankState(), parsed, {
+      const restored = Object.assign(blankState(), parsed, {
         settings: Object.assign(blankState().settings, parsed.settings || {}),
         side: Object.assign(blankState().side, parsed.side || {}),
         ui: Object.assign(blankState().ui, parsed.ui || {})
       });
+      /* WORKED OUT BEFORE IT REPLACES ANYTHING (2026-11-12). `save()` used to
+         run before `render()` inside this one `try`, so a file the engine
+         could not compute was written over the plan FIRST and refused second:
+         the toast said it didn't look like a backup, the old plan was already
+         gone, and the next load threw at boot. A throw here lands in the same
+         catch with nothing touched. */
+      computeAll(restored, todayISO());
+      state = restored;
       claimStorage();   // a deliberate whole-plan replacement — see claimStorage()
       save();
       render();
@@ -32421,7 +32530,7 @@ F('compareFile').onchange = (e) => {
       </table></div>
       <p class="sub" style="margin-top:12px">Headline figures only — each one read from the
         same place the tab that owns it draws it. To work from the other plan instead, use
-        Restore JSON, which replaces what is here.</p>`;
+        Restore from Backup, which replaces what is here.</p>`;
       openModal(compareDialog);
     } catch (err) {
       toast('That file doesn’t look like a Money Map backup');
@@ -34947,7 +35056,7 @@ window.__finTestHooks = { SCHEMA, EARNED_ROW_ID, round2, roundTo, roundToDollar,
   normRole, gridToSummary, summaryToGrid, gridToPinned, pinnedToLive,
   foldableYear, unfoldableYear, summaryYears, folded, stripFoldedGrids,
   rulesNeedingYear, partsKind, sumKind, paycheckParts,
-  paycheckBonus, bonusSalaryFor, bonusPreview, freezePaycheckBonuses,
+  paycheckBonus, bonusSalaryFor, bonusPreview, freezePaycheckBonuses, ruleNames, RULES, cleanId,
   planHasBonus, withoutBonuses, bonusDependence, rothBasisAt,
   limitsFor,
   peopleOf, personById, ownerLabel, ageAt, retirementYearOf, majorityMonthOf,
