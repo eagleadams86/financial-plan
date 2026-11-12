@@ -29697,6 +29697,7 @@ function wireBudget() {
      reading, not editing, and Enter simply opens nothing now that the click
      listener above was never attached. */
   if (grid) wireGridKeys(grid);
+  padGridScroll();
   if (grid) wireGridSelectScroll(grid);   // after wireView's wireGridRange: its pointerdown set the anchor this extends
   if (grid && !viewOnly) wireRowDrag(grid);
   /* The gathered notes sit outside the table, so the grid's own listener can't
@@ -30066,6 +30067,12 @@ function wireGridSelectScroll(grid) {
 function wireGridKeys(grid) {
   const cells = [...grid.querySelectorAll('td.cell')];
   cells.forEach((c, i) => { c.tabIndex = i === 0 ? 0 : -1; });
+  /* However the focus arrives — Tab into the grid, an arrow key, the hand-back
+     after a save — the cell holding it is not left under a pinned column. */
+  grid.addEventListener('focusin', (e) => {
+    const td = e.target.closest && e.target.closest('td.cell');
+    if (td) revealGridCell(td);
+  });
   const rove = (to) => {
     if (!to) return;
     grid.querySelectorAll('td.cell[tabindex="0"]').forEach(c => { c.tabIndex = -1; });
@@ -30095,6 +30102,73 @@ function wireGridKeys(grid) {
       }
     }
   });
+}
+
+/* ── A FOCUSED CELL IS NOT LEFT UNDER A PINNED COLUMN (2026-11-12, WCAG 2.4.11)
+   The label column is stuck over the left of this scroller and the year total
+   over the right, and both are opaque. When focus moves, the browser scrolls
+   the cell "into view" — but a cell lying wholly UNDERNEATH a pinned column is
+   already inside the box as far as it can tell, so it does nothing, and the
+   keyboard is on a figure nobody can see. Measured: the grid opens scrolled to
+   the current month, Tab from the toolbar lands on January with 0 of its 107px
+   showing; on a phone ArrowLeft walks under the labels every other press.
+
+   `scroll-padding` is the browser's own word for "this much of each edge is
+   covered", and focus scrolling honours it. It is written from the MEASURED
+   columns rather than in the stylesheet because neither width is a constant:
+   the labels are as wide as the longest name up to a cap that differs by
+   breakpoint, and the total only counts while it is pinned (a phone unpins it
+   — the same test scrollGridToNow makes). offsetWidth, not a rectangle: the
+   padding is in the box's own layout pixels, which is what offsetWidth counts,
+   so the page zoom never enters into it. Re-measured on every render and on a
+   resize, which is when a breakpoint can change either answer. */
+function padGridScroll() {
+  const wrap = document.querySelector('.gridwrap');
+  if (!wrap) return;
+  const lbl = wrap.querySelector('thead th.lbl');
+  const tot = wrap.querySelector('thead th.rowtot');
+  const totW = tot && getComputedStyle(tot).position === 'sticky' ? tot.offsetWidth : 0;
+  wrap.style.scrollPaddingLeft = (lbl ? lbl.offsetWidth : 0) + 'px';
+  wrap.style.scrollPaddingRight = totW + 'px';
+}
+addEventListener('resize', padGridScroll);
+/* The padding is only HALF of it, and the measurement said so: a browser moves
+   nothing for a cell that is PARTLY in view, so with the padding alone every
+   other ArrowLeft on a phone still stopped on a cell 45% showing (the rest
+   under the labels), and a cell wholly covered was centred rather than brought
+   to the edge beside the one you came from. So a cell that takes the focus from
+   the KEYBOARD is brought fully into the run between the two pinned columns by
+   hand — the same arithmetic as scrollGridToNow, and the same two coordinate
+   spaces: rectangles are screen pixels, scrollLeft is the box's own, and the
+   page zoom is the difference.
+
+   Not for a pointer. A press focuses the cell on the way DOWN, and a grid that
+   slid under the finger before it came up would hand the click to a different
+   cell or to none. The last thing used decides which it is, the way the
+   browser's own :focus-visible does. */
+let gridFocusByPointer = false;
+document.addEventListener('pointerdown', () => { gridFocusByPointer = true; }, true);
+document.addEventListener('keydown', () => { gridFocusByPointer = false; }, true);
+/* The run of the scroller between its two pinned columns, in SCREEN pixels. */
+function gridRun(wrap) {
+  if (!wrap) return null;
+  const z = zoomScale || 1;
+  const lbl = wrap.querySelector('thead th.lbl');
+  const tot = wrap.querySelector('thead th.rowtot');
+  const inner = wrap.getBoundingClientRect().left + wrap.clientLeft * z;   // inside the border
+  return { z, left: inner + (lbl ? lbl.getBoundingClientRect().width : 0),
+    right: inner + wrap.clientWidth * z
+      - (tot && getComputedStyle(tot).position === 'sticky' ? tot.getBoundingClientRect().width : 0) };
+}
+function revealGridCell(td) {
+  const wrap = td && td.closest('.gridwrap');
+  if (!wrap || gridFocusByPointer) return;
+  const { z, left, right } = gridRun(wrap);
+  const r = td.getBoundingClientRect();
+  /* A run too narrow to hold the cell shows its START — the figure's sign and
+     leading digits — rather than swinging between the two edges. */
+  if (r.left < left - 0.5 || right - left < r.width) wrap.scrollLeft += (r.left - left) / z;
+  else if (r.right > right + 0.5) wrap.scrollLeft += (r.right - right) / z;
 }
 
 /* After a save re-renders, the element that opened the dialog is a DEAD node:
