@@ -8957,3 +8957,27 @@ Handicap first; the engine and `runSyncSim` here are its, verbatim.
   `scrollWidth` equals its `clientWidth` (286). No rule added. A NEW label longer than about
   28 characters needs Wine Cellar's `#dataDialog .datarow button { max-width: 100%;
   white-space: normal; }`.
+
+## The Late Echo (2026-11-19)
+
+Charles: "when switching tabs, i keep getting synced from cloud. even doing nothing, i got the
+message" — with the laptop's copy closed, on the phone alone.
+
+- **The listener runs BEHIND the transactions.** A transaction's write does not pass through the
+  listener's local cache, so `onSnapshot` hears this device's own write some time after the
+  commit returns. Two saves close together (two tab presses on a slow connection; the quiet
+  price refresh and the month-end closes a launch sets off) both commit — base is now the
+  second — and THEN the first one's echo is delivered. It is not the base, nothing is unsent,
+  and `syncPlan` says `adopt`: the screen went back one save with "Synced from another device",
+  and again when the second echo arrived. One device is enough; a single save never shows it,
+  which is why the laptop looked clean when it was watched.
+- **The fix is `past` / `wasBase` in `makeCloudSync`**: every tag `setBase` replaces is
+  remembered (64, in memory, this sitting), and `snapshot()` drops a copy whose tag this device
+  once held as its base — direct or parked, both go through `snapshot()`. Not "ignore a lower
+  rev": a page on the old code writes with no `rev`, which reads as 0 and must still be heard.
+  The copy a TRANSACTION read (`moved`) and the one `start()` reads are never filtered — those
+  are the cloud as it is.
+- Sim scenarios 13 and 13b (`lateEcho`, `lateEchoParked`), red first: 13 also proves another
+  device's real write is still taken afterwards, once.
+- **Found here, so it started here** — then ported to Golf Handicap, Wine Cellar and PAPTrack
+  web the same day. The engine text is still one text; a change to it belongs in all four.

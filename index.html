@@ -35387,7 +35387,22 @@ function makeCloudSync(io) {
       return b && b.uid === io.uid() ? { rev: Number(b.rev) || 0, at: Number(b.at) || 0 } : null;
     } catch (e) { return null; }
   };
-  const setBase = (t) => io.setItem(io.keys.base, JSON.stringify({ uid: io.uid(), rev: t.rev, at: t.at }));
+  /* Every copy this device has already moved on FROM, this sitting. The
+     listener runs behind the transactions: two saves close together both land,
+     and only then is the first one's echo delivered. It is not the base any
+     more, and with nothing unsent a device takes whatever it hears — so the
+     screen went back a save, said "Synced from another device", and said it
+     again when the second echo arrived. Nobody else had written a thing
+     (2026-11-19; a tab pressed twice on a phone, or the price lookups a launch
+     sets off, was enough). A copy this device once held as its base is by
+     definition older than the one it holds now, and is never looked at again. */
+  const past = [];
+  const wasBase = (t) => past.some((p) => sameTag(p, t));
+  const setBase = (t) => {
+    const b = base();
+    if (b && !sameTag(b, t) && !wasBase(b)) { past.push(b); if (past.length > 64) past.shift(); }
+    io.setItem(io.keys.base, JSON.stringify({ uid: io.uid(), rev: t.rev, at: t.at }));
+  };
   const dirty = () => io.stamp() !== Number(io.getItem(io.keys.pushed) || 0);
   const markSent = (at) => io.setItem(io.keys.pushed, String(at));
   function adopt(data, how) {
@@ -35471,7 +35486,7 @@ function makeCloudSync(io) {
     if (pushing || asking) { held = data; return null; }
     /* Looked at directly, so it is newer than anything still parked. */
     held = null;
-    if (sameTag(base(), cloudTag(data))) return null;
+    if (sameTag(base(), cloudTag(data)) || wasBase(cloudTag(data))) return null;
     return resolve(data, 'live');
   }
   return {

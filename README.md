@@ -2604,6 +2604,15 @@ was being sent used to be set aside and, if that save failed, replayed after the
 next one that worked. It is now looked at straight away, or dropped when a
 fresher one has been seen.
 
+**The app no longer mistakes its own save for another device's** (2026-11-19).
+Two saves close together — a tab pressed twice on a phone, or the price lookups
+that run when the app opens — both reached Google, and then Google's echo of the
+FIRST one arrived. The app read that as a change from somewhere else: the screen
+stepped back one save, "Synced from another device" came up, and it came up
+again when the echo of the second save put things right. It happened with one
+device and nothing else open. The app now remembers the copies it has already
+moved on from and ignores them when they come round again.
+
 **A change that arrives while a window is open closes that window — if the
 window was filled in from the plan** (2026-09-18). Edit a goal on the laptop
 while the phone deletes another one, and the laptop's editor used to stay up
