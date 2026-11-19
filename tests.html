@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1312;
+const EXPECTED = 1318;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -1516,6 +1516,86 @@ t('past the end of the plan it extrapolates from the LAST built year, not the li
   /* 23 months to December 2027, where 22,800 is still open, then 46 of them. */
   eq(g.etaMonths, 69, 'the built months counted once, then the rate');
   eq(g.eta, '2031-10');
+});
+/* ── The goals card read at ANOTHER month (2026-11-19) ─────────────────────
+   Charles: "an 'as of' option that shows the goal progress in the past and in
+   the future when there are forecasted months and years". `computeGoals` takes
+   the month as a fourth argument, and it replaces the clock in all three
+   places the clock came in — the year, the month the balances are read at,
+   and where the months left to a date are counted from. Same fixture as the
+   pace walk above: `mid` is 100 × month in 2026 and 1,200 + 500 × month in
+   2027, so every figure below can be worked out from this comment. */
+const asOfFixture = (goals, today, tweak) => {
+  const s = builtAheadFixture(goals);
+  if (tweak) tweak(s);
+  const st = H.coerceShape(s);
+  const C = H.computeAll(st, today);
+  return { st, C, at: (m) => H.computeGoals(st, C, today, m) };
+};
+const AS_OF_GOAL = [{ id: 'g', name: 'G', target: 5000, accounts: ['mid'],
+  count: 'capped', targetDate: '2027-06-15' }];
+t('with no month asked for, computeGoals is exactly what it was', () => {
+  const f = asOfFixture(AS_OF_GOAL, '2026-01-15');
+  const plain = JSON.stringify(H.computeGoals(f.st, f.C, '2026-01-15'));
+  eq(JSON.stringify(f.at(undefined)), plain, 'undefined is no month');
+  eq(JSON.stringify(f.at(null)), plain, 'null is no month');
+  eq(JSON.stringify(f.at('2031-05')), plain, 'a month no grid holds is ignored, not drawn at $0');
+  ok(!('asOf' in f.at(null)[0]), 'and the goal carries no asOf key for the tile to word itself off');
+});
+t('a month in the live year reads THAT month\'s balances and counts from it', () => {
+  const f = asOfFixture(AS_OF_GOAL, '2026-01-15');
+  const [now] = f.at(null), [g] = f.at('2026-06');
+  eq(now.saved, 100, 'January holds 100');
+  eq(g.saved, 600, 'June holds 600');
+  eq(g.asOf, '2026-06'); eq(g.asOfYear, '2026');
+  eq(g.asOfEst, true, 'nothing is entered, so June is the plan\'s estimate');
+  eq(g.monthsLeft, 12, 'June 2026 to June 2027 — NOT the seventeen from today');
+  approx(g.monthlyReq, 366.67, '(5,000 − 600) / 12');
+  eq(g.eta, '2027-08', 'the plan reaches it in the same month whichever month asks');
+  eq(now.eta, '2027-08');
+  eq(g.etaMonths, 14, 'fourteen months on from June, against nineteen from January');
+  eq(g.aheadMonths, 12 - 14, 'two months behind, both counted from June');
+  eq(now.aheadMonths, 17 - 19, 'and two behind from January — the verdict does not depend on the asker');
+});
+t('a month in a year built ahead moves the year, and a month past the landing is full', () => {
+  const f = asOfFixture(AS_OF_GOAL, '2026-01-15');
+  const [g] = f.at('2027-03');
+  eq(g.asOfYear, '2027', 'the year is the grid HOLDING the month');
+  eq(g.saved, 2700, '1,200 + 500 × 3');
+  eq(g.monthsLeft, 3); eq(g.etaMonths, 5); eq(g.eta, '2027-08');
+  const [full] = f.at('2027-09');
+  eq(full.saved, 5000, 'capped at its target'); eq(full.etaMonths, 0);
+  eq(full.monthsLeft, 0, 'a date already behind the month is no months left, never a negative');
+});
+t('a month two grids could offer is read from its OWN year', () => {
+  /* A live grid can run past its December. `yearOfMonth` is the one place that
+     decides, and the first four characters of the month would have agreed with
+     it here by luck — so the fixture makes them disagree: 2026 runs 24 months
+     and 2027 is deleted, leaving March 2027 on the 2026 grid alone. */
+  const both = asOfFixture(AS_OF_GOAL, '2026-01-15', s => { s.years['2026'].monthCount = 24; });
+  eq(both.at('2027-03')[0].asOfYear, '2027', 'its own grid, where its figures were typed');
+  eq(both.at('2027-03')[0].saved, 2700);
+  const tail = asOfFixture(AS_OF_GOAL, '2026-01-15', s => {
+    s.years['2026'].monthCount = 24; delete s.years['2027']; });
+  eq(tail.at('2027-03')[0].asOfYear, '2026', 'the tail of 2026 when no 2027 grid exists');
+  eq(tail.at('2027-03')[0].asOf, '2027-03');
+});
+t('an entered month is not an estimate, and the month list says which is which', () => {
+  const f = asOfFixture(AS_OF_GOAL, '2026-06-15', s => { s.years['2026'].enteredThrough = '2026-03'; });
+  eq(f.at('2026-02')[0].asOfEst, false, 'February is entered');
+  eq(f.at('2026-02')[0].saved, 200);
+  eq(f.at('2026-04')[0].asOfEst, true, 'April is not');
+  const months = H.goalAsOfMonths(f.st, f.C);
+  eq(months.length, 24, 'both grids, each month once');
+  eq(months[0].m, '2026-01'); eq(months[23].m, '2027-12');
+  eq(months.filter(x => !x.ahead).map(x => x.m).join(), '2026-01,2026-02,2026-03',
+    'ahead is monthAhead\'s answer');
+  eq(months[14].year, '2027');
+  /* A year that computed no total for a month does not offer it: a finished
+     year states a balance only where one was typed, and the card would draw
+     every goal at $0.00 for the rest. */
+  const sparse = H.goalAsOfMonths(f.st, { ...f.C, '2027': { ...f.C['2027'], balances: {} } });
+  eq(sparse.length, 12, 'the twelve months that have a figure');
 });
 t('with nothing built ahead it is the live year, exactly as it always was', () => {
   const [g] = builtAhead([{ id: 'g', name: 'G', target: 5000, accounts: ['mid'],
@@ -14979,6 +15059,88 @@ t('a note typed into a row editor puts the dot on that row, and the words in its
        'and the row’s own hover text carries the words', row.dataset.tip);
     ok(!row.hasAttribute('title'),
        'with no native title beside it — two bubbles over one row is the fault');
+  } finally { f.remove(); }
+});
+t('the Savings Goals card can be read at another month, and only that card moves', async () => {
+  /* 2026-11-19. The picker is a session variable: nothing saved, and Net Worth
+     and the runway tile — which read the same `cur` the goals used to — must
+     not move with it. Values are read, not presence: a picker that re-renders
+     the same figures passes every "is it there" check. */
+  const f = await tripFrame('goalsasof');
+  try {
+    const W = f.contentWindow, D = W.document;
+    let saves = 0;
+    W.save = () => { saves++; }; W.confirm = () => true; W.alert = () => {};
+    W.loadSample();
+    D.getElementById('tab-goals').click();
+    const $ = (id) => D.getElementById(id);
+    const card = () => $('goalAsOfSel').closest('.card');
+    const figures = () => [...card().querySelectorAll('.goal .value')].map(v => v.textContent.replace(/\s+/g, ' ').trim()).join(' | ');
+    const others = () => [...D.querySelectorAll('.card')].filter(c => c !== card()
+      && /Net Worth|Runway/.test((c.querySelector('h2') || {}).textContent || ''))
+      .map(c => [...c.querySelectorAll('.goal .value')].map(v => v.textContent).join('|')).join(' || ');
+    ok(!!$('goalAsOfSel'), 'the sample plan offers the picker');
+    const months = [...$('goalAsOfSel').options].map(o => o.value);
+    ok(months.length >= 12, 'every month of the sample year', String(months.length));
+    const cur = $('goalAsOfSel').value;
+    eq($('goalAsOfNow').disabled, true, 'on this month, This Month has nowhere to go');
+    ok(/this month/.test($('goalAsOfSel').selectedOptions[0].textContent), 'and the list says which month that is');
+    ok(/this month's computed balances/.test($('goalAsOfSub').textContent), 'the sentence is the one it always was');
+    const before = figures(), othersBefore = others();
+    ok(othersBefore.length > 0, 'the test can see Net Worth and the runway');
+    const savesBefore = saves;
+
+    /* To the far end of the plan — the LAST month, which is a forecast in every
+       month of the year but December, when the sample has nothing ahead of
+       today and the far end is January instead. The test follows whichever
+       it is rather than failing once a year. */
+    const atEnd = months[months.length - 1] !== cur;
+    const last = atEnd ? months[months.length - 1] : months[0];
+    $('goalAsOfSel').value = last;
+    $('goalAsOfSel').dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq($('goalAsOfSel').value, last, 'the redrawn list is on the month chosen');
+    const forecast = /forecast/.test($('goalAsOfSel').selectedOptions[0].textContent);
+    eq(forecast, atEnd, 'a month still to come is called a forecast in the list');
+    ok(/as they are set today/.test($('goalAsOfSub').textContent),
+      'the sentence says the goals are today\'s', $('goalAsOfSub').textContent);
+    ok((forecast ? /plan's estimate for/ : /entered balances/).test($('goalAsOfSub').textContent),
+      'and whether the month is an estimate or entered', $('goalAsOfSub').textContent);
+    const atLast = figures();
+    ok(atLast !== before, 'and the figures are that month\'s', atLast);
+    eq(card().querySelectorAll('.goalgrid .goal.est').length > 0, forecast,
+      'the estimate mark is on the tiles exactly when the month is a forecast');
+    eq(others(), othersBefore, 'Net Worth and the runway did not move');
+    eq($(atEnd ? 'goalAsOfNext' : 'goalAsOfPrev').disabled, true, 'nothing past the end of the plan');
+    eq($('goalAsOfNow').disabled, false);
+    ok(/^As of /.test((card().querySelector('.pill') || { closest: () => ({ textContent: 'As of ' }) })
+      .closest('p').textContent.trim()), 'the verdict line says which month it is counted from');
+
+    /* the arrows step one month, and agree with the list */
+    $(atEnd ? 'goalAsOfPrev' : 'goalAsOfNext').click();
+    eq($('goalAsOfSel').value, months[atEnd ? months.length - 2 : 1], 'an arrow is one month');
+    $(atEnd ? 'goalAsOfNext' : 'goalAsOfPrev').click();
+    eq(figures(), atLast, 'and the other arrow returns to exactly the figures the list gave');
+
+    /* the other end of the plan */
+    const other = atEnd ? months[0] : months[months.length - 2];
+    $('goalAsOfSel').value = other;
+    $('goalAsOfSel').dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq($('goalAsOfSel').value, other);
+    eq(others(), othersBefore, 'still nothing else moved');
+
+    /* choosing this month in the list is the same as This Month */
+    $('goalAsOfNow').click();
+    eq($('goalAsOfSel').value, cur);
+    eq(figures(), before, 'This Month restores every figure');
+    eq($('goalAsOfNow').disabled, true);
+    eq(card().querySelectorAll('.goalgrid .goal.est').length, 0, 'and takes the estimate mark off');
+    eq(saves, savesBefore, 'none of it saved anything — the month is a session variable, not a `ui` key');
+
+    /* the without-bonus twin is read at the same month as the goal beside it */
+    const id = (card().querySelector('.goalgrid .goal') && W.liveGoals()[0] || {}).id;
+    const nb = W.goalWithoutBonus(id, last), nb0 = W.goalWithoutBonus(id);
+    ok(nb === null || nb.asOf === last, 'counted from the month asked for');
+    ok(nb0 === null || !('asOf' in nb0), 'and from today when none is');
   } finally { f.remove(); }
 });
 t('the month page reads a note written about the ROW, not only about a month', async () => {

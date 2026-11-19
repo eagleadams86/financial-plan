@@ -2187,6 +2187,26 @@ td:has(.tile-help), th:has(.tile-help) { white-space: nowrap; }
    `wireBudgetSwitch` querySelectors the first `.viewswitch` on the page. */
 .asofrow { display: flex; align-items: center; gap: 8px; margin: 0 0 12px;
   flex-wrap: wrap; }
+/* The Savings Goals card's "As of" row (2026-11-19): a label, This Month, and
+   ‹ dropdown ›. Its own class — `wireWorthSwitch` takes the first `.asofswitch`
+   on the page. The dropdown stays at the body's 16px so an iPhone does not
+   zoom the page on focus.
+   IT WRAPS, AS TWO PIECES. Measured at 375px on the first draft, held to one
+   line: the dropdown was squeezed to 96px and read "Dec 202", and This Month
+   broke over two lines. "Dec 2026 · forecast" needs about 190px and a phone's
+   card has 305 for the whole row, so there is no one-line answer there — and a
+   truncated control is worse than a second line. `.goalasof-step` keeps
+   ‹ dropdown › together, so what drops to the next line is the whole stepper
+   and never an arrow on its own. Not a width test: it wraps exactly when the
+   line will not hold it, whatever the reader's type size. */
+.goalasof { display: flex; align-items: center; gap: 4px 4px; margin: 0 0 12px;
+  flex-wrap: wrap; }
+.goalasof-l { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-weight: var(--fw-medium); color: var(--text-secondary); margin-right: 4px; }
+.goalasof .mnow { white-space: nowrap; }
+.goalasof-step { display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto;
+  min-width: 0; }
+.goalasof select.ctl { flex: 0 1 auto; min-width: 0; font-size: 1rem; }
 /* ── The pair STACKS when the line will not hold it ─────────────────────────
    Reported by Charles on 2026-09-03: on a phone this ran off the right edge of
    its card. The two labels carry a month AND what that month is — "Aug 2026 ·
@@ -9701,13 +9721,26 @@ function goalPace(g, ctx) {
    (`overflowOf`, see goalClaim above), and either stops at its target
    (`capped`) or keeps counting past it (`all`). `claimed` and `claimedBy`
    ride out so the tile can say why a goal reads lower than its accounts. */
-function computeGoals(st, computed, todayIso) {
+/* `asOf` (2026-11-19) — AN OPTIONAL MONTH TO READ EVERYTHING AT, for the
+   Savings Goals card's "As of" picker. Absent, nothing below changes. Given, it
+   replaces the clock in all three places the clock came in: the YEAR is the
+   grid holding that month (`yearOfMonth`, never the month's first four
+   characters — a live grid runs past its December), the MONTH the balances are
+   read at is the month itself, and the months left to a target date count from
+   it too, so "(1 yr 2 mo)", the monthly figure and ahead/behind are all
+   measured from the one month the bar was read at. The goals themselves are
+   today's — there is no history of what a target used to be — against that
+   month's balances, and the card says so. A month no grid holds is ignored. */
+function computeGoals(st, computed, todayIso, asOf) {
   const gridKeys = startedGridYears(st, todayIso);
-  const liveKey = gridKeys[gridKeys.length - 1];
+  const asOfYear = asOf ? yearOfMonth(st, asOf) : null;
+  const at = asOfYear && computed[asOfYear] ? asOf : null;
+  const liveKey = at ? asOfYear : gridKeys[gridKeys.length - 1];
   if (!liveKey) return [];
   const yr = st.years[liveKey];
   const c = computed[liveKey];
-  const cur = currentMonthOf(yr, todayIso);
+  const cur = at || currentMonthOf(yr, todayIso);
+  const fromMonth = at || todayIso.slice(0, 7);
   const bal = (bid) => c.balances[`${bid}|${cur}`] || 0;
   /* The RESOLVED goals — a months-of-expenses target is a figure here and $0
      on `state.goals`. `c.goals` is absent only on a hand-built computed
@@ -9767,7 +9800,7 @@ function computeGoals(st, computed, todayIso) {
     if (g.count !== 'all') saved = Math.min(saved, g.target || 0);   // capped: never more than the goal
     saved = round2(Math.max(0, saved));
     const monthsLeft = g.targetDate
-      ? Math.max(0, monthDiff(todayIso.slice(0, 7), g.targetDate.slice(0, 7))) : 0;
+      ? Math.max(0, monthDiff(fromMonth, g.targetDate.slice(0, 7))) : 0;
     const need = goalNeed(g, goals, bal, accountOrder);
     const pace = goalPace(g, { need, held: round2(held + basisNow), cur, computed, keys: paceKeys,
       priorC, years: st.years, goals, order: accountOrder, basisFor });
@@ -9788,6 +9821,9 @@ function computeGoals(st, computed, todayIso) {
       monthlyReq: monthsLeft > 0 ? round2(pace.gap / monthsLeft) : 0,
       ...pace,
       eta: pace.etaMonths !== null ? monthAdd(cur, pace.etaMonths) : null,
+      /* Only when a month was asked for: the tile words itself off these, and
+         every other caller's goals stay the shape they have always been. */
+      ...(at ? { asOf: at, asOfYear: liveKey, asOfEst: monthAhead(yr, at) } : {}),
     };
   });
 }
@@ -10068,6 +10104,23 @@ const HELP = {
       + 'their tabs, but the Total counts that pot once — at what the holdings are worth, '
       + 'since a priced figure is the better answer to what something is worth today.'],
   ] },
+  goalsAsOf: { title: 'Reading the Goals at Another Month', body: [
+    ['The card normally reads ', b('this month\'s'), ' balances. The arrows and the list '
+      + 'move it to any other month your plan holds — back through the months you have '
+      + 'entered, or forward into the rest of this year and any year you have built ahead.'],
+    [b('A month still to come is a forecast'), ': the plan\'s own estimate of what the '
+      + 'accounts will hold then, drawn in italics, and it moves every time a real figure '
+      + 'lands or a row changes.'],
+    [b('The goals are always today\'s.'), ' The plan keeps no history of what a target, '
+      + 'its accounts or its place in the queue used to be, so a past month shows the goals '
+      + 'as they are set now against the balances as they were then — not what this card '
+      + 'said at the time.'],
+    ['Everything on the card counts from the month chosen: the time left to a target '
+      + 'date, the amount needed each month, when the plan reaches it, and whether the next '
+      + 'dated goal is on time. Net Worth, the runway and the charts below are not moved.'],
+    ['The month is ', b('not remembered'), '. Reload the app and the card is back on this '
+      + 'month, so it never greets you weeks later with a date you chose once.'],
+  ] },
   worthAsOf: { title: 'Which Month This Is Read At', body: [
     ['The month in progress is ', b('not settled'), ' — every figure in it is the plan\'s '
       + 'own estimate until you mark it entered, so on the first of a month the headline is '
@@ -10339,7 +10392,9 @@ const HELP = {
       + 'month, from this one to the end of the last year in your plan, it asks whether '
       + 'the accounts the goal counts have reached what it needs. If they do, that month '
       + 'is the answer and no rate comes into it — the line says "your plan reaches it '
-      + 'about …" rather than "at this pace".'],
+      + 'about …" rather than "at this pace". With another month chosen in the card\'s '
+      + 'As of row, "this one" is that month: the walk, the time left and the verdict all '
+      + 'count from it.'],
     ['Only past the end of what you have built does it need a rate, and it uses ',
       b('the last built year\'s growth in the accounts the goal counts'),
       ' — their December figure less what they opened that year with, spread over twelve '
@@ -10730,14 +10785,14 @@ let C = {};   // computeAll() output, rebuilt on every render
    only once per render — the second `computeAll` costs as much as the first,
    and most renders never draw a goal. Keyed on `C` itself, which every render
    replaces, so it can never outlive the figures it is compared with. */
-let noBonusMemo = { for: null, st: null, C: null, goals: null };
+let noBonusMemo = { for: null, st: null, C: null, goals: null, at: {} };
 function noBonusPlan() {
   if (noBonusMemo.for === C) return noBonusMemo;
-  noBonusMemo = { for: C, st: null, C: null, goals: null };
+  noBonusMemo = { for: C, st: null, C: null, goals: null, at: {} };
   if (!planHasBonus(state)) return noBonusMemo;
   const st = withoutBonuses(state);
   const nc = computeAll(st, todayISO());
-  noBonusMemo = { for: C, st, C: nc,
+  noBonusMemo = { for: C, st, C: nc, at: {},
     goals: latestGridYear() ? computeGoals(st, nc, todayISO()) : [] };
   return noBonusMemo;
 }
@@ -10753,7 +10808,17 @@ function noBonusLine(pts, liveKey) {
   const data = pts.map(p => byM.has(p.m) ? byM.get(p.m) : null);
   return data.some((v, i) => v !== pts[i].v) ? data : null;
 }
-const goalWithoutBonus = (id) => (noBonusPlan().goals || []).find(g => g.id === id) || null;
+/* `asOf` — the month the goal beside it was read at, when the Savings Goals
+   card is showing one (2026-11-19). Both dates in "about X · Y without bonuses"
+   have to be counted from the same month or the gap between them is partly the
+   distance between two starting points. One more `computeGoals` per month
+   asked for, kept on the same memo so it dies with the `C` it was built from. */
+function goalWithoutBonus(id, asOf) {
+  const nb = noBonusPlan();
+  let list = nb.goals;
+  if (asOf && nb.C) list = nb.at[asOf] || (nb.at[asOf] = computeGoals(nb.st, nb.C, todayISO(), asOf));
+  return (list || []).find(g => g.id === id) || null;
+}
 
 /* The tabs this page is allowed to draw. Everything in a normal session; only
    what the sender put in the link in a shared one — and the order still comes
@@ -14295,6 +14360,35 @@ function monthPickerHtml(active, all) {
    showing it differently. The other half is in the switch itself. */
 /* Which fully closed month's list is unfolded — see renderMonthView. */
 let closeListOpen = null;
+
+/* ── The Savings Goals card's "As of" month (2026-11-19) ────────────────────
+   Which month the goals card is read at, or null for THIS month. A session
+   variable and deliberately NOT a `state.ui` key — Charles's decision: it is
+   gone on reload, never saved, never synced, never in a link. The Net Worth
+   switch stores a mode rather than a month for the same reason (a stored
+   '2026-08' is a stale answer by October), and a picker over every month has
+   no mode to store, so it stores nothing. No `coerceShape` line, no undo step. */
+let goalsAsOf = null;
+/* Every month the card can be read at, oldest first: a month some grid holds
+   AND whose year computed a total for it. A summary year has no months; a
+   finished (pinned) year computes a balance only where one was stated, and a
+   month with none would draw every goal at $0.00 — a figure nobody recorded.
+   `ahead` is `monthAhead`'s answer, the one reader for "still a projection". */
+function goalAsOfMonths(st, computed) {
+  return planMonths(st).map(m => {
+    const y = yearOfMonth(st, m);
+    const c = y && computed[y];
+    if (!c || !c.balances || c.balances[`total|${m}`] === undefined) return null;
+    return { m, year: y, ahead: monthAhead(st.years[y], m) };
+  }).filter(Boolean);
+}
+/* The chosen month while the plan still offers it and it is not simply this
+   month; otherwise null. A deleted year or a restored backup cannot leave the
+   card pointing at a month that is no longer there. */
+function goalAsOfKey(months, cur) {
+  return goalsAsOf && goalsAsOf !== cur && months.some(x => x.m === goalsAsOf)
+    ? goalsAsOf : null;
+}
 function pickMonth(m) {
   if (!m || m === activeMonthKey()) return false;
   closeListOpen = null;
@@ -15447,7 +15541,12 @@ const paceWhen = (g) => g.paceYear && g.paceYear !== latestGridYear()
 function goalCard(g, idx) {
   const done = g.target && g.saved >= g.target;
   const pct = Math.min(1, g.progress);
-  return `<div class="goal ${done ? 'done' : ''}" data-edit="goal" data-idx="${idx}"
+  /* Read at a month the reader chose (the card's "As of" picker), and a month
+     still to come: the tile is the plan's estimate and wears the app's mark
+     for one. The year named below is that month's, never "this year's". */
+  const est = !!g.asOfEst;
+  const expYear = g.asOfYear && g.asOfYear !== latestGridYear() ? `${g.asOfYear}'s` : `this year's`;
+  return `<div class="goal ${done ? 'done' : ''}${est ? ' est' : ''}" data-edit="goal" data-idx="${idx}"
     style="cursor:pointer"${rowTip('Click to edit', g.note)}>
     ${/* The dot goes after the ✓ rather than between it and the name: the tick
          is part of what the goal is CALLED once it is reached ("Kitchen ✓"),
@@ -15467,7 +15566,7 @@ function goalCard(g, idx) {
         : 'at this pace'} about ${esc(monthLabelFull(g.eta))}` : ''}
       ${/* How much of that date is the bonus — said only where it moves it. */
         (() => {
-          const d = done ? null : bonusDependence(g, goalWithoutBonus(g.id));
+          const d = done ? null : bonusDependence(g, goalWithoutBonus(g.id, g.asOf));
           return !d ? '' : d.never ? ' · never at this pace without bonuses'
             : ` · ${esc(monthLabelFull(d.eta))} without bonuses`;
         })()}
@@ -15486,7 +15585,7 @@ function goalCard(g, idx) {
             : Math.min(g.rothBasis.basis, g.saved))} of Roth IRA contributions${
           g.etaMonths !== 0 && g.rothBasis.yearly > 0
             ? `, ${fmtMoney(g.rothBasis.yearly)}/yr assumed after ${esc(g.rothBasis.lastTyped)}` : ''}` : ''}
-      ${g.targetMonths > 0 ? ` · ${g.targetMonths} month${g.targetMonths === 1 ? '' : 's'} of this year's expenses` : ''}</div>
+      ${g.targetMonths > 0 ? ` · ${g.targetMonths} month${g.targetMonths === 1 ? '' : 's'} of ${esc(expYear)} expenses` : ''}</div>
   </div>`;
 }
 
@@ -15958,6 +16057,32 @@ function netWorthCard(liquid, cur, c, choice) {
   </div>`;
 }
 
+/* The Savings Goals card's "As of" row. Nothing is saved — `goalsAsOf` is a
+   session variable — so a press is a re-render and no more. `keepFocus` puts
+   the reader back on the control they pressed, and on the dropdown when that
+   control has just gone `disabled` (‹ at the first month, "This Month" on
+   arriving there). The page does not move: this is a control on a card. */
+function wireGoalAsOf() {
+  const sel = F('goalAsOfSel');
+  if (!sel) return;
+  const liveKey = latestGridYear();
+  const cur = liveKey ? currentMonthOf(state.years[liveKey], todayISO()) : null;
+  const go = (m) => {
+    if (!m) return;
+    goalsAsOf = m === cur ? null : m;
+    keepFocus(() => render(), '#goalAsOfSel');
+  };
+  const step = (d) => {
+    const all = [...sel.options].map(o => o.value);
+    go(all[all.indexOf(sel.value) + d]);
+  };
+  sel.onchange = () => go(sel.value);
+  const now = F('goalAsOfNow'), prev = F('goalAsOfPrev'), next = F('goalAsOfNext');
+  if (now) now.onclick = () => go(cur);
+  if (prev) prev.onclick = () => step(-1);
+  if (next) next.onclick = () => step(1);
+}
+
 /* The Net Worth card's "as of" switch. Modelled on `wireBudgetSwitch` above,
    which is the same control asking a different question — click, and arrow keys
    because it is a radiogroup. Its own class rather than `.viewswitch` reused:
@@ -16033,17 +16158,29 @@ function renderGoals() {
         from the grid's computed balances.</p></div></div>`;
   const yr = state.years[liveKey];
   const c = C[liveKey];
-  const goals = computeGoals(state, C, todayISO());
   const cur = currentMonthOf(yr, todayISO());
+  /* THE GOALS CARD HAS A MONTH OF ITS OWN (2026-11-19). `asOf` is null for this
+     month. `goalsAt` / `goalsTotal` are the card's; `cur` / `totalNow` below
+     stay exactly what they were, because Net Worth and the runway tile read
+     them and neither is re-dated by this picker. Two names, on purpose: one
+     shared variable is how a control on one card moves a figure on another. */
+  const asOfMonths = goalAsOfMonths(state, C);
+  const asOf = goalAsOfKey(asOfMonths, cur);
+  const asOfEntry = asOf ? asOfMonths.find(x => x.m === asOf) : null;
+  const goals = computeGoals(state, C, todayISO(), asOf);
+  const goalsAt = asOf || cur;
+  const goalsTotal = (asOfEntry ? C[asOfEntry.year] : c).balances[`total|${goalsAt}`] || 0;
+  const goalsEst = !!(asOfEntry && asOfEntry.ahead);
 
   /* Total liquidity — the sheet's overall progress bar */
   const totalNow = c.balances[`total|${cur}`] || 0;
   const totalTarget = goals.reduce((s, g) => s + (g.target || 0), 0);   // resolved targets
-  const totalPct = totalTarget ? Math.min(1, totalNow / totalTarget) : 0;
+  const totalPct = totalTarget ? Math.min(1, goalsTotal / totalTarget) : 0;
   /* The Net Worth card reads at a month of its own — the one the reader chose
-     with its switch. Everything else on this tab keeps reading `cur`: this is
-     that card's question, and silently re-dating the goals and the savings
-     pulse beside it would be answering one somebody else asked. */
+     with its switch — and so, since 2026-11-19, does the goals card above it,
+     with its own picker. The savings pulse keeps reading `cur`: neither
+     control is asking its question, and silently re-dating it would be
+     answering one somebody else asked. */
   const worth = worthAsOf(state, liveKey, cur);
   const wc = C[worth.year] || c;
   const netWorthHtml = netWorthCard(wc.balances[`total|${worth.asOf}`] || 0,
@@ -16105,6 +16242,10 @@ function renderGoals() {
   const next = goals
     .filter(g => g.targetDate && g.target && g.saved < g.target)
     .sort((a, b) => a.targetDate.localeCompare(b.targetDate))[0];
+  /* Said in the sentence when the card is not on this month: "on time" and
+     "3 mo behind" are counted from the month the card is read at, and unmarked
+     they would be read as today's verdict. */
+  const asOfLead = asOf ? `As of ${esc(monthLabelFull(asOf))} — ` : '';
   let paceHtml = '';
   if (next && next.aheadMonths === null) {
     const why = next.paceMo === null
@@ -16112,7 +16253,7 @@ function renderGoals() {
          no pace to land it by`
       : `its own accounts are not growing ${esc(paceWhen(next))}
          (${fmtMoney(next.paceMo)}/mo), so at this pace it never lands`;
-    paceHtml = `<p class="sub" style="margin-top:12px">Next dated goal — ${esc(next.name)}${
+    paceHtml = `<p class="sub" style="margin-top:12px">${asOfLead}Next dated goal — ${esc(next.name)}${
       helpBtn('paceCheck', 'the pace check')}: ${why} —
       <span class="pill warn">! ${next.paceMo === null ? 'no balance to pace by' : 'not growing'}</span>
       (target ${esc(monthLabelFull(next.targetDate.slice(0, 7)))})</p>`;
@@ -16131,7 +16272,7 @@ function renderGoals() {
          so it lands about ${esc(monthLabelFull(next.eta))}`;
     /* And how much of that date rests on bonuses nobody promised (2026-11-03):
        the same goal, the same plan, every bonus taken out. */
-    const dep = bonusDependence(next, goalWithoutBonus(next.id));
+    const dep = bonusDependence(next, goalWithoutBonus(next.id, asOf));
     const target = next.targetDate.slice(0, 7);
     const depHtml = !dep ? ''
       : dep.never ? ` Without bonuses its own accounts never get it there at this pace.`
@@ -16143,7 +16284,7 @@ function renderGoals() {
             : `, ${fmtYrMo(Math.abs(ahead))} ${ahead < 0 ? 'behind' : 'ahead'}`;
           return ` Without bonuses: about ${esc(monthLabelFull(dep.eta))}${side}.`;
         })();
-    paceHtml = `<p class="sub" style="margin-top:12px">Next dated goal — ${esc(next.name)}${
+    paceHtml = `<p class="sub" style="margin-top:12px">${asOfLead}Next dated goal — ${esc(next.name)}${
       helpBtn('paceCheck', 'the pace check')}: ${how}
       against a target of ${esc(monthLabelFull(target))} —
       <span class="pill ${behind ? 'warn' : 'good'}">${verdict}</span>${depHtml}</p>`;
@@ -16164,20 +16305,60 @@ function renderGoals() {
     : `Entered through <strong>${esc(monthLabel(chartPts[firstEstimate - 1].m))}</strong> —
        everything after that is the plan's own estimate, drawn dashed.`;
 
+  /* The "As of" row and the sentence under it. The row is drawn only when
+     there is another month to go to. Arrows are always rendered and only ever
+     `disabled`, and "This Month" comes FIRST — the month strip's two lessons:
+     a control that appears or changes width must not move the arrows a second
+     click is about to land on. A native <select>, grouped by year, because two
+     or three years of months is a long rail and a short list. Every option
+     says what KIND of month it is in words; nothing here is carried by hue. */
+  const asOfI = asOfMonths.findIndex(x => x.m === goalsAt);
+  const asOfOpt = (x) => `<option value="${esc(x.m)}"${x.m === goalsAt ? ' selected' : ''}>${
+    esc(monthLabelFull(x.m))}${x.m === cur ? ' · this month' : x.ahead ? ' · forecast' : ''}</option>`;
+  const asOfYears = [...new Set(asOfMonths.map(x => x.m.slice(0, 4)))];
+  const asOfHtml = asOfMonths.length < 2 ? '' : `<div class="goalasof">
+      <span class="goalasof-l" id="goalAsOfLbl">As of${helpBtn('goalsAsOf', 'the As of month')}</span>
+      <button type="button" class="ynav snav mnow" id="goalAsOfNow"${asOf ? '' : ' disabled'}
+        title="${asOf ? `Back to ${esc(monthTitle(cur))}` : `You're on ${esc(monthTitle(cur))}`}">This Month</button>
+      <span class="goalasof-step">
+      <button type="button" class="ynav snav" id="goalAsOfPrev"${asOfI <= 0 ? ' disabled' : ''}
+        aria-label="The month before" title="The month before">&#8249;</button>
+      <select class="ctl" id="goalAsOfSel" aria-labelledby="goalAsOfLbl">${
+        asOfYears.map(y => `<optgroup label="${esc(y)}">${
+          asOfMonths.filter(x => x.m.slice(0, 4) === y).map(asOfOpt).join('')}</optgroup>`).join('')
+      }</select>
+      <button type="button" class="ynav snav" id="goalAsOfNext"${
+        asOfI < 0 || asOfI >= asOfMonths.length - 1 ? ' disabled' : ''}
+        aria-label="The month after" title="The month after">&#8250;</button>
+      </span>
+    </div>`;
+  /* Three sentences, because they are three different claims. A chosen month
+     ALWAYS says the goals are today's: there is no record of what a target, an
+     account list or the queue used to be, and a past month drawn without that
+     would read as "this is what the card showed in August". */
+  const asOfSub = !asOf
+    ? `Saved figures read this month's computed balances (${esc(monthLabel(cur))}).`
+    : goalsEst
+    ? `Saved figures read the plan's estimate for <strong>${esc(monthLabelFull(asOf))}</strong> —
+       a forecast that moves as real numbers land — against your goals as they are set today.`
+    : `Saved figures read <strong>${esc(monthLabelFull(asOf))}</strong>'s ${
+        asOf > cur ? 'computed' : 'entered'} balances, against your goals as they are set today.`;
+
   /* The goals card, or its empty state — an empty state INSIDE the tab rather
      than in place of it, because the charts below read the budget grid and
      draw perfectly well for a plan that has never set a goal. */
   const goalsHtml = state.goals.length
     ? `<div class="card">
     <h2>Savings Goals</h2>
-    <p class="sub">Saved figures read this month's computed balances (${esc(monthLabel(cur))}).</p>
+    ${asOfHtml}
+    <p class="sub" id="goalAsOfSub">${asOfSub}</p>
     <div class="goalgrid">${goals.map(goalCard).join('')}</div>
     <div class="addbar"><button class="btn small" data-add="goal">＋ Add Goal</button></div>
     <div style="margin-top:16px">
       <div class="label" style="font-size:var(--fs-xs);color:var(--text-secondary);font-weight:600;
         text-transform:uppercase;letter-spacing:.04em">Total liquidity</div>
-      <div class="goal" style="border:none;background:none;padding:0">
-        <div class="value">${fmtMoney(totalNow)} <span class="of">of ${fmtMoney(totalTarget)}
+      <div class="goal${goalsEst ? ' est' : ''}" style="border:none;background:none;padding:0">
+        <div class="value">${fmtMoney(goalsTotal)} <span class="of">of ${fmtMoney(totalTarget)}
           (${Math.round(totalPct * 100)}%)</span></div>
         <div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100"
           aria-valuenow="${Math.round(totalPct * 100)}" aria-label="Total liquidity progress">
@@ -22459,6 +22640,7 @@ function wireView(view) {
         : `Recorded ${fmtMoney(total)} as of ${when}`);
     };
     wireWorthSwitch();
+    wireGoalAsOf();
     /* The settled month asks for its closes on its own — see refreshMonthCloses.
        Nothing to ask (no key, a shared view, all answered) returns at once. */
     {
@@ -34988,7 +35170,7 @@ applyPin(savedPin());
 
 /* tests.html reaches function declarations directly through the iframe window;
    consts are invisible on window, so the ones it needs are handed over here. */
-window.__finTestHooks = { SCHEMA, EARNED_ROW_ID, round2, roundTo, roundToDollar,
+window.__finTestHooks = { goalAsOfMonths, SCHEMA, EARNED_ROW_ID, round2, roundTo, roundToDollar,
   EDITORS,
   /* Closing a month (2026-09-19). */
   closeChecklist, stampDay, coerceExported, stripStamps, carryExported,

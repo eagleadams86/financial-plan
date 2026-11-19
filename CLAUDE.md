@@ -361,6 +361,42 @@ family names as well as balances.
   worth is that month's balances beside TODAY's prices. The card says so out
   loud rather than implying a time machine, and that sentence is the reason
   there is no picker over every month in the plan.
+  (That sentence is about NET WORTH and still holds. The Savings Goals card got
+  a month picker on 2026-11-19 — next bullet — because a goal reads budget
+  balances only, and every month of those is a figure the engine states.)
+- **The Savings Goals card is read AT A MONTH too, with its own picker**
+  (2026-11-19, asked for: "an 'as of' option that shows the goal progress in the
+  past and in the future"). Decisions that will look arbitrary later:
+  - **`goalsAsOf` is a SESSION `let`, never a `state.ui` key** — Charles chose
+    "snap back to today". Not saved, synced, undone or shared; no `coerceShape`
+    line. Do not "fix" it into `ui`: a stored month is a stale answer, the same
+    reasoning as `ui.worthAsOf` being a mode. `goalAsOfKey` drops a month the
+    plan no longer offers.
+  - **`computeGoals(st, computed, todayIso, asOf)`** — the 4th arg replaces the
+    clock in three places at once: the year (`yearOfMonth`, NOT `asOf.slice(0,4)`
+    — a live grid runs past December; a test makes the two disagree), the month
+    balances are read at, and where `monthsLeft` counts from. Absent, the result
+    is byte-identical (pinned). The goal gains `asOf` / `asOfYear` / `asOfEst`
+    ONLY when a month was asked for; `goalCard` words itself off them, so
+    Household's child goals are untouched.
+  - **`goalWithoutBonus(id, asOf)`** recomputes the no-bonus twin at the same
+    month (memoised on `noBonusMemo.at`, dies with `C`). Two dates counted from
+    two starting months is a gap that is partly the distance between them.
+  - **In `renderGoals`, `goalsAt` / `goalsTotal` are the card's; `cur` /
+    `totalNow` are everyone else's.** Net Worth and the runway tile read the
+    second pair and must not move — a render test reads their VALUES across a
+    month change. Scope was Charles's choice: the goals card only.
+  - **The goals are always TODAY'S**, and every chosen-month sentence says so —
+    there is no history of a target, an account list or the queue.
+  - **`goalAsOfMonths` offers a month only where its year computed a
+    `total|m`** — a pinned year states balances only where typed, and the rest
+    would draw every goal at $0.00.
+  - **The row WRAPS as two pieces** (`.goalasof-step` keeps ‹ list › together).
+    The plan said one line; at 375px that squeezed the list to "Dec 202".
+    Its own classes — `wireWorthSwitch` takes the first `.asofswitch`.
+  - The sample has no year built ahead, so the forward-YEAR case is covered by
+    the pure tests only; the render test follows whichever end of the sample
+    year is not today (December has nothing ahead of it).
   The tiles finally carry the estimate mark the rest of the app has always had
   (`.goal.est`, italic), on Total and Liquid ALONE — no month makes an estimate
   of a figure the reader typed, and marking those would say they had guessed.
