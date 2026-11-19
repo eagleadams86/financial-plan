@@ -1083,6 +1083,30 @@ Before September 2026 it was one division — this year's rate, held flat foreve
 single good year (a bonus, a windfall) was projected into every year after it.
 Build another year and every one of these answers sharpens.
 
+**As Of — the card at another month** (2026-11-19). Under the heading, **As of**
+with **This Month**, ‹ ›, and a list of every month your plan holds a figure for,
+grouped by year. Step back through the months you've entered, or forward into
+the rest of this year and any year you've built ahead — a month still to come is
+marked **forecast** in the list, and its tiles are drawn in italics with a dashed
+meter, the app's mark for a figure it worked out. Everything on the card counts
+from the month chosen: the saved figures, Total Liquidity, the time left to a
+target date, the monthly amount needed, when the plan reaches a goal (with and
+without bonuses), and the Next dated goal verdict, which says "As of Mar 2027 —"
+so it is never read as today's. Three things it deliberately does not do:
+
+- **It is not a record of what the card used to say.** The plan keeps no history
+  of a goal's target, accounts or place in the queue, so a past month is *today's
+  goals* against *that month's balances* — and the sentence under the picker says
+  so every time.
+- **It moves nothing else.** Net Worth keeps its own Settled / Now switch, and
+  Savings Rate & Runway and the charts stay where they were.
+- **It is not remembered.** Reload and the card is back on this month; nothing is
+  saved, synced or put in a share link, so the card can never greet you weeks
+  later with a month you chose once.
+
+On a phone the row takes two lines — the label and This Month, then ‹ list › —
+rather than squeezing the list until it cuts the month off.
+
 **Where the Total Is Heading** goes **dashed the moment it passes the month
 you've entered through**, so a month the plan has merely worked out never
 reads as one that happened, whether it's next month or a year you've built
