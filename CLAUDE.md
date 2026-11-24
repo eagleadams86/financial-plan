@@ -8012,9 +8012,12 @@ would be needed?"* The answer to the second is that `asOf` already IS one.
 - **Boundary:** `ref(l, 'paidFrom')` slugs it like every reference, then
   coerceShape keeps only an `ID_OK` string. It is NOT checked against the rows —
   a row can live in one year and not another, and a dangling name degrades to
-  the typed payment on its own. The editor's dropdown is the newest grid's
-  expense rows plus the linked row when that lives only in an older year
-  (`paidFromOptions`), so opening the window never unpicks a link by omission.
+  the typed payment on its own.
+- **The dropdown is EVERY grid year's expense rows, live year first
+  (`paidFromRows`) — never "the newest grid".** It was, for an afternoon, and
+  Charles's Tesla row was missing: the row has `until` December 2032, a stopped
+  row is left out of the next year, and his plan runs to 2035. A loan's row is
+  by nature one that ENDS, so the newest year is the one place it will not be.
 - **The editor refuses a link with no `asOf`** — there is nowhere to count from.
 - **SCHEMA 12 and `SHARE_PAYLOAD_V` 8**, rewriting nothing.
 - **The sample's estate-car loan is linked to a `Car payment` row** whose $340

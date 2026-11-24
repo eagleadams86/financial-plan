@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1337;
+const EXPECTED = 1338;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -7129,6 +7129,27 @@ t('the boundary keeps a shaped row id and drops anything else', () => {
   const st = H.coerceShape({ schema: H.SCHEMA, years: {}, settings: {}, side: {
     liabilities: [{ ...PF_LOAN, paidFrom: 'gone' }] } });
   eq(H.netWorthParts(st, '2030-03').debts, 799, 'so the typed payment carries on');
+});
+
+t('a row that stops before the newest year is still offered', () => {
+  /* Charles's plan exactly: built out to 2035, and the loan's row stops in
+     2032 — so it is in the live year and NOT in the newest. */
+  const row = (id, name, section) => ({ id, name, rule: 'carry', role: 'normal', section });
+  const st = { years: {
+    2025: { kind: 'summary', categoryTotals: [] },
+    2026: { kind: 'grid', categories: [row('rent', 'Rent', 'expense'), row('tesla', 'Tesla', 'expense'),
+                                         row('pay', 'Paycheck', 'income')] },
+    2027: { kind: 'grid', categories: [row('rent', 'Rent', 'expense'), row('tesla', 'Tesla', 'expense'),
+                                         row('gym', 'Gym', 'expense')] },
+    2035: { kind: 'grid', categories: [row('rent', 'Rent', 'expense'), row('boat', 'Boat', 'expense')] },
+  } };
+  const got = H.paidFromRows(st, '2026');
+  eq(got.map(([id]) => id), ['rent', 'tesla', 'gym', 'boat'],
+    'the live year first and in its order, then what only other years hold — once each');
+  ok(!got.some(([id]) => id === 'pay'), 'income is not what pays a debt');
+  eq(H.paidFromRows(st, null).map(([id]) => id), ['rent', 'tesla', 'gym', 'boat'],
+    'and with no live year at all the grids are simply read oldest first');
+  eq(H.paidFromRows({ years: {} }, '2026'), []);
 });
 
 t('the sample\'s car loan is paid from its budget row, and says so', async () => {

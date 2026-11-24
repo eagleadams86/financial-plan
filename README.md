@@ -1826,6 +1826,10 @@ still added at the debt's rate first.
   includes escrow or insurance would bring the debt down faster than the lender
   says. The link is per debt for exactly that reason.
 
+The list offers every expense row in any year of the budget, this year's
+first — so a loan's row that stops in 2032 is there even when the plan is built
+out to 2035.
+
 Retyping the balance and its month from a newer statement simply restarts the
 count from there, so nothing is counted twice. The link needs a True as of
 month and says so if there is none.

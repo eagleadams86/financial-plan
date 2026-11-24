@@ -15826,21 +15826,33 @@ function payoffMonth(l, pays) {
 const securedTo = (l, propIds) => (l && l.securedOn && propIds.has(l.securedOn))
   ? l.securedOn : null;
 
-/* The rows a debt can be paid from: the newest grid's expense rows, which is
-   the budget the reader is looking at — plus the row this debt already names
-   when that lives only in an older year, so opening the window never quietly
-   unpicks a link the dropdown merely failed to offer. `[id, name]` pairs. */
-function paidFromOptions(ds) {
-  const y = newestGridYear();
-  const cats = y ? (state.years[y].categories || []) : [];
-  const out = cats.filter(c => (c.section || 'expense') === 'expense').map(c => [c.id, c.name]);
-  const cur = ds && ds.idx !== undefined ? (state.side.liabilities[+ds.idx] || {}).paidFrom : null;
-  if (cur && !out.some(([id]) => id === cur))
-    for (const k of Object.keys(state.years).sort().reverse()) {
-      const c = (state.years[k].categories || []).find(x => x.id === cur);
-      if (c) { out.push([c.id, `${c.name} (${k})`]); break; }
+/* The rows a debt can be paid from: every expense row in ANY grid year, the
+   live year's first and in its order, then whatever only another year holds.
+
+   It was the NEWEST grid's rows alone for an afternoon, and Charles's Tesla row
+   was not in the list: the row stops in December 2032 (`until`), a stopped row
+   is left out when the next year is started, and his plan is built out to
+   2035 — so the newest grid was the one year guaranteed not to have the very
+   row a loan ending in 2032 is paid from. A loan's row is BY NATURE one that
+   ends, so "the latest year" is the wrong place to look for it, always.
+   The live year leads because that is the budget the reader is looking at.
+   Pure; `[id, name]` pairs, one per id. */
+function paidFromRows(st, liveYear) {
+  const grids = Object.keys((st && st.years) || {}).sort()
+    .filter(y => st.years[y] && st.years[y].kind === 'grid');
+  const order = [...(grids.includes(liveYear) ? [liveYear] : []),
+                 ...grids.filter(y => y !== liveYear)];
+  const seen = new Set(), out = [];
+  for (const y of order)
+    for (const c of st.years[y].categories || []) {
+      if (!c || seen.has(c.id) || (c.section || 'expense') !== 'expense') continue;
+      seen.add(c.id);
+      out.push([c.id, c.name]);
     }
   return out;
+}
+function paidFromOptions() {
+  return paidFromRows(state, latestGridYear() || newestGridYear());
 }
 
 /* ── A property that has been SOLD (2026-11-24) ─────────────────────────────
@@ -28009,8 +28021,8 @@ const EDITORS = {
           + 'as its own figure. Either way it comes off your net worth.' }] : []),
       /* THE BUDGET ROW THAT PAYS IT — see paidFromWalk. Offered only when the
          budget has an expense row to choose, the Secured-on rule. */
-      ...(paidFromOptions(ds).length ? [{ key: 'paidFrom', label: 'Paid from', type: 'select',
-        options: [['', 'Nothing \u2014 use Paid each month'], ...paidFromOptions(ds)],
+      ...(paidFromOptions().length ? [{ key: 'paidFrom', label: 'Paid from', type: 'select',
+        options: [['', 'Nothing \u2014 use Paid each month'], ...paidFromOptions()],
         hint: 'Choose the budget row this debt\u2019s payment is on and the balance comes '
           + 'down by what that row says each month \u2014 an extra payment there shows '
           + 'here on its own. It counts from the month AFTER \u201cTrue as of\u201d, so a '
@@ -35569,7 +35581,7 @@ window.__finTestHooks = { goalAsOfMonths, SCHEMA, EARNED_ROW_ID, round2, roundTo
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketValues, bucketGap, kindTotals,
-  netWorthParts, propSold, paidFromWalk, rowPays, PROPERTY_KINDS, vacationYearStats, vacationYearRunning,
+  netWorthParts, propSold, paidFromWalk, rowPays, paidFromRows, PROPERTY_KINDS, vacationYearStats, vacationYearRunning,
   /* Debts: the schedule, where it lands in a given month, and when it ends.
      Pure over one row, so a test pins the arithmetic rather than the card. */
   amortize, liabilityAt, payoffMonth, LIABILITY_KINDS, SECURED_KINDS,
