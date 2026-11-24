@@ -15826,8 +15826,9 @@ function payoffMonth(l, pays) {
 const securedTo = (l, propIds) => (l && l.securedOn && propIds.has(l.securedOn))
   ? l.securedOn : null;
 
-/* The rows a debt can be paid from: every expense row in ANY grid year, the
-   live year's first and in its order, then whatever only another year holds.
+/* The rows a debt can be paid from: the expense rows of every grid year the
+   debt's walk can reach, A to Z (see the two notes inside for why not all
+   years and why not the grid's order).
 
    It was the NEWEST grid's rows alone for an afternoon, and Charles's Tesla row
    was not in the list: the row stops in December 2032 (`until`), a stopped row
@@ -15835,24 +15836,51 @@ const securedTo = (l, propIds) => (l && l.securedOn && propIds.has(l.securedOn))
    2035 — so the newest grid was the one year guaranteed not to have the very
    row a loan ending in 2032 is paid from. A loan's row is BY NATURE one that
    ends, so "the latest year" is the wrong place to look for it, always.
-   The live year leads because that is the budget the reader is looking at.
-   Pure; `[id, name]` pairs, one per id. */
-function paidFromRows(st, liveYear) {
+   Pure; `[id, label]` pairs, one per id. */
+function paidFromRows(st, liveYear, asOf, keep) {
   const grids = Object.keys((st && st.years) || {}).sort()
     .filter(y => st.years[y] && st.years[y].kind === 'grid');
-  const order = [...(grids.includes(liveYear) ? [liveYear] : []),
-                 ...grids.filter(y => y !== liveYear)];
-  const seen = new Set(), out = [];
-  for (const y of order)
-    for (const c of st.years[y].categories || []) {
-      if (!c || seen.has(c.id) || (c.section || 'expense') !== 'expense') continue;
-      seen.add(c.id);
-      out.push([c.id, c.name]);
+  /* ONLY THE YEARS THE DEBT CAN READ. The first version of this offered every
+     year's rows and Charles's list ran to sixty-odd, with Electric in it three
+     times: his older years were imported one sheet at a time, so the same bill
+     is a different row in each. None of those can pay this debt — the walk
+     starts the month after `asOf` and never looks behind it — so a row that
+     only lives in a year before that is a choice that would do nothing.
+     With no `asOf` yet (a debt being added) the live year stands in for it.
+     If that leaves no year at all — a statement dated past the end of the
+     plan — the live year is offered rather than an empty list. */
+  const from = /^\d{4}-\d{2}$/.test(String(asOf || ''))
+    ? monthAdd(asOf, 1).slice(0, 4) : String(liveYear || '');
+  let years = grids.filter(y => y >= from);
+  if (!years.length) years = grids.includes(liveYear) ? [liveYear] : grids.slice(-1);
+  const rows = new Map();   // id -> { name, years: [] }
+  const take = (y, c) => {
+    if (!c || (c.section || 'expense') !== 'expense') return;
+    if (!rows.has(c.id)) rows.set(c.id, { name: String(c.name || ''), years: [] });
+    rows.get(c.id).years.push(y);
+  };
+  for (const y of years) for (const c of st.years[y].categories || []) take(y, c);
+  /* The row this debt ALREADY names, wherever it lives, so that opening the
+     window never unpicks a link merely by failing to offer it. */
+  if (keep && !rows.has(keep))
+    for (const y of grids.slice().reverse()) {
+      const c = (st.years[y].categories || []).find(x => x && x.id === keep);
+      if (c) { rows.set(c.id, { name: String(c.name || ''), years: [y] }); break; }
     }
-  return out;
+  /* Two rows that share a name are told apart by the years they run — the one
+     thing that differs between them that a reader can check against the grid. */
+  const count = {};
+  for (const r of rows.values()) count[r.name] = (count[r.name] || 0) + 1;
+  const span = (ys) => ys.length > 1 ? `${ys[0]}\u2013${ys[ys.length - 1]}` : ys[0];
+  /* A TO Z, not the grid's order: the grid's order is a layout, and this is a
+     list somebody is hunting one name in. */
+  return [...rows.entries()]
+    .map(([id, r]) => [id, count[r.name] > 1 ? `${r.name} (${span(r.years)})` : r.name])
+    .sort((a, b) => a[1].localeCompare(b[1], undefined, { sensitivity: 'base', numeric: true }));
 }
-function paidFromOptions() {
-  return paidFromRows(state, latestGridYear() || newestGridYear());
+function paidFromOptions(ds) {
+  const l = ds && ds.idx !== undefined ? (state.side.liabilities[+ds.idx] || {}) : {};
+  return paidFromRows(state, latestGridYear() || newestGridYear(), l.asOf, l.paidFrom);
 }
 
 /* ── A property that has been SOLD (2026-11-24) ─────────────────────────────
@@ -28021,8 +28049,8 @@ const EDITORS = {
           + 'as its own figure. Either way it comes off your net worth.' }] : []),
       /* THE BUDGET ROW THAT PAYS IT — see paidFromWalk. Offered only when the
          budget has an expense row to choose, the Secured-on rule. */
-      ...(paidFromOptions().length ? [{ key: 'paidFrom', label: 'Paid from', type: 'select',
-        options: [['', 'Nothing \u2014 use Paid each month'], ...paidFromOptions()],
+      ...(paidFromOptions(ds).length ? [{ key: 'paidFrom', label: 'Paid from', type: 'select',
+        options: [['', 'Nothing \u2014 use Paid each month'], ...paidFromOptions(ds)],
         hint: 'Choose the budget row this debt\u2019s payment is on and the balance comes '
           + 'down by what that row says each month \u2014 an extra payment there shows '
           + 'here on its own. It counts from the month AFTER \u201cTrue as of\u201d, so a '

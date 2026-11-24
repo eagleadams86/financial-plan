@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1338;
+const EXPECTED = 1341;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -7131,25 +7131,53 @@ t('the boundary keeps a shaped row id and drops anything else', () => {
   eq(H.netWorthParts(st, '2030-03').debts, 799, 'so the typed payment carries on');
 });
 
+const pfRow = (id, name, section) => ({ id, name, rule: 'carry', role: 'normal', section });
+/* Charles's plan in miniature: old years imported sheet by sheet (so the same
+   bill is a DIFFERENT row each year), a loan row that stops in 2032, and the
+   plan built out to 2035. */
+const pfYears = () => ({ years: {
+  2024: { kind: 'summary', categoryTotals: [] },
+  2025: { kind: 'grid', categories: [pfRow('elec-25', 'Electric', 'expense'), pfRow('old', 'Old Card', 'expense')] },
+  2026: { kind: 'grid', categories: [pfRow('rent', 'Rent', 'expense'), pfRow('tesla', 'Tesla', 'expense'),
+                                       pfRow('elec', 'Electric', 'expense'), pfRow('pay', 'Paycheck', 'income')] },
+  2027: { kind: 'grid', categories: [pfRow('rent', 'Rent', 'expense'), pfRow('tesla', 'Tesla', 'expense'),
+                                       pfRow('elec', 'Electric', 'expense'), pfRow('gym', 'gym', 'expense')] },
+  2035: { kind: 'grid', categories: [pfRow('rent', 'Rent', 'expense'), pfRow('boat', 'Boat', 'expense'),
+                                       pfRow('elec', 'Electric', 'expense')] },
+} });
+
 t('a row that stops before the newest year is still offered', () => {
-  /* Charles's plan exactly: built out to 2035, and the loan's row stops in
-     2032 — so it is in the live year and NOT in the newest. */
-  const row = (id, name, section) => ({ id, name, rule: 'carry', role: 'normal', section });
-  const st = { years: {
-    2025: { kind: 'summary', categoryTotals: [] },
-    2026: { kind: 'grid', categories: [row('rent', 'Rent', 'expense'), row('tesla', 'Tesla', 'expense'),
-                                         row('pay', 'Paycheck', 'income')] },
-    2027: { kind: 'grid', categories: [row('rent', 'Rent', 'expense'), row('tesla', 'Tesla', 'expense'),
-                                         row('gym', 'Gym', 'expense')] },
-    2035: { kind: 'grid', categories: [row('rent', 'Rent', 'expense'), row('boat', 'Boat', 'expense')] },
-  } };
-  const got = H.paidFromRows(st, '2026');
-  eq(got.map(([id]) => id), ['rent', 'tesla', 'gym', 'boat'],
-    'the live year first and in its order, then what only other years hold — once each');
+  const got = H.paidFromRows(pfYears(), '2026', '2026-12');
+  ok(got.some(([id]) => id === 'tesla'), 'in 2027 and not in 2035, and offered all the same');
   ok(!got.some(([id]) => id === 'pay'), 'income is not what pays a debt');
-  eq(H.paidFromRows(st, null).map(([id]) => id), ['rent', 'tesla', 'gym', 'boat'],
-    'and with no live year at all the grids are simply read oldest first');
+});
+
+t('only the years the debt can read are offered, A to Z, once each', () => {
+  /* True as of December 2026 → counted from January 2027. */
+  const got = H.paidFromRows(pfYears(), '2026', '2026-12');
+  eq(got.map(([, label]) => label), ['Boat', 'Electric', 'gym', 'Rent', 'Tesla'],
+    'alphabetical whatever the case, and Electric once — the 2025 row of the same name cannot pay this debt');
+  ok(!got.some(([id]) => id === 'old' || id === 'elec-25'), 'nothing from a year behind the statement');
+  /* A statement from mid-2025 reaches back into 2025, where Electric is a
+     different row — so now there are two, and they say which is which. */
+  const wide = H.paidFromRows(pfYears(), '2026', '2025-06').map(([, label]) => label);
+  ok(wide.includes('Electric (2025)') && wide.includes('Electric (2026\u20132035)'),
+    'two rows sharing a name are told apart by the years they run', wide.join(', '));
+  ok(wide.includes('Old Card'));
+});
+
+t('with no month said, the live year onward; past the plan, the live year', () => {
+  const st = pfYears();
+  eq(H.paidFromRows(st, '2026').map(([id]) => id).sort(), ['boat', 'elec', 'gym', 'rent', 'tesla']);
+  eq(H.paidFromRows(st, '2026', '2040-01').map(([id]) => id).sort(), ['elec', 'rent', 'tesla'],
+    'a statement dated past every year still gets a list rather than an empty box');
   eq(H.paidFromRows({ years: {} }, '2026'), []);
+});
+
+t('the row a debt already names is always offered', () => {
+  const got = H.paidFromRows(pfYears(), '2026', '2026-12', 'old');
+  ok(got.some(([id, label]) => id === 'old' && label === 'Old Card'),
+    'even from a year the list would otherwise leave out — opening the window must not unpick a link');
 });
 
 t('the sample\'s car loan is paid from its budget row, and says so', async () => {

@@ -8013,8 +8013,13 @@ would be needed?"* The answer to the second is that `asOf` already IS one.
   coerceShape keeps only an `ID_OK` string. It is NOT checked against the rows —
   a row can live in one year and not another, and a dangling name degrades to
   the typed payment on its own.
-- **The dropdown is EVERY grid year's expense rows, live year first
-  (`paidFromRows`) — never "the newest grid".** It was, for an afternoon, and
+- **The dropdown is the expense rows of the grid years FROM the month after
+  `asOf` ONWARD, A to Z, one entry per id (`paidFromRows`).** Not every year:
+  Charles's older years were imported sheet by sheet, so the same bill is a
+  different row in each, and "all years" gave him sixty-odd entries with
+  Electric three times — none of which the walk could ever read. Same-named
+  rows that do both qualify carry the years they run. The linked row is always
+  offered wherever it lives. And never "the newest grid": It was, for an afternoon, and
   Charles's Tesla row was missing: the row has `until` December 2032, a stopped
   row is left out of the next year, and his plan runs to 2035. A loan's row is
   by nature one that ENDS, so the newest year is the one place it will not be.
