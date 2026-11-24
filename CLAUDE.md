@@ -100,7 +100,8 @@ family names as well as balances.
   knowing up here: `netWorthParts(st, month)` takes a MONTH now, because what a
   debt is worth depends on when you ask.
 - **`side.property` is the household's stuff, not an account** — `{name, kind,
-  value, owed?, note?}`, kinds from `PROPERTY_KINDS` (above `load()`, the
+  value, owed?, note?, soldOn?, soldFor?}` (the last two: "A property that has
+  been sold", below), kinds from `PROPERTY_KINDS` (above `load()`, the
   temporal-dead-zone rule). Nothing flows through a house: the engine never
   sees these rows, the Household tab lists them (equity = value − owed) and the
   net worth counts them. Addressed by INDEX like a retirement account — nothing
@@ -7946,6 +7947,41 @@ standing in a shop.
   All seven proven red against the build before them, and the guard one proven
   red a second time against this build with `input:disabled + .moneykey` taken
   back out. EXPECTED 1196 → 1203.
+
+## A property that has been sold (2026-11-24)
+
+Charles, with the editor open on a car: *"how do i 'sell' this without deleting
+it or staying here forever?"* There was no answer — Delete or leave it counting.
+
+- **`soldOn` (a day) and `soldFor` (a number, optional) on the property row.**
+  `propSold(p, month)` is THE question, defined beside `securedTo`; `month`
+  absent means now, and a future date is not sold yet. Do not re-derive it.
+- **`netWorthParts` filters on it AT THE MONTH IT IS ASKED ABOUT**, so a settled
+  month before the sale still counts the row. This is the first thing on a
+  property with a month to it — "property has no month" is still true of a
+  property that is OWNED, and that sentence above stands for those.
+- **A debt secured on a sold property degrades to unsecured**, exactly the
+  deleted-property rule (`propIds` is built from the held list). The figure
+  moves from the Property tile to Owed; the total does not move. The debts card
+  says "on X, sold" because nowhere else explains the move.
+- **`soldFor` reaches NO total.** The proceeds are in an account balance.
+- **`propertyCard` draws two tables off one stored list and every row keeps its
+  STORED index** (`idxOf`) — the editor addresses a property by index, so a row
+  numbered by its place in either table opens the wrong property. There is a
+  test that clicks the sold row and reads the name.
+- **The fold's open state is a page variable (`soldListOpen`), not plan state**:
+  the card is redrawn on every save-as-you-go commit and a bare `<details>`
+  snapped shut under the row being edited. `toggle` does not bubble — the
+  listener is on `document` in the CAPTURE phase.
+- **Boundary:** `soldOn` through `stampDay`; `soldFor` is tested with
+  `parseFloat` BEFORE `num()`, because `num('junk')` is 0 and "sold for $0.00"
+  is a claim nobody made; a price with no day is dropped. The editor refuses a
+  price without a day out loud.
+- **Excluded from the Close card's property line and from `markChecked`.**
+- **SCHEMA 11 and `SHARE_PAYLOAD_V` 7, rewriting nothing** — an older build
+  keeps the field (the boundary does not strip a property's unknown keys) but
+  counts the car again, and would record a snapshot with it in.
+- The sample has one (`hatchback`, sold last November) so the fold is in the demo.
 
 ## Looking a property's value up (2026-09-17)
 

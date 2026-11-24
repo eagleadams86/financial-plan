@@ -1417,6 +1417,15 @@ details.danger-zone { margin-top: 16px; border-top: 1px solid var(--border); pad
 details.danger-zone > summary { cursor: pointer; font-size: var(--fs-xs); font-weight: 600;
   color: var(--text-secondary); }
 details.danger-zone > summary:hover { color: var(--text-primary); }
+/* The Property card's Sold list — the same quiet fold, for the same reason:
+   it is there when you go looking and out of the way when you do not. */
+details.soldlist { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+details.soldlist > summary { cursor: pointer; font-size: var(--fs-xs); font-weight: 600;
+  color: var(--text-secondary); }
+details.soldlist > summary:hover { color: var(--text-primary); }
+/* `.sub` is scoped to a card's own children, so one inside the fold has to be
+   given its ink and size here or it comes out as body text. */
+details.soldlist > .sub { margin: 10px 0 12px; color: var(--text-secondary); font-size: var(--fs-xs); }
 .muted { color: var(--text-secondary); }
 /* ── DIALOG PROSE IS ONE SIZE AND ONE INK, family-wide ──────────────────────
    Charles, 2026-08-22, with the five Back Up windows side by side: "how do you
@@ -4201,7 +4210,7 @@ const STORAGE_KEY = 'fin-state';
    here is what lets `load` spot the opposite case — a plan from the FUTURE,
    saved by a newer build — which migrate cannot help with and must not guess
    at. Bump it in the same commit as the migration step that earns it. */
-const SCHEMA = 10;
+const SCHEMA = 11;
 
 const UPDATED_KEY = 'fin-updated';   // written by save(); the hook a future sync layer keys off
 const THEME_KEY   = 'fin-theme';
@@ -6525,6 +6534,15 @@ function coerceShape(data) {
     /* The day its value was last confirmed — see "Closing a month". A date
        only, and a real one; anything else goes. */
     if (stampDay(p.checkedOn)) p.checkedOn = stampDay(p.checkedOn); else delete p.checkedOn;
+    /* The day it was sold, and what for — see propSold. A real day or nothing:
+       a malformed one would otherwise be compared as text against a month and
+       could take a house out of net worth. The price is a record only and
+       means nothing without the day. */
+    if (stampDay(p.soldOn)) p.soldOn = stampDay(p.soldOn); else delete p.soldOn;
+    /* Asked BEFORE num(), which turns junk into 0 — right for a figure a total
+       must survive, wrong here: "sold for $0.00" is a claim nobody made. */
+    const soldNum = Number.isFinite(parseFloat(p.soldFor)) ? num(p.soldFor) : undefined;
+    if (p.soldOn && typeof soldNum === 'number') p.soldFor = soldNum; else delete p.soldFor;
   }
   /* What is owed. The balance goes through num() like every other figure that
      reaches a total; the RATE and the PAYMENT do not — they go through
@@ -7626,6 +7644,12 @@ function migrate(parsed) {
      offers "Convert to a Summary" on any finished year, so it can interleave
      summaries and grids behind the block rule's back. */
   if ((parsed.schema || 1) < 10) parsed.schema = 10;
+  /* 11 — a property can be SOLD (`soldOn`, `soldFor`; 2026-11-24). Rewrites
+     nothing: every row written before today is one still owned, which is what
+     an absent `soldOn` means. The bump is for the build that does not know the
+     field — it would count a sold car in net worth again, offer it on the
+     Close card, and record a snapshot with it in. */
+  if ((parsed.schema || 1) < 11) parsed.schema = 11;
   return parsed;
 }
 
@@ -10094,7 +10118,9 @@ const HELP = {
     [b('Property'), ' is the Household tab\'s list at your own stated values, minus whatever '
       + 'is secured on it. ', b('Owed'), ' is everything else the household owes — cards, '
       + 'student loans, a personal loan — and it comes off the total; a debt secured on a '
-      + 'property is already inside the Property figure, so it is never counted twice.'],
+      + 'property is already inside the Property figure, so it is never counted twice. '
+      + 'A property you have marked as sold stops counting from the month of the sale; '
+      + 'a loan still secured on it moves to Owed.'],
     [b('The giving fund is deliberately left out'), ': that money was given the day it went '
       + 'in, and counting it would inflate the total by dollars that are no longer yours.'],
     ['A part with nothing recorded shows ', b('no tile at all'), ' rather than a $0.00 — an '
@@ -11503,6 +11529,12 @@ function sampleState() {
           { id: 'house', kind: 'home', name: 'The house', value: 412000,
             note: 'Bought 2019; the mortgage row in the budget is this one.' },
           { id: 'car', kind: 'vehicle', name: 'The estate car', value: 14500 },
+          /* One that has been SOLD, so the demo shows the Sold list and what a
+             sale does to the figures: it is in last year's net worth and in
+             none of this year's. Nothing is secured on it. */
+          { id: 'hatchback', kind: 'vehicle', name: 'The old hatchback', value: 6200,
+            soldOn: `${PREV}-11-08`, soldFor: 5900,
+            note: 'Sold privately; the money went into the emergency fund.' },
           /* Priced in the currency it stands in, which is the whole case the
              app could not express before: without a rate this flat was either
              absent from the plan or counted as if 96,000 GBP were 96,000 USD. */
@@ -13510,7 +13542,8 @@ function closeChecklist(st, computed, y, m, today) {
         : inGrace ? `Not checked yet${graceNote}` : `Not checked since ${fullDayLabel(from)}`,
       { kind: 'view', view: 'giving' });
   stampLine('property', 'Property values checked',
-    (Array.isArray(side.property) ? side.property : []).filter(p => p && typeof p.value === 'number'),
+    (Array.isArray(side.property) ? side.property : [])
+      .filter(p => p && typeof p.value === 'number' && !propSold(p)),
     n => n === 1 ? 'property' : 'properties', 'household');
 
   const ex = st.exported || {};
@@ -15678,6 +15711,34 @@ function payoffMonth(l) {
 const securedTo = (l, propIds) => (l && l.securedOn && propIds.has(l.securedOn))
   ? l.securedOn : null;
 
+/* ── A property that has been SOLD (2026-11-24) ─────────────────────────────
+   Asked for with the editor open on a car: "how do I sell this without deleting
+   it or staying here forever?" Until today those were the only two answers —
+   delete the row and lose its name, note and saved link, or leave it and have
+   net worth and the Close card count a car that is somebody else's.
+
+   `soldOn` is a DAY and it is the first thing on a property row with a month to
+   it, which changes one sentence the app has always said: a property WAS a
+   stated value with no month. It still is while it is owned. A sale is the one
+   event that does have a date, so `netWorthParts(st, month)` counts a row in
+   every month BEFORE the sale's and in none from it on — a settled October still
+   holds the car that was sold in November, at the last value stated for it.
+   The sale's own month is already without it, because that is the month the
+   money turns up in an account.
+
+   `soldFor` is a RECORD and nothing reads it into a total: the proceeds are in
+   whichever account they landed in, where the balance already says so, and
+   adding them here as well would count the same dollars twice.
+
+   A debt secured on a sold property is treated exactly like one secured on a
+   deleted property — it degrades to unsecured, the figure moves from the
+   Property tile to Owed, and the total is the same either way. Selling the car
+   does not clear the loan, and the app has no business assuming it did.
+
+   `month` absent means now. A sale dated in the future has not happened yet. */
+const propSold = (p, month) =>
+  !!(p && p.soldOn && String(p.soldOn).slice(0, 7) <= (month || thisMonth()));
+
 /* ── One figure, in the plan's own money ────────────────────────────────────
    `code` absent means the plan's currency, which is what every row written
    before rates existed means. A code the reader has given no rate for is NOT
@@ -15738,7 +15799,10 @@ function netWorthParts(st, month, closes) {
   const priceOf = pricer ? pricer.priceOf : undefined;
   const portfolios = side.portfolios || [];
   const retAccts = side.retirementAccounts || [];
-  const property = side.property || [];
+  /* Only what is still the household's AT this month — see propSold. Everything
+     below (the value, the secured split, `hasProperty`) reads this list, so a
+     sold row leaves all of them in one place. */
+  const property = (side.property || []).filter(p => !propSold(p, month));
   const liabilities = side.liabilities || [];
   /* Anything the plan cannot value, because its currency has no rate yet. Names
      rather than a count: a card that says "1 thing could not be counted" is a
@@ -16647,7 +16711,10 @@ function markChecked(st, target, day) {
   if (t === 'daf') { side.dafCheckedOn = day; return true; }
   if (t === 'property') {
     let n = 0;
-    for (const pr of side.property || []) if (pr && typeof pr.value === 'number') { pr.checkedOn = day; n++; }
+    /* Not a sold one: nobody can go and check what a car they no longer own
+       would fetch, and the Close card does not ask them to. */
+    for (const pr of side.property || [])
+      if (pr && typeof pr.value === 'number' && !propSold(pr)) { pr.checkedOn = day; n++; }
     return n > 0;
   }
   if (t.startsWith('pf:')) {
@@ -17074,8 +17141,26 @@ function rothBasisAt(st, goal, year) {
    balances the engine computes: nothing flows through a house, so these live
    beside the people rather than among the accounts. The Progress tab's net
    worth counts the equity (value minus owed). */
+/* Whether the Sold list is open. On the PAGE and not in the plan: it is where a
+   reader happened to be looking, and the card is redrawn on every save — which
+   is every keystroke-and-tab in a window that saves as you go — so without
+   this the list would snap shut under the row being edited. */
+let soldListOpen = false;
+document.addEventListener('toggle', (e) => {
+  if (e.target && e.target.matches && e.target.matches('details.soldlist'))
+    soldListOpen = e.target.open;
+}, true);
+
 function propertyCard() {
-  const list = state.side.property || [];
+  /* `all` keeps every row at its real index, because that is how the editor
+     addresses a property; `list` is what the household still holds, and it is
+     the only thing the table, the total and the Checked button are about. */
+  const all = (state.side.property || []).map((p, idx) => ({ p, idx }));
+  const list = all.filter(x => !propSold(x.p)).map(x => x.p);
+  const idxOf = new Map(all.map(x => [x.p, x.idx]));
+  /* Newest sale on top — the family's rule for time running down a page. */
+  const sold = all.filter(x => propSold(x.p))
+    .sort((a, b) => String(b.p.soldOn).localeCompare(String(a.p.soldOn)));
   const now = thisMonth();
   /* What is owed AGAINST each thing, read off the liabilities list rather than
      off the property row. Before schema 7 this was `p.owed`, a number retyped
@@ -17089,7 +17174,8 @@ function propertyCard() {
   /* Each row reads in ITS OWN money — that is the figure on the statement. The
      total is the only thing converted, because adding pounds to dollars is the
      one arithmetic this table must never quietly do. */
-  const rows = list.map((p, idx) => {
+  const rows = list.map((p) => {
+    const idx = idxOf.get(p);
     const owed = owedOn(p);
     const equity = round2((p.value || 0) - owed);
     const money = (v) => fmtMoneyIn(v, p.cur);
@@ -17127,9 +17213,27 @@ function propertyCard() {
         ${/* No title: the paragraph above already says it in the open, and only
              when it is true — which is where a caveat on a total belongs. */''}
         <td>${fmtMoney(totalEquity)}</td></tr></tfoot>` : ''}
-    </table></div>` : '<p class="sub">Nothing listed yet.</p>'}
+    </table></div>` : `<p class="sub">${sold.length ? 'Nothing owned now.' : 'Nothing listed yet.'}</p>`}
     <div class="addbar"><button class="btn small" data-add="property">＋ Add Property</button>${
       list.some(pr => typeof pr.value === 'number') ? checkedBtn('property') : ''}</div>
+    ${sold.length ? `<details class="soldlist"${soldListOpen ? ' open' : ''}>
+      <summary>Sold <span class="muted">${sold.length}</span></summary>
+      <p class="sub">Kept for the record and counted nowhere from the month of the
+        sale. A month you settled before it still holds what it was worth then.${
+        viewOnly ? '' : ' Click a row to change the sale, or clear its date to take it back.'}</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th style="text-align:left">Property</th><th style="text-align:left">Kind</th>
+          <th style="text-align:left">Sold</th><th>Sold For</th></tr></thead>
+        <tbody>${sold.map(({ p, idx }) => `<tr class="editrow" data-edit="property" data-idx="${idx}"${
+          rowTip('Click to edit', p.note)}>
+          <th scope="row">${esc(p.name)}${noteDot(p.note)}</th>
+          <td style="text-align:left">${esc(PROPERTY_KIND_LABEL[p.kind] || 'Other')}${
+            p.cur ? ` <span class="muted">${esc(p.cur)}</span>` : ''}</td>
+          <td style="text-align:left">${esc(fullDayLabel(p.soldOn))}</td>
+          <td>${typeof p.soldFor === 'number' ? fmtMoneyIn(p.soldFor, p.cur)
+            : '<span class="muted">—</span>'}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </details>` : ''}
   </div>`;
 }
 
@@ -17212,6 +17316,9 @@ function liabilitiesCard() {
   const list = state.side.liabilities || [];
   const now = thisMonth();
   const propName = (id) => (state.side.property || []).find(p => p.id === id)?.name;
+  /* Said on the row, because the loan on a sold car has just moved from the
+     Property tile to Owed and this is the only place that says why. */
+  const soldProp = (id) => propSold((state.side.property || []).find(p => p.id === id));
   const rows = list.map((l, idx) => {
     const a = amortize(l);
     const bal = liabilityAt(l, now);
@@ -17243,7 +17350,8 @@ function liabilitiesCard() {
       <th scope="row">${esc(l.name)}${noteDot(l.note)}</th>
       <td style="text-align:left">${esc(LIABILITY_KIND_LABEL[l.kind] || 'Other')}${
         l.securedOn && propName(l.securedOn)
-          ? ` <span class="muted">on ${esc(propName(l.securedOn))}</span>` : ''}${
+          ? ` <span class="muted">on ${esc(propName(l.securedOn))}${
+              soldProp(l.securedOn) ? ', sold' : ''}</span>` : ''}${
         l.cur ? ` <span class="muted">${esc(l.cur)}</span>` : ''}</td>
       ${/* This cell says where its own figure came from, and it used to say it
              in a native title — which inside a row that now carries a tip would
@@ -27554,6 +27662,22 @@ const EDITORS = {
             + '— so save it to your password manager and that will carry it to your '
             + 'other devices.',
       }] : []),
+      /* SELLING IT. Two boxes rather than a button, because a sale is two facts
+         — the day and the price — and this window saves as you go: a "Mark as
+         Sold" press would have to open a second window to ask for them. Filling
+         in the day IS the sale; emptying it takes the sale back.
+         Only on a property that exists, the saved link's rule: Add Property is
+         for something you own, and four boxes there would become six. */
+      ...(row ? [
+        { key: 'soldOn', label: 'Sold on', type: 'date',
+          hint: 'Leave empty while you own it. From this day it stops counting in '
+              + 'your net worth and the month-end checklist, and moves to the Sold '
+              + 'list — nothing is deleted, and clearing the date brings it back.' },
+        { key: 'soldFor', label: 'Sold for', type: 'money',
+          hint: 'Optional, and a record only. The money itself is in whichever '
+              + 'account it landed in — update that balance there. A loan secured '
+              + 'on this stays in What You Owe until you pay it off.' },
+      ] : []),
       noteField,
       ];
     },
@@ -27594,12 +27718,22 @@ const EDITORS = {
         cur: (state.side.rates || {})[v.cur] ? v.cur : undefined,
         note: v.note || undefined,
       };
+      /* A sale is a real day or it is not a sale. The price is refused without
+         one rather than kept: a "sold for" on a property still counted as owned
+         is a figure claiming something the row does not say. */
+      const soldOn = stampDay(v.soldOn) || undefined;
+      if (typeof v.soldFor === 'number' && !soldOn)
+        return 'Say the day it was sold first — a sale price needs one';
       if (ds.idx !== undefined) {
         const cur = state.side.property[+ds.idx];
         /* Asked BEFORE the assign — a changed value is somebody having looked. */
         if (typeof row.value === 'number' && row.value !== cur.value) cur.checkedOn = todayISO();
         Object.assign(cur, row);
         if (row.cur === undefined) delete cur.cur;
+        /* Deleted, never left as `undefined`: the same reason as `cur` above. */
+        if (soldOn) cur.soldOn = soldOn; else delete cur.soldOn;
+        if (soldOn && typeof v.soldFor === 'number') cur.soldFor = v.soldFor;
+        else delete cur.soldFor;
         /* The link goes to its OWN store, never onto the row: `row` above is an
            explicit literal, so nothing can ride in by accident — which matters,
            because coerceShape does not strip unknown keys off a property and a
@@ -27707,7 +27841,7 @@ const EDITORS = {
       ...((state.side.property || []).length ? [{ key: 'securedOn', label: 'Secured on',
         type: 'select',
         options: [['', 'Nothing \u2014 count it on its own'],
-          ...(state.side.property || []).map(p => [p.id, p.name])],
+          ...(state.side.property || []).map(p => [p.id, propSold(p) ? `${p.name} (sold)` : p.name])],
         hint: 'A secured debt comes off that property\u2019s equity instead of standing '
           + 'as its own figure. Either way it comes off your net worth.' }] : []),
       noteField,
@@ -32380,7 +32514,8 @@ function searchPlan(st, query, allowed) {
       push({ view: 'household', where: `${p.name} — household`, snippet: p.note || '' });
   for (const p of ((st.side || {}).property || []))
     if (has(p.name) || has(p.note))
-      push({ view: 'household', where: `${p.name} — property`, snippet: p.note || '' });
+      push({ view: 'household', where: `${p.name} — ${propSold(p) ? 'sold property' : 'property'}`,
+        snippet: p.note || '' });
   for (const a of accountsOf(st))
     if (has(a.name))
       push({ view: 'budget', where: `${a.name} — account`, snippet: '' });
@@ -34033,10 +34168,11 @@ const SHARE_FORMAT = 1;
    missing whatever their build added. Unlike SCHEMA there is no stored copy at
    stake, so nothing is written and nothing halts — the family pattern from
    Sprint Velocity. */
-const SHARE_PAYLOAD_V = 6;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05);
+const SHARE_PAYLOAD_V = 7;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05);
                              // 4: a summary year's isGrowth rows (2026-09-20);
                              // 5: a paycheck row's yearly bonus (2026-11-03);
                              // 6: a goal counting Roth IRA contributions (same day)
+                             // 7: a property's soldOn — an older reader would count it (2026-11-24)
 
 const b64urlEncode = (bytes) => {
   let s = '';
@@ -35251,7 +35387,7 @@ window.__finTestHooks = { goalAsOfMonths, SCHEMA, EARNED_ROW_ID, round2, roundTo
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketValues, bucketGap, kindTotals,
-  netWorthParts, PROPERTY_KINDS, vacationYearStats, vacationYearRunning,
+  netWorthParts, propSold, PROPERTY_KINDS, vacationYearStats, vacationYearRunning,
   /* Debts: the schedule, where it lands in a given month, and when it ends.
      Pure over one row, so a test pins the arithmetic rather than the card. */
   amortize, liabilityAt, payoffMonth, LIABILITY_KINDS, SECURED_KINDS,

@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1319;
+const EXPECTED = 1327;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -6944,6 +6944,111 @@ t('a secured debt comes off the property, an unsecured one stands on its own', (
   eq(nw.hasDebts, true);
   eq(nw.propertyOwed, 250);
 });
+
+/* ── A property that has been sold (2026-11-24) ──────────────────────────── */
+const soldFixture = () => H.coerceShape({ schema: H.SCHEMA, years: {}, settings: {}, side: {
+  property: [
+    { id: 'house', name: 'House', kind: 'home', value: 400 },
+    { id: 'car', name: 'Car', kind: 'vehicle', value: 90, soldOn: '2030-03-14', soldFor: 85 },
+  ],
+  liabilities: [
+    { id: 'm', name: 'Mortgage', kind: 'mortgage', balance: 250, securedOn: 'house' },
+    { id: 'c', name: 'Car loan', kind: 'auto', balance: 20, securedOn: 'car' },
+  ] } });
+
+t('a sold property counts before the month of its sale and not from it', () => {
+  const st = soldFixture();
+  eq(H.netWorthParts(st, '2030-02').property, 220,
+    'February still holds the car: 400 + 90 − 250 − 20');
+  eq(H.netWorthParts(st, '2030-03').property, 150,
+    'the month of the sale is already without it — that is the month the money is in an account');
+  eq(H.netWorthParts(st, '2030-09').property, 150, 'and so is every month after');
+});
+
+t('the loan on a sold property moves to Owed, and the total does not move', () => {
+  const st = soldFixture();
+  const before = H.netWorthParts(st, '2030-02'), after = H.netWorthParts(st, '2030-03');
+  eq(before.debts, 0, 'secured while the car is owned');
+  eq(after.debts, 20, 'unsecured once it is sold — selling the car does not clear the loan');
+  eq(after.propertyOwed, 250, 'and it is no longer inside the Property figure');
+  eq(Math.round((before.property - before.debts) - (after.property - after.debts)), 90,
+    'the only thing that left the plan is the car itself — its 90, and not a cent of the loan');
+});
+
+t('a plan whose only property is sold has no Property figure at all', () => {
+  const st = H.coerceShape({ schema: H.SCHEMA, years: {}, settings: {}, side: {
+    property: [{ id: 'car', name: 'Car', kind: 'vehicle', value: 90, soldOn: '2030-03-14' }] } });
+  eq(H.netWorthParts(st, '2030-04').hasProperty, false, 'so no tile and no snapshot key');
+  eq(H.netWorthParts(st, '2030-01').hasProperty, true, 'but the months before the sale keep theirs');
+});
+
+t('a sale dated in the future has not happened yet', () => {
+  const far = `${new Date().getFullYear() + 5}-01-01`;
+  ok(!H.propSold({ soldOn: far }), 'asked about today');
+  ok(H.propSold({ soldOn: far }, far.slice(0, 7)), 'asked about the month it is dated in');
+  ok(H.propSold({ soldOn: '2001-05-05' }), 'and one in the past is sold now');
+  ok(!H.propSold({}) && !H.propSold(null), 'no date, not sold');
+});
+
+t('the boundary keeps a real sale day and drops anything else', () => {
+  const st = H.coerceShape({ schema: H.SCHEMA, years: {}, settings: {}, side: { property: [
+    { name: 'A', value: 1, soldOn: '2030-02-30', soldFor: 5 },
+    { name: 'B', value: 1, soldOn: 'yesterday' },
+    { name: 'C', value: 1, soldFor: 7 },
+    { name: 'D', value: 1, soldOn: '2030-02-28', soldFor: 'lots' },
+    { name: 'E', value: 1, soldOn: '2030-02-28', soldFor: '12.5' },
+  ] } });
+  const [a, b, c, d, e] = st.side.property;
+  ok(!('soldOn' in a) && !('soldFor' in a), 'the 30th of February is not a day, and its price goes with it');
+  ok(!('soldOn' in b), 'nor is a word');
+  ok(!('soldFor' in c), 'a price with no day is a claim the row does not make');
+  ok(d.soldOn === '2030-02-28' && !('soldFor' in d), 'a price that is not a number is dropped, the sale stays');
+  ok(e.soldOn === '2030-02-28' && e.soldFor === 12.5, 'and a good pair survives');
+});
+
+t('a sold property is not asked about, or stamped, at month end', () => {
+  /* Sold in the PAST: markChecked asks about today, and soldFixture's 2030 sale
+     has not happened yet as far as today is concerned. */
+  const st = soldFixture();
+  st.side.property[1].soldOn = '2001-03-14';
+  ok(H.markChecked(st, 'property', '2030-08-02'));
+  eq(st.side.property[0].checkedOn, '2030-08-02', 'the house is stamped');
+  ok(!('checkedOn' in st.side.property[1]), 'the car nobody owns is not');
+  const only = H.coerceShape({ schema: H.SCHEMA, years: {}, settings: {}, side: {
+    property: [{ id: 'car', name: 'Car', kind: 'vehicle', value: 90, soldOn: '2001-03-14' }] } });
+  eq(H.markChecked(only, 'property', '2030-08-02'), false, 'and with nothing else there is nothing to mark');
+});
+
+t('the sale is the newest schema and the newest share payload', () => {
+  ok(H.SCHEMA >= 11, 'a build that does not know soldOn would count the car again');
+  eq(H.migrate({ schema: 10, years: {}, settings: {} }).schema, H.SCHEMA);
+});
+
+t('the Sold list holds the sold row, and the table and its total do not', async () => {
+  const { f, D } = await auditFrame(1280, 900, 'propsold');
+  try {
+    D.getElementById('tab-household').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const fold = D.querySelector('details.soldlist');
+    ok(fold, 'the sample has sold one thing, so the fold is drawn');
+    const soldRows = [...fold.querySelectorAll('tbody tr')];
+    eq(soldRows.length, 1);
+    ok(/hatchback/i.test(soldRows[0].textContent), 'and it is the hatchback', soldRows[0].textContent);
+    ok(/5,900/.test(soldRows[0].textContent), 'with what it went for');
+    const card = fold.closest('.card');
+    const owned = [...card.querySelectorAll('table')][0];
+    ok(!/hatchback/i.test(owned.textContent), 'the main table is what the household still holds');
+    eq(owned.querySelectorAll('tbody tr').length, 3, 'house, car, flat');
+    /* The index is the row's place in the STORED list, not in either table —
+       a sold row addressed by its place in the Sold list would open the house. */
+    soldRows[0].click();
+    await new Promise((r) => setTimeout(r, 200));
+    ok(/hatchback/i.test(D.getElementById('rf-name').value), 'the sold row opens ITSELF',
+      D.getElementById('rf-name').value);
+    ok(/^\d{4}-11-08$/.test(D.getElementById('rf-soldOn').value), 'with its sale day in the box',
+      D.getElementById('rf-soldOn').value);
+  } finally { f.remove(); }
+});
 t('a debt secured on a property that is gone still counts, just elsewhere', () => {
   /* The property of the split worth knowing: which tile a figure lands in can
      change, the total cannot. */
@@ -11579,8 +11684,9 @@ t('the payload version is 6: a goal can count Roth IRA contributions', () => {
      year's `isGrowth` row as an ordinary flow and count a paper gain as income
      in money in and in the savings rate; v4 would drop a paycheck row's bonus
      and show a year without it; v5 would drop the Roth contributions a goal
-     counts — each the silent misread the version exists to refuse. */
-  eq(H.SHARE_PAYLOAD_V, 6);
+     counts; v6 would count a sold property as one still owned — each the
+     silent misread the version exists to refuse. */
+  eq(H.SHARE_PAYLOAD_V, 7);
 });
 
 t('an unknown tab in a link is dropped, not drawn', async () => {

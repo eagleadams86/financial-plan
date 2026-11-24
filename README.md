@@ -1154,7 +1154,9 @@ What a close can't turn back stays **today's figure**, and the tile says so:
 share counts (a purchase after the month ended still shows), a price you typed
 by hand or a holding with lookups off, a retirement account kept as typed
 balances, and what a property would fetch. The plan keeps no history of those,
-which is why there is no picker over every month in the plan.
+which is why there is no picker over every month in the plan. The one exception
+is a property you have [marked as sold](#selling-something): it has a date, so
+a month before the sale still counts it and a month from the sale on does not.
 
 Debt appears in one of two places and comes off the total either way. A debt
 **secured on a property** is inside that property's figure, which is the
@@ -1739,6 +1741,33 @@ for the same reason. Only `http` and `https` links are accepted (paste the whole
 address, `https://` included), and a saved one is labelled by its own hostname
 rather than by anything you type. A paste that is not a web link is refused
 with a message, and the link you had stays.
+
+#### Selling Something
+
+When a car or a house is sold, **don't delete it** — open its row and fill in
+**Sold on**. That is the whole press: the window saves as you go, the row moves
+to the **Sold** list folded under the table, and nothing about it is lost — its
+name, its note and its saved value page link all stay. Clear the date and it
+comes straight back.
+
+What a sale changes:
+
+- **Net worth stops counting it from the month of the sale.** A month you
+  settled *before* that still holds it, at the last value you stated — an
+  October you closed with the car in the driveway goes on saying so. This is
+  the one thing about a property that has a month to it.
+- **The month-end checklist stops asking** whether its value has been checked,
+  and **✓ Checked, No Change** no longer stamps it.
+- **A loan secured on it is not cleared.** It stays in What You Owe, marked
+  *sold* beside the property's name, and moves from inside the Property figure
+  to the **Owed** tile. The total is the same either way — pay it off or delete
+  it yourself when the lender says it is gone.
+- **Sold for** is optional and a record only. The money is in whichever account
+  it landed in, so that account's balance is where it is counted; adding it
+  here as well would count the same dollars twice.
+
+A date in the future is a sale that has not happened yet, and changes nothing
+until that month arrives.
 
 ### What You Owe
 
