@@ -7983,6 +7983,43 @@ it or staying here forever?"* There was no answer — Delete or leave it countin
   counts the car again, and would record a snapshot with it in.
 - The sample has one (`hatchback`, sold last November) so the fold is in the demo.
 
+## A debt paid from a budget row (2026-11-24)
+
+Charles: *"can this be tied to a budget line so that it automatically draws
+down the debt?"* — then, unprompted: *"a downpayment also shouldn't be included
+though that would probably be on the same budget line so some kind of start date
+would be needed?"* The answer to the second is that `asOf` already IS one.
+
+- **`l.paidFrom` is a budget category id.** `paidFromWalk(l, pays)` is the walk
+  and returns **null for an unlinked debt**, which then goes through `amortize`
+  untouched — every debt before today computes exactly what it did.
+- **THE WALK STARTS THE MONTH AFTER `asOf`** — the typed payment's own rule, and
+  the whole of the down-payment answer. Do not add a start-date field.
+- **Where the plan says nothing (`pays` → undefined: a summary year, a month
+  past every grid, a row that year lacks) the TYPED payment carries on.** None
+  typed, or one under the interest, and the walk stops `open`: payoff unknown,
+  balance standing at the last month reached — never zero, never invented.
+- **A row month is believed even at 0** (balance grows by the interest). A
+  positive cell — a refund — pays nothing and adds nothing.
+- **`pays` is PASSED, never fetched inside the maths.** `rowPays(st, all)` reads
+  computeAll's cells and turns the expense sign ONCE; `planPays(st)` builds it
+  only when some debt is linked, off `C` for the plan on screen and off a fresh
+  `computeAll` for any other `st`. `liabilityAt` / `payoffMonth` take it as a
+  third / second argument — **a new call site that forgets it silently reads
+  the typed payment**, so grep both names when adding one. Today: netWorthParts,
+  propertyCard, liabilitiesCard.
+- **Still one way.** The budget feeds the debt; nothing here reaches the budget.
+- **Boundary:** `ref(l, 'paidFrom')` slugs it like every reference, then
+  coerceShape keeps only an `ID_OK` string. It is NOT checked against the rows —
+  a row can live in one year and not another, and a dangling name degrades to
+  the typed payment on its own. The editor's dropdown is the newest grid's
+  expense rows plus the linked row when that lives only in an older year
+  (`paidFromOptions`), so opening the window never unpicks a link by omission.
+- **The editor refuses a link with no `asOf`** — there is nowhere to count from.
+- **SCHEMA 12 and `SHARE_PAYLOAD_V` 8**, rewriting nothing.
+- **The sample's estate-car loan is linked to a `Car payment` row** whose $340
+  was carved out of Everything else month for month — no sample total moved.
+
 ## Looking a property's value up (2026-09-17)
 
 Charles: *"are there any free house and/or car value lookups that we can add to

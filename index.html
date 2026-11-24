@@ -4210,7 +4210,7 @@ const STORAGE_KEY = 'fin-state';
    here is what lets `load` spot the opposite case — a plan from the FUTURE,
    saved by a newer build — which migrate cannot help with and must not guess
    at. Bump it in the same commit as the migration step that earns it. */
-const SCHEMA = 11;
+const SCHEMA = 12;
 
 const UPDATED_KEY = 'fin-updated';   // written by save(); the hook a future sync layer keys off
 const THEME_KEY   = 'fin-theme';
@@ -5759,7 +5759,7 @@ function normalizeIds(d) {
      rows carry no id at all and minting needs the uniqueness check `own` does
      not do. What belongs here is the REFERENCE — cleaned the same way, so a
      mangled `securedOn` still finds the row it names. */
-  for (const l of list(side.liabilities)) ref(l, 'securedOn', '');
+  for (const l of list(side.liabilities)) { ref(l, 'securedOn', ''); ref(l, 'paidFrom', ''); }
 
   /* One year's own ids and the maps keyed on them. Lifted out of the loop
      (2026-09-20) so the SAME pass reaches the grid a folded summary is still
@@ -6573,6 +6573,11 @@ function coerceShape(data) {
       }
       if (!/^\d{4}-\d{2}$/.test(String(l.asOf || ''))) delete l.asOf;
       if (l.securedOn !== undefined && !propIds.has(l.securedOn)) delete l.securedOn;
+      /* The budget row it is paid from. Only SHAPED here, not checked against
+         the rows: a row can live in one year and not another, and a name that
+         answers nowhere simply reads as "the plan says nothing" — the typed
+         payment carries on, which is the debt before it was linked. */
+      if (typeof l.paidFrom !== 'string' || !ID_OK.test(l.paidFrom)) delete l.paidFrom;
     }
   }
   /* Exchange rates: ISO code → what one unit is worth in the plan's own
@@ -7650,6 +7655,11 @@ function migrate(parsed) {
      field — it would count a sold car in net worth again, offer it on the
      Close card, and record a snapshot with it in. */
   if ((parsed.schema || 1) < 11) parsed.schema = 11;
+  /* 12 — a debt can be PAID FROM a budget row (`paidFrom`; same day). Rewrites
+     nothing. An older build keeps the field and ignores it, so it would draw
+     the debt down by the typed payment and show a different balance, payoff
+     date and net worth for the same plan. */
+  if ((parsed.schema || 1) < 12) parsed.schema = 12;
   return parsed;
 }
 
@@ -10261,6 +10271,14 @@ const HELP = {
       + 'the same number whichever side of the line it sits.'],
     [b('Nothing here touches the budget grid'), ': the payment leaving your account is '
       + 'already a row there, and counting the debt as well would take the money out twice.'],
+    ['The other direction is yours to switch on. ', b('Paid from'), ' names the budget row '
+      + 'the payment is on, and the balance then comes down by ', b('what that row says each '
+      + 'month'), ' — an extra payment, a skipped month or a changed amount shows here '
+      + 'without retyping anything. It counts from the month after the balance was true, so '
+      + 'a down payment on the same row is left out; once the budget’s months run out, the '
+      + 'payment typed on the debt carries on. A month the row paid nothing is a month the '
+      + 'interest was added, so the balance goes up. Leave a row that also carries escrow or '
+      + 'insurance unlinked, or the debt will come down faster than the lender says.'],
   ] },
   savingFor: { title: 'Saving for a Child', body: [
     ['Naming the child a goal is for does two things, and only two. It ', b('files the goal '
@@ -11266,6 +11284,11 @@ function sampleState() {
       { id: 'childcare',  name: 'Childcare',        rule: 'carry',    role: 'normal', section: 'expense',
         person: 'mia' },
       { id: 'transport',  name: 'Transport',        rule: 'avg',      role: 'normal', section: 'expense' },
+      /* The row the estate car's loan is PAID FROM (`paidFrom` on the debt), so
+         the demo shows a debt coming down by what the budget says. Its $340 is
+         carved out of Everything else below, month for month, so no total in
+         the sample moved when it arrived. */
+      { id: 'car-payment', name: 'Car payment',     rule: 'carry',    role: 'normal', section: 'expense' },
       /* Hand-paid and monthly, which is the row a reminder is actually for.
          Due the 1st, which is the case the look-ahead exists for: you pay it in
          the month BEFORE it falls, so the reminder has to reach forward or it
@@ -11338,7 +11361,8 @@ function sampleState() {
          card and already has the water bill demonstrating it. */
       if (i !== 6) put('insurance', i, -285);
       put('dining', i, -(240 + (i % 3) * 55));
-      put('everything-else', i, -(380 + (i % 5) * 70));
+      put('everything-else', i, -(40 + (i % 5) * 70));
+      put('car-payment', i, -340);
       put('to-savings', i, -600);
       put('to-college', i, -300);
       /* Four months and then nothing — the row's own `until` says the same
@@ -11352,7 +11376,7 @@ function sampleState() {
       if (i === 1) put('water', i, -92);
     }
     /* A month with a note on it, so the notes gathering and the marked cell show. */
-    cells[`everything-else|${m(3)}`] = { v: -1240, kind: 'actual',
+    cells[`everything-else|${m(3)}`] = { v: -900, kind: 'actual',
       note: 'Boiler service and the new washing machine — one-off, not a new normal.' };
     /* A one-off in the income row that carries nothing forward. */
     put('other-income', 5, 1400);
@@ -11563,7 +11587,9 @@ function sampleState() {
             securedOn: 'house',
             note: 'Principal and interest only; the budget row also carries escrow.' },
           { id: 'car-loan', name: 'The estate car', kind: 'auto',
-            balance: 6400, rate: 0.049, payment: 340, asOf: `${Y}-01`, securedOn: 'car' },
+            balance: 6400, rate: 0.049, payment: 340, asOf: `${Y}-01`, securedOn: 'car',
+            /* Linked to the budget row above — see paidFromWalk. */
+            paidFrom: 'car-payment' },
           { id: 'student', name: 'Ben — student loan', kind: 'student',
             balance: 11200, rate: 0.058, payment: 190, asOf: `${PREV}-06` },
           { id: 'visa', name: 'Visa', kind: 'card', balance: 1450, rate: 0.229,
@@ -15679,15 +15705,102 @@ function amortize(l) {
   return { months, interest, never: false, schedule };
 }
 
+/* ── A debt paid from a BUDGET ROW (2026-11-24) ─────────────────────────────
+   Asked for: "can this be tied to a budget line so that it automatically draws
+   down the debt?" Until today a debt came down by the one payment typed on it,
+   every month, for ever — so an extra $500 in March, a skipped month or a
+   payment that changed were all invisible until somebody retyped the balance.
+
+   `l.paidFrom` names a budget row (a category id). The walk below then takes
+   each month's payment from WHAT THAT ROW SAYS — typed where the month has been
+   entered, the row's own estimate where it has not — with interest still added
+   at the debt's rate. Three rules, each one a question Charles asked or would:
+
+   • IT STARTS THE MONTH AFTER `asOf`, the rule the typed payment always had.
+     The stated balance already reflects everything paid up to and including
+     that month — which is what keeps a DOWN PAYMENT out: it sits on the same
+     budget row, in or before the month of the statement, and is never read.
+     No second "start date" field, because the debt has had one all along.
+   • WHERE THE PLAN SAYS NOTHING, THE TYPED PAYMENT CARRIES ON. A month in a
+     year that is a summary, or past the last month any grid reaches, has no
+     cell — `pays` answers undefined — and the walk falls back to `l.payment`.
+     With none typed, or one under the interest, it STOPS and says so (`open`)
+     rather than inventing a payment: the payoff date is then unknown, which is
+     the truth.
+   • A ROW MONTH IS BELIEVED, EVEN AT ZERO. A month the row paid nothing is a
+     month the interest was added and nothing came off, so the balance goes UP.
+     That is what a skipped payment does, and hiding it would be the one thing
+     worse than showing it. A refund on the row (a positive cell) pays nothing;
+     it does not add to the debt.
+
+   The direction is still ONE WAY: the budget feeds the debt, and nothing here
+   reaches the budget — the payment is already an expense row there.
+
+   Returns null when the debt is not linked (or no lookup was handed in), which
+   is every debt before today: those go through `amortize` exactly as they did.
+   `pays(catId, month)` is a number of dollars PAID (positive) or undefined. */
+function paidFromWalk(l, pays) {
+  if (!l || !l.paidFrom || !l.asOf || typeof pays !== 'function') return null;
+  const monthly = (typeof l.rate === 'number' ? l.rate : 0) / 12;
+  const typed = Math.max(0, l.payment || 0);
+  let bal = Math.max(0, l.balance || 0), open = false;
+  const schedule = [];
+  while (bal > 0 && schedule.length < MAX_AMORT_MONTHS) {
+    const month = monthAdd(l.asOf, schedule.length + 1);
+    const got = pays(l.paidFrom, month);
+    const fromRow = typeof got === 'number' && Number.isFinite(got);
+    const int = round2(bal * monthly);
+    const pay = fromRow ? Math.max(0, got) : typed;
+    if (!fromRow && pay <= int) { open = true; break; }
+    const principal = Math.min(round2(pay - int), bal);
+    bal = round2(bal - principal);
+    schedule.push({ month, interest: int, principal, balance: bal, paid: round2(principal + int), fromRow });
+  }
+  if (bal > 0) open = true;
+  return { schedule, open };
+}
+
+/* The lookup `paidFromWalk` reads: what a budget row paid in a month, off the
+   COMPUTED plan so a month not yet entered answers with its estimate. Expense
+   cells are negative, so the sign is turned here, once. A month no grid holds,
+   or a row that year does not have, is undefined — "the plan says nothing".
+   `all` is computeAll's output. */
+function rowPays(st, all) {
+  return (catId, m) => {
+    const y = yearOfMonth(st, m);
+    const cell = y && all && all[y] && all[y].cells ? all[y].cells[`${catId}|${m}`] : null;
+    return cell && typeof cell.v === 'number' ? round2(-cell.v) : undefined;
+  };
+}
+
+/* The lookup for a whole plan, built only when a debt is actually linked — a
+   plan with none never pays for a second pass. The plan on screen reads `C`,
+   which every render has already worked out; any other (a test's fixture, a
+   share view's copy) is computed here. */
+function planPays(st) {
+  if (!(((st || {}).side || {}).liabilities || []).some(l => l && l.paidFrom)) return undefined;
+  const mine = st === state && C && Object.keys(C).length;
+  return rowPays(st, mine ? C : computeAll(st, todayISO()));
+}
+
 /* What is owed in a given month — the whole point of `asOf`. A balance with no
    date is a fact about no particular day, so it simply stands; so does one the
    reader has said nothing else about. Nothing is ever projected BACKWARDS: a
    month before the statement reads the stated figure, because the app was not
    told what the loan looked like then and running the schedule in reverse would
    be inventing it. */
-function liabilityAt(l, month) {
+function liabilityAt(l, month, pays) {
   const bal = Math.max(0, (l && l.balance) || 0);
   if (!bal || !l.asOf || !month || month <= l.asOf) return bal;
+  const w = paidFromWalk(l, pays);
+  if (w) {
+    const n = monthDiff(l.asOf, month);
+    if (n <= 0) return bal;
+    if (n <= w.schedule.length) return w.schedule[n - 1].balance;
+    /* Past the end of the walk: paid off, or — where the walk stopped because
+       nothing said what is paid next — standing at the last figure it reached. */
+    return w.open ? (w.schedule.length ? w.schedule[w.schedule.length - 1].balance : bal) : 0;
+  }
   const a = amortize(l);
   if (!a || a.never) return bal;
   const n = monthDiff(l.asOf, month);
@@ -15698,7 +15811,9 @@ function liabilityAt(l, month) {
 /* The month a debt is paid off, or null while there is nothing to work it out
    from. Read by the Household card and by nothing else — the balance itself is
    what net worth uses. */
-function payoffMonth(l) {
+function payoffMonth(l, pays) {
+  const w = paidFromWalk(l, pays);
+  if (w) return w.open ? null : monthAdd(l.asOf, w.schedule.length);
   const a = amortize(l);
   if (!a || a.never || !a.months || !l.asOf) return null;
   return monthAdd(l.asOf, a.months);
@@ -15710,6 +15825,23 @@ function payoffMonth(l) {
    tile to another and leaves the total alone. */
 const securedTo = (l, propIds) => (l && l.securedOn && propIds.has(l.securedOn))
   ? l.securedOn : null;
+
+/* The rows a debt can be paid from: the newest grid's expense rows, which is
+   the budget the reader is looking at — plus the row this debt already names
+   when that lives only in an older year, so opening the window never quietly
+   unpicks a link the dropdown merely failed to offer. `[id, name]` pairs. */
+function paidFromOptions(ds) {
+  const y = newestGridYear();
+  const cats = y ? (state.years[y].categories || []) : [];
+  const out = cats.filter(c => (c.section || 'expense') === 'expense').map(c => [c.id, c.name]);
+  const cur = ds && ds.idx !== undefined ? (state.side.liabilities[+ds.idx] || {}).paidFrom : null;
+  if (cur && !out.some(([id]) => id === cur))
+    for (const k of Object.keys(state.years).sort().reverse()) {
+      const c = (state.years[k].categories || []).find(x => x.id === cur);
+      if (c) { out.push([c.id, `${c.name} (${k})`]); break; }
+    }
+  return out;
+}
 
 /* ── A property that has been SOLD (2026-11-24) ─────────────────────────────
    Asked for with the editor open on a car: "how do I sell this without deleting
@@ -15835,7 +15967,8 @@ function netWorthParts(st, month, closes) {
   const owed = round2(property.reduce((s, p) => s + conv(p, p.owed || 0), 0));
   const propertyValue = round2(property.reduce((s, p) => s + conv(p, p.value || 0), 0));
   const propIds = new Set(property.map(p => p.id));
-  const owedNow = (l) => liabilityAt(l, month);
+  const pays = planPays(st);
+  const owedNow = (l) => liabilityAt(l, month, pays);
   /* Secured debt comes off the PROPERTY tile, unsecured debt gets a tile of its
      own. Both come off the total, so the split is a matter of where a reader
      looks for the figure, never of what the plan is worth. */
@@ -17166,9 +17299,10 @@ function propertyCard() {
      off the property row. Before schema 7 this was `p.owed`, a number retyped
      by hand or left to rot; it is a debt with a rate and a payment now, and
      what shows here is what it has been paid down to. */
+  const pays = planPays(state);
   const owedOn = (p) => round2((state.side.liabilities || [])
     .filter(l => l.securedOn === p.id)
-    .reduce((t, l) => t + liabilityAt(l, now), 0));
+    .reduce((t, l) => t + liabilityAt(l, now, pays), 0));
   const anyOwed = list.some(p => owedOn(p) > 0);
   const foreign = list.filter(p => p.cur);
   /* Each row reads in ITS OWN money — that is the figure on the statement. The
@@ -17319,28 +17453,54 @@ function liabilitiesCard() {
   /* Said on the row, because the loan on a sold car has just moved from the
      Property tile to Owed and this is the only place that says why. */
   const soldProp = (id) => propSold((state.side.property || []).find(p => p.id === id));
+  const pays = planPays(state);
+  /* The budget row a debt is paid from, by name, off the newest grid that has
+     it — null when the row is gone, and the card then says nothing rather than
+     naming a row nobody can find. */
+  const rowName = (id) => {
+    for (const y of Object.keys(state.years).sort().reverse()) {
+      const c = (state.years[y].categories || []).find(x => x.id === id);
+      if (c) return c.name;
+    }
+    return null;
+  };
   const rows = list.map((l, idx) => {
+    const walk = paidFromWalk(l, pays);
     const a = amortize(l);
-    const bal = liabilityAt(l, now);
-    const off = payoffMonth(l);
+    const bal = liabilityAt(l, now, pays);
+    const off = payoffMonth(l, pays);
     /* Interest LEFT, so the schedule is re-walked from where the balance is
        now rather than from where it was stated. Reading `a.interest` here
        showed a mortgage's whole lifetime cost under a column headed "left",
        which is the same figure wearing the wrong question. */
-    const rest = amortize({ ...l, balance: bal });
+    /* A linked debt's is the interest of the months still ahead on its own
+       walk — the same question, answered from the row's figures. */
+    const rest = walk
+      ? (walk.open ? null : { never: false, interest: round2(walk.schedule
+          .filter(x => x.month > now).reduce((t, x) => t + x.interest, 0)) })
+      : amortize({ ...l, balance: bal });
     const moved = l.asOf && bal !== l.balance;
+    const from = l.paidFrom ? rowName(l.paidFrom) : null;
     /* The stated figure is named in the tooltip whenever the projection has
        moved it, so a balance nobody typed is never mistaken for one somebody
        did. */
     const money = (v) => fmtMoneyIn(v, l.cur);
     const balTitle = (moved
-      ? `Stated ${money(l.balance)} in ${monthLabelFull(l.asOf)}, paid down to here`
+      ? `Stated ${money(l.balance)} in ${monthLabelFull(l.asOf)}, ${walk && from
+          ? `brought here by what ${from} paid each month since`
+          : 'paid down to here'}`
       : l.asOf ? `As stated in ${monthLabelFull(l.asOf)}` : 'As typed — no month said')
       + (l.cur ? ` · in ${l.cur}${(() => {
         const c = inPlanCurrency(state, bal, l.cur);
         return c.unknown ? ', no rate stated yet' : `, about ${fmtMoney(c.v)}`;
       })()}` : '');
-    const ends = !a ? '<span class="muted">Add a payment</span>'
+    const ends = walk
+      ? (!walk.open ? (bal <= 0 ? 'Paid off' : `${esc(monthLabelFull(off))}`)
+        /* The row's figures ran out before the debt did, and nothing typed here
+           says what is paid after them. */
+        : `<span class="muted">${l.payment ? 'The payment is under the interest'
+            : 'Add a payment for after the plan ends'}</span>`)
+      : !a ? '<span class="muted">Add a payment</span>'
       : a.never ? '<span class="muted">The payment is under the interest</span>'
       : !l.asOf ? '<span class="muted">Add the month it was true</span>'
       : bal <= 0 ? 'Paid off'
@@ -17352,6 +17512,7 @@ function liabilitiesCard() {
         l.securedOn && propName(l.securedOn)
           ? ` <span class="muted">on ${esc(propName(l.securedOn))}${
               soldProp(l.securedOn) ? ', sold' : ''}</span>` : ''}${
+        from ? ` <span class="muted">paid from ${esc(from)}</span>` : ''}${
         l.cur ? ` <span class="muted">${esc(l.cur)}</span>` : ''}</td>
       ${/* This cell says where its own figure came from, and it used to say it
              in a native title — which inside a row that now carries a tip would
@@ -17368,13 +17529,13 @@ function liabilitiesCard() {
   /* Both totals convert, and both leave out what they cannot value — a column
      of pounds and dollars added together is the one figure this card must never
      print. */
-  const owedEach = list.map(l => inPlanCurrency(state, liabilityAt(l, now), l.cur));
+  const owedEach = list.map(l => inPlanCurrency(state, liabilityAt(l, now, pays), l.cur));
   const total = round2(owedEach.reduce((t, e) => t + e.v, 0));
   const payTotal = round2(list
     .reduce((t, l) => t + inPlanCurrency(state, l.payment || 0, l.cur).v, 0));
   const uncounted = owedEach.filter(e => e.unknown).length;
   const foreign = list.filter(l => l.cur).length;
-  const anyProjected = list.some(l => l.asOf && liabilityAt(l, now) !== l.balance);
+  const anyProjected = list.some(l => l.asOf && liabilityAt(l, now, pays) !== l.balance);
   return `<div class="card" style="grid-column:1/-1">
     <h2>What You Owe${helpBtn('liabilities', 'how a debt is projected')}</h2>
     <p class="sub">Every debt the household carries, whether or not it is secured on
@@ -17385,7 +17546,9 @@ function liabilitiesCard() {
         : `Say what a balance was, when it was true, the rate and the payment, and the app
            works out what is left today and when it ends.`} Nothing here reaches the budget:
       the payment is already an expense row, and counting it twice would take the money out
-      twice.${foreign ? ` A debt held abroad reads in its own money; only the totals are
+      twice.${list.some(l => l.paidFrom) ? ` A debt <em>paid from</em> a budget row reads the
+      other way: it comes down by what that row says each month, so an extra payment there
+      shows here on its own.` : ''}${foreign ? ` A debt held abroad reads in its own money; only the totals are
       converted${uncounted ? ', and they leave out what has no rate yet' : ''}.` : ''}</p>
     ${list.length ? `<div class="tablewrap"><table>
       <thead><tr><th style="text-align:left">Debt</th><th style="text-align:left">Kind</th>
@@ -27823,7 +27986,7 @@ const EDITORS = {
       + 'is left today, so it stops going stale. Add the rate and the payment and it also '
       + 'says when the debt ends and what the rest of it costs. None of this reaches the '
       + 'budget — the payment is already a row there.',
-    fields: () => [
+    fields: (ds) => [
       { key: 'name', label: 'Name', type: 'text',
         hint: 'Whatever you call it — "The house", "Mia\u2019s car", "Visa".' },
       { key: 'kind', label: 'Kind', type: 'select',
@@ -27844,6 +28007,16 @@ const EDITORS = {
           ...(state.side.property || []).map(p => [p.id, propSold(p) ? `${p.name} (sold)` : p.name])],
         hint: 'A secured debt comes off that property\u2019s equity instead of standing '
           + 'as its own figure. Either way it comes off your net worth.' }] : []),
+      /* THE BUDGET ROW THAT PAYS IT — see paidFromWalk. Offered only when the
+         budget has an expense row to choose, the Secured-on rule. */
+      ...(paidFromOptions(ds).length ? [{ key: 'paidFrom', label: 'Paid from', type: 'select',
+        options: [['', 'Nothing \u2014 use Paid each month'], ...paidFromOptions(ds)],
+        hint: 'Choose the budget row this debt\u2019s payment is on and the balance comes '
+          + 'down by what that row says each month \u2014 an extra payment there shows '
+          + 'here on its own. It counts from the month AFTER \u201cTrue as of\u201d, so a '
+          + 'down payment on the same row in or before that month is left out. Paid each '
+          + 'month still takes over once the budget\u2019s months run out. Leave this at '
+          + 'Nothing for a row that also carries escrow or insurance.' }] : []),
       noteField,
     ],
     get: (ds) => ({ ...state.side.liabilities[+ds.idx] }),
@@ -27863,16 +28036,24 @@ const EDITORS = {
         asOf: /^\d{4}-\d{2}$/.test(String(v.asOf || '')) ? v.asOf : undefined,
         securedOn: (state.side.property || []).some(p => p.id === v.securedOn)
           ? v.securedOn : undefined,
+        /* A row some year of the plan really has, or nothing. */
+        paidFrom: Object.values(state.years || {}).some(yr =>
+          (yr.categories || []).some(c => c.id === v.paidFrom)) ? v.paidFrom : undefined,
         cur: (state.side.rates || {})[v.cur] ? v.cur : undefined,
         note: v.note || undefined,
       };
+      /* The link's whole rule is "from the month after True as of" — without
+         that month there is nowhere to count from, and the link would sit on
+         the row doing nothing while reading as though it worked. */
+      if (row.paidFrom && !row.asOf)
+        return 'Say the month the balance was true first — the budget row is counted from the month after it';
       if (ds.idx !== undefined) {
         /* Object.assign copies an explicit undefined straight over a stored
            value, which is exactly what a cleared box should do here — the
            settings-defaults trap in reverse, and the reason it is safe is that
            nothing merges this row over a set of defaults. */
         Object.assign(state.side.liabilities[+ds.idx], row);
-        for (const k of ['rate', 'payment', 'asOf', 'securedOn', 'cur', 'note'])
+        for (const k of ['rate', 'payment', 'asOf', 'securedOn', 'paidFrom', 'cur', 'note'])
           if (row[k] === undefined) delete state.side.liabilities[+ds.idx][k];
       } else {
         state.side.liabilities.push({ ...row,
@@ -34168,11 +34349,12 @@ const SHARE_FORMAT = 1;
    missing whatever their build added. Unlike SCHEMA there is no stored copy at
    stake, so nothing is written and nothing halts — the family pattern from
    Sprint Velocity. */
-const SHARE_PAYLOAD_V = 7;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05);
+const SHARE_PAYLOAD_V = 8;   // 2: count ∈ {capped, all} + overflowOf; 3: targetMonths (both 2026-09-05);
                              // 4: a summary year's isGrowth rows (2026-09-20);
                              // 5: a paycheck row's yearly bonus (2026-11-03);
                              // 6: a goal counting Roth IRA contributions (same day)
                              // 7: a property's soldOn — an older reader would count it (2026-11-24)
+                             // 8: a debt's paidFrom — an older reader draws it down differently (same day)
 
 const b64urlEncode = (bytes) => {
   let s = '';
@@ -35387,7 +35569,7 @@ window.__finTestHooks = { goalAsOfMonths, SCHEMA, EARNED_ROW_ID, round2, roundTo
   accountRate, retirementPots, retirementSplit, retKind, RET_TYPES,
   shiftRates, drawdownScenarios,
   retAcctBalance, holdingsValue, bucketsValue, bucketValues, bucketGap, kindTotals,
-  netWorthParts, propSold, PROPERTY_KINDS, vacationYearStats, vacationYearRunning,
+  netWorthParts, propSold, paidFromWalk, rowPays, PROPERTY_KINDS, vacationYearStats, vacationYearRunning,
   /* Debts: the schedule, where it lands in a given month, and when it ends.
      Pure over one row, so a test pins the arithmetic rather than the card. */
   amortize, liabilityAt, payoffMonth, LIABILITY_KINDS, SECURED_KINDS,

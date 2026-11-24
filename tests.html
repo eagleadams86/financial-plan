@@ -127,7 +127,7 @@ function ok(cond, note, detail) {
    registers today, so ADDING a test never fails the build; removing one does,
    which is the moment to ask whether it should have gone. Lower it deliberately
    when a test is deliberately retired. */
-const EXPECTED = 1327;
+const EXPECTED = 1337;
 /* HTML comments explain things by naming them — including the very elements
    these assertions look for, and one of those notes lives in a <style> block a
    strip does not reach. So the comments come out before the page is matched
@@ -7020,8 +7020,135 @@ t('a sold property is not asked about, or stamped, at month end', () => {
 });
 
 t('the sale is the newest schema and the newest share payload', () => {
-  ok(H.SCHEMA >= 11, 'a build that does not know soldOn would count the car again');
+  ok(H.SCHEMA >= 12, 'a build that does not know soldOn would count the car again');
   eq(H.migrate({ schema: 10, years: {}, settings: {} }).schema, H.SCHEMA);
+});
+
+/* ── A debt paid from a budget row (2026-11-24) ──────────────────────────── */
+const PF_LOAN = { id: 'car', name: 'Car', kind: 'auto', balance: 1000, rate: 0.12,
+  payment: 110, asOf: '2030-01', paidFrom: 'carpay' };
+/* A lookup written out by hand: month → dollars paid. Anything not listed is a
+   month the plan says nothing about. */
+const paysOf = (map) => (id, m) => (id === 'carpay' ? map[m] : undefined);
+
+t('an unlinked debt, or one with no lookup, is walked exactly as before', () => {
+  eq(H.paidFromWalk({ ...PF_LOAN, paidFrom: undefined }, paysOf({})), null);
+  eq(H.paidFromWalk(PF_LOAN), null, 'no lookup handed in');
+  eq(H.paidFromWalk({ ...PF_LOAN, asOf: undefined }, paysOf({})), null, 'and nowhere to count from');
+  const plain = { ...PF_LOAN, paidFrom: undefined };
+  eq(H.liabilityAt(PF_LOAN, '2030-03'), H.liabilityAt(plain, '2030-03'));
+});
+
+t('a linked debt comes down by what the row paid, interest first', () => {
+  const pays = paysOf({ '2030-02': 110, '2030-03': 610 });
+  /* Feb: 1% of 1000 = 10 interest, 100 off → 900. Mar: 9 interest, 601 off → 299. */
+  eq(H.liabilityAt(PF_LOAN, '2030-02', pays), 900);
+  eq(H.liabilityAt(PF_LOAN, '2030-03', pays), 299, 'the extra 500 in March shows on its own');
+  eq(H.liabilityAt({ ...PF_LOAN, paidFrom: undefined }, '2030-03'), 799,
+    'where the typed payment alone would have left it');
+});
+
+t('the month the balance was true is never read — a down payment there is left out', () => {
+  const pays = paysOf({ '2029-12': 9000, '2030-01': 5000, '2030-02': 110 });
+  eq(H.liabilityAt(PF_LOAN, '2030-01', pays), 1000, 'the stated month reads as stated');
+  eq(H.liabilityAt(PF_LOAN, '2030-02', pays), 900, 'and February is the first month counted');
+  eq(H.liabilityAt(PF_LOAN, '2029-06', pays), 1000, 'nothing is projected backwards');
+});
+
+t('a month the row paid nothing adds the interest; a refund pays nothing', () => {
+  eq(H.liabilityAt(PF_LOAN, '2030-02', paysOf({ '2030-02': 0 })), 1010, 'a skipped payment');
+  eq(H.liabilityAt(PF_LOAN, '2030-02', paysOf({ '2030-02': -50 })), 1010,
+    'money coming BACK on the row is not a payment and is not a new loan either');
+});
+
+t('past the months the plan holds, the typed payment carries on', () => {
+  const pays = paysOf({ '2030-02': 110 });
+  eq(H.liabilityAt(PF_LOAN, '2030-03', pays), 799, 'March has no cell, so 110 is used: 900 + 9 − 110');
+  const w = H.paidFromWalk(PF_LOAN, pays);
+  ok(!w.open, 'and the walk reaches zero');
+  ok(w.schedule[0].fromRow && !w.schedule[1].fromRow, 'saying which months were the row\'s');
+  eq(H.payoffMonth(PF_LOAN, pays), H.payoffMonth({ ...PF_LOAN, paidFrom: undefined }),
+    'an identical payment ends in the identical month');
+});
+
+t('with nothing typed for after the plan, the payoff is unknown rather than invented', () => {
+  const loan = { ...PF_LOAN, payment: undefined };
+  const pays = paysOf({ '2030-02': 110 });
+  const w = H.paidFromWalk(loan, pays);
+  ok(w.open, 'the walk stops where the row\'s figures do');
+  eq(H.payoffMonth(loan, pays), null);
+  eq(H.liabilityAt(loan, '2030-02', pays), 900, 'the months it does know are still counted');
+  eq(H.liabilityAt(loan, '2031-02', pays), 900, 'and the balance stands there, never at zero');
+});
+
+t('an extra payment on the row pulls the payoff month in', () => {
+  const steady = {}, extra = {};
+  for (let i = 1; i <= 24; i++) {
+    const m = H.monthAdd('2030-01', i);
+    steady[m] = 110; extra[m] = i === 2 ? 610 : 110;
+  }
+  const a = H.payoffMonth(PF_LOAN, paysOf(steady)), b = H.payoffMonth(PF_LOAN, paysOf(extra));
+  ok(a && b && b < a, 'sooner with the extra 500', `${a} vs ${b}`);
+});
+
+/* The real path: a plan whose budget row feeds the debt through computeAll. */
+const pfPlan = (link) => H.migrate(H.coerceShape({ schema: H.SCHEMA, settings: {},
+  years: { 2030: { kind: 'grid', model: 'pinned', enteredThrough: '2030-12',
+    categories: [{ id: 'carpay', name: 'Car payment', rule: 'none', role: 'normal', section: 'expense' }],
+    cells: { 'carpay|2030-01': { v: -5000, kind: 'actual' },
+             'carpay|2030-02': { v: -110, kind: 'actual' },
+             'carpay|2030-03': { v: -610, kind: 'actual' } } } },
+  side: { liabilities: [{ ...PF_LOAN, ...(link ? {} : { paidFrom: undefined }) }] } }));
+
+t('net worth reads a linked debt off the computed budget', () => {
+  const st = pfPlan(true);
+  eq(st.side.liabilities[0].paidFrom, 'carpay', 'the link survives the boundary');
+  eq(H.netWorthParts(st, '2030-01').debts, 1000, 'January\'s 5,000 down payment is not a loan payment');
+  eq(H.netWorthParts(st, '2030-03').debts, 299, 'expense cells are negative; the sign is turned once');
+  eq(H.netWorthParts(pfPlan(false), '2030-03').debts, 799, 'and unlinked it is the typed payment');
+});
+
+t('the boundary keeps a shaped row id and drops anything else', () => {
+  const one = (v) => H.coerceShape({ schema: H.SCHEMA, years: {}, settings: {}, side: {
+    liabilities: [{ name: 'L', balance: 1, paidFrom: v }] } }).side.liabilities[0];
+  /* The id walker reaches a reference before this does and slugs it, the
+     family rule — so markup arrives as a harmless id that names no row, never
+     as itself. Either answer is safe; the raw string is the one that is not. */
+  const hostile = one('<img src=x>').paidFrom;
+  ok(hostile === undefined || /^[A-Za-z0-9_-]{1,64}$/.test(hostile),
+    'a string that is not an id never survives as written', String(hostile));
+  for (const junk of [42, {}, ['a'], true]) {
+    const got = one(junk).paidFrom;
+    ok(got === undefined || (typeof got === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(got)),
+      'a non-string comes out as nothing or as a shaped string', JSON.stringify(got));
+  }
+  ok(!('paidFrom' in one('')) && !('paidFrom' in one(null)), 'and nothing stays nothing');
+  eq(one('car-payment').paidFrom, 'car-payment');
+  /* A name no row answers to is KEPT and simply reads as "the plan says
+     nothing" — a row can live in one year and not another. */
+  const st = H.coerceShape({ schema: H.SCHEMA, years: {}, settings: {}, side: {
+    liabilities: [{ ...PF_LOAN, paidFrom: 'gone' }] } });
+  eq(H.netWorthParts(st, '2030-03').debts, 799, 'so the typed payment carries on');
+});
+
+t('the sample\'s car loan is paid from its budget row, and says so', async () => {
+  const { f, D } = await auditFrame(1280, 900, 'paidfrom');
+  try {
+    D.getElementById('tab-household').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const row = [...D.querySelectorAll('tr[data-edit="liability"]')]
+      .find((r) => /estate car/i.test(r.textContent));
+    ok(row && /paid from Car payment/i.test(row.textContent), 'the row names the budget line',
+      row && row.textContent.slice(0, 120));
+    row.click();
+    await new Promise((r) => setTimeout(r, 200));
+    const box = D.getElementById('rf-paidFrom');
+    ok(box, 'the editor offers Paid from');
+    eq(box.value, 'car-payment', 'with the linked row chosen');
+    const names = [...box.options].map((o) => o.textContent);
+    ok(names.includes('Mortgage') && !names.some((n) => /paycheck/i.test(n)),
+      'expense rows only — income is not what pays a debt', names.join(', '));
+  } finally { f.remove(); }
 });
 
 t('the Sold list holds the sold row, and the table and its total do not', async () => {
@@ -11685,8 +11812,9 @@ t('the payload version is 6: a goal can count Roth IRA contributions', () => {
      in money in and in the savings rate; v4 would drop a paycheck row's bonus
      and show a year without it; v5 would drop the Roth contributions a goal
      counts; v6 would count a sold property as one still owned — each the
-     silent misread the version exists to refuse. */
-  eq(H.SHARE_PAYLOAD_V, 7);
+     silent misread the version exists to refuse. v7 would draw a linked debt
+     down by its typed payment and show a different balance. */
+  eq(H.SHARE_PAYLOAD_V, 8);
 });
 
 t('an unknown tab in a link is dropped, not drawn', async () => {

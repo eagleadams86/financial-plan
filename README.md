@@ -1799,6 +1799,37 @@ a fact about the loan and it should not look like a fault in the app.
 already a row there, and counting the debt as well would take the money out
 twice.
 
+#### Paid From a Budget Row
+
+The budget does not hear about a debt, but a debt can listen to the budget.
+Open a debt and choose **Paid from** — the expense row its payment is on — and
+the balance stops coming down by the one payment you typed and comes down by
+**what that row says each month** instead: the figure you entered for a month
+that has happened, the row's own estimate for one that has not. Interest is
+still added at the debt's rate first.
+
+- **An extra payment shows on its own.** Put another $500 on the row in March
+  and the balance, the payoff month and the interest left all move without the
+  debt being touched.
+- **A down payment is left out.** The row is counted from the month *after*
+  **True as of** — the balance you typed already reflects everything paid up to
+  and including that month — so a down payment on the same row, in or before
+  it, is never read. If the down payment lands later than that, set True as of
+  to the month of the first statement that already shows it.
+- **A month the row paid nothing is believed.** The interest is added and
+  nothing comes off, so the balance goes up, which is what a skipped payment
+  does.
+- **Paid each month still matters.** Once the budget's months run out, the
+  typed payment carries on to the end of the loan. With none typed, the card
+  says the payoff date is unknown rather than inventing one.
+- **Leave a row that carries more than the loan unlinked.** A mortgage row that
+  includes escrow or insurance would bring the debt down faster than the lender
+  says. The link is per debt for exactly that reason.
+
+Retyping the balance and its month from a newer statement simply restarts the
+count from there, so nothing is counted twice. The link needs a True as of
+month and says so if there is none.
+
 *(A plan written before this arrives keeps its figures exactly: whatever was
 owed on a property becomes a debt secured on it, and the net worth is
 identical to the cent. No rate, payment or date is invented for it.)*
